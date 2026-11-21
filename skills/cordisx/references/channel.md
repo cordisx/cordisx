@@ -3,6 +3,8 @@
 Use the running profile's `channel_*` MCP tools when present. The CLI has the
 equivalent request shapes through `cordisx channel <operation> --input '<JSON>'`; question cards are CLI-only.
 For fields and compatibility, read the owning [CLI reference](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/channel-cli.md).
+For Channel connection and message-delivery troubleshooting, use the plugin's
+[troubleshooting guide](https://github.com/cordisx/plugin-channel/blob/main/docs/troubleshooting.md).
 
 List `channel_connections`, select the requested configured account, then use
 `channel_conversations`. Do not guess account or conversation IDs. Configure
