@@ -18,13 +18,17 @@ const f = vi.hoisted(() => ({
   events: [] as string[],
   failStart: false,
   enabled: true,
+  packageMode: false,
+  packageReadCount: 0,
   transportEnvironment: undefined as NodeJS.ProcessEnv | undefined,
   backendEnvironment: undefined as NodeJS.ProcessEnv | undefined,
 }))
 vi.mock(
   '../packages/cli/src/launcher/config.js',
   () => ({
-    loadConfig: async () => ({ plugins: [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs' }] }),
+    loadConfig: async () => ({
+      plugins: f.packageMode ? [] : [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs' }],
+    }),
   }),
 )
 vi.mock('../packages/cli/src/launcher/plugin-activation.js', () => ({
@@ -34,7 +38,28 @@ vi.mock('../packages/cli/src/launcher/plugin-activation.js', () => ({
     }
   },
 }))
-vi.mock('../packages/cli/src/launcher/plugin-composition.js', () => ({ loadPluginComposition: async () => [] }))
+vi.mock('../packages/cli/src/launcher/plugin-composition.js', () => ({
+  loadPluginComposition: async () =>
+    f.packageMode
+      ? [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs', package: { version: '0.1.7' } }]
+      : [],
+}))
+vi.mock('../packages/cli/src/launcher/package-plugin-service-config.js', () => ({
+  PackagePluginServiceConfigStore: class {
+    persistence = {
+      read: async () => {
+        f.packageReadCount += 1
+        return {
+          config: {
+            contract: 'cordisx.channel-service-config/v2',
+            schemaVersion: 2,
+            connections: [],
+          },
+        }
+      },
+    }
+  },
+}))
 vi.mock(
   '../packages/cli/src/config/service-config.js',
   () => ({
@@ -129,12 +154,21 @@ describe('headless service lifecycle', () => {
     f.events.length = 0
     f.failStart = false
     f.enabled = true
+    f.packageMode = false
+    f.packageReadCount = 0
   })
   it('attaches the consumer before ingress and disposes in reverse order once', async () => {
     const service = await startHeadlessService(input)
     expect(f.events).toEqual(['backend-start', 'consumer-attached', 'service-start'])
     await Promise.all([service!.close(), service!.close()])
     expect(f.events.slice(3)).toEqual(['consumer-close', 'service-close', 'backend-close', 'authority-close'])
+  })
+  it('loads lifecycle-installed Channel service configuration from its package store', async () => {
+    f.packageMode = true
+    const service = await startHeadlessService(input)
+    expect(f.packageReadCount).toBe(1)
+    expect(f.events).toContain('service-start')
+    await service.close()
   })
   it('cleans up every owner if startup fails', async () => {
     f.failStart = true

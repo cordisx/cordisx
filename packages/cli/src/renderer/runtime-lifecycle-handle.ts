@@ -831,6 +831,18 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
     }
     return runtimeScope.lifecycleBridge()!.applyPermissionReviewV4(runtimeScope.currentActivation.revision, decision)
   },
+  permissionLifecycleReviewPlanV7: target => {
+    if (runtimeScope.lifecycleBridge()! === undefined) {
+      return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+    }
+    return runtimeScope.lifecycleBridge()!.permissionReviewPlanV7(runtimeScope.currentActivation.revision, target)
+  },
+  applyPermissionLifecycleReviewV7: decision => {
+    if (runtimeScope.lifecycleBridge()! === undefined) {
+      return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+    }
+    return runtimeScope.lifecycleBridge()!.applyPermissionReviewV7(runtimeScope.currentActivation.revision, decision)
+  },
   stagePluginMutation: runtimeScope.stagePluginMutation()!,
   publishPluginMutation: runtimeScope.publishPluginMutation()!,
   completePluginMutation: runtimeScope.completePluginMutation()!,

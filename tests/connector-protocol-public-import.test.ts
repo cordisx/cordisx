@@ -15,12 +15,12 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolVersion = '0.1.0-beta.17'
-const protocolSpec = 'github:cordisx/cordisx-protocol#9c5e32d9c702934874417d89ff8c374d766a47d0'
+const protocolVersion = '0.1.0-beta.18'
+const protocolSpec = 'github:cordisx/cordisx-protocol#265eaeaf82232a62065314f523385628285cabc2'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#9c5e32d9c702934874417d89ff8c374d766a47d0'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#265eaeaf82232a62065314f523385628285cabc2'
 const protocolIntegrity =
-  'sha512-L4sxRG7+wqrGK+ojfJbm5vequFjG09xTLzDjrGpAqRFt/jjX3E1at0SGeOAsFxSAs15ZRtMy8fyliZ5IHzBoTg=='
+  'sha512-aaZMSHHTAIYtswOS5yOcuwAwACcSIHbQ0VR38a2nit49KD8rOyQ4Z1kOgsF0hoom/HPSYVDsfDN1c4YaR8yOhQ=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {

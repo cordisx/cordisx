@@ -1,4 +1,5 @@
 import type { CordisXPermissionAuthorizationPlanV1 } from '../platform-contracts.js'
+import type { DeferredPermissionPlan } from '../permission-deferral.js'
 import type {
   CordisXPermissionAuthorizationPlanV2,
   CordisXPermissionAuthorizationPlanV4,
@@ -125,6 +126,7 @@ export type PluginManagementPermissionPlan =
   | CordisXPermissionAuthorizationPlanV1
   | CordisXPermissionAuthorizationPlanV2
   | CordisXPermissionAuthorizationPlanV4
+  | DeferredPermissionPlan
 
 export type PluginManagementPluginRequest =
   | { readonly kind: 'plugin-plan-local'; readonly sourceDirectory: string }

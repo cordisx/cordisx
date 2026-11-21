@@ -3,7 +3,7 @@ import {
   applyManagementPermissionReview,
   parsePermissionReviewOperation,
 } from '../packages/cli/src/launcher/permission-review-management.js'
-import type { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { PermissionReviewGate } from '../packages/cli/src/launcher/permission-review-gate.js'
 
@@ -39,6 +39,48 @@ describe('private permission review management', () => {
     release()
     await expect(first).rejects.toThrow('fixture failure')
     await expect(gate.run(async () => 'third')).resolves.toBe('third')
+  })
+
+  it('uses the same authority gate for deferred and existing permission reviews', async () => {
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: '/tmp/cordisx-permission-gate-fixture',
+      profileId: 'work',
+      runtimeGeneration: 'generation-1',
+      permissionPolicies: [],
+      runtime: { stage: async () => {}, commit: async () => {}, abort: async () => {}, reload: async () => {} },
+    })
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const load = vi.spyOn(coordinator.store, 'loadActive').mockImplementation(async () => {
+      await waiting
+      throw new Error('fixture failure')
+    })
+    const first = coordinator.applyPermissionReviewV7({
+      requestId: 'first',
+      profileId: 'work',
+      runtimeGeneration: 'generation-1',
+      expectedRevision: 0,
+      decision: {} as never,
+    })
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce())
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'second',
+      profileId: 'work',
+      runtimeGeneration: 'generation-1',
+      expectedRevision: 0,
+      decision: {} as never,
+    })).rejects.toThrow('Another plugin permission review')
+    release()
+    await expect(first).rejects.toThrow('fixture failure')
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'third',
+      profileId: 'other',
+      runtimeGeneration: 'generation-1',
+      expectedRevision: 0,
+      decision: {} as never,
+    })).rejects.toThrow('runtime generation changed')
   })
 
   it('rejects absent confirmation, unsupported versions, wrong profiles and extra envelope fields', () => {

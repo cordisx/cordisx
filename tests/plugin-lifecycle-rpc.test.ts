@@ -48,6 +48,17 @@ describe('Host-private permission lifecycle binding', () => {
         target: { kind: 'candidate', candidateId: 'plugin-candidate-1' },
       },
     })
+    expect(parsePluginLifecycleBindingRequest(privatePlan({ kind: 'permission-review-plan-v7' }), handler)).toEqual({
+      kind: 'permission-review-plan-v7',
+      requestId: 'request-1',
+      request: {
+        requestId: 'request-1',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 3,
+        target: { kind: 'candidate', candidateId: 'plugin-candidate-1' },
+      },
+    })
   })
 
   it('rejects token/profile/generation confusion and extra private fields', () => {
@@ -70,6 +81,24 @@ describe('Host-private permission lifecycle binding', () => {
         }),
         handler,
       )
+    ).toThrow(/unsupported/)
+    expect(() =>
+      parsePluginLifecycleBindingRequest(privatePlan({ kind: 'permission-review-plan-v7', official: true }), handler)
+    )
+      .toThrow(/unsupported/)
+    expect(() =>
+      parsePluginLifecycleBindingRequest({
+        token: handler.token,
+        privateRequest: {
+          kind: 'permission-review-apply-v7',
+          requestId: 'request-1',
+          profileId: 'work',
+          runtimeGeneration: 'runtime-1',
+          expectedRevision: 3,
+          decision: {},
+          bundlePolicySelections: { 'models.read': 'allow' },
+        },
+      }, handler)
     ).toThrow(/unsupported/)
     expect(() =>
       parsePluginLifecycleBindingRequest(

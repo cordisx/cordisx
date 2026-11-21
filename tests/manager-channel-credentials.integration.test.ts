@@ -126,6 +126,7 @@ async function fixture() {
       configPath,
       plugin,
       service,
+      persistence: new PackagePluginServiceConfigStore(homeDir, 'work', 'host-1').persistence,
       expectedServiceGeneration,
     })
   const configured = configuredChannelManager({ service, configuration: openService })

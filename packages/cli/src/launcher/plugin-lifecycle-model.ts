@@ -1,6 +1,7 @@
 import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
+import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
 import {
   type CordisXPluginManifestV12,
   type CordisXPluginManifestV13,
@@ -153,6 +154,9 @@ export interface PluginRuntimeMutation {
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
+  /** Host-only, candidate-bound effective choices from a reviewed bundle. */
+  readonly bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>
 }
 
 export interface ManagedServiceUICapabilityMutation {
@@ -253,10 +257,12 @@ export interface PendingPermissionReview {
     | CordisXPermissionAuthorizationPlanV1
     | CordisXPermissionAuthorizationPlanV2
     | CordisXPermissionAuthorizationPlanV4
+    | DeferredPermissionPlan
   readonly decision:
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
 }
 
 export interface HostPermissionLifecycleReviewV2Request {
@@ -285,6 +291,10 @@ export interface HostPermissionLifecycleApplyV4Request {
   readonly runtimeGeneration: string
   readonly expectedRevision: number
   readonly decision: CordisXPermissionAuthorizationDecisionV4
+}
+
+export interface HostPermissionLifecycleApplyV7Request extends Omit<HostPermissionLifecycleApplyV4Request, 'decision'> {
+  readonly decision: DeferredPermissionDecision
 }
 
 export class LifecycleFailure extends Error {

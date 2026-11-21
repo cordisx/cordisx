@@ -44,6 +44,7 @@ export function createManagerChannelCredentials(input: {
       configPath: input.configPath,
       plugin,
       service,
+      persistence: packageStore.persistence,
       expectedServiceGeneration: serviceGeneration,
     })
   const manager = configuredChannelManager({ service, configuration: openService })

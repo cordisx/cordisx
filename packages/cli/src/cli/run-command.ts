@@ -342,6 +342,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       profileId: selection.profileId,
       configPath,
       homeDir: rootFromConfigPath(configPath),
+      generation: lifecycleGeneration,
       environment: runtime.env ?? process.env,
     }, { runtimeGeneration: lifecycleGeneration, profileOwnerVerified: releaseRuntimeOwner !== undefined })
     const channelService = channel.service

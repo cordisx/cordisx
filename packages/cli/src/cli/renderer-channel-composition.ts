@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { HostServiceConfigNarrowApi } from '../launcher/service-config.js'
+import type { HostServiceConfigPersistence } from '../launcher/service-config.js'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { createChannelHostServiceConfigContract } from '../launcher/channel-service.js'
 import { createChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import { createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
 import { ChannelConversationManagement } from '../launcher/channel-conversation-management.js'
 import { configuredChannelManager } from '../launcher/channel-connection-configuration.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
-import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
 import type { ChannelConversationConsumer } from '../launcher/channel-conversation-consumer.js'
 import path from 'node:path'
@@ -26,6 +27,7 @@ import type { ChannelManagerApi } from '../launcher/channel-manager-api.js'
 export interface RendererChannelComposition {
   readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   readonly plugin?: CordisXConfigPlugin
+  readonly persistence?: HostServiceConfigPersistence
   readonly service?: LocalChannelService
   readonly manager?: ChannelManagerBundleProjection
   readonly credentialBridgeToken?: string
@@ -41,18 +43,18 @@ export async function createRendererChannelComposition(
     readonly appId: string
     readonly configPath: string
     readonly homeDir: string
+    readonly generation: string
     readonly environment: NodeJS.ProcessEnv
     readonly dryRun?: boolean
   },
   owner?: { readonly runtimeGeneration: string; readonly profileOwnerVerified: boolean },
 ): Promise<RendererChannelComposition> {
-  const runtimeGeneration = owner?.runtimeGeneration
   const plugin = input.composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
-  if (plugin?.package && runtimeGeneration === undefined && !input.dryRun) {
-    throw new Error('package Channel runtime generation is unavailable')
+  if (owner !== undefined && owner.runtimeGeneration !== input.generation) {
+    throw new Error('package Channel runtime generation is inconsistent')
   }
-  const packageStore = plugin?.package && runtimeGeneration !== undefined
-    ? new PackagePluginServiceConfigStore(input.homeDir, input.profileId, runtimeGeneration)
+  const packageStore = plugin?.package
+    ? new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation)
     : undefined
   const readState = packageStore?.persistence.read ?? readServiceConfigState
   let service: LocalChannelService | undefined
@@ -113,6 +115,7 @@ export async function createRendererChannelComposition(
   return {
     plugin,
     service,
+    ...(packageStore === undefined ? {} : { persistence: packageStore.persistence }),
     serviceCapabilityOwners: service.managementOwner() === undefined ? [] : [service.managementOwner()!],
     manager: await loadManagerProjection(),
     credentialBridgeToken: randomBytes(32).toString('hex'),
@@ -129,6 +132,7 @@ export function channelConfigurationApi(input: {
   readonly configPath: string
   readonly plugin: CordisXConfigPlugin
   readonly service: LocalChannelService
+  readonly persistence?: HostServiceConfigPersistence
   readonly expectedServiceGeneration?: string
 }): HostServiceConfigNarrowApi {
   const contract = createChannelHostServiceConfigContract({
@@ -136,18 +140,15 @@ export function channelConfigurationApi(input: {
     pluginId: 'channel',
     serviceId: 'runtime',
   })
-  const persistence = input.plugin.package === undefined
-    ? undefined
-    : new PackagePluginServiceConfigStore(path.dirname(input.configPath), input.profileId, input.generation).persistence
   return new HostServiceConfigNarrowApi({
     contract: contract as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
     profileId: input.profileId,
     generation: input.generation,
     ownerToken: input.token,
     configPath: input.configPath,
+    ...(input.persistence === undefined ? {} : { persistence: input.persistence }),
     writable: true,
     authorize: () => true,
-    ...(persistence === undefined ? {} : { persistence }),
     restartService: candidate => input.service.restart(candidate, input.expectedServiceGeneration),
   })
 }
@@ -171,6 +172,7 @@ export function createChannelLaunchBridges(input: {
       configPath: input.configPath,
       plugin: channel.plugin,
       service: channel.service,
+      ...(channel.persistence === undefined ? {} : { persistence: channel.persistence }),
     })
     : undefined
   const credentials = channel.credentialBridgeToken !== undefined && configApi
@@ -199,6 +201,7 @@ export function createChannelLaunchBridges(input: {
                   configPath: input.configPath,
                   plugin: channel.plugin!,
                   service: channel.service!,
+                  ...(channel.persistence === undefined ? {} : { persistence: channel.persistence }),
                   expectedServiceGeneration,
                 }),
             }

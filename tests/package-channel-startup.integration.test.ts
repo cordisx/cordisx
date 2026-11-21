@@ -241,6 +241,7 @@ describe('package Channel startup routing', () => {
           appId: 'codex',
           configPath: f.configPath,
           homeDir: f.homeDir,
+          generation: 'runtime-1',
           environment: {},
         },
         { runtimeGeneration: 'runtime-1', profileOwnerVerified: true },
