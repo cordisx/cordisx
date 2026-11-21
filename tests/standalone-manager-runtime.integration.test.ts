@@ -3,11 +3,13 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { transform } from 'esbuild'
 import { expect, it, vi } from 'vitest'
-import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
+import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { ownerSnapshotPermissionStore } from '../packages/cli/src/renderer/platform/owner-snapshot-permission-store.js'
+import { createRuntimeAgentLoopHost } from '../packages/cli/src/renderer/runtime-foundation.js'
+import { BindingAgentLoopHost, UnavailableAgentLoopHost } from '../packages/cli/src/renderer/agent-loop.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -51,6 +53,13 @@ it('requires a live owner-scoped attachment before and after standalone assembly
     initialRegistryEpoch: 0,
     permission: { profileId: 'work', policies: [] },
   }
+  const standalone = await buildRendererCompositionSource(config, options)
+  expect(standalone.metadataSource).not.toContain('workspaceCwd')
+  expect(standalone.metadataSource).not.toContain(JSON.stringify(config.rootDir))
+  const standaloneBundle = await buildRendererBundle(config, options)
+  expect(standaloneBundle).not.toContain(config.rootDir)
+  const native = await buildRendererCompositionSource(config)
+  expect(native.metadataSource).toContain(JSON.stringify(config.rootDir))
   await expect(buildRendererBundle(config, { ...options, standaloneOwner: { ...owner, isCurrent: () => false } }))
     .rejects.toThrow('owner attachment is unavailable')
   await expect(buildRendererBundle(config, { ...options, generation: 'different' }))
@@ -64,6 +73,17 @@ it('requires a live owner-scoped attachment before and after standalone assembly
     .rejects.toThrow('owner attachment is unavailable')
   expect(current).toHaveBeenCalledTimes(3)
 }, 30_000)
+
+it('keeps agent execution unavailable when the owner does not provide a workspace', () => {
+  const scope = {
+    playgroundMockAgentLoop: () => undefined,
+    bindingPlatformAdapter: {},
+    metadata: () => ({}),
+  }
+  expect(createRuntimeAgentLoopHost(scope as never)).toBeInstanceOf(UnavailableAgentLoopHost)
+  expect(createRuntimeAgentLoopHost({ ...scope, metadata: () => ({ workspaceCwd: '/fixture' }) } as never))
+    .toBeInstanceOf(BindingAgentLoopHost)
+})
 
 it('mounts the original Manager and registered plugin in an owner-scoped standalone composition', async () => {
   const loaded = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })

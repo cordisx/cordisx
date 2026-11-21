@@ -331,10 +331,13 @@ export const createRuntimeSimulatorV4Persistence = (runtimeScope: RuntimeClosure
   },
 })
 
-export const createRuntimeAgentLoopHost = (runtimeScope: RuntimeClosureScope) =>
-  runtimeScope.playgroundMockAgentLoop()! ?? (runtimeScope.bindingPlatformAdapter === undefined
-    ? new UnavailableAgentLoopHost()
-    : new BindingAgentLoopHost(runtimeScope.bindingPlatformAdapter, runtimeScope.metadata()!.workspaceCwd))
+export const createRuntimeAgentLoopHost = (runtimeScope: RuntimeClosureScope) => {
+  const cwd = runtimeScope.metadata()!.workspaceCwd
+  return runtimeScope.playgroundMockAgentLoop()!
+    ?? (runtimeScope.bindingPlatformAdapter === undefined || cwd === undefined
+      ? new UnavailableAgentLoopHost()
+      : new BindingAgentLoopHost(runtimeScope.bindingPlatformAdapter, cwd))
+}
 
 export const createRuntimeAgentLoopBrokerV2 = (runtimeScope: RuntimeClosureScope) =>
   new CordisXAgentLoopBrokerV2(

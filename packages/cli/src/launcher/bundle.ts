@@ -490,8 +490,8 @@ export async function buildRendererCompositionSource(
   if (options.playgroundSessionScenarios !== undefined && options.playground !== true) {
     throw new Error('Playground Session scenarios are available only in the explicit UI Playground')
   }
-  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${
-    JSON.stringify(config.rootDir)
+  const metadata = `{ version: ${JSON.stringify(version)}${
+    attachedStandalone ? '' : `, workspaceCwd: ${JSON.stringify(config.rootDir)}`
   }, executionPlatform: ${
     JSON.stringify(options.executionPlatform ?? (process.platform === 'win32' ? 'win32' : 'posix'))
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${

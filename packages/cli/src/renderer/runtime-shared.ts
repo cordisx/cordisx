@@ -251,7 +251,8 @@ export function cloneRendererValue<Value>(value: Value): Value {
 export interface CordisXRuntimeMetadata {
   readonly serviceCapabilityOwners?: readonly RuntimeServiceCapabilityOwner[]
   readonly version: string
-  readonly workspaceCwd: string
+  /** Omitted when a standalone owner has not granted a workspace. */
+  readonly workspaceCwd?: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
   readonly appId?: string
