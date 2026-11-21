@@ -41,6 +41,32 @@ browser session. Plugin-owned data follows the plugin's existing storage rules:
 managed-service data directories are keyed by home and plugin/service identity.
 Use separate homes for separate backend accounts.
 
+## Deployment verification and recovery
+
+Service status, Channel connection readiness, model availability and an end-to-end
+reply are separate checks. Use the running service's home, profile, CLI and
+environment to inspect status, then test the intended account with an authorized
+non-sensitive message and verify the actual response. A model in a catalog is not
+proof that authentication or inference works. An HTTP 401 or 403 can indicate a
+reachable endpoint but does not prove the account is authorized.
+
+The service manager does not necessarily inherit an interactive shell's `PATH`,
+proxy or login state. Verify the actual service environment and the target
+connection, including DNS, TLS and any WebSocket endpoint; bypass an HTTP proxy
+for local endpoints when required. On macOS, a user LaunchAgent runs in the
+user's login session: `RunAtLoad` and `KeepAlive` alone do not prove operation
+before login or after a full machine restart. On Linux, verify the selected user
+manager and host lifecycle rather than assuming logout or machine recreation
+preserves the service.
+
+When updating the Codex CLI, use the complete vendor distribution for the
+target platform, including companion executables, and verify a tool-using turn
+as well as a text response. Before replacing a working runtime, preserve a
+recoverable version and check Host, plugin, provider, and persisted-state
+compatibility. After a controlled restart, recheck the intended profile,
+connection, model and an authorized message; do not treat a merged commit or a
+successful isolated test as an installed release or production acceptance.
+
 ## Linux deployment and Channel credentials
 
 Service mode does not require a desktop application or macOS Keychain. Install
