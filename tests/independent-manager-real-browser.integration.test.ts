@@ -108,6 +108,16 @@ it.skipIf(chrome === undefined)(
           expect(state.ready, state.status).toBe(true)
         }, { timeout: 45_000 })
       await ready(first)
+      const priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
+      expect(priorResume).toMatch(/^[a-f0-9]{64}$/u)
+      await first.send('Page.reload')
+      await vi.waitFor(async () => {
+        const current = await first!.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
+        expect(current).toMatch(/^[a-f0-9]{64}$/u)
+        expect(current).not.toBe(priorResume)
+      }, { timeout: 20_000 })
+      await ready(first)
+      expect(await first.evaluate('location.hash')).toBe('')
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
       const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }
       const port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])

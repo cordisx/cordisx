@@ -42,9 +42,24 @@ function fixture(input: {
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
   readonly loseAck?: boolean
+  readonly resume?: boolean
+  readonly issueResume?: boolean
+  readonly controlledPoll?: boolean
+  readonly holdBindings?: boolean
 } = {}) {
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: `${origin}/?host=1#${entryToken}` })
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
+  })
   const win = dom.window
+  let beforeUnload: ((event: BeforeUnloadEvent) => void) | undefined
+  const addListener = win.addEventListener.bind(win)
+  Object.defineProperty(win, 'addEventListener', {
+    value: (type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
+      if (type === 'beforeunload') beforeUnload = listener as (event: BeforeUnloadEvent) => void
+      addListener(type, listener, options)
+    },
+  })
+  if (input.resume) win.sessionStorage.setItem('cordisx-manager-resume-id', 'e'.repeat(64))
   const serviceWorker = new win.EventTarget()
   Object.defineProperty(win.navigator, 'serviceWorker', { value: serviceWorker })
   const unavailable = vi.fn()
@@ -65,9 +80,21 @@ function fixture(input: {
   let allowAdmission!: () => void
   let checks = 0
   let polls = 0
+  let resumes = 0
+  let rejectPoll: ((error: Error) => void) | undefined
   let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
-    if (path === '/api/session') return Promise.resolve(response({ token: sessionToken }))
+    if (path === '/api/session') {
+      return Promise.resolve(
+        response({ token: sessionToken, ...(input.issueResume ? { resumeId: 'f'.repeat(64) } : {}) }),
+      )
+    }
+    if (path === `/api/session/resume/${'e'.repeat(64)}`) {
+      if (resumes++ === 0) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'RESUME_PENDING' }), { status: 409 }))
+      }
+      return Promise.resolve(response({ token: sessionToken, resumeId: 'f'.repeat(64) }))
+    }
     if (path === '/api/renderer/open') {
       return Promise.resolve(response({
         status: 'ok',
@@ -104,7 +131,11 @@ function fixture(input: {
           },
         }))
       }
-      return abortResponse(options.signal!)
+      if (!input.controlledPoll) return abortResponse(options.signal!)
+      return new Promise((_resolve, reject) => {
+        rejectPoll = reject
+        options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
+      })
     }
     if (path === '/api/renderer/admit') {
       return new Promise((resolve, reject) => {
@@ -118,6 +149,7 @@ function fixture(input: {
       return Promise.resolve(response({ accepted: true }))
     }
     if (path === '/api/renderer/close') return Promise.resolve(response({ closed: true }))
+    if (path === '/api/renderer/binding' && input.holdBindings) return abortResponse(options.signal!)
     throw new Error(`Unexpected request ${path}`)
   })
   Object.defineProperty(win, 'fetch', { value: fetch })
@@ -158,6 +190,9 @@ function fixture(input: {
     unavailable,
     runtime,
     registry,
+    beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
+    failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
+    pollStarted: () => rejectPoll !== undefined,
     revokeSession: () => {
       sessionCurrent = false
     },
@@ -166,6 +201,63 @@ function fixture(input: {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+it('recovers a refreshed tab only after the old renderer is confirmed retired', async () => {
+  const test = fixture({ resume: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const requests = test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))
+    expect(requests).toHaveLength(2)
+    expect(requests.every(([, options]) => options.credentials === 'same-origin')).toBe(true)
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/session')).toBe(false)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('preserves refresh authority if navigation aborts an idle poll before pagehide', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.beforeUnload()
+    test.failPoll()
+    await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
+    await test.manager.close()
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not preserve refresh authority while a possible write is in flight', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    Object.assign(test.win, { __cordisxConfigReceiveV1: vi.fn() })
+    ;(test.win as unknown as { __cordisxConfigRequestV1(value: string): void }).__cordisxConfigRequestV1(
+      JSON.stringify({ requestId: 'pending-write' }),
+    )
+    test.beforeUnload()
+    test.failPoll()
+    await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
+    await test.manager.close()
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({})
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    expect(test.unavailable).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
 })
 
 it('admits a configured graph only when the actual runtime confirms its exact generation', async () => {

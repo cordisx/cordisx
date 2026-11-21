@@ -24,10 +24,13 @@ it('forwards only owner-granted bindings with a session header and correlates ex
     channels: ['config', 'plugin-lifecycle'],
   })
   try {
+    expect(dispose.canResume()).toBe(true)
     expect(target.__cordisxProviderRequestV1).toBeUndefined()
     target.__cordisxConfigRequestV1(JSON.stringify({ requestId: 'config-1', operation: 'read' }))
     target.__cordisxPluginLifecycleRequestV1(JSON.stringify({ request: { requestId: 'lifecycle-1' } }))
+    expect(dispose.canResume()).toBe(false)
     await vi.waitFor(() => expect(receiveLifecycle).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(true)
     expect(JSON.parse(receiveConfig.mock.calls[0]![0])).toEqual({ requestId: 'config-1', ok: true, value: 'config' })
     expect(JSON.parse(receiveLifecycle.mock.calls[0]![0])).toEqual({
       requestId: 'lifecycle-1',
@@ -45,6 +48,7 @@ it('forwards only owner-granted bindings with a session header and correlates ex
     dispose()
   }
   expect(target.__cordisxConfigRequestV1).toBeUndefined()
+  expect(dispose.canResume()).toBe(false)
 })
 
 it('fences stale callbacks and reports a revoked session without retrying pending requests', async () => {
@@ -73,6 +77,26 @@ it('fences stale callbacks and reports a revoked session without retrying pendin
   expect(original).not.toHaveBeenCalled()
   expect(replacement).not.toHaveBeenCalled()
   expect(lost).not.toHaveBeenCalled()
+})
+
+it('permits refresh with an owner-declared read pending but not with a write pending', async () => {
+  const target = {
+    fetch: vi.fn(() => new Promise(() => {})),
+    __cordisxPluginManagementReceiveV1: vi.fn(),
+  } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['plugin-management'],
+  })
+  try {
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'read', operation: { kind: 'query' } }))
+    expect(dispose.canResume()).toBe(true)
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'write', operation: { kind: 'execute' } }))
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+  }
 })
 
 it('rejects forged responses and does not retry an operation whose outcome is unknown', async () => {

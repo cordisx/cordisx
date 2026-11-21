@@ -1,3 +1,5 @@
+import { isRendererManagementRead } from '../management/renderer-operation-mode.js'
+
 /** Host-private channels. The owner must explicitly grant each one per renderer. */
 export const INDEPENDENT_HOST_CHANNELS = {
   config: ['__cordisxConfigRequestV1', '__cordisxConfigReceiveV1'],
@@ -18,6 +20,7 @@ interface Pending {
   readonly receiverName: string
   readonly receiver: Binding
   readonly controller: AbortController
+  readonly readOnly: boolean
   dispatched: boolean
 }
 const MAX_IN_FLIGHT = 64
@@ -62,7 +65,7 @@ export function installIndependentHostBindings(input: {
   readonly sessionToken: string
   readonly channels: readonly IndependentHostChannel[]
   readonly onSessionLost?: () => void
-}): () => void {
+}): (() => void) & { canResume(): boolean } {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
   const host = input.window as BindingWindow
   const granted = new Set(input.channels)
@@ -123,6 +126,10 @@ export function installIndependentHostBindings(input: {
         receiverName,
         receiver: receiver as Binding,
         controller,
+        readOnly: channel === 'plugin-management' && (() => {
+          const envelope = JSON.parse(payload) as { operation?: { kind?: unknown } }
+          return isRendererManagementRead(envelope.operation?.kind)
+        })(),
         dispatched: false,
       }
       pending.set(key, request)
@@ -160,5 +167,5 @@ export function installIndependentHostBindings(input: {
     host[name] = binding
     installed.set(name, binding)
   }
-  return dispose
+  return Object.assign(dispose, { canResume: () => !closed && [...pending.values()].every(item => item.readOnly) })
 }

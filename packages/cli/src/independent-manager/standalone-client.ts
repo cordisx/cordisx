@@ -20,6 +20,7 @@ const bundleUrl = '/api/renderer/bundle.js'
 const heartbeatMilliseconds = 15_000
 const requestMilliseconds = 20_000
 const bootMilliseconds = 60_000
+const resumeStorageKey = 'cordisx-manager-resume-id'
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
@@ -106,9 +107,9 @@ function verifyInitialGraphs(
 }
 
 /**
- * Start one owner-authorized Manager document. No token is put into persistent
- * browser storage, URLs, global bindings, or lifecycle requests. Failure and
- * uncertain replies retire this document; they are never replayed here.
+ * Start one owner-authorized Manager document. The bearer token stays in
+ * memory. A tab-local non-secret handle and an HttpOnly cookie permit a fresh
+ * session after confirmed retirement; uncertain operations are never replayed.
  */
 export function startStandaloneManager(input: {
   readonly window: Window
@@ -124,7 +125,7 @@ export function startStandaloneManager(input: {
   let closing: Promise<void> | undefined
   let sessionToken: string | undefined
   let resourceAuth: ManagerResourceAuthClient | undefined
-  let removeBindings: (() => void) | undefined
+  let removeBindings: ReturnType<typeof installIndependentHostBindings> | undefined
   let runtime: Runtime | undefined
   let graphLoader: ManagerRendererStageLoader | undefined
   let lifecycle: ReturnType<typeof createManagerRendererLifecycleClient> | undefined
@@ -133,8 +134,17 @@ export function startStandaloneManager(input: {
   let heartbeatRunning = false
   let watchWorker = false
   let notified = false
+  let resumeId: string | undefined
+  let navigating = false
+  let navigationTimer: ReturnType<typeof setTimeout> | undefined
 
-  const post = async (path: string, body: unknown, token?: string): Promise<Record<string, unknown>> => {
+  const post = async (
+    path: string,
+    body: unknown,
+    token?: string,
+    withCookies = false,
+    allowPending = false,
+  ): Promise<Record<string, unknown>> => {
     if (closed) throw new Error('manager-session-revoked')
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), requestMilliseconds)
@@ -147,12 +157,14 @@ export function startStandaloneManager(input: {
         },
         body: JSON.stringify(body),
         cache: 'no-store',
-        credentials: 'omit',
+        credentials: withCookies ? 'same-origin' : 'omit',
         redirect: 'error',
         referrerPolicy: 'no-referrer',
         signal: AbortSignal.any([lifetime.signal, timeout.signal]),
       })
-      if (!response.ok || closed || timeout.signal.aborted) throw new Error('manager-session-unavailable')
+      if ((!response.ok && !(allowPending && response.status === 409)) || closed || timeout.signal.aborted) {
+        throw new Error('manager-session-unavailable')
+      }
       const text = await response.text()
       if (text.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('manager-response-invalid')
       const value: unknown = JSON.parse(text)
@@ -162,14 +174,48 @@ export function startStandaloneManager(input: {
       clearTimeout(timer)
     }
   }
-  const revokeServer = async (token: string) => {
+  const takeResumeId = (): string | undefined => {
+    try {
+      const value = browser.sessionStorage.getItem(resumeStorageKey)
+      browser.sessionStorage.removeItem(resumeStorageKey)
+      return value && tokenPattern.test(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const saveResumeId = (value: unknown): string | undefined => {
+    if (typeof value !== 'string' || !tokenPattern.test(value)) return undefined
+    try {
+      browser.sessionStorage.setItem(resumeStorageKey, value)
+      return value
+    } catch {
+      return undefined
+    }
+  }
+  const forgetResumeId = () => {
+    try {
+      if (browser.sessionStorage.getItem(resumeStorageKey) === resumeId) {
+        browser.sessionStorage.removeItem(resumeStorageKey)
+      }
+    } catch { /* storage may be disabled */ }
+    resumeId = undefined
+  }
+  const resumeSession = async (id: string): Promise<Record<string, unknown>> => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const result = await post(`/api/session/resume/${id}`, {}, undefined, true, true)
+      if (result.error !== 'RESUME_PENDING' || Object.keys(result).length !== 1) return result
+      await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
+    }
+    throw new Error('manager-resume-unavailable')
+  }
+  const revokeServer = async (token: string, preserveResume: boolean) => {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), 3_000)
     try {
       await browser.fetch('/api/renderer/close', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: '{}',
+        body: JSON.stringify(preserveResume ? { preserveResume: true } : {}),
         cache: 'no-store',
         credentials: 'omit',
         redirect: 'error',
@@ -183,16 +229,19 @@ export function startStandaloneManager(input: {
       clearTimeout(timer)
     }
   }
-  const close = (): Promise<void> => {
+  const close = (preserveResume = false): Promise<void> => {
     if (closing) return closing
     closed = true
     lifetime.abort()
     if (heartbeat !== undefined) clearInterval(heartbeat)
+    if (navigationTimer !== undefined) clearTimeout(navigationTimer)
+    browser.removeEventListener('beforeunload', onBeforeUnload)
     browser.removeEventListener('pagehide', onPageHide)
     workerContainer?.removeEventListener('controllerchange', onControllerChange)
     removeBindings?.()
     const token = sessionToken
     sessionToken = undefined
+    if (!preserveResume) forgetResumeId()
     const pending: Promise<unknown>[] = []
     if (resourceAuth) pending.push(resourceAuth.revokeLocal())
     if (pump) pending.push(pump.close())
@@ -202,7 +251,7 @@ export function startStandaloneManager(input: {
       if (graphLoader) pending.push(Promise.resolve().then(() => graphLoader?.dispose()))
       else pending.push(Promise.resolve().then(() => browser.__cordisxPluginGenerationResourcesV1?.dispose?.()))
     }
-    if (token) pending.push(revokeServer(token))
+    if (token) pending.push(revokeServer(token, preserveResume))
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
@@ -216,12 +265,24 @@ export function startStandaloneManager(input: {
     }
     void close()
   }
-  const onPageHide = () => {
-    void close()
+  const canPreserveResume = () =>
+    resumeId !== undefined
+    && lifecycle?.canResume() === true && removeBindings?.canResume() === true
+  const onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (!event.isTrusted) return
+    navigating = true
+    if (navigationTimer !== undefined) clearTimeout(navigationTimer)
+    navigationTimer = setTimeout(() => {
+      navigating = false
+    }, 3_000)
+  }
+  const onPageHide = (event: PageTransitionEvent) => {
+    void close(event.isTrusted && canPreserveResume())
   }
   const onControllerChange = () => {
     if (watchWorker) fail()
   }
+  browser.addEventListener('beforeunload', onBeforeUnload)
   browser.addEventListener('pagehide', onPageHide, { once: true })
   workerContainer?.addEventListener('controllerchange', onControllerChange)
 
@@ -234,12 +295,20 @@ export function startStandaloneManager(input: {
       const entryToken = url.hash.slice(1)
       // A one-time entry token should not survive a reload or remain visible.
       browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
-      if (!tokenPattern.test(entryToken)) throw new Error('manager-entry-invalid')
-      const exchanged = record(await post('/api/session', { token: entryToken }), ['token'])
-      if (typeof exchanged.token !== 'string' || !tokenPattern.test(exchanged.token)) {
+      const previousResume = takeResumeId()
+      const exchanged = tokenPattern.test(entryToken)
+        ? await post('/api/session', { token: entryToken, resume: true }, undefined, true)
+        : entryToken !== '' || previousResume === undefined
+        ? undefined
+        : await resumeSession(previousResume)
+      if (!exchanged || typeof exchanged.token !== 'string' || !tokenPattern.test(exchanged.token)) {
+        throw new Error('manager-session-invalid')
+      }
+      if (Object.keys(exchanged).some(key => key !== 'token' && key !== 'resumeId')) {
         throw new Error('manager-session-invalid')
       }
       sessionToken = exchanged.token
+      resumeId = saveResumeId(exchanged.resumeId)
       const opened = record(await post('/api/renderer/open', {}, sessionToken), [
         'status',
         'rendererId',
@@ -361,7 +430,10 @@ export function startStandaloneManager(input: {
         window: browser,
         sessionToken: token,
         client: lifecycle,
-        onFailure: fail,
+        onFailure: () => {
+          if (navigating && canPreserveResume()) void close(true)
+          else fail()
+        },
       })
       if (!await pump.admitted || closed) throw new Error('manager-admission-unavailable')
       return true
@@ -370,5 +442,5 @@ export function startStandaloneManager(input: {
       return false
     }
   })()
-  return { ready, close }
+  return { ready, close: () => close(false) }
 }

@@ -46,12 +46,16 @@ The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use
 bootstrap in the URL fragment; it is exchanged for a separate session token and
 removed from the address bar. The default page stores its session token in that
-tab's session storage. The experimental Host page keeps it in memory and must
-be opened with a new entry after a browser refresh. When its resource worker
-loses its in-memory binding, an idle renderer may rebind only after the owner
-confirms that the same session remains current; concurrent lifecycle work or an
-uncertain health check instead retires the renderer. A session
-expires after eight hours of inactivity or when the manager exits. Browser origin
+tab's session storage. The experimental Host page keeps its session token in
+memory. On a normal refresh, a tab-local handle and an HttpOnly cookie can
+authorize a new session after the owner confirms retirement of the old renderer.
+If a write or lifecycle transaction is in progress, retirement is uncertain, or
+browser storage is unavailable, open a new manager entry and check any uncertain
+operation before retrying. When its resource worker loses its in-memory binding,
+an idle renderer may rebind only after the owner confirms that the same session
+remains current; concurrent lifecycle work or an uncertain health check instead
+retires the renderer. A session expires after eight hours of inactivity or when
+the manager exits. Browser origin
 checks and Host header checks fence management requests; no API key is placed in
 the URL. The command asks the OS to open the default browser without logging the
 URL. On macOS and Linux the opener receives a temporary HTML file path, not the

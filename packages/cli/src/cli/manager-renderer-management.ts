@@ -5,6 +5,7 @@ import {
 } from '../launcher/management-rpc.js'
 import type { PluginManagementService } from '../management/service.js'
 import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
+import { isRendererManagementRead } from '../management/renderer-operation-mode.js'
 
 /**
  * Project only the existing management operations. Mutations require this
@@ -36,7 +37,6 @@ export function createManagerRendererManagementChannel(service: PluginManagement
         profileId: context.profileId,
       })
       const kind = request.operation.kind
-      const reads = ['query', 'query-catalog', 'plugin-info']
       const writes = ['refresh-catalog', 'plan', 'execute', 'migrate-legacy-sources']
       const keys: Readonly<Record<string, readonly string[]>> = {
         query: ['kind'],
@@ -48,7 +48,7 @@ export function createManagerRendererManagementChannel(service: PluginManagement
         'migrate-legacy-sources': ['kind', 'input'],
       }
       if (
-        !reads.includes(kind) && !writes.includes(kind) || writes.includes(kind) && context.admitted !== true
+        !isRendererManagementRead(kind) && !writes.includes(kind) || writes.includes(kind) && context.admitted !== true
         || Object.keys(request.operation).some(key => !keys[kind]?.includes(key))
       ) {
         throw new Error('MANAGER_RENDERER_UNAVAILABLE')

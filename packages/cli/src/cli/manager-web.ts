@@ -8,6 +8,7 @@ import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
 import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
+import { ManagerSessionResumeGrants } from './manager-session-resume.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
@@ -97,6 +98,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     resources?: Set<ServerResponse>
   }
   const sessions = new Map<string, BrowserSession>()
+  const resumes = new ManagerSessionResumeGrants()
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
   const retire = async (key: string) => {
@@ -119,7 +121,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   const revokeUrl = async (url: string) => {
     await retire(new URL(url).hash.slice(1))
   }
-  const retireSession = async (token: string) => {
+  const retireSession = async (token: string, preserveResume = false) => {
     const session = sessions.get(token)
     if (!session) return await closedSessions.get(token)?.retired ?? false
     sessions.delete(token)
@@ -152,6 +154,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     const retired = Promise.allSettled(retireOperations).then(results =>
       results.every(result => result.status === 'fulfilled' && result.value)
     )
+    if (preserveResume) resumes.park(token, retired)
+    else resumes.revoke(token)
     closedSessions.set(token, { deadline: Date.now() + 60_000, retired })
     while (closedSessions.size > 128) closedSessions.delete(closedSessions.keys().next().value!)
     return await retired
@@ -243,8 +247,35 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         const token = randomBytes(32).toString('hex')
         for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
         while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
+        const resume = offered?.resume === true ? resumes.issue(token) : undefined
         touchSession(token, randomBytes(32).toString('hex'), false)
-        return json(response, 200, { token })
+        if (resume) response.setHeader('set-cookie', resume.cookie)
+        return json(response, 200, { token, ...(resume ? { resumeId: resume.id } : {}) })
+      } catch {
+        return json(response, 400, { error: 'INVALID_REQUEST' })
+      }
+    }
+    const resumeMatch = /^\/api\/session\/resume\/([a-f0-9]{64})$/u.exec(url.pathname)
+    if (resumeMatch) {
+      if (
+        request.method !== 'POST' || origin !== `http://${authority}`
+        || !request.headers['content-type']?.startsWith('application/json')
+      ) return json(response, 403, { error: 'INVALID_ORIGIN' })
+      try {
+        const input = object(await body(request))
+        if (!input || Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
+        const claimed = await resumes.claim(resumeMatch[1]!, request.headers.cookie)
+        if (claimed === 'pending') return json(response, 409, { error: 'RESUME_PENDING' })
+        if (claimed !== 'accepted' || !await owner.isCurrent().catch(() => false)) {
+          return json(response, 401, { error: 'UNAUTHORIZED' })
+        }
+        const token = randomBytes(32).toString('hex')
+        for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
+        while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
+        const resume = resumes.issue(token)
+        touchSession(token, randomBytes(32).toString('hex'), false)
+        response.setHeader('set-cookie', [resumes.deleteCookie(resumeMatch[1]!), resume.cookie])
+        return json(response, 200, { token, resumeId: resume.id })
       } catch {
         return json(response, 400, { error: 'INVALID_REQUEST' })
       }
@@ -260,7 +291,10 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         && request.headers['content-type']?.startsWith('application/json')
       ) {
         const input = object(await body(request).catch(() => undefined))
-        if (input && Object.keys(input).length === 0) {
+        if (
+          input
+          && (Object.keys(input).length === 0 || (Object.keys(input).length === 1 && input.preserveResume === true))
+        ) {
           return await retireSession(token)
             ? json(response, 200, { closed: true })
             : json(response, 503, { error: 'RENDERER_CLOSE_UNAVAILABLE' })
@@ -447,12 +481,15 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           })
       }
       if (['/api/renderer/session', '/api/renderer/bootstrap', '/api/renderer/close'].includes(url.pathname)) {
-        if (Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
         if (url.pathname === '/api/renderer/close') {
-          return await retireSession(token)
+          if (Object.keys(input).length !== 0 && !(Object.keys(input).length === 1 && input.preserveResume === true)) {
+            return json(response, 400, { error: 'INVALID_REQUEST' })
+          }
+          return await retireSession(token, input.preserveResume === true)
             ? json(response, 200, { closed: true })
             : json(response, 503, { error: 'RENDERER_CLOSE_UNAVAILABLE' })
         }
+        if (Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
         if (!session.rendererBootstrap || !session.rendererOpen) {
           return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         }
@@ -782,7 +819,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     revokeUrl,
     async close() {
       await Promise.allSettled([...bootstraps.keys()].map(retire))
-      await Promise.allSettled([...sessions.keys()].map(retireSession))
+      await Promise.allSettled([...sessions.keys()].map(token => retireSession(token)))
+      resumes.close()
       server.closeAllConnections()
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
     },
