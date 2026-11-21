@@ -2,6 +2,8 @@ export type JsonValue = null | boolean | number | string | readonly JsonValue[] 
   readonly [key: string]: JsonValue
 }
 
+const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
 export const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 
 export function record(value: unknown, label: string): Record<string, unknown> {
@@ -22,6 +24,14 @@ export function nonEmptyString(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty string`)
   }
   return value.trim()
+}
+
+export function portableId(value: unknown, label: string): string {
+  const id = nonEmptyString(value, label)
+  if (!APP_OR_PROFILE_ID.test(id)) {
+    throw new Error(`${label} must match ${APP_OR_PROFILE_ID.source}`)
+  }
+  return id
 }
 
 export function jsonValue(value: unknown, label: string, seen = new Set<object>()): JsonValue {
