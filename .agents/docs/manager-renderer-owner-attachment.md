@@ -60,3 +60,44 @@ API does not attest the caller's PID. It does not protect against another
 malicious process under that same OS identity. The browser is not treated as
 an owner child process. No integration here claims an attached real Desktop,
 federated plugin graph, snapshot notifications, or lifecycle mutation.
+
+## Browser resource transport (not yet wired to the Manager)
+
+`createManagerResourceAuthClient` binds the in-memory browser session bearer to
+the fixed `/manager-resource-worker.js` for the calling top-level document.
+The worker attaches that bearer only to same-origin GET requests for the exact
+`/api/renderer/bundle.js` path and bounded `/api/renderer/graphs/<id>/<file>`
+paths. It derives the requester from `FetchEvent.clientId`; it does not grant
+access to any graph. The HTTP server must authenticate the bearer, choose the
+matching `SessionPluginGraphProjection`, and validate every lease and request.
+The bearer must never be included in URLs, diagnostics, or persistent storage.
+
+The public entry must register the fixed worker, wait for its session binding,
+then import the authenticated bundle. Serve the worker as same-origin JavaScript
+and allow `worker-src 'self'` and `font-src 'self'` in the standalone document's
+CSP. Other existing CSP restrictions remain in force. Worker registration is
+limited to the manager origin; a newer worker waits for old clients to close
+instead of replacing an active controller during a lifecycle transaction.
+The client verifies the controlling worker's exact script URL before sending a
+bearer. Existing inline Host or plugin style elements are not made CSP-compatible
+by this transport and require their own trusted style-delivery solution.
+
+A worker restart erases its in-memory bindings, so resource requests fail closed.
+The document may call `recover()` only after checking the server-side session;
+the resource caller decides whether a safe reload is needed. `revokeLocal()`
+erases the local token and aborts in-flight reads, but cannot revoke the server
+session or erase code already imported. Closing or replacing an owner must also
+revoke the HTTP session and its graph leases. This is a resource gateway, not a
+sandbox for mutually hostile same-origin scripts or windows.
+
+The standalone renderer bundle can exceed the existing 8 MiB owner management
+RPC response limit (an empty-plugin measurement was approximately 36.8 MB).
+Serving the protected bundle therefore also needs an owner-controlled bounded
+artifact or streaming transport; returning the whole bundle as a single
+management RPC response is not a valid integration.
+
+The isolated browser test composes the actual artifact server and session graph
+projection, then checks nested ESM, CSS, image and font requests, cross-tab and
+direct bypass denial, restart/recovery, local in-flight revocation, and server
+revocation. It does not exercise the product Manager entry, real plugin
+lifecycle federation, or a native Desktop renderer.

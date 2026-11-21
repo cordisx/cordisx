@@ -295,6 +295,7 @@ try {
       'dist/skills/cordisx-feedback/version.json',
       'dist/assets/manager/manager-shell.js',
       'dist/assets/manager/manager-host.css',
+      'dist/assets/manager/manager-resource-worker.js',
       'dist/assets/illustrations/model-services.svg',
       'dist/assets/illustrations/model-services.css',
       'dist/assets/feedback/feedback-manifest.schema.json',
