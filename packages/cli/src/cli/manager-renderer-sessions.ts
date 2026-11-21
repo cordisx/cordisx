@@ -108,7 +108,7 @@ export class ManagerRendererSessions {
 
   /** Only names are projected; owner-side dispatch remains the authority. */
   channelNames(): readonly string[] {
-    return [...this.channels.keys()]
+    return [...this.channels.keys()].filter(name => name !== 'manager-bootstrap')
   }
 
   commandsAvailable(): boolean {
