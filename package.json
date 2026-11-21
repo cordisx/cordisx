@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.74",
+  "version": "0.1.0-beta.75",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -103,7 +103,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#fbf9b8baa3af51aabd8b43640f56acfc0a31797f",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#265eaeaf82232a62065314f523385628285cabc2",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
