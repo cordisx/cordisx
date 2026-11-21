@@ -26,6 +26,13 @@ it('composes the shared navigation with the existing manager and preserves draft
   window.__schemaCheck = safeServiceConfigEdit
   window.__channelUI = createChannelCredentialsUI
   window.confirm = vi.fn(() => true)
+  window.HTMLDialogElement.prototype.showModal = function() {
+    this.open = true
+  }
+  window.HTMLDialogElement.prototype.close = function() {
+    this.open = false
+    this.dispatchEvent(new window.Event('close'))
+  }
   const state = {
     owner: { appId: 'codex', profileId: 'fixture' },
     management: {
@@ -73,13 +80,15 @@ it('composes the shared navigation with the existing manager and preserves draft
       }
       : route === '/api/plugin-configuration' && input.action === 'services'
       ? { status: 'ok', services: [] }
+      : route === '/api/permission-review'
+      ? { status: 'rejected', reason: 'stale-revision' }
       : { status: 'unavailable' }
     return { ok: true, json: async () => value } as Response
   }) as typeof fetch
   try {
     window.eval(bundled.outputFiles[0]!.text)
     await window.eval(
-      `(async()=>{const safeServiceConfigEdit=window.__schemaCheck;const createChannelCredentialsUI=window.__channelUI;${source}\n})()`,
+      `(async()=>{const safeServiceConfigEdit=window.__schemaCheck;const createChannelCredentialsUI=window.__channelUI;${source}\n;window.__managerReview=reviewPermissions})()`,
     )
     const doc = window.document
     const nav = (name: string) =>
@@ -113,6 +122,47 @@ it('composes the shared navigation with the existing manager and preserves draft
     nav('插件').click()
     await vi.waitFor(() => expect(panel('plugins').hidden).toBe(false))
     expect(doc.querySelector<HTMLInputElement>('#plugins .detail input')?.value).toBe('unsaved draft')
+    window.__managerReview({
+      snapshot: { activationRevision: 1 },
+      permissionPlan: {
+        schemaVersion: 7,
+        planId: 'plan',
+        operation: 'install',
+        profileId: 'fixture',
+        identity: { pluginId: 'fixture', source: 'https://example.test/plugin' },
+        binding: { runtimeGeneration: 'generation' },
+        declarations: [
+          {
+            capability: 'models.read',
+            required: true,
+            decisionRequired: true,
+            scope: {},
+            securityFingerprint: 'fixture',
+            allowedDecisions: ['allow-once'],
+          },
+          {
+            capability: 'optional.read',
+            required: false,
+            decisionRequired: false,
+            authorizationMode: 'deferred',
+            scope: {},
+          },
+        ],
+      },
+    })
+    const dialog = doc.querySelector<HTMLDialogElement>('dialog[open]')!
+    expect(dialog.textContent).toContain('实际使用此权限时再询问')
+    dialog.querySelector<HTMLSelectElement>('select')!.value = 'allow-once'
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === '提交审核')!.click()
+    await vi.waitFor(() => {
+      const submitted = requests.find(item => item.route === '/api/permission-review')
+      expect(submitted?.input).toMatchObject({
+        userConfirmed: true,
+        decision: { schemaVersion: 7, origin: 'explicit-user' },
+      })
+      expect(submitted?.input.decision.decisions).toHaveLength(1)
+      expect(doc.querySelector('#message')?.textContent).toContain('配置版本已变化')
+    })
   } finally {
     dom.window.close()
   }
