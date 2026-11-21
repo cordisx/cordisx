@@ -21,6 +21,8 @@ export interface ManagerRendererChannelContext {
   readonly rendererId: string
   readonly ownerGeneration: string
   readonly signal: AbortSignal
+  /** True only after this renderer joined the live lifecycle federation. */
+  readonly admitted?: boolean
 }
 
 /**
@@ -48,6 +50,7 @@ interface Session {
   readonly timer: ReturnType<typeof setTimeout>
   peer?: ManagerRendererCommandPeer
   admission?: Promise<boolean>
+  admitted?: boolean
   inFlight: number
 }
 
@@ -230,7 +233,9 @@ export class ManagerRendererSessions {
         peer.close()
         return { status: 'unavailable' }
       }
-      return this.current(session) ? { status: 'ok', value: { admitted: true } } : { status: 'unavailable' }
+      if (!this.current(session)) return { status: 'unavailable' }
+      session.admitted = true
+      return { status: 'ok', value: { admitted: true } }
     } finally {
       session.inFlight--
     }
@@ -331,6 +336,7 @@ export class ManagerRendererSessions {
         rendererId: session.handle.rendererId,
         ownerGeneration: this.input.ownerGeneration,
         signal: session.controller.signal,
+        admitted: session.admitted === true && session.peer !== undefined && !session.peer.closed,
       })
       if (prepared.mode !== 'read' && prepared.mode !== 'write') return unavailable
       dispatched = prepared.mode

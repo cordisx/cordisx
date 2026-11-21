@@ -7,9 +7,8 @@ import type { PluginManagementService } from '../management/service.js'
 import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
 
 /**
- * A complete, deliberately read-only projection of the existing management
- * binding. Lifecycle/configuration writes require an attached renderer and its
- * coordinator participation, and are not admitted by this channel.
+ * Project only the existing management operations. Mutations require this
+ * exact renderer to have joined the owner's live lifecycle federation.
  */
 export function createManagerRendererManagementChannel(service: PluginManagementService): ManagerRendererChannel {
   return {
@@ -29,13 +28,6 @@ export function createManagerRendererManagementChannel(service: PluginManagement
       ) {
         throw new Error('MANAGER_RENDERER_INVALID')
       }
-      const operation = item.operation
-      if (
-        operation === null || typeof operation !== 'object' || Array.isArray(operation)
-        || Object.keys(operation).length !== 1 || (operation as Record<string, unknown>).kind !== 'query'
-      ) {
-        throw new Error('MANAGER_RENDERER_UNAVAILABLE')
-      }
       // The outer authenticated session, not a renderer-controlled token, is
       // the authority. Normalize the legacy binding token only for its parser.
       const parserToken = 'owner-internal-parser-sentinel'
@@ -43,8 +35,26 @@ export function createManagerRendererManagementChannel(service: PluginManagement
         token: parserToken,
         profileId: context.profileId,
       })
+      const kind = request.operation.kind
+      const reads = ['query', 'query-catalog', 'plugin-info']
+      const writes = ['refresh-catalog', 'plan', 'execute', 'migrate-legacy-sources']
+      const keys: Readonly<Record<string, readonly string[]>> = {
+        query: ['kind'],
+        'query-catalog': ['kind', 'query'],
+        'plugin-info': ['kind', 'query'],
+        'refresh-catalog': ['kind', 'sourceUrl'],
+        plan: ['kind', 'request'],
+        execute: ['kind', 'request', 'expectedRevision'],
+        'migrate-legacy-sources': ['kind', 'input'],
+      }
+      if (
+        !reads.includes(kind) && !writes.includes(kind) || writes.includes(kind) && context.admitted !== true
+        || Object.keys(request.operation).some(key => !keys[kind]?.includes(key))
+      ) {
+        throw new Error('MANAGER_RENDERER_UNAVAILABLE')
+      }
       return {
-        mode: 'read',
+        mode: writes.includes(kind) ? 'write' : 'read',
         dispatch: async () => ({
           requestId: request.requestId,
           ok: true,
