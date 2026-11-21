@@ -223,6 +223,12 @@ describe('read-only independent manager for an existing configured Channel', () 
       available = true
       await own.refreshIdentity(new AbortController().signal)
       expect(own.snapshot().accounts[0]?.connectionState).toBe('ready')
+      run.mockResolvedValueOnce({ status: 'applied', projection: { ...initial.runtime, observedAt: 'invalid' } })
+      await expect(own.refreshIdentity(new AbortController().signal)).rejects.toThrow('observedAt')
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('unavailable')
+      expect(own.snapshot().observedAt).toBe(refreshedObservedAt)
+      await own.refreshIdentity(new AbortController().signal)
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('ready')
       let rejectOlder!: (error: Error) => void
       run.mockImplementationOnce(async () =>
         await new Promise((_resolve, reject) => {
@@ -252,7 +258,7 @@ describe('read-only independent manager for an existing configured Channel', () 
         target: { kind: 'connection', connectionToken: account.connectionToken },
       })
       expect(outcome.status).toBe('rejected')
-      expect(run).toHaveBeenCalledTimes(7)
+      expect(run).toHaveBeenCalledTimes(9)
       retire()
       expect(() => presentationManager.presentationCapabilities()).toThrow('PERMISSION_DENIED')
       view!.close()

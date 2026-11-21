@@ -56,15 +56,19 @@ import type { RequestedScope } from './platform/platform-permission-store.js'
 import { generationVisibilityFromContext } from './generation-visibility.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
-import { restrictChannelManagerActions } from './channel-manager-actions.js'
-import { markChannelSnapshotUnavailable, readChannelSnapshot } from './channel-manager-unavailable.js'
+import { type ChannelManagerActionsApi, restrictChannelManagerActions } from './channel-manager-actions.js'
+export type { ChannelManagerActionsApi } from './channel-manager-actions.js'
+import {
+  adoptChannelSnapshot,
+  markChannelSnapshotUnavailable,
+  readChannelSnapshot,
+} from './channel-manager-unavailable.js'
 import {
   type ChannelManagerConnectionProjection,
   type ChannelManagerProjectionV1,
   compositeRef,
   EMPTY_PROJECTION,
   normalizeProjection,
-  withRuntimeProjection,
 } from './channel-manager-projection.js'
 export type {
   ChannelManagerAccountProjection,
@@ -76,44 +80,6 @@ export type {
   ChannelManagerRouteProjection,
   ChannelProductStatus,
 } from './channel-manager-projection.js'
-
-/** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
-export interface ChannelManagerActionsApi {
-  /** Only a current redacted snapshot can be requested through this bridge. */
-  readonly snapshotOnly?: true
-  run(
-    action:
-      | 'enable'
-      | 'disable'
-      | 'reconnect'
-      | 'archive'
-      | 'restore'
-      | 'unbind'
-      | 'snapshot'
-      | 'policy'
-      | 'policy-set'
-      | 'continuation-defaults'
-      | 'continuation-defaults-set'
-      | 'execution-defaults'
-      | 'execution-defaults-set'
-      | 'channel-execution-defaults'
-      | 'channel-execution-defaults-set'
-      | 'execution-settings'
-      | 'execution-settings-set'
-      | 'model-list'
-      | 'task-config'
-      | 'task-config-set'
-      | 'task-settings'
-      | 'task-settings-set'
-      | 'binding-labels'
-      | 'conversation-page'
-      | 'conversation-detail'
-      | 'conversation-activity'
-      | 'conversation-bindings'
-      | 'binding-navigation',
-    input: Record<string, unknown>,
-  ): Promise<ChannelManagerActionResult>
-}
 
 export interface ChannelManagerServiceConfigApi {
   list(): Promise<readonly HostServiceConfigDescriptor[]>
@@ -660,12 +626,13 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     this.assertOwnedRead()
     const state = stateFor(this)
     const result = await readChannelSnapshot(state, signal, () => this.notifyListeners())
-    if (result === undefined) return
+    if (
+      result === undefined || signal.aborted || state.disposed || !state.isCurrent()
+      || state.refreshSequence !== result.sequence
+    ) return
     this.assertOwnedRead()
     const before = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
-    // Normalize the entire readback before it can replace any last-good account data.
-    withRuntimeProjection(state.projection, result)
-    state.runtimeProjection = result
+    adoptChannelSnapshot(state, result.projection, () => this.notifyListeners())
     const after = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
     if (before === after) return
     state.cachedProjection = undefined
