@@ -91,10 +91,15 @@ export class ServiceRendererParticipants {
     return !this.closed && entry !== undefined && !entry.peer.closed ? entry.peer : undefined
   }
 
+  /** Revoke current peers without preventing a later, freshly admitted session. */
+  disconnectAll(): void {
+    for (const entry of this.entries.values()) entry.peer.close()
+    this.entries.clear()
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true
-    for (const entry of this.entries.values()) entry.peer.close()
-    this.entries.clear()
+    this.disconnectAll()
   }
 }

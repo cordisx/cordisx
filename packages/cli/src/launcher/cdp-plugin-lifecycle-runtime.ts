@@ -21,11 +21,11 @@ import {
   type BrowserGraphAdmission,
   type BrowserGraphBootstrapRefresh,
   type CdpSharedAdmission,
+  createCdpDepartureObserver,
   createCdpSharedAdmission,
   type GenerationOwner,
   mutationArtifactLeases,
   reloadCdpSessions,
-  removeCdpSession,
   type SharedAdmissionState,
 } from './cdp-shared-admission.js'
 export type { BrowserGraphAdmission, BrowserGraphBootstrapRefresh, CdpSharedAdmission } from './cdp-shared-admission.js'
@@ -53,6 +53,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly sessions = new Set<CdpSession>()
   private readonly joining = new Set<CdpSession>()
   private readonly staged = new Map<string, readonly CdpSession[]>()
+  private readonly departures = createCdpDepartureObserver(this.sessions, this.staged, () => this.sharedAdmission)
+  readonly onNoReadySessions = this.departures.subscribe
   private readonly stagedMutations = new Map<string, PluginRuntimeMutation>()
   private readonly fences = new Map<string, RuntimeGenerationFence>()
   private registryEpoch = 0
@@ -392,7 +394,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
     this.sessions.add(session)
-    return () => removeCdpSession(this.sessions, this.staged, this.sharedAdmission, session)
+    return () => this.departures.remove(session)
   }
 
   /** Reserve one boot-ready renderer for cold recovery before normal admission. */
@@ -420,7 +422,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         this.generationOwner = undefined
         settled = true
         this.sessions.add(session)
-        return () => removeCdpSession(this.sessions, this.staged, this.sharedAdmission, session)
+        return () => this.departures.remove(session)
       },
       abort: () => {
         if (settled) return

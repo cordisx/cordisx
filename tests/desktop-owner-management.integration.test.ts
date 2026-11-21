@@ -124,24 +124,14 @@ it('attaches the real management composition to one existing Desktop owner and r
     })
     const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', profileId)
     const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
-    const browserSessionId = secret()
-    const opened = await requestPluginManagementRpc(rpcPaths, endpoint, {
-      kind: 'manager-renderer',
-      action: 'open',
-      gateway,
-      browserSessionId,
-    }) as any
-    expect(opened).toMatchObject({ status: 'ok', commands: true, channels: ['plugin-management'] })
-    const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
-    const call = async (payload: unknown) =>
+    const open = async (browserSessionId: string) =>
       await requestPluginManagementRpc(rpcPaths, endpoint, {
-        ...common,
-        action: 'call',
-        channel: 'manager-bootstrap',
-        payload,
+        kind: 'manager-renderer',
+        action: 'open',
+        gateway,
+        browserSessionId,
       }) as any
-    expect(await call({ action: 'status' })).toEqual({ status: 'ok', value: { status: 'ok', current: true } })
-    expect(await call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+    expect(await open(secret())).toEqual({ status: 'unavailable' })
     const bundle = await buildRendererBundle({
       version: 1,
       rootDir: process.cwd(),
@@ -170,6 +160,18 @@ it('attaches the real management composition to one existing Desktop owner and r
       },
     }
     unregister = cdp.register(session as never)
+    const browserSessionId = secret()
+    const opened = await open(browserSessionId)
+    expect(opened).toMatchObject({ status: 'ok', commands: true, channels: ['plugin-management'] })
+    const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
+    const call = async (payload: unknown) =>
+      await requestPluginManagementRpc(rpcPaths, endpoint, {
+        ...common,
+        action: 'call',
+        channel: 'manager-bootstrap',
+        payload,
+      }) as any
+    expect(await call({ action: 'status' })).toEqual({ status: 'ok', value: { status: 'ok', current: true } })
     expect(owner.lifecycle.snapshot()).toEqual({ active, registryEpoch: 0 })
     const prepared = await call({ action: 'prepare' })
     expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [] } })
@@ -221,6 +223,14 @@ it('attaches the real management composition to one existing Desktop owner and r
     })
     expect(denied).toMatchObject({ outcome: 'rejected', error: { code: 'operation-unavailable' } })
     expect((await store.loadActive()).revision).toBe(0)
+    unregister()
+    unregister = undefined
+    expect(await call({ action: 'status' })).toEqual({ status: 'unavailable' })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'poll', timeoutMs: 100 }))
+      .toEqual({ status: 'unavailable' })
+    expect(await open(secret())).toEqual({ status: 'unavailable' })
+    unregister = cdp.register(session as never)
+    expect(await open(secret())).toMatchObject({ status: 'ok', commands: true })
     await composition.close()
     composition = undefined
     await client.close()

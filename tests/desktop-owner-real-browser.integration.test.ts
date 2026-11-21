@@ -211,7 +211,33 @@ it.skipIf(chrome === undefined)(
         status: 'unavailable',
         reason: 'renderer-busy',
       })
+      // This is the same owner callback used when the last CDP seat disconnects.
+      unregister()
+      unregister = undefined
+      await vi.waitFor(async () => {
+        const status = await second!.evaluate<{ hidden: boolean; text: string }>(`({
+          hidden: document.querySelector('p[role=status]')?.hidden,
+          text: document.querySelector('p[role=status]')?.textContent ?? ''
+        })`)
+        expect(status.hidden).toBe(false)
+        expect(status.text).toContain('连接不可用')
+      }, { timeout: 15_000 })
+      expect(() => owner.lifecycle.snapshot()).toThrow('unavailable')
       await desktop.send('Target.closeTarget', { targetId: secondTarget.targetId })
+      await second.close().catch(() => {})
+      second = undefined
+      // A new Desktop seat permits a new Manager session; the old one stays revoked.
+      unregister = cdp.register(desktop as never)
+      const thirdTarget = await desktop.send('Target.createTarget', { url: url(web.issueUrl()) }) as {
+        targetId: string
+      }
+      second = await connect(thirdTarget.targetId)
+      await ready(second)
+      expect(await owner.lifecycle.pluginConfiguration(list)).toEqual({
+        status: 'unavailable',
+        reason: 'renderer-busy',
+      })
+      await desktop.send('Target.closeTarget', { targetId: thirdTarget.targetId })
       await second.close().catch(() => {})
       second = undefined
       await vi.waitFor(async () => {

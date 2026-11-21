@@ -104,3 +104,28 @@ it('does not start a shared fence while an earlier Desktop reload is still in fl
   admission.release()
   unregister()
 })
+
+it('notifies the owner only when the final admitted Desktop seat leaves', () => {
+  const cdp = new CdpPluginLifecycleRuntime()
+  const first = { send: async () => ({}) } as never
+  const second = { send: async () => ({}) } as never
+  const closed = vi.fn()
+  const unsubscribe = cdp.onNoReadySessions(closed)
+  cdp.onNoReadySessions(() => {
+    throw new Error('observer failure')
+  })
+  const removeFirst = cdp.register(first)
+  const removeSecond = cdp.register(second)
+  removeFirst()
+  expect(closed).not.toHaveBeenCalled()
+  removeSecond()
+  removeSecond()
+  expect(closed).toHaveBeenCalledTimes(1)
+  const join = cdp.beginJoin(first)
+  const removeRejoined = join.commit(0)!
+  removeRejoined()
+  expect(closed).toHaveBeenCalledTimes(2)
+  unsubscribe()
+  cdp.register(second)()
+  expect(closed).toHaveBeenCalledTimes(2)
+})

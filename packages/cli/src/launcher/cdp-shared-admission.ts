@@ -268,6 +268,32 @@ export function removeCdpSession(
   }
 }
 
+/** Signal only the transition from at least one admitted Desktop seat to zero. */
+export function createCdpDepartureObserver(
+  sessions: Set<CdpSession>,
+  staged: Map<string, readonly CdpSession[]>,
+  admission: () => SharedAdmissionState | undefined,
+): { subscribe(listener: () => void): () => void; remove(session: CdpSession): void } {
+  const listeners = new Set<() => void>()
+  return {
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    remove(session) {
+      const present = sessions.has(session)
+      removeCdpSession(sessions, staged, admission(), session)
+      if (present && sessions.size === 0) {
+        for (const listener of listeners) {
+          try {
+            listener()
+          } catch { /* isolate lifecycle observers */ }
+        }
+      }
+    },
+  }
+}
+
 export async function reloadCdpSessions(
   sessions: readonly CdpSession[],
   input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string },

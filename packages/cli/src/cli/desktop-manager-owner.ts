@@ -38,6 +38,15 @@ export function createDesktopManagerOwner(input: {
     }),
   })
   participants.bind(lifecycle)
+  const unsubscribeNoSeats = input.cdp.onNoReadySessions(() => participants.disconnectAll())
+  const participant = {
+    create: (request: Parameters<typeof participants.participant.create>[0]) => {
+      // No private session may outlive or precede its last admitted Desktop seat.
+      lifecycle.snapshot()
+      return participants.participant.create(request)
+    },
+    attach: participants.participant.attach,
+  }
   const bootstrap = new ServiceRendererBootstrap({
     homeDir: input.homeDir,
     configPath: input.configPath,
@@ -51,13 +60,14 @@ export function createDesktopManagerOwner(input: {
   let closed = false
   return {
     lifecycle,
-    managementOptions: { rendererParticipant: participants.participant, rendererBootstrap: bootstrap.channel() },
+    managementOptions: { rendererParticipant: participant, rendererBootstrap: bootstrap.channel() },
     initialize(active: CordisXPluginActivationRecordV1, recoveryPending: boolean) {
       lifecycle.initialize(active, recoveryPending)
     },
     close() {
       if (closed) return
       closed = true
+      unsubscribeNoSeats()
       bootstrap.close()
       participants.close()
       lifecycle.close()
