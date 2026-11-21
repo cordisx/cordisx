@@ -51,6 +51,7 @@ function fixture(initialGraphs = [old, dependent]) {
     stage: vi.fn((input: { id: string }) => ({ id: input.id, ready: Promise.resolve() })),
     publish: vi.fn(() => true),
     retire: vi.fn(() => true),
+    dispose: vi.fn(),
   }
   const importModule = vi.fn(async (_url: string) => ({ apply: () => {} }))
   const loader = createManagerRendererGraphLoader({ origin, registry, initialGraphs, importModule })
@@ -77,6 +78,7 @@ it('uses the existing registry and native module loader, then retires the replac
   await loader.dispose()
   expect(registry.retire).toHaveBeenCalledWith(replacement.leaseId)
   expect(registry.retire).toHaveBeenCalledWith(dependent.leaseId)
+  expect(registry.dispose).toHaveBeenCalledOnce()
 })
 
 it('retains the previous graph on rollback and retires only the staged replacement', async () => {

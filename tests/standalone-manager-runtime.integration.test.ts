@@ -1,5 +1,6 @@
 import { JSDOM } from 'jsdom'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
@@ -122,7 +123,19 @@ it('mounts the original Manager and registered plugin in an owner-scoped standal
         .__cordisxPluginGenerationResourcesV1,
     )
       .toBeDefined()
-    const runtime = (dom.window as unknown as { __cordisxRuntime: { dispose(): Promise<void> } }).__cordisxRuntime
+    const runtime = (dom.window as unknown as {
+      __cordisxRuntime: {
+        setExtensionPointPolicy(source: string, plugin: string, point: string, value: string): Promise<void>
+        dispose(): Promise<void>
+      }
+    }).__cordisxRuntime
+    await expect(runtime.setExtensionPointPolicy(
+      pathToFileURL(plugin.entry).href,
+      plugin.id,
+      'manager.settings.navigation-items',
+      'deny',
+    )).rejects.toThrow('Owner permission writes are unavailable')
+    expect(root.querySelector('[data-settings-navigation-item="settings-tab-demo:navigation"]')).not.toBeNull()
     await runtime.dispose()
   } finally {
     dom.window.close()

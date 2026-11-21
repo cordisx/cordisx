@@ -20,6 +20,8 @@ export interface ManagerRendererResourceRegistry {
   }): { readonly id: string; readonly ready: Promise<void> }
   publish(id: string): boolean
   retire(id: string): boolean
+  /** The standalone document owns the registry and its observer. */
+  dispose?(): void
 }
 
 const identifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -293,6 +295,7 @@ export function createManagerRendererGraphLoader(input: {
         } catch { /* owner must fence an unconfirmed cleanup */ }
       }
       active.clear()
+      input.registry.dispose?.()
     },
   }
 }
