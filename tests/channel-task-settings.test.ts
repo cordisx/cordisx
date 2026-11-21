@@ -121,6 +121,22 @@ async function fixture() {
 }
 
 describe('exact Channel task changes', () => {
+  it('records a definitive provider refusal without leaving the chat uncertain', async () => {
+    const f = await fixture()
+    f.native.applyTaskSelection.mockResolvedValueOnce({
+      status: 'rejected',
+      reason: 'provider-switch-unavailable',
+    } as never)
+    await f.tasks.request(undefined, 'chat', { providerId: 'two', model: 'other' })
+    await f.tasks.pump()
+    expect(await f.tasks.read('chat')).toMatchObject({
+      application: 'applied',
+      code: 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE',
+      settings: { providerId: 'one', model: 'old' },
+    })
+    await f.tasks.pump()
+    expect(f.native.applyTaskSelection).toHaveBeenCalledOnce()
+  })
   it('routes common configuration commands through the real actor approval workflow instead of applying directly', async () => {
     const f = await fixture()
     const tools = new ChannelConversationTools(

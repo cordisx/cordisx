@@ -2,8 +2,69 @@ import { describe, expect, it, vi } from 'vitest'
 import { startHeadlessCodexBackend } from '../packages/cli/src/launcher/headless-codex-backend.js'
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
 import { createHeadlessCodexOperations } from '../packages/cli/src/launcher/headless-codex-operations.js'
+import { JsonLineRpcError } from '../packages/cli/src/providers/json-line-rpc.js'
 
 describe('headless Codex backend', () => {
+  it('distinguishes an explicit cold provider refusal from an uncertain resume', async () => {
+    let failure: Error = new JsonLineRpcError(
+      "thread/resume failed: cannot change this thread's model provider from openrouter to openai on resume",
+      -32600,
+    )
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [] }
+      if (method === 'thread/read') {
+        return { thread: { id: 'chat', modelProvider: 'openrouter', status: { type: 'notLoaded' } } }
+      }
+      if (method === 'thread/resume') throw failure
+      throw new Error(`unexpected method ${method}`)
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      environment: {
+        CORDISX_HEADLESS_PROVIDER_ID: 'openrouter',
+        CORDISX_HEADLESS_MODEL_ID: 'old',
+        CORDISX_HEADLESS_EXTRA_PROVIDER: 'openai',
+        CORDISX_HEADLESS_EXTRA_MODELS: 'new',
+      },
+      startServer: async () => ({ request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      const selection = { threadId: 'chat', providerId: 'openai', model: 'new' }
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'rejected', reason: 'provider-switch-unavailable' })
+      failure = new JsonLineRpcError('thread/resume timed out')
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'reconciliation-required', reason: 'native-selection-unavailable' })
+      failure = new JsonLineRpcError('thread/resume failed: invalid request', -32600)
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'reconciliation-required', reason: 'native-selection-unavailable' })
+      failure = new JsonLineRpcError(
+        "thread/resume failed: cannot change this thread's model provider from openrouter to openai on resume",
+        -32603,
+      )
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'reconciliation-required', reason: 'native-selection-unavailable' })
+      failure = new JsonLineRpcError('thread/resume failed: provider mismatch', -32600, {
+        type: 'modelProviderMismatch',
+        modelProvider: 'openrouter',
+        currentModelProvider: 'openai',
+      })
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'rejected', reason: 'provider-switch-unavailable' })
+      failure = new JsonLineRpcError('thread/resume failed: provider mismatch', -32600, {
+        type: 'modelProviderMismatch',
+        modelProvider: 'another',
+        currentModelProvider: 'openai',
+      })
+      expect(await backend.models('select', selection))
+        .toEqual({ status: 'reconciliation-required', reason: 'native-selection-unavailable' })
+    } finally {
+      await backend.close()
+    }
+  })
   it('confirms a fresh native settings event without resuming an empty idle thread', async () => {
     let listener: ((method: string, params: unknown) => void) | undefined
     let actual = 'new'

@@ -408,6 +408,12 @@ validated against the actual catalog and queued until the chat is idle. Saving,
 submission and observed application are distinct states; unknown effects are
 not replayed after restart.
 
+Some native Codex versions keep an existing thread's provider fixed. When the
+native service explicitly refuses a cross-provider resume, the change is rejected
+without retrying it, and `/task-settings` explains that the existing chat can be
+kept while a new chat is created for the other provider. A timeout or any
+unrecognized native error remains uncertain and is not treated as a refusal.
+
 Model grants constrain platform/account/conversation, users/user groups, changed
 fields, Provider, qualified model, effort, Fast values (`fastModes`) and local
 projects (`projectIds`). Deny wins and applicable allow
