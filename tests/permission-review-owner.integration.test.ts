@@ -2,7 +2,10 @@ import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
@@ -163,12 +166,33 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
         body: JSON.stringify({}),
       })).json()
     expect(await post('/api/renderer/open')).toMatchObject({ status: 'ok' })
+    const supportsPolicyFence = process.platform === 'darwin' || process.platform === 'linux'
+    const policy = createPermissionPolicyRecord({
+      profileId: profile,
+      identity: { source: 'https://example.test/unrelated', id: 'unrelated' },
+      capability: 'models.read',
+      scope: { providers: ['codex'] },
+      policy: 'deny',
+    })
+    const configPath = path.join(cordisxHome, 'config.json')
+    if (supportsPolicyFence) {
+      expect(await post('/api/renderer/bootstrap')).toMatchObject({ status: 'ok' })
+      // The owner runs in another process; its renderer fence must stop the
+      // normal Home writer rather than merely compare a cached snapshot.
+      await expect(persistPermissionPolicies({ configPath }, [policy])).rejects.toThrow(
+        'permission policy is in use',
+      )
+    }
     expect(await request(operation)).toEqual({
       status: 'unavailable',
       reason: 'profile-coordination-unavailable',
     })
     expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
     expect(await post('/api/renderer/close')).toEqual({ closed: true })
+    if (supportsPolicyFence) {
+      await vi.waitFor(async () => await persistPermissionPolicies({ configPath }, [policy]))
+      await updateHomeConfigAtomic(current => ({ ...current, permissions: [] }), configPath)
+    }
 
     const applied = await Promise.all([request(operation), request(operation)])
     expect(applied).toContainEqual(expect.objectContaining({

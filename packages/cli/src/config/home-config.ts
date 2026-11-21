@@ -34,6 +34,7 @@ import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from '
 import { type HomeMcpConfig, parseHomeMcpConfig } from './home-config-mcp.js'
 import { type HomeConfigPublisherGrantIssuer, parsePublisherGrantIssuer } from './home-config-issuers.js'
 import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-execution-settings.js'
+import { fenceChangedPermissionProfiles } from './profile-permission-fence.js'
 
 export type { JsonValue } from './home-config-values.js'
 export type { HomeConfigPublisherGrantIssuer } from './home-config-issuers.js'
@@ -964,9 +965,19 @@ export async function updateHomeConfigAtomic(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       current = createDefaultHomeConfig()
     }
+    const previousPermissions = structuredClone(current.permissions)
     const updated = parseHomeConfig(await updater(current))
-    await publishAtomic(configPath, updated)
-    return updated
+    const releasePermissions = await fenceChangedPermissionProfiles(
+      configPath,
+      previousPermissions,
+      updated.permissions,
+    )
+    try {
+      await publishAtomic(configPath, updated)
+      return updated
+    } finally {
+      await releasePermissions()
+    }
   } finally {
     await lock.release()
   }

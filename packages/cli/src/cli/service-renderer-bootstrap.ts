@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { loadHomeConfig } from '../config/home-config.js'
+import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { type CordisXConfig, type CordisXConfigPlugin, loadConfig } from '../launcher/config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
@@ -31,6 +32,7 @@ type Entry = {
   policies?: readonly CordisXPersistedPermissionPolicyRecord[]
   managedOwners?: ReadonlyMap<string, string>
   managedContext?: ManagerRendererChannelContext
+  releasePermissionFence?: () => Promise<void>
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
 }
@@ -48,6 +50,7 @@ function emptyConfig(value: unknown): boolean {
 export class ServiceRendererBootstrap {
   private readonly entries = new Map<string, Entry>()
   private readonly unsubscribeFinalization: () => void
+  private readonly permissionFence: SharedProfilePermissionFence | undefined
   private closed = false
 
   constructor(
@@ -61,8 +64,13 @@ export class ServiceRendererBootstrap {
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
+      /** Service owner only: fence cooperative Home policy writers while a renderer is admitted. */
+      readonly protectPermissionWrites?: boolean
     },
   ) {
+    this.permissionFence = input.protectPermissionWrites
+      ? new SharedProfilePermissionFence(input.configPath, input.profileId)
+      : undefined
     this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active => {
       for (const entry of this.entries.values()) {
         for (let index = entry.leases.length - 1; index >= 0; index--) {
@@ -129,6 +137,9 @@ export class ServiceRendererBootstrap {
     // Drain this entry even if it has already been removed from the map.
     if (this.entries.get(rendererId) === entry) this.entries.delete(rendererId)
     entry.unsubscribe()
+    const releasePermissionFence = entry.releasePermissionFence
+    delete entry.releasePermissionFence
+    void releasePermissionFence?.().catch(() => entry.peer.close())
     if (entry.managedContext) this.input.managedServiceUI?.retire(entry.managedContext)
     for (const lease of entry.leases) lease.retire()
     entry.leases.length = 0
@@ -158,6 +169,14 @@ export class ServiceRendererBootstrap {
     }
     entry.preparing = (async () => {
       try {
+        if (this.permissionFence) {
+          const release = await this.permissionFence.acquire()
+          if (!this.current(rendererId, entry)) {
+            await release()
+            throw new Error('renderer-bootstrap-stale')
+          }
+          entry.releasePermissionFence = release
+        }
         const snapshot = this.input.lifecycle.snapshot()
         const [config, plugins, policies] = await Promise.all([
           loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
@@ -389,6 +408,10 @@ export class ServiceRendererBootstrap {
     if (this.closed) return
     this.closed = true
     this.unsubscribeFinalization()
-    for (const [rendererId, entry] of this.entries) this.retire(rendererId, entry)
+    for (const [rendererId, entry] of this.entries) {
+      entry.peer.close()
+      this.retire(rendererId, entry)
+    }
+    void this.permissionFence?.close().catch(() => undefined)
   }
 }

@@ -120,6 +120,14 @@ admitting another renderer. An uncertain review keeps coordination closed.
 Other permission writers and native or external consumers are not yet covered
 by a profile-wide barrier.
 
+On macOS and Linux, an experimental service-mode renderer also holds a
+profile-scoped permission fence while its startup snapshot is in use. Current
+Home configuration writers reject changes to that profile's persisted policies
+until its Manager renderers retire; unrelated profiles are not blocked. A
+rejected policy write has not been published and can be retried after closing
+the Manager. Older or non-cooperating writers, Windows, plugin configuration
+and other consumers are not synchronized by this fence.
+
 Model-service changes retain the current Host's app-restart apply semantics.
 The manager permits saving only when the active model-service authority reports
 the explicit safe-write contract; an older owner without that capability remains

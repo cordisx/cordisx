@@ -122,6 +122,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           participants: rendererParticipants,
           store,
           managedServiceUI: rendererManagedServiceUI,
+          protectPermissionWrites: process.platform === 'darwin' || process.platform === 'linux',
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)

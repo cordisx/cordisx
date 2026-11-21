@@ -21,6 +21,7 @@ import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import {
   type PluginGenerationGraphLease,
   startPluginGenerationArtifactServer,
@@ -42,11 +43,13 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-async function fixture(options: { delayLease?: boolean; managedBackend?: boolean } = {}) {
+async function fixture(
+  options: { delayLease?: boolean; managedBackend?: boolean; protectPermissionWrites?: boolean } = {},
+) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
   const homeDir = path.join(root, 'home')
   const configPath = path.join(homeDir, 'config.json')
-  await mkdir(homeDir, { recursive: true })
+  await mkdir(homeDir, { recursive: true, mode: 0o700 })
   await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
   const profileId = 'default'
   const generation = 'fixture-owner'
@@ -137,6 +140,7 @@ async function fixture(options: { delayLease?: boolean; managedBackend?: boolean
     participants,
     store,
     managedServiceUI: managedUI,
+    protectPermissionWrites: options.protectPermissionWrites === true,
   })
   const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
   const sessions = new ManagerRendererSessions({
@@ -210,6 +214,41 @@ async function fixture(options: { delayLease?: boolean; managedBackend?: boolean
     },
   }
 }
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'holds one profile permission fence until both Manager bootstraps retire',
+  async () => {
+    const f = await fixture({ protectPermissionWrites: true })
+    const secondId = secret()
+    const secondHandle = (await f.sessions.open(f.gateway, secondId))!
+    const second = { gateway: f.gateway, browserSessionId: secondId, handle: secondHandle }
+    const policy = createPermissionPolicyRecord({
+      profileId: f.profileId,
+      identity: { source: 'https://example.test/plugin', id: 'fixture' },
+      capability: 'models.read',
+      scope: { providers: ['codex'] },
+      policy: 'deny',
+    })
+    try {
+      expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+      expect(await f.sessions.call(second, 'manager-bootstrap', { action: 'prepare' })).toMatchObject({
+        status: 'ok',
+      })
+      await expect(persistPermissionPolicies({ configPath: f.configPath }, [policy])).rejects.toThrow(
+        'permission policy is in use',
+      )
+      expect(await f.sessions.close(f.invocation)).toBe(true)
+      await expect(persistPermissionPolicies({ configPath: f.configPath }, [policy])).rejects.toThrow(
+        'permission policy is in use',
+      )
+      expect(await f.sessions.close(second)).toBe(true)
+      await vi.waitFor(async () => await persistPermissionPolicies({ configPath: f.configPath }, [policy]))
+    } finally {
+      await f.close()
+    }
+  },
+  30_000,
+)
 
 function project(graph: ServiceRendererPrivateGraph) {
   const baseUrl = `${origin}/api/renderer/graphs/${secret()}/`
