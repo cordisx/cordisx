@@ -224,6 +224,8 @@ export interface ManagerModel {
   /** Host-private shared execution preferences, independent of installed Channel transports. */
   chatExecution?: import('./channel-execution-workflow.js').ChannelExecutionWorkflow
   readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
+  /** False when the active owner only supplies a permission snapshot. */
+  readonly permissionPolicyWritable?: boolean
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1
   clearPluginConsole?(id: string): void

@@ -912,6 +912,7 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
+  permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone',
   ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
     chatExecution: new ChannelExecutionWorkflow({
       document,

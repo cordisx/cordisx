@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Select } from 'tdesign-react'
 import type { ManagerSettingsNavigationProjectionV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
-import { productLocale } from '../../ui-copy.js'
+import { managerCopy, productLocale } from '../../ui-copy.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import type { ManagerRouter } from '../model/routes.js'
 
@@ -133,6 +133,9 @@ export function ExtensionPointDetailPage(
       <ManagerTabs label="扩展点详情" tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'usage' && (
         <div className="cxr-list">
+          {model.permissionPolicyWritable === false
+            ? <p role="status">{managerCopy(snapshot.localization.locale, 'permission.read-only')}</p>
+            : null}
           {point.plugins.map(plugin => (
             <section className="cxr-card" key={`${plugin.identity.source}\0${plugin.identity.id}`}>
               <span className="cxr-card-body">
@@ -144,7 +147,7 @@ export function ExtensionPointDetailPage(
                 className="cxr-policy-select"
                 value={plugin.policy}
                 options={options}
-                disabled={model.setExtensionPointPolicy === undefined}
+                disabled={model.setExtensionPointPolicy === undefined || model.permissionPolicyWritable === false}
                 onChange={value =>
                   void model.setExtensionPointPolicy?.(
                     plugin.identity.source,
@@ -188,7 +191,8 @@ export function ExtensionPointDetailPage(
                     className="cxr-policy-select"
                     value={value}
                     options={groupOptions}
-                    disabled={model.setExtensionPointControlGroupChoice === undefined}
+                    disabled={model.setExtensionPointControlGroupChoice === undefined
+                      || model.permissionPolicyWritable === false}
                     onChange={next => {
                       const selected = candidates.find(candidate => stableControlClaimKey(candidate) === next)
                       void model.setExtensionPointControlGroupChoice?.(
@@ -235,7 +239,8 @@ export function ExtensionPointDetailPage(
                   className="cxr-policy-select"
                   value={candidate.policy}
                   options={options}
-                  disabled={model.setExtensionPointControlAuthorization === undefined}
+                  disabled={model.setExtensionPointControlAuthorization === undefined
+                    || model.permissionPolicyWritable === false}
                   onChange={policy =>
                     void model.setExtensionPointControlAuthorization?.(controlSnapshot!.policyRevision, {
                       principalHandle: candidate.principalHandle,

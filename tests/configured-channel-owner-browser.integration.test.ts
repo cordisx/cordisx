@@ -154,6 +154,13 @@ it.skipIf(!archive || !chrome || process.platform !== 'darwin' && process.platfo
       if (grant !== 'owner') {
         await expect.poll(() => cdp!.evaluate('document.body.textContent.includes("Review permissions")')).toBe(true)
         expect(await cdp.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))')).toBe(false)
+        await expect.poll(() =>
+          cdp!.evaluate(
+            'document.querySelector(".t-select input")?.disabled === true',
+          )
+        ).toBe(true)
+        expect(await cdp.evaluate('document.body.textContent.includes("Permissions are read-only here.")'))
+          .toBe(true)
       } else {
         await expect.poll(() => cdp!.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
           .toBe(true)
