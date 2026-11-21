@@ -116,7 +116,8 @@ async function fixture(
       try {
         const value = await dom.window.eval(expression)
         if (expression.includes('stagePluginMutation')) desktopImpacts.push(value?.result?.affectedPluginIds)
-        return { result: { value: JSON.parse(JSON.stringify(value)) } }
+        const serialized = JSON.stringify(value)
+        return { result: { value: serialized === undefined ? undefined : JSON.parse(serialized) } }
       } catch (error) {
         return { exceptionDetails: { text: error instanceof Error ? error.message : String(error) } }
       }
@@ -148,7 +149,8 @@ async function fixture(
         try {
           const value = await extraDom!.window.eval(expression)
           if (expression.includes('stagePluginMutation')) desktopImpacts.push(value?.result?.affectedPluginIds)
-          return { result: { value: JSON.parse(JSON.stringify(value)) } }
+          const serialized = JSON.stringify(value)
+          return { result: { value: serialized === undefined ? undefined : JSON.parse(serialized) } }
         } catch (error) {
           return { exceptionDetails: { text: error instanceof Error ? error.message : String(error) } }
         }
@@ -309,6 +311,16 @@ async function fixture(
       request({ kind: 'disable', pluginId: 'fixture-plugin', impactToken: planned.impactToken! }, revision),
     )
   }
+  async function enable(pluginId: string) {
+    const revision = (await store.loadActive()).revision
+    const planned = await coordinator.handle(request({ kind: 'enable', pluginId }, revision))
+    expect(planned).toMatchObject({ outcome: 'planned' })
+    return await coordinator.handle(request({
+      kind: 'enable',
+      pluginId,
+      authorizationDecision: decision(planned.authorizationPlan!),
+    }, revision))
+  }
   return {
     root,
     home,
@@ -329,6 +341,7 @@ async function fixture(
     calls,
     attach,
     disable,
+    enable,
     async close() {
       for (const item of peers) item.peer.close()
       await Promise.allSettled(peers.map(item => item.task))
@@ -612,6 +625,10 @@ it.each(['desktop', 'manager'] as const)(
 it.each([false, true])('validates a real dependency closure with Manager attached: %s', async withManager => {
   const f = await fixture({ dependent: true, desktopCount: 2 })
   try {
+    // A transport substitute is required because JSDOM cannot provide CDP's
+    // native browser graph admission and future-document bootstrap refresh.
+    f.cdp.setBrowserGraphAdmission(async () => ({ commit: () => {}, rollback: async () => {} }))
+    f.cdp.setBrowserGraphBootstrapRefresh(async () => {})
     if (withManager) await f.attach()
     expect(await f.disable()).toMatchObject({ outcome: 'applied', revision: 3 })
     expect(f.desktopImpacts).toEqual([
@@ -627,6 +644,19 @@ it.each([false, true])('validates a real dependency closure with Manager attache
     expect(f.stageEpochs).toHaveLength(withManager ? 3 : 2)
     expect(new Set(f.stageEpochs).size).toBe(1)
     expect(f.stageEpochs[0]).not.toBe('')
+    expect(f.lifecycle.requiresReconciliation).toBe(false)
+    expect(await f.enable('fixture-plugin')).toMatchObject({ outcome: 'applied', revision: 4 })
+    expect(f.desktop.activePluginGeneration().plugins.map((item: { enabled: boolean }) => item.enabled)).toEqual([
+      true,
+      false,
+    ])
+    expect(f.extraDesktop.activePluginGeneration()).toEqual(f.desktop.activePluginGeneration())
+    expect(await f.enable('fixture-dependent')).toMatchObject({ outcome: 'applied', revision: 5 })
+    expect(f.desktop.activePluginGeneration().plugins.map((item: { enabled: boolean }) => item.enabled)).toEqual([
+      true,
+      true,
+    ])
+    expect(f.extraDesktop.activePluginGeneration()).toEqual(f.desktop.activePluginGeneration())
     expect(f.lifecycle.requiresReconciliation).toBe(false)
   } finally {
     await f.close()
