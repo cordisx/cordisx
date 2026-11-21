@@ -33,8 +33,8 @@ export async function waitForChromeTarget(
   browser: ChildProcess,
   stderr: () => string,
 ): Promise<string> {
-  const launchDeadline = Date.now() + 15_000
-  const diagnostics = observeChromeReadiness(browser, [0, 5_000, 10_000])
+  const launchDeadline = Date.now() + 30_000
+  const diagnostics = observeChromeReadiness(browser, [0, 5_000, 10_000, 20_000])
   try {
     // Chrome binds its own port and publishes it in this browser's private profile.
     const port = await waitForChromeDebugPort(
@@ -45,7 +45,7 @@ export async function waitForChromeTarget(
     )
     diagnostics.activePort(port)
     // A published debug port does not mean the first page target exists yet.
-    // Preserve the cold-launch budget and give that separate step a bounded wait.
+    // Give the first target a separate bounded wait after the cold launch.
     const targetDeadline = Date.now() + 10_000
     while (Date.now() < targetDeadline) {
       if (browser.exitCode !== null || browser.signalCode !== null) {
