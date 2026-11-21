@@ -11,6 +11,8 @@ export interface CodexAppServerOptions {
   readonly experimentalApi?: boolean
   /** A launch-owned immutable catalog, fixed before this app-server starts. */
   readonly modelCatalogPath?: string
+  /** Review-only catalogs preserve the selected native provider. */
+  readonly modelCatalogPreserveProvider?: boolean
   /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
   readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
 }
@@ -59,14 +61,18 @@ export function codexAppServerArguments(
 }
 
 /** Local App Server uses the existing Codex login/configuration and receives no injected credential. */
-export function localCodexAppServerArguments(modelCatalogPath?: string): readonly string[] {
+export function localCodexAppServerArguments(modelCatalogPath?: string, preserveProvider = false): readonly string[] {
   return Object.freeze([
     'app-server',
     '--stdio',
     '-c',
     'analytics.enabled=false',
     ...(modelCatalogPath
-      ? ['-c', `model_catalog_json=${tomlString(modelCatalogPath)}`, '-c', 'model_provider="openai"']
+      ? [
+        '-c',
+        `model_catalog_json=${tomlString(modelCatalogPath)}`,
+        ...(preserveProvider ? [] : ['-c', 'model_provider="openai"']),
+      ]
       : []),
   ])
 }
@@ -166,12 +172,16 @@ export async function startLocalCodexAppServer(
   const environment = options.environment ?? process.env
   await mkdir(config.codexHome, { recursive: true, mode: 0o700 })
   const launch = options.spawnProcess ?? spawn
-  const child = launch(config.codexExecutable, localCodexAppServerArguments(options.modelCatalogPath), {
-    cwd: config.codexHome,
-    env: { ...environment, CODEX_HOME: config.codexHome },
-    shell: false,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }) as ChildProcessWithoutNullStreams
+  const child = launch(
+    config.codexExecutable,
+    localCodexAppServerArguments(options.modelCatalogPath, options.modelCatalogPreserveProvider),
+    {
+      cwd: config.codexHome,
+      env: { ...environment, CODEX_HOME: config.codexHome },
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  ) as ChildProcessWithoutNullStreams
   const server = new SpawnedCodexAppServer(child, config.timeoutMs)
   try {
     await server.initialize(options.experimentalApi === true)

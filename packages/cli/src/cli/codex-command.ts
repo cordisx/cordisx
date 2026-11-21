@@ -1,3 +1,4 @@
+import { createApprovalReviewConfiguration } from '../launcher/approval-review-configuration.js'
 import path from 'node:path'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import {
@@ -36,6 +37,10 @@ cordisx codex chats project get [--session <id>]
 cordisx codex chats project set [--session <id>] --revision <n> --project <id> [--cwd <path>]
 cordisx codex chats reviewer get --session <id>
 cordisx codex chats reviewer set --session <id> --revision <n> --reviewer <user|auto_review>
+cordisx codex defaults review get
+cordisx codex defaults review set --revision <n> --input-file <JSON-file|->
+cordisx codex defaults review reset --revision <n>
+Review routing uses a complete native model catalog and applies after native restart. It does not enable auto_review or support live per-chat routing.
 Reviewer changes are local management only and require an idle chat; they do not change sandbox or approval policy.
 Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Headless services can use operator-configured workspace projects; these do not create Desktop sidebar membership.`
 
@@ -63,6 +68,20 @@ export async function runCodexCommand(
   const config = await loadHomeConfig(configPath), appId = 'codex'
   const profileId = command.profile ?? config.apps[appId]?.defaultProfile
   if (!profileId || !config.apps[appId]?.profiles[profileId]) throw new Error('PROFILE_UNAVAILABLE')
+  if (command.operation.startsWith('review:')) {
+    const callerThreadId = command.sourceSession ?? process.env.CODEX_THREAD_ID
+    const result = await createApprovalReviewConfiguration({ configPath, profileId })(
+      command.operation.slice(6),
+      command.input,
+      {
+        ...(callerThreadId ? { 'openai/threadId': callerThreadId } : {}),
+        ...(command.context ? { 'cordisx/channelContext': command.context } : {}),
+      },
+    )
+    stdout(JSON.stringify(result))
+    if (result.status !== 'ok') throw new CodexCommandRejected()
+    return
+  }
   const paths = pluginManagementRpcPaths(path.dirname(configPath), appId, profileId)
   const endpoint = await readPluginManagementRpcEndpoint(paths)
   if (!endpoint) throw new Error('CODEX_RUNTIME_NOT_RUNNING')

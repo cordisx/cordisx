@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { expect, test } from 'vitest'
 import { codexCommandError, codexRpcError } from '../packages/cli/src/cli/codex-command.js'
 import { parseCodexCommand } from '../packages/cli/src/cli/codex-command-parse.js'
@@ -158,4 +161,22 @@ test('distinguishes an unsupported old Host for the read-only capability query',
   })
   expect(codexRpcError('create', rejection).message).toBe('CODEX_RPC_RESULT_UNKNOWN')
   expect(codexRpcError('capabilities', new Error('timeout')).message).toBe('CODEX_RPC_RESULT_UNKNOWN')
+})
+
+test('review defaults are explicit profile operations, never implicit session mutations', async () => {
+  expect(await parseCodexCommand(['defaults', 'review', 'get'])).toEqual({ operation: 'review:read', input: {} })
+  expect(await parseCodexCommand(['defaults', 'review', 'reset', '--revision', '3']))
+    .toEqual({ operation: 'review:save', input: { expectedRevision: 3, settings: null } })
+  await expect(parseCodexCommand(['defaults', 'review', 'get', '--session', 'chat'])).rejects.toThrow()
+  await expect(parseCodexCommand(['defaults', 'review', 'set', '--revision', '3'])).rejects.toThrow()
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-review-command-'))
+  try {
+    const file = path.join(root, 'review.json'),
+      settings = { providerId: 'gateway', catalogPath: 'models.json', defaultModel: 'review' }
+    await writeFile(file, JSON.stringify(settings))
+    expect(await parseCodexCommand(['defaults', 'review', 'set', '--revision', '3', '--input-file', file]))
+      .toEqual({ operation: 'review:save', input: { expectedRevision: 3, settings } })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

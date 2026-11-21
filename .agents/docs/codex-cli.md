@@ -1,7 +1,8 @@
 # Supplemental Codex CLI and tools
 
 Experimental Host implementation. These commands use the selected running
-CordisX profile's management endpoint. They do not launch an App or another
+CordisX profile's management endpoint, except the local startup configuration
+commands documented below. They do not launch an App or another
 Codex app-server. Check `cordisx codex capabilities` before choosing an operation;
 a command advertised in help may be unavailable in the selected runtime.
 
@@ -60,6 +61,11 @@ does not change the sandbox, network or approval policy, or answer pending
 requests. Existing execution overrides are preserved. Availability depends on
 native runtime support for reviewer settings; older runtimes may reject the
 operation. A Channel-originated agent cannot change its own reviewer.
+
+To select the automatic reviewer's model separately from the working model,
+use [approval review model configuration](approval-review-models.md). It is an
+operator-owned profile startup setting; it does not change the chat strategy
+and does not provide live per-chat model overrides.
 
 Model defaults are a separate profile-owned `chatCreation` layer in `config.json`.
 They apply to future ordinary native/API chats. Explicit native selections take
