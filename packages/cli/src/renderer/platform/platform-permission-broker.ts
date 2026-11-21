@@ -218,6 +218,7 @@ export class PermissionBroker extends PlatformUsagePermissionBroker {
   }
 
   dispose(): void {
+    this.policyRecords.invalidate()
     this.disposeUsagePermissions()
     this.disposeVisualInteractions()
     this.clearAgentRuntimeConnection()
