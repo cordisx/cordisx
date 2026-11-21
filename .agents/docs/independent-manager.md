@@ -43,9 +43,10 @@ stylesheet and its live service owner matches. An existing source-specific
 Manager UI permission or a separate one-tab review is required. Legacy Channel
 graphs without a standalone stylesheet are not admitted. The service owner can
 also expose the existing connection form for a resolved Channel account's display
-name and reception selectors. The eligible Desktop owner remains read-only.
-Credential capture, creation, connection controls, policies, logs and sessions
-are not available through this restricted page. Other configured plugins,
+name and reception selectors, and can rotate a Feishu/Lark credential within
+that Host-owned form. The eligible Desktop owner remains read-only. Connection
+creation, connection controls, policies, logs and sessions are not available
+through this restricted page. Other configured plugins,
 adapters, concurrent permission changes and recovery after an uncertain result
 are not yet supported. The isolated browser tests do not constitute real Codex
 App validation.
@@ -115,24 +116,30 @@ without reading them back into the page. The configured archive path has been
 exercised with a real isolated Channel service and a simulator; separate
 synthetic credentials exercise the write and recovery transactions. Real
 Feishu/Lark credentials have not been used in validation. This API is separate
-from the restricted Channel page and does not enable credential writes there.
+from the restricted Channel page, which offers only the existing-account
+credential rotation described below.
 Unverified direct entries, other adapters, connection deletion, and remaining
 Channel management features are unavailable.
 
 The experimental service-owner composition projects an exact configured
 Channel archive and its already-running service into renderer sessions. It
 forwards only matching existing Manager UI policies. The connection form may
-save ordinary settings for a resolved account through the owner-bound service
-configuration bridge. It does not capture credentials. A two-page test exercises the
+save ordinary settings and rotate a credential for a resolved Feishu/Lark
+account through owner-bound bridges. Credential values and private references
+are not returned to the plugin-facing facade or stored in browser storage.
+The owner retires private drafts with the renderer; an unconfirmed cleanup or
+write keeps subsequent mutation coordination closed. A two-page test exercises the
 compiled service owner, actual isolated Codex app-server, authenticated sidecar,
 refresh, profile write fences and owner restart with an isolated simulator.
-This does not validate real Channel credentials, the current user's profile,
+An additional browser test exercises the credential form and owner handoff with
+a synthetic validator and an in-memory credential store. These do not validate
+real Channel credentials, the current user's profile,
 the native Desktop renderer or another adapter. Archives without a staged
 browser graph and an initial Channel stylesheet are unavailable, and
 permissions from another source are not reused.
 
 The originating Manager reserves its own session and the owner lifecycle before
-a connection settings write. It drains old reads and waits for the new service
+a connection settings or credential write. It drains old reads and waits for the new service
 generation and configuration readback before reporting success. A second
 Manager or unaccounted adapter makes the write unavailable without closing that
 session; the form retains its draft. Changed revisions require the user to
@@ -150,9 +157,10 @@ is unavailable and can be retried after the exact archive, configuration and
 running service match again. A failure after an action begins may have changed
 state and requires reconciliation rather than an automatic retry.
 
-In service mode, a sidecar-originated Channel configuration commit, tenant
+In service mode, the older sidecar credential API's Channel commit, tenant
 resolution, or enablement is unavailable while any standalone Manager renderer
 is open, because its drafts and pending writes cannot yet be handed off safely.
+The Host-owned form uses the separate originating-Manager handoff above.
 With no Manager renderer open, the owner reserves the renderer lifecycle and
 blocks new admissions before the write. It refuses the operation if an attached
 peer is outside the Manager registry. An uncertain result keeps coordination

@@ -34,6 +34,18 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
           throw new Error('unused')
         },
       }],
+      ['channel-credentials', {
+        prepare(payload) {
+          const request = JSON.parse(String(payload)) as { requestId: string; operation: string }
+          return {
+            mode: 'write',
+            dispatch: async () => {
+              if (request.operation === 'commit') throw new Error('synthetic unknown result')
+              return { requestId: request.requestId, ok: true, value: { status: 'applied', code: 'CAPTURED' } }
+            },
+          }
+        },
+      }],
       ['manager-bootstrap', {
         prepare(payload) {
           const input = payload as { action: string; graphs?: unknown[] }
@@ -124,6 +136,20 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
     expect(await post('/api/renderer/close', {}, first)).toMatchObject({ status: 200, body: { closed: true } })
     expect((await fetchResource(first, firstGraph.entryUrl)).status).toBe(401)
     expect((await fetchResource(second, secondGraph.entryUrl)).status).toBe(200)
+    const credentialSession = await open(web.issueUrl())
+    expect(
+      await post('/api/renderer/binding', {
+        channel: 'channel-credentials',
+        payload: JSON.stringify({ requestId: 'capture', operation: 'capture' }),
+      }, credentialSession),
+    ).toMatchObject({ status: 200, body: { value: { status: 'applied' } } })
+    expect(
+      await post('/api/renderer/binding', {
+        channel: 'channel-credentials',
+        payload: JSON.stringify({ requestId: 'commit', operation: 'commit' }),
+      }, credentialSession),
+    ).toMatchObject({ status: 503, body: { error: 'OPERATION_RESULT_UNKNOWN' } })
+    expect((await post('/api/renderer/session', {}, credentialSession)).status).toBe(401)
     ownerCurrent = false
     expect((await fetchResource(second, `${origin}/api/renderer/bundle.js`)).status).toBe(401)
   } finally {
@@ -132,3 +158,126 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
     await fixture.close()
   }
 }, 30_000)
+
+it('retires a Manager when a credential write loses its browser response', async () => {
+  let entered!: () => void
+  let release!: () => void
+  const started = new Promise<void>(resolve => entered = resolve)
+  const finished = new Promise<void>(resolve => release = resolve)
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['channel-credentials', {
+        prepare: () => ({
+          mode: 'write' as const,
+          dispatch: async () => {
+            entered()
+            await finished
+            return { requestId: 'capture', ok: true }
+          },
+        }),
+      }],
+    ]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string, signal?: AbortSignal) =>
+    await fetch(`${origin}${route}`, {
+      method: 'POST',
+      signal,
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+    const abort = new AbortController()
+    const pending = post(
+      '/api/renderer/binding',
+      {
+        channel: 'channel-credentials',
+        payload: JSON.stringify({ requestId: 'capture', operation: 'capture' }),
+      },
+      token,
+      abort.signal,
+    ).catch(() => undefined)
+    await started
+    abort.abort()
+    await pending
+    await expect.poll(() => authority.mutationAvailability(), { timeout: 5_000 }).not.toBe('available')
+    release()
+    expect((await post('/api/renderer/session', {}, token)).status).toBe(401)
+  } finally {
+    release()
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)
+
+it('retires a Manager when the owner transport fails during a credential write', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['channel-credentials', { prepare: () => ({ mode: 'write' as const, dispatch: async () => ({}) }) }],
+    ]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => {
+      if (operation.kind === 'manager-renderer' && operation.action === 'call') {
+        throw new Error('synthetic transport failure')
+      }
+      return await dispatchManagerRendererOperation(authority, operation)
+    },
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(`${origin}${route}`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+    const result = await post('/api/renderer/binding', {
+      channel: 'channel-credentials',
+      payload: JSON.stringify({ requestId: 'commit', operation: 'commit' }),
+    }, token)
+    expect(result.status).toBe(503)
+    expect(await result.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
+    expect((await post('/api/renderer/session', {}, token)).status).toBe(401)
+  } finally {
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)

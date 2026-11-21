@@ -124,6 +124,55 @@ it('waits for admission and preserves refresh only for Channel configuration rea
   }
 })
 
+it('admits the private credential channel before dispatch and blocks refresh while it is pending', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const fetch = vi.fn(() => new Promise(() => {}))
+  const target = { fetch, __cordisxChannelCredentialReceiveV1: vi.fn() } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['channel-credentials'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxChannelCredentialRequestV1(JSON.stringify({ requestId: 'capture', operation: 'capture' }))
+    expect(dispose.canResume()).toBe(false)
+    await Promise.resolve()
+    expect(fetch).not.toHaveBeenCalled()
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body)).channel).toBe('channel-credentials')
+  } finally {
+    dispose()
+  }
+})
+
+it('retires the browser binding and reports an unknown result after a failed credential write', async () => {
+  const receiver = vi.fn(), lost = vi.fn()
+  const fetch = vi.fn(async () => ({ ok: false, status: 503, text: async () => '' }))
+  const target = { fetch, __cordisxChannelCredentialReceiveV1: receiver } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['channel-credentials'],
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxChannelCredentialRequestV1(JSON.stringify({ requestId: 'commit', operation: 'commit' }))
+    await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith('result-unknown'))
+    expect(JSON.parse(receiver.mock.calls[0]![0])).toMatchObject({
+      requestId: 'commit',
+      ok: false,
+      code: 'INDEPENDENT_HOST_RESULT_UNKNOWN',
+    })
+    expect(target.__cordisxChannelCredentialRequestV1).toBeUndefined()
+    expect(fetch).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
+  }
+})
+
 it('rejects forged responses and does not retry an operation whose outcome is unknown', async () => {
   const receiver = vi.fn()
   const fetch = vi.fn(async () => ({

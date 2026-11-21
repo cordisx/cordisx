@@ -7,7 +7,7 @@ import type {
 const SERVICE_CONFIG_BINDING = '__cordisxServiceConfigRequestV1'
 const SERVICE_CONFIG_RECEIVER = '__cordisxServiceConfigReceiveV1'
 const REQUEST_TIMEOUT_MS = 4_000
-const MUTATION_TIMEOUT_MS = 55_000
+const MUTATION_TIMEOUT_MS = 75_000
 const LIST_ATTEMPTS = 3
 const LIST_RETRY_DELAY_MS = 100
 

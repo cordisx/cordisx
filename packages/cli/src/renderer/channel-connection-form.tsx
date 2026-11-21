@@ -27,6 +27,14 @@ export interface ChannelConnectionFormSnapshot {
   readonly credentialWritable: boolean
 }
 
+function uncertainWrite(error: unknown): boolean {
+  return error instanceof Error && [
+    'INDEPENDENT_HOST_RESULT_UNKNOWN',
+    'channel-credential-result-unknown',
+    'Service configuration write result is unknown',
+  ].includes(error.message)
+}
+
 /** One Host-owned field shell, transient key and revision-fenced save/reset. */
 export function ChannelConnectionForm(props: {
   readonly account: ChannelCredentialRef
@@ -60,6 +68,7 @@ export function ChannelConnectionForm(props: {
   const container = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [reset, setReset] = useState(0)
   const [reviewRequired, setReviewRequired] = useState(false)
+  const [resultUnknown, setResultUnknown] = useState(false)
   const [secretReset, setSecretReset] = useState(0)
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
   useStandaloneDraftWarning(container, dirty)
@@ -121,7 +130,7 @@ export function ChannelConnectionForm(props: {
     }
   }, [props.signal])
   const save = async () => {
-    if (!dirty || reviewRequired || submitting.current || props.signal.aborted) return
+    if (!dirty || reviewRequired || resultUnknown || submitting.current || props.signal.aborted) return
     const invalid = validateChannelConnectionForm(values.current, zh)
     setErrors(invalid)
     if (invalid.size) return
@@ -130,6 +139,10 @@ export function ChannelConnectionForm(props: {
     try {
       const result = await props.apply({ ...values.current }, baseline.current)
       if (props.signal.aborted) return
+      if (['RESULT_UNKNOWN', 'CREDENTIAL_CLEANUP_UNAVAILABLE'].includes(result.code)) {
+        setResultUnknown(true)
+        return
+      }
       if (result.status === 'applied') {
         if (!props.account.tenantId) {
           props.onResult(result)
@@ -158,15 +171,18 @@ export function ChannelConnectionForm(props: {
         setErrors(new Map([[!props.account.tenantId ? 'channel-tenantId' : failure.id, failure.message]]))
       }
       if (!props.signal.aborted) props.onResult(result)
-    } catch {
-      if (!props.signal.aborted) props.onResult({ status: 'unavailable', code: 'CONNECTION_CONFIGURATION_FAILED' })
+    } catch (error) {
+      if (!props.signal.aborted) {
+        if (uncertainWrite(error)) setResultUnknown(true)
+        else props.onResult({ status: 'unavailable', code: 'CONNECTION_CONFIGURATION_FAILED' })
+      }
     } finally {
       submitting.current = false
       if (!props.signal.aborted) setBusy(false)
     }
   }
   const review = async () => {
-    if (submitting.current || props.signal.aborted) return
+    if (resultUnknown || submitting.current || props.signal.aborted) return
     submitting.current = true
     setBusy(true)
     try {
@@ -182,19 +198,26 @@ export function ChannelConnectionForm(props: {
     }
   }
   const retryTenant = async () => {
-    if (reviewRequired || submitting.current || props.signal.aborted) return
+    if (reviewRequired || resultUnknown || submitting.current || props.signal.aborted) return
     submitting.current = true
     setBusy(true)
     try {
       const result = await props.resolveTenant('', baseline.current)
       if (props.signal.aborted) return
+      if (['RESULT_UNKNOWN', 'CREDENTIAL_CLEANUP_UNAVAILABLE'].includes(result.code)) {
+        setResultUnknown(true)
+        return
+      }
       if (result.status !== 'applied') {
         const failure = channelCredentialFailure(result.code, zh)
         setErrors(new Map([['channel-tenantId', failure.message]]))
       }
       props.onResult(result)
-    } catch {
-      if (!props.signal.aborted) props.onResult({ status: 'unavailable', code: 'TENANT_DISCOVERY_FAILED' })
+    } catch (error) {
+      if (!props.signal.aborted) {
+        if (uncertainWrite(error)) setResultUnknown(true)
+        else props.onResult({ status: 'unavailable', code: 'TENANT_DISCOVERY_FAILED' })
+      }
     } finally {
       submitting.current = false
       if (!props.signal.aborted) setBusy(false)
@@ -236,7 +259,11 @@ export function ChannelConnectionForm(props: {
               footer={
                 <div className="cxf-form-actions">
                   <span className="cxf-status">
-                    {reviewRequired
+                    {resultUnknown
+                      ? (zh
+                        ? '保存结果未确认。请重新打开管理页，核对已保存的配置后再操作。'
+                        : 'The save result is unknown. Reopen the manager and check the saved configuration before continuing.')
+                      : reviewRequired
                       ? (zh
                         ? '配置已更新，草稿已保留。请核对最新配置后继续。'
                         : 'Configuration changed. Your draft was kept; review the latest values before saving.')
@@ -247,7 +274,7 @@ export function ChannelConnectionForm(props: {
                       : ''}
                   </span>
                   <div className="cxf-form-action-buttons">
-                    {reviewRequired && (
+                    {reviewRequired && !resultUnknown && (
                       <Button
                         type="button"
                         variant="outline"
@@ -261,7 +288,7 @@ export function ChannelConnectionForm(props: {
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={busy || reviewRequired || !baseline.current.writable}
+                        disabled={busy || reviewRequired || resultUnknown || !baseline.current.writable}
                         onClick={() => void retryTenant()}
                       >
                         {zh ? '重试自动查询' : 'Retry automatic lookup'}
@@ -284,7 +311,7 @@ export function ChannelConnectionForm(props: {
                       theme="primary"
                       icon={<HostIcon token="action.save" />}
                       loading={busy}
-                      disabled={!dirty || busy || reviewRequired || !baseline.current.writable}
+                      disabled={!dirty || busy || reviewRequired || resultUnknown || !baseline.current.writable}
                     >
                       {!props.account.tenantId ? (zh ? '保存租户 ID' : 'Save tenant ID') : (zh ? '保存' : 'Save')}
                     </Button>

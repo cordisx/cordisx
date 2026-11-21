@@ -35,6 +35,7 @@ export async function bootConfiguredChannelManager(f: Fixture, invocation = f.in
     expect(alias).toBeDefined()
     expect(bundle).not.toContain(f.configuredChannel!.plugin.source!)
     expect(bundle).not.toContain('fixture-private-reference')
+    if (f.channelCredentialsEnabled) expect(bundle).toContain('channelCredentialBridgeToken')
   } finally {
     bytes.fill(0)
   }

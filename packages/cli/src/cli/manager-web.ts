@@ -55,6 +55,7 @@ const rendererChannelAllowlist = new Set([
   'plugin-management',
   'managed-service-ui',
   'channel-actions',
+  'channel-credentials',
   'model-services',
   'service-config',
   'marketplace',
@@ -338,6 +339,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       sessions.get(token) === session && session.deadline > Date.now()
       && !session.controller.signal.aborted
     let mutationDispatched = false
+    let rendererWriteDispatched = false
     const scopedRequest = async (operation: PluginManagementRpcOperation, mutation = false) => {
       if (!activeSession()) throw new Error('MANAGER_SESSION_REVOKED')
       if (mutation) mutationDispatched = true
@@ -611,17 +613,23 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         const handle = await session.rendererOpen
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
-        let serviceConfigWrite = false
+        let rendererWrite = input.channel === 'channel-credentials'
         if (input.channel === 'service-config') {
           try {
             const envelope = object(JSON.parse(input.payload))
             if (!envelope || !['list', 'mutate'].includes(String(envelope.operation))) {
               return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
             }
-            serviceConfigWrite = envelope.operation === 'mutate'
+            rendererWrite = envelope.operation === 'mutate'
           } catch {
             return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
           }
+        }
+        if (rendererWrite) {
+          rendererWriteDispatched = true
+          response.once('close', () => {
+            if (!response.writableFinished) void retireSession(token).catch(() => false)
+          })
         }
         // The owner applies its own strict channel parser and capability
         // checks. A browser cannot choose a handle, gateway, or session ID.
@@ -634,9 +642,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             handle,
             channel: input.channel,
             payload: input.payload,
-          }, serviceConfigWrite),
+          }, rendererWrite),
         )
-        if (serviceConfigWrite && result?.status === 'unknown') {
+        if (rendererWrite && result?.status === 'unknown') {
           await retireSession(token)
           return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
         }
@@ -839,6 +847,11 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       return json(response, 404, { error: 'NOT_FOUND' })
     } catch (error) {
       // Reflect only closed categories, never backend exception text or request data.
+      if (rendererWriteDispatched && mutationDispatched) {
+        await retireSession(token).catch(() => false)
+        if (!response.destroyed) json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+        return
+      }
       const code = error instanceof Error ? error.message : ''
       if (code === 'MANAGER_SESSION_REVOKED' || !activeSession()) {
         return revoked()

@@ -26,6 +26,7 @@ import { fenceManagerConsumers } from './manager-consumer-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
+import { createManagerRendererChannelCredentials } from './manager-renderer-channel-credentials.js'
 import { createManagerRendererMarketplaceChannel } from './manager-renderer-marketplace.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
@@ -122,6 +123,19 @@ export async function openProductionPluginManagementComposition(input: {
       sessions: () => rendererSessions,
     })
     : undefined
+  const credentialHandler = input.managerChannelCredentials
+  const rendererCredentials = input.rendererConfiguredChannelService && credentialHandler
+    ? createManagerRendererChannelCredentials({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      configPath: input.configPath,
+      ...input.rendererConfiguredChannelService,
+      participants: input.rendererParticipants!,
+      lifecycle: input.rendererLifecycle!,
+      sessions: () => rendererSessions,
+      handle: credentialHandler,
+    })
+    : undefined
   rendererSessions = new ManagerRendererSessions({
     profileId: input.profileId,
     ownerGeneration: input.runtimeGeneration,
@@ -132,7 +146,15 @@ export async function openProductionPluginManagementComposition(input: {
       ownerAppId: input.appId,
       ownerGeneration: input.runtimeGeneration,
     }),
-    ...(input.rendererRetirement === undefined ? {} : { waitForRetirement: input.rendererRetirement }),
+    ...(input.rendererRetirement === undefined && rendererCredentials === undefined ? {} : {
+      waitForRetirement: async (rendererId: string) => {
+        const results = await Promise.all([
+          input.rendererRetirement?.(rendererId) ?? Promise.resolve(true),
+          rendererCredentials?.waitForRetirement(rendererId) ?? Promise.resolve(true),
+        ])
+        return results.every(Boolean)
+      },
+    }),
     ...(input.rendererWriteLifetimes === undefined ? {} : { writeLifetimes: input.rendererWriteLifetimes }),
     ...(input.rendererReadLifetimes === undefined ? {} : { readLifetimes: input.rendererReadLifetimes }),
     channels: new Map([
@@ -150,6 +172,7 @@ export async function openProductionPluginManagementComposition(input: {
         ? []
         : [['channel-actions', input.rendererReadonlyChannel] as const]),
       ...(rendererServiceConfig === undefined ? [] : [['service-config', rendererServiceConfig] as const]),
+      ...(rendererCredentials === undefined ? [] : [['channel-credentials', rendererCredentials.channel] as const]),
       ...(rendererMarketplace === undefined ? [] : [['marketplace', rendererMarketplace] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),

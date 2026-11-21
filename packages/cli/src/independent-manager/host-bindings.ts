@@ -10,6 +10,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
   'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
   'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
+  'channel-credentials': ['__cordisxChannelCredentialRequestV1', '__cordisxChannelCredentialReceiveV1'],
   marketplace: ['__cordisxMarketplaceRequestV1', '__cordisxMarketplaceReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
@@ -69,7 +70,7 @@ export function installIndependentHostBindings(input: {
   readonly channels: readonly IndependentHostChannel[]
   /** Owner channels that require a lifecycle participant wait for admission. */
   readonly rendererAdmission?: Promise<boolean>
-  readonly onSessionLost?: () => void
+  readonly onSessionLost?: (reason?: 'result-unknown') => void
 }): (() => void) & { canResume(): boolean } {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
   const host = input.window as BindingWindow
@@ -98,7 +99,12 @@ export function installIndependentHostBindings(input: {
   const failure = (key: string, reason: 'INDEPENDENT_HOST_RESULT_UNKNOWN' | 'INDEPENDENT_HOST_SESSION_REVOKED') => {
     const request = pending.get(key)
     if (request !== undefined) {
+      const uncertain = reason === 'INDEPENDENT_HOST_RESULT_UNKNOWN' && request.dispatched && !request.readOnly
       deliver(key, JSON.stringify({ requestId: request.requestId, ok: false, error: reason, code: reason }))
+      if (uncertain && !closed) {
+        dispose()
+        input.onSessionLost?.('result-unknown')
+      }
     }
   }
   const dispose = () => {
@@ -146,6 +152,7 @@ export function installIndependentHostBindings(input: {
       pending.set(key, request)
       void Promise.resolve().then(async () => {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
+          || channel === 'channel-credentials'
           || (channel === 'model-services' || channel === 'plugin-management') && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {
           if (!await input.rendererAdmission) throw new Error('independent-host-session-revoked')
@@ -164,8 +171,9 @@ export function installIndependentHostBindings(input: {
         })
       }).then(async response => {
         if (response.status === 401 && !closed) {
+          const uncertain = [...pending.values()].some(request => request.dispatched && !request.readOnly)
           dispose()
-          input.onSessionLost?.()
+          input.onSessionLost?.(uncertain ? 'result-unknown' : undefined)
           return
         }
         if (!response.ok) return failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN')

@@ -49,6 +49,7 @@ function fixture(input: {
   readonly holdBindings?: boolean
   readonly modelServices?: boolean
   readonly admissionGate?: Promise<void>
+  readonly credentialFailure?: boolean
 } = {}) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
@@ -105,7 +106,11 @@ function fixture(input: {
         rendererId,
         generation: 'owner-1',
         profileId: 'work',
-        channels: ['config', ...(input.modelServices ? ['model-services'] : [])],
+        channels: [
+          'config',
+          ...(input.modelServices ? ['model-services'] : []),
+          ...(input.credentialFailure ? ['channel-credentials'] : []),
+        ],
         commands: true,
       }))
     }
@@ -157,6 +162,9 @@ function fixture(input: {
       return Promise.resolve(response({ accepted: true }))
     }
     if (path === '/api/renderer/close') return Promise.resolve(response({ closed: true }))
+    if (path === '/api/renderer/binding' && input.credentialFailure) {
+      return Promise.resolve(new Response('{}', { status: 503 }))
+    }
     if (path === '/api/renderer/binding' && input.holdBindings) return abortResponse(options.signal!)
     throw new Error(`Unexpected request ${path}`)
   })
@@ -210,6 +218,20 @@ function fixture(input: {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+it('reports an uncertain credential write when the Manager session is lost', async () => {
+  const test = fixture({ credentialFailure: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxChannelCredentialReceiveV1 = vi.fn()
+    target.__cordisxChannelCredentialRequestV1(JSON.stringify({ requestId: 'commit', operation: 'commit' }))
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('result-unknown'))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
 })
 
 it('keeps a slow owner bootstrap alive while it builds the initial bundle', async () => {

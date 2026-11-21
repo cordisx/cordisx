@@ -118,7 +118,7 @@ function verifyInitialGraphs(
  */
 export function startStandaloneManager(input: {
   readonly window: Window
-  readonly onUnavailable?: () => void
+  readonly onUnavailable?: (reason?: 'result-unknown') => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
   readonly importBundle?: (url: string) => Promise<Composition>
@@ -268,12 +268,13 @@ export function startStandaloneManager(input: {
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
-  const fail = () => {
+  const fail = (reason?: 'result-unknown') => {
     if (closed) return
+    const uncertain = reason === 'result-unknown' || removeBindings?.canResume() === false
     if (!notified) {
       notified = true
       try {
-        input.onUnavailable?.()
+        input.onUnavailable?.(uncertain ? 'result-unknown' : undefined)
       } catch { /* presentation cannot keep an invalid session alive */ }
     }
     void close()

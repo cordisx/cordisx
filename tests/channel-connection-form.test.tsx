@@ -4,6 +4,53 @@ import { ChannelConnectionForm } from '../packages/cli/src/renderer/channel-conn
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 describe('unified Host Channel connection form', () => {
+  it('locks an uncertain save until the user reopens and checks the saved configuration', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    const snapshot = {
+      displayName: 'Original',
+      selectors: ['direct'],
+      revision: 2,
+      serviceRevision: 7,
+      writable: true,
+      credentialWritable: true,
+    }
+    const onResult = vi.fn()
+    const apply = vi.fn(async () => {
+      throw new Error('INDEPENDENT_HOST_RESULT_UNKNOWN')
+    })
+    try {
+      await f.render(createElement(ChannelConnectionForm, {
+        account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' },
+        initial: snapshot,
+        credentialsAvailable: true,
+        locale: 'en',
+        signal: lifetime.signal,
+        subscribe: () => () => {},
+        read: async () => snapshot,
+        apply,
+        resolveTenant: vi.fn(),
+        onResult,
+      }))
+      await f.type('#channel-connection-displayName input', 'Edited')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(f.document.body.textContent).toContain('The save result is unknown')
+      expect(f.element('[type="submit"]').hasAttribute('disabled')).toBe(true)
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).toHaveBeenCalledOnce()
+      expect(onResult).not.toHaveBeenCalled()
+    } finally {
+      lifetime.abort()
+      await f.dispose()
+    }
+  })
   it('shows pending identity, allows retry and accepts a manual key without asking for the secret again', async () => {
     const f = reactManagerFixture(), lifetime = new AbortController()
     const snapshot = {

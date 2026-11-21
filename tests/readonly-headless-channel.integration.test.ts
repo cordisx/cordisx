@@ -184,14 +184,36 @@ describe('read-only independent manager for an existing configured Channel', () 
       revision: mutation.expectedRevision + 1,
       serviceGeneration: 'new-service-generation',
     }))
+    const credentialRequest = vi.fn()
+    const resolved = {
+      ref: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' },
+      adapterKind: 'feishu',
+      enabled: false,
+      transportMode: 'websocket',
+      secretState: 'ready' as const,
+    }
     const root = new Context()
     const fiber = root.plugin(CordisXChannelManagerPresentationService, {
       presentationMode: 'configuration-only',
-      projection: { ...view.initial.projection, service: { ...view.initial.projection.service, writable: true } },
+      projection: {
+        ...view.initial.projection,
+        service: { ...view.initial.projection.service, writable: true },
+        connections: [...view.initial.projection.connections, resolved],
+        accounts: [...view.initial.projection.accounts, {
+          ...resolved,
+          implementationStatus: 'implemented',
+          connectionState: 'disabled',
+          generation: 1,
+          inbound: { pending: 0, retrying: 0, deadLetter: 0 },
+          outbound: { pending: 0, retrying: 0, deadLetter: 0 },
+        }],
+      },
       profileId: 'test',
       hostGeneration: 'owner-generation',
       broker,
       serviceConfig: { list: async () => [await api.descriptor()], mutate },
+      credentialRequest,
+      document: {} as Document,
       actions: {
         snapshotOnly: true,
         run: async () => ({ status: 'applied' as const, projection: view.initial.runtime }),
@@ -214,9 +236,25 @@ describe('read-only independent manager for an existing configured Channel', () 
       const before = config.snapshot()
       const ready = before.accounts.find(account => account.adapterKind === 'simulator')!
       const pending = before.accounts.find(account => account.lastErrorCode === 'TENANT_IDENTIFICATION_PENDING')!
+      const feishu = before.accounts.find(account => account.adapterKind === 'feishu' && account !== pending)!
       expect(ready.availableOperations).toEqual(['connection.update'])
       expect(pending.availableOperations).toEqual([])
+      expect(feishu.availableOperations).toEqual(['connection.update'])
       expect(old.snapshot().accounts.flatMap(account => account.availableOperations)).toEqual([])
+      expect(
+        await config.issue({
+          contract: 'cordisx.channel-manager-target-request/v1',
+          schemaVersion: 1,
+          requestId: 'credential',
+          profileId: before.profileId,
+          hostGeneration: before.hostGeneration,
+          expectedRevision: before.revision,
+          operation: 'target.credential.capture.rotate',
+          purpose: 'rotate',
+          target: { kind: 'connection', connectionToken: feishu.connectionToken },
+        } as never),
+      ).toMatchObject({ status: 'rejected', code: 'OPERATION_UNAVAILABLE' })
+      expect(credentialRequest).not.toHaveBeenCalled()
       await expect(old.connectionConfiguration(ready.connectionToken, new AbortController().signal))
         .rejects.toThrow('OPERATION_UNAVAILABLE')
       await expect(config.connectionConfiguration(ready.connectionToken, new AbortController().signal))

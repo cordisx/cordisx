@@ -177,4 +177,72 @@ describe('Host credential entry authorization timing', () => {
       flow.dispose()
     }
   })
+  it('waits for private draft cleanup and stops subsequent operations when cleanup fails', async () => {
+    for (const succeeds of [true, false]) {
+      let finishDiscard!: (value: { status: 'applied' | 'unavailable'; code: string }) => void
+      const discarded = new Promise<{ status: 'applied' | 'unavailable'; code: string }>(resolve => {
+        finishDiscard = resolve
+      })
+      let revision = 1
+      const flow = new ChannelCredentialWorkflow({
+        revision: () => revision,
+        advance: () => {
+          revision += 1
+        },
+        target: () => account,
+        connectionToken: () => 'connection',
+        available: () => true,
+        prompt: async input => await input.submit(account, 'synthetic-fixture-value', input.signal),
+        request: async input =>
+          input.operation === 'capture'
+            ? {
+              status: 'applied',
+              code: 'CAPTURED',
+              draftId: 'private-draft',
+              ref: account,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            }
+            : await discarded,
+        adopt: () => {},
+      })
+      try {
+        const request = () =>
+          ({
+            operation: 'target.credential.capture.rotate',
+            target: { kind: 'connection', connectionToken: 'connection' },
+            expectedRevision: revision,
+          }) as never
+        const first = await flow.issue(request(), 'owner')
+        expect(
+          await flow.execute(
+            { operation: 'credential.capture', target: first.target } as never,
+            'owner',
+            () => true,
+            async () => true,
+          ),
+        ).toMatchObject({ status: 'applied' })
+        flow.retireOwner('owner')
+        let settled = false
+        const next = flow.issue(request(), 'owner').then(value => {
+          settled = true
+          return value
+        })
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        finishDiscard(
+          succeeds
+            ? { status: 'applied', code: 'DISCARDED' }
+            : { status: 'unavailable', code: 'CREDENTIAL_CLEANUP_UNAVAILABLE' },
+        )
+        expect(await next).toMatchObject(
+          succeeds
+            ? { status: 'applied' }
+            : { status: 'unavailable', code: 'CREDENTIAL_CLEANUP_UNAVAILABLE' },
+        )
+      } finally {
+        finishDiscard({ status: 'applied', code: 'DISCARDED' })
+        flow.dispose()
+      }
+    }
+  })
 })

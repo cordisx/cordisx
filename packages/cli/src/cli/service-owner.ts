@@ -225,6 +225,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
           experimentalChannelServiceConfig: configuredServiceOwner !== undefined,
+          experimentalChannelCredentials: configuredServiceOwner !== undefined && managerChannel !== undefined,
           ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {
             experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },
           }),

@@ -6,6 +6,10 @@ import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../../packages/channel-runtime
 import { ServiceRendererBootstrap } from '../../packages/cli/src/cli/service-renderer-bootstrap.js'
 import { createConfiguredChannelOwner } from '../../packages/cli/src/cli/configured-channel-owner.js'
 import { createManagerRendererServiceConfigChannel } from '../../packages/cli/src/cli/manager-renderer-service-config.js'
+import { createManagerRendererChannelCredentials } from '../../packages/cli/src/cli/manager-renderer-channel-credentials.js'
+import { createManagerRendererManagementChannel } from '../../packages/cli/src/cli/manager-renderer-management.js'
+import { openPluginManagementService } from '../../packages/cli/src/management/service.js'
+import { channelConfigurationApi } from '../../packages/cli/src/cli/renderer-channel-composition.js'
 import { ReadonlyChannelRendererBridge } from '../../packages/cli/src/cli/readonly-channel-renderer-bridge.js'
 import { ServiceRendererParticipants } from '../../packages/cli/src/cli/service-renderer-participant.js'
 import { createServiceRendererProjector } from '../../packages/cli/src/cli/service-renderer-projection.js'
@@ -17,6 +21,8 @@ import { createLocalChannelService } from '../../packages/cli/src/launcher/chann
 import { loadConfig } from '../../packages/cli/src/launcher/config.js'
 import { PluginActivationStore } from '../../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
+import { ManagerChannelCredentials } from '../../packages/cli/src/launcher/manager-channel-credentials.js'
+import { LauncherSecretStore } from '../../packages/cli/src/launcher/secret-store.js'
 import { persistPermissionPolicies } from '../../packages/cli/src/launcher/permission-rpc.js'
 import {
   type PluginGenerationGraphLease,
@@ -48,6 +54,11 @@ export async function fixture(
     channelGrantOtherSource?: boolean
     channelOwnerMismatch?: boolean
     channelServiceConfig?: boolean
+    channelCredentials?: boolean
+    channelCredentialValidate?: () => Promise<void>
+    channelCredentialCleanupFails?: boolean
+    channelCredentialCommitUnknown?: boolean
+    browserManagement?: boolean
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -66,7 +77,18 @@ export async function fixture(
     const configuration = {
       contract: 'cordisx.channel-service-config/v3',
       schemaVersion: 3,
-      connections: SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+      connections: [
+        ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+        ...(options.channelCredentials
+          ? [{
+            ref: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture-tenant' },
+            adapterKind: 'feishu',
+            enabled: false,
+            transport: { mode: 'websocket' },
+            secretRef: 'host-secret:channel/fixture-private-reference',
+          }]
+          : []),
+      ],
       pendingConnections: [{
         account: { adapterId: 'feishu', accountId: 'cli_pending' },
         adapterKind: 'feishu',
@@ -213,6 +235,7 @@ export async function fixture(
     managedServiceUI: managedUI,
     protectProfileInputs: options.protectProfileInputs === true,
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
+    experimentalChannelCredentials: options.channelCredentials === true,
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {
         plugin: options.channelOwnerMismatch
@@ -247,6 +270,76 @@ export async function fixture(
       sessions: () => sessions,
     })
     : undefined
+  const credentialValues = new Map<string, string>()
+  let credentialCleanupFails = options.channelCredentialCleanupFails === true
+  let credentialCommitUnknown = options.channelCredentialCommitUnknown === true
+  const credentialStore = new LauncherSecretStore({
+    platform: 'darwin',
+    backend: {
+      read: async (service, account) => credentialValues.get(`${service}/${account}`)!,
+      upsert: async (service, account, value) => {
+        credentialValues.set(`${service}/${account}`, value)
+      },
+      remove: async (service, account) => {
+        if (credentialCleanupFails) throw new Error('synthetic cleanup failure')
+        credentialValues.delete(`${service}/${account}`)
+      },
+      status: async () => 'set',
+    },
+  })
+  const credentialManager = options.channelCredentials && configuredChannel && configuredOwner
+    ? new ManagerChannelCredentials({
+      profileId,
+      runtimeGeneration: generation,
+      generation: () => configuredChannel!.service.generation(),
+      withOwner: async action => await configuredOwner.withOwner(action),
+      openService: expectedServiceGeneration =>
+        channelConfigurationApi({
+          token: secret(),
+          profileId,
+          generation,
+          configPath,
+          plugin: configuredChannel!.plugin,
+          service: configuredChannel!.service,
+          persistence: configuredOwner.persistence,
+          expectedServiceGeneration,
+        }),
+      store: credentialStore,
+      validateCredentials: options.channelCredentialValidate ?? (async () => {}),
+    })
+    : undefined
+  const credentialsChannel = credentialManager && configuredChannel && configuredOwner
+    ? createManagerRendererChannelCredentials({
+      profileId,
+      generation,
+      configPath,
+      plugin: configuredChannel.plugin,
+      service: configuredChannel.service,
+      authority: configuredOwner,
+      bootstrap,
+      participants,
+      lifecycle,
+      sessions: () => sessions,
+      handle: async operation => {
+        const result = await credentialManager.handle(operation)
+        if (
+          credentialCommitUnknown && operation.action === 'commit'
+          && result !== null && typeof result === 'object' && 'status' in result && result.status === 'applied'
+        ) return { status: 'unknown', code: 'RESULT_UNKNOWN' }
+        return result
+      },
+    })
+    : undefined
+  const management = options.browserManagement
+    ? await openPluginManagementService({
+      configPath,
+      homeDir,
+      appId: 'codex',
+      profileId,
+      watch: false,
+      lifecycle: { coordinator, runtimeGeneration: generation, mode: 'service' },
+    })
+    : undefined
   sessions = new ManagerRendererSessions({
     profileId,
     ownerGeneration: generation,
@@ -255,14 +348,26 @@ export async function fixture(
     writeLifetimes: bootstrap.writeLifetimes,
     readLifetimes: bootstrap.readLifetimes,
     ...(options.protectProfileInputs
-      ? { waitForRetirement: async (rendererId: string) => await bootstrap.waitForRetirement(rendererId) }
+      ? {
+        waitForRetirement: async (rendererId: string) => {
+          const results = await Promise.all([
+            bootstrap.waitForRetirement(rendererId),
+            credentialsChannel?.waitForRetirement(rendererId) ?? Promise.resolve(true),
+          ])
+          return results.every(Boolean)
+        },
+      }
       : {}),
     participant: participants.participant,
     channels: new Map([
+      ...(management === undefined
+        ? []
+        : [['plugin-management', createManagerRendererManagementChannel(management)] as const]),
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
       ...(channelBridge === undefined ? [] : [['channel-actions', channelBridge.channel] as const]),
       ...(serviceConfigChannel === undefined ? [] : [['service-config', serviceConfigChannel] as const]),
+      ...(credentialsChannel === undefined ? [] : [['channel-credentials', credentialsChannel.channel] as const]),
       ...(options.writeDispatch === undefined ? [] : [
         [
           'fixture-write',
@@ -324,10 +429,20 @@ export async function fixture(
     leaseReady,
     releaseLease,
     configuredChannel,
+    credentialValues,
+    channelCredentialsEnabled: options.channelCredentials === true,
+    setCredentialCleanupFailure(value: boolean) {
+      credentialCleanupFails = value
+    },
+    setCredentialCommitUnknown(value: boolean) {
+      credentialCommitUnknown = value
+    },
     async close() {
       releaseLease.resolve()
       sessions.dispose()
       await bootstrap.close()
+      await credentialManager?.close()
+      management?.close()
       channelBridge?.close()
       managedUI.dispose()
       participants.close()

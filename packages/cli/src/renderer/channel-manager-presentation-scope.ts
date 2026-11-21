@@ -18,14 +18,18 @@ export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 |
   service: object,
   snapshot: T,
 ): T {
-  if (!stateFor(service).configurationOnly || channelConfigurationAllowed(service)) return snapshot
+  if (!stateFor(service).configurationOnly) return snapshot
+  const configurationAllowed = channelConfigurationAllowed(service)
   return Object.freeze({
     ...snapshot,
     accounts: Object.freeze(snapshot.accounts.map(account =>
       Object.freeze({
         ...account,
         availableOperations: Object.freeze(
-          account.availableOperations.filter(operation => operation !== 'connection.update'),
+          account.availableOperations.filter(operation =>
+            operation !== 'target.credential.capture.rotate' && operation !== 'connection.rotate-credential'
+            && (configurationAllowed || operation !== 'connection.update')
+          ),
         ),
       })
     )),

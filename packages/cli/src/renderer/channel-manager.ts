@@ -129,8 +129,9 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     const snapshotOnly = configurationOnly || wrapped.presentationMode === 'snapshot-only'
       || wrapped.actions?.snapshotOnly === true
     if (
-      snapshotOnly && (!configurationOnly && wrapped.serviceConfig !== undefined
-        || wrapped.credentialRequest !== undefined || wrapped.createCredentialedConnection !== undefined)
+      snapshotOnly
+      && (!configurationOnly && (wrapped.serviceConfig !== undefined || wrapped.credentialRequest !== undefined)
+        || wrapped.createCredentialedConnection !== undefined)
     ) throw new Error('snapshot-only Channel Manager cannot expose configuration or credentials')
     const actions = restrictChannelManagerActions(wrapped.actions, snapshotOnly)
     registerChannelManagerState(this, {

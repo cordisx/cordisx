@@ -55,6 +55,7 @@ it.skipIf(
       CORDISX_MODEL_API_PORT: '0',
       TMPDIR: root,
       LANG: 'en_US.UTF-8',
+      FIXTURE_CHANNEL_KEY: 'synthetic-fixture-value',
     }
     const cli = path.join(root, 'package', 'dist', 'src', 'cli.js')
     const run = async (...args: string[]) =>
@@ -156,7 +157,23 @@ it.skipIf(
             services: {
               runtime: {
                 profiles: {
-                  default: { revision: 1, lastGoodRevision: 1, config: SIMULATOR_CHANNEL_SERVICE_CONFIG },
+                  default: {
+                    revision: 1,
+                    lastGoodRevision: 1,
+                    config: {
+                      ...SIMULATOR_CHANNEL_SERVICE_CONFIG,
+                      connections: [
+                        ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+                        {
+                          ref: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture-tenant' },
+                          adapterKind: 'feishu',
+                          enabled: false,
+                          transport: { mode: 'websocket' },
+                          secretRef: 'host-secret:env/FIXTURE_CHANNEL_KEY',
+                        },
+                      ],
+                    },
+                  },
                 },
               },
             },
@@ -198,10 +215,26 @@ it.skipIf(
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
       await showChannel(second)
+      expect(await first.evaluate('typeof globalThis.__cordisxChannelCredentialRequestV1')).toBe('function')
+      const openRow = (labels: string[]) =>
+        `(() => {
+        const row = [...document.querySelectorAll('[data-manager-collection-item]')].find(item =>
+          ${JSON.stringify(labels)}.some(label => item.textContent.includes(label)))
+        const button = row?.querySelector('.cxr-manager-collection-open')
+        if (!button) return false
+        button.click()
+        return true
+      })()`
+      await expect.poll(() => first.evaluate(openRow(['Feishu', '飞书', 'cli_fixture']))).toBe(true)
+      await expect.poll(() =>
+        first.evaluate(
+          'Boolean(document.querySelector("#channel-credential-secret input"))',
+        ), { timeout: 15_000 }).toBe(true)
+      expect(await first.evaluate('document.querySelector("#channel-credential-secret input").value')).toBe('')
+      expect(await first.evaluate('document.body.textContent.includes("FIXTURE_CHANNEL_KEY")')).toBe(false)
+      await showChannel(first)
 
-      await first.evaluate(
-        'document.querySelector("[data-manager-collection-item] .cxr-manager-collection-open").click()',
-      )
+      await expect.poll(() => first.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
       try {
         await expect.poll(
           () => first.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
@@ -289,7 +322,10 @@ it.skipIf(
       expect(savedConfig).toMatchObject({
         contract: 'cordisx.channel-service-config/v2',
         schemaVersion: 2,
-        connections: [{ displayName: 'Configured Simulator' }],
+        connections: [
+          { displayName: 'Configured Simulator' },
+          { ref: { accountId: 'cli_fixture' }, secretRef: 'host-secret:env/FIXTURE_CHANNEL_KEY' },
+        ],
       })
       await expect.poll(() =>
         first.evaluate(
@@ -317,9 +353,7 @@ it.skipIf(
           ),
         { timeout: 30_000 },
       ).toBe(true)
-      await first.evaluate(
-        'document.querySelector("[data-manager-collection-item] .cxr-manager-collection-open").click()',
-      )
+      await expect.poll(() => first.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
       await expect.poll(() =>
         first.evaluate(
           'document.querySelector("#channel-connection-displayName input")?.value',

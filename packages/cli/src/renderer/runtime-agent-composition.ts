@@ -545,6 +545,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
               }),
             ...(runtimeScope.channelCredentialBridge()! === undefined
                 || runtimeScope.metadata()!.hostKind === 'standalone'
+                  && runtimeScope.metadata()!.channelManager?.service.writable !== true
               ? {}
               : {
                 credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),

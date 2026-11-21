@@ -201,6 +201,18 @@ export class ServiceRendererConfiguredChannel {
     return { alias, source: identity.source }
   }
 
+  /** Return only the renderer-safe view after the owner has verified its exact session. */
+  projection(context: ManagerRendererChannelContext) {
+    this.serviceIdentity(context)
+    if (!this.view) throw new Error('renderer-configured-channel-unavailable')
+    const projection = this.view.initial.projection
+    const writable = this.input.allowConfiguration
+      && this.owner.capabilities.some(capability =>
+        capability.name === 'channel.accounts.connect' && Object.keys(capability.scope).length === 0
+      )
+    return writable ? { ...projection, service: { ...projection.service, writable: true } } : projection
+  }
+
   /** Verify an unchanged view or replace it only after the exact committed service generation is readable. */
   async handoff(
     reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>>,

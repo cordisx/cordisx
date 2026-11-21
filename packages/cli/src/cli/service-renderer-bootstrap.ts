@@ -95,6 +95,8 @@ export class ServiceRendererBootstrap {
       readonly experimentalConfiguredChannel?: ConfiguredChannel
       /** The production owner also supplied the coordinated Channel configuration bridge. */
       readonly experimentalChannelServiceConfig?: boolean
+      /** The owner also supplied the private, coordinated credential bridge. */
+      readonly experimentalChannelCredentials?: boolean
     },
   ) {
     this.configuredChannel = input.experimentalConfiguredChannel
@@ -268,6 +270,16 @@ export class ServiceRendererBootstrap {
       || !await this.unchanged(context.rendererId, entry)
     ) throw new Error('renderer-configured-channel-unavailable')
     return entry.configuredChannel.serviceIdentity(context, alias)
+  }
+
+  /** Read back the new redacted view only for the admitted originating Manager. */
+  async configuredChannelProjection(context: ManagerRendererChannelContext) {
+    await this.configuredChannelServiceIdentity(context)
+    const entry = this.entries.get(context.rendererId)
+    if (!entry?.configuredChannel || !this.current(context.rendererId, entry)) {
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    return entry.configuredChannel.projection(context)
   }
 
   /** Owner-only Channel write handoff; callers must already reserve the originating Manager and lifecycle. */
@@ -568,6 +580,9 @@ export class ServiceRendererBootstrap {
             channelActionsBridgeToken: 'renderer-binding-placeholder',
             ...(this.input.experimentalChannelServiceConfig
               ? { serviceConfigBridgeToken: 'renderer-binding-placeholder' }
+              : {}),
+            ...(this.input.experimentalChannelCredentials && configured.projection.service.writable
+              ? { channelCredentialBridgeToken: 'renderer-binding-placeholder' }
               : {}),
           }),
           ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),

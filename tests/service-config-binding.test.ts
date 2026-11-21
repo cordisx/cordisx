@@ -73,7 +73,7 @@ describe('browser service configuration bridge', () => {
     const rejection = expect(pending).rejects.toThrow('write result is unknown')
     await vi.advanceTimersByTimeAsync(4_000)
     expect(settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(51_000)
+    await vi.advanceTimersByTimeAsync(71_000)
     await rejection
     expect(binding).toHaveBeenCalledOnce()
     bridge.dispose()

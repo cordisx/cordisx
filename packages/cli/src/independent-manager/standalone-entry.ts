@@ -7,9 +7,11 @@ status.setAttribute('role', 'status')
 status.textContent = '正在连接 CordisX…'
 document.body.append(status)
 let failed = false
-const unavailable = () => {
+const unavailable = (reason?: 'result-unknown') => {
   failed = true
-  status.textContent = 'CordisX 连接不可用，请重新打开管理页面。'
+  status.textContent = reason === 'result-unknown'
+    ? '操作结果未确认。请重新打开管理页面，核对已保存的配置后再继续。'
+    : 'CordisX 连接不可用，请重新打开管理页面。'
   status.hidden = false
 }
 if (location.pathname !== '/' || new URL(location.href).searchParams.get('host') !== '1') {
