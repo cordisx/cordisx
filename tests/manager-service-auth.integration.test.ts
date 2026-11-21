@@ -29,7 +29,7 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
     binding: {
       registrationHandle: 'msr_test',
       serviceHandle: 'mss_test',
-      identity: { pluginId: 'aiden', serviceId: 'gateway' },
+      identity: { pluginId: 'sample-provider', serviceId: 'gateway' },
       hostGeneration: 'runtime-1',
       serviceGeneration: 'service-1',
     },
@@ -50,9 +50,9 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
     runtimeGeneration: 'runtime-1',
     registrationHandle: registration,
     healthIntervalMs: 250,
-    displayName: 'Aiden',
+    displayName: 'Sample Provider',
     serviceKind: 'managed-backend',
-    pluginId: 'aiden',
+    pluginId: 'sample-provider',
     pluginGeneration: 'plugin-1',
     serviceId: 'gateway',
     authenticationMode,
@@ -66,7 +66,7 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
       ({
         hostGeneration: 'runtime-1',
         authorities: [],
-        sources: [{ pluginId: 'aiden', pluginGeneration: 'plugin-1', serviceId: 'gateway', source }],
+        sources: [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', serviceId: 'gateway', source }],
         nativeProviderIds: [],
         subscribeNativeProviders: () => () => {},
         prepareNativeConnection: () => {
@@ -84,7 +84,7 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
     lastGoodRevision: 1,
     runtimeGeneration: 'runtime-1',
     plugins: [{
-      id: 'aiden',
+      id: 'sample-provider',
       version: '1.0.0',
       digest: `sha256:${'1'.repeat(64)}`,
       moduleGeneration: 'plugin-1',
@@ -148,7 +148,12 @@ describe('local manager service authentication', () => {
       const { token } = await sessionResponse.json() as { token: string }
       const list = await (await post('/api/managed-services', { action: 'list' }, token)).json()
       const item = list.services[0]
-      expect(item).toMatchObject({ pluginId: 'aiden', serviceId: 'gateway', status: 'available', canLogin: true })
+      expect(item).toMatchObject({
+        pluginId: 'sample-provider',
+        serviceId: 'gateway',
+        status: 'available',
+        canLogin: true,
+      })
       const prepared = await (await post('/api/managed-services', {
         action: 'prepare-login',
         pluginId: item.pluginId,
@@ -179,7 +184,7 @@ describe('local manager service authentication', () => {
       expect(listed).toMatchObject({
         status: 'available',
         services: [{
-          pluginId: 'aiden',
+          pluginId: 'sample-provider',
           serviceId: 'gateway',
           pluginGeneration: 'plugin-1',
           canLogin: true,
@@ -187,7 +192,7 @@ describe('local manager service authentication', () => {
       })
       const view = listed.services[0]
       const target = {
-        pluginId: 'aiden',
+        pluginId: 'sample-provider',
         serviceId: 'gateway',
         pluginGeneration: view.pluginGeneration,
         bindingId: view.bindingId,
@@ -217,10 +222,10 @@ describe('local manager service authentication', () => {
   it('revokes pending work and is unavailable through the renderer handler', async () => {
     const f = await fixture()
     try {
-      const view = await f.request(op('view', { pluginId: 'aiden', serviceId: 'gateway' }))
+      const view = await f.request(op('view', { pluginId: 'sample-provider', serviceId: 'gateway' }))
       const prepared = await f.request(
         op('prepare-login', {
-          pluginId: 'aiden',
+          pluginId: 'sample-provider',
           serviceId: 'gateway',
           pluginGeneration: view.pluginGeneration,
           bindingId: view.bindingId,
@@ -245,9 +250,9 @@ describe('local manager service authentication', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const f = await fixture()
     try {
-      const view = await f.request(op('view', { pluginId: 'aiden', serviceId: 'gateway' }))
+      const view = await f.request(op('view', { pluginId: 'sample-provider', serviceId: 'gateway' }))
       const target = {
-        pluginId: 'aiden',
+        pluginId: 'sample-provider',
         serviceId: 'gateway',
         pluginGeneration: view.pluginGeneration,
         bindingId: view.bindingId,
@@ -271,12 +276,12 @@ describe('local manager service authentication', () => {
   it('does not invent login support for host-secret services or expose plugin errors', async () => {
     const unsupported = await fixture('host-secret')
     try {
-      const view = await unsupported.request(op('view', { pluginId: 'aiden', serviceId: 'gateway' }))
+      const view = await unsupported.request(op('view', { pluginId: 'sample-provider', serviceId: 'gateway' }))
       expect(view).toMatchObject({ status: 'available', explicitLogin: false, canLogin: false })
       expect(
         await unsupported.request(
           op('prepare-login', {
-            pluginId: 'aiden',
+            pluginId: 'sample-provider',
             serviceId: 'gateway',
             pluginGeneration: view.pluginGeneration,
             bindingId: view.bindingId,
@@ -290,10 +295,10 @@ describe('local manager service authentication', () => {
     const f = await fixture()
     try {
       vi.mocked(f.registration.authenticate).mockRejectedValueOnce(new Error('synthetic-secret'))
-      const view = await f.request(op('view', { pluginId: 'aiden', serviceId: 'gateway' }))
+      const view = await f.request(op('view', { pluginId: 'sample-provider', serviceId: 'gateway' }))
       const prepared = await f.request(
         op('prepare-login', {
-          pluginId: 'aiden',
+          pluginId: 'sample-provider',
           serviceId: 'gateway',
           pluginGeneration: view.pluginGeneration,
           bindingId: view.bindingId,

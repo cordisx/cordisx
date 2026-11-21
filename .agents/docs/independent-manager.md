@@ -59,7 +59,7 @@ fields, secret values, or array insertions/deletions. For active managed plugin
 services that expose explicit login, the user may initiate the existing Host
 background login flow. That process does not expose its standard streams, so
 login methods needing terminal input or a displayed terminal code are not
-supported here. A synthetic service verifies the bridge; a real Aiden login is
+supported here. A synthetic service verifies the bridge; a real provider login is
 not yet verified.
 
 For a running Channel service with a verified active package and profile owner,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ManagerServiceAuth, type ManagerServiceAuthRoute } from '../packages/cli/src/launcher/manager-service-auth.js'
 
 const sessionId = 'a'.repeat(64)
-const target = { pluginId: 'aiden', serviceId: 'gateway' }
+const target = { pluginId: 'sample-provider', serviceId: 'gateway' }
 const binding = {
   bindingId: 'binding-1',
   identity: target,
@@ -51,7 +51,7 @@ describe('manager service login leases', () => {
       return pending
     })
     const route: ManagerServiceAuthRoute = {
-      owner: { pluginId: 'aiden', pluginGeneration: 'generation-1' },
+      owner: { pluginId: 'sample-provider', pluginGeneration: 'generation-1' },
       handler: {
         token: 'test-token',
         profileId: 'work',
@@ -132,7 +132,10 @@ describe('manager service login leases', () => {
       disposeOwner: async () => {},
       dispose: async () => {},
     }
-    let route = { owner: { pluginId: 'aiden', pluginGeneration: 'generation-1' }, handler } as ManagerServiceAuthRoute
+    let route = {
+      owner: { pluginId: 'sample-provider', pluginGeneration: 'generation-1' },
+      handler,
+    } as ManagerServiceAuthRoute
     const auth = new ManagerServiceAuth({
       profileId: 'work',
       generation: 'host-1',

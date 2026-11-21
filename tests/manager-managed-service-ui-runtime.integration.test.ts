@@ -12,7 +12,11 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
     const ownerToken = `owner-token-${'x'.repeat(48)}`
     const binding = {
       bindingId: 'binding-1',
-      identity: { source: 'https://plugins.example/aiden' as const, pluginId: 'aiden', serviceId: 'gateway' },
+      identity: {
+        source: 'https://plugins.example/sample-provider' as const,
+        pluginId: 'sample-provider',
+        serviceId: 'gateway',
+      },
       scope: { profileId: 'work', generation: 'runtime-1' },
     }
     const snapshot = vi.fn(async () => ({
@@ -25,7 +29,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
     const fleet = {
       hostGeneration: 'runtime-1',
       authorities: [],
-      sources: [{ pluginId: 'aiden', pluginGeneration: 'plugin-1', serviceId: 'gateway', source }],
+      sources: [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', serviceId: 'gateway', source }],
       nativeProviderIds: [],
       subscribeNativeProviders: () => () => {},
       prepareNativeConnection: () => {
@@ -49,7 +53,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
       lastGoodRevision: 1,
       runtimeGeneration: 'runtime-1',
       plugins: [{
-        id: 'aiden',
+        id: 'sample-provider',
         version: '1.0.0',
         digest: `sha256:${'1'.repeat(64)}`,
         moduleGeneration: 'plugin-1',
@@ -90,7 +94,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
     }
     const renderer = BrowserManagedServiceUIBridge.connect(capabilities, 'work', 'runtime-1')
     try {
-      const registry = renderer.bind({ pluginId: 'aiden', pluginGeneration: 'plugin-1' })!
+      const registry = renderer.bind({ pluginId: 'sample-provider', pluginGeneration: 'plugin-1' })!
       const service = await registry.get({ serviceId: 'gateway' })
       expect(service.status).toBe('available')
       if (service.status !== 'available') throw new Error('fixture service unavailable')

@@ -7,7 +7,7 @@ const ownerToken = 'owner-private-' + 'a'.repeat(64)
 const secondOwnerToken = 'owner-private-' + 'b'.repeat(64)
 const binding = {
   bindingId: 'binding-1',
-  identity: { source: 'https://plugins.example/aiden', pluginId: 'aiden', serviceId: 'gateway' },
+  identity: { source: 'https://plugins.example/sample-provider', pluginId: 'sample-provider', serviceId: 'gateway' },
   scope: { profileId: 'work', generation: 'runtime-1' },
 }
 
@@ -46,7 +46,7 @@ function descriptor() {
 function fixture() {
   let epoch = 1
   let live = true
-  let capabilities = [{ pluginId: 'aiden', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
+  let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
   const handle = vi.fn(async (value: string, _signal?: AbortSignal): Promise<Record<string, unknown>> => {
     const input = JSON.parse(value) as { requestId: string; operation: string }
     return {

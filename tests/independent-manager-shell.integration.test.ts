@@ -47,8 +47,8 @@ it('composes the shared navigation with the existing manager and preserves draft
       revision: 'r1',
       managerSafeWrite: MODEL_SERVICE_SAFE_WRITE_CONTRACT,
       services: [{
-        id: 'modelhub',
-        displayName: 'Model Hub',
+        id: 'sample-service',
+        displayName: 'Sample Service',
         baseUrl: 'https://example.test',
         enabled: true,
         codexModels: ['gpt-fixture'],

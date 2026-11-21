@@ -332,7 +332,7 @@ it('starts a plugin login only after a user action and fences an uncertain resul
   const requests: Array<Record<string, unknown>> = []
   const service = {
     status: 'available',
-    pluginId: 'aiden',
+    pluginId: 'sample-provider',
     serviceId: 'gateway',
     pluginGeneration: 'generation',
     bindingId: 'binding',
@@ -355,7 +355,9 @@ it('starts a plugin login only after a user action and fences an uncertain resul
     return { status: 'unavailable' }
   })
   try {
-    await vi.waitFor(() => expect(window.document.getElementById('managed-services')!.textContent).toContain('aiden'))
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('managed-services')!.textContent).toContain('sample-provider')
+    )
     expect(requests.map(request => request.action)).toEqual(['list'])
     ;[...window.document.querySelectorAll('#managed-services button')].find(button => button.textContent === '登录')!
       .click()
@@ -365,7 +367,7 @@ it('starts a plugin login only after a user action and fences an uncertain resul
     )
     expect(requests.filter(request => request.action === 'login')).toEqual([{ action: 'login', leaseId: 'lease' }])
     expect(requests.find(request => request.action === 'prepare-login')).toMatchObject({
-      pluginId: 'aiden',
+      pluginId: 'sample-provider',
       serviceId: 'gateway',
       pluginGeneration: 'generation',
       bindingId: 'binding',
