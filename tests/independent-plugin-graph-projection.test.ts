@@ -39,7 +39,13 @@ afterEach(async () => {
   projections.clear()
   await Promise.all([...servers].map(async server => await server.close()))
   servers.clear()
-  await Promise.all([...directories].map(async directory => await rm(directory, { recursive: true, force: true })))
+  // Chrome's child processes can finish flushing the isolated profile just
+  // after the browser exits, especially on a busy CI runner.
+  await Promise.all(
+    [...directories].map(async directory =>
+      await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    ),
+  )
   directories.clear()
 })
 

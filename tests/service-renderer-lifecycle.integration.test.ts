@@ -16,6 +16,7 @@ import {
   RendererAttachmentRejected,
 } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
+import { RendererLifecycleFederation } from '../packages/cli/src/launcher/renderer-lifecycle-federation.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import type { CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { decision, FormalRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
@@ -524,6 +525,76 @@ it.each(['ready', 'disconnect'] as const)(
   },
   30000,
 )
+
+it('rejects a federation reservation if a peer leaves after preflight', async () => {
+  const f = await fixture()
+  try {
+    const active = await f.store.loadActive()
+    const federation = new RendererLifecycleFederation({
+      scope: f.scope,
+      active,
+      registryEpoch: 0,
+      projectMutation: () => ({}),
+    })
+    const makePeer = (rendererId: string): AttachedRendererPeer => {
+      const listeners = new Set<() => void>()
+      let closed = false
+      return {
+        scope: f.scope,
+        identity: { appId: 'codex', adapterId: 'manager', rendererId, pid: process.pid, processStartedAt: 'fixture' },
+        sessionId: secret(),
+        get closed() {
+          return closed
+        },
+        request: async (_method, payload) => payload,
+        onDisconnect(listener) {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        close() {
+          if (closed) return
+          closed = true
+          for (const listener of listeners) listener()
+        },
+      }
+    }
+    const first = makePeer('federation-first')
+    const second = makePeer('federation-second')
+    await federation.attach(first)
+    await federation.attach(second)
+    const candidate = {
+      ...active,
+      recordKind: 'candidate' as const,
+      transactionId: 'federation-reservation',
+      revision: active.revision + 1,
+      lastGoodRevision: active.revision,
+      plugins: [{
+        id: 'test',
+        version: '1.0.0',
+        digest: `sha256:${'a'.repeat(64)}` as const,
+        moduleGeneration: 'test-generation',
+        enabled: true,
+        dependencies: [],
+      }],
+    }
+    const input = {
+      transactionId: 'federation-reservation',
+      operation: 'install' as const,
+      previous: active,
+      candidate,
+      targetId: 'test',
+    }
+    await federation.preflight(input)
+    first.close()
+    expect(() => federation.prepare(input.transactionId)).toThrow('admission became stale')
+    await federation.preflight(input)
+    expect(federation.prepare(input.transactionId).expectedRegistryEpoch).toBe(0)
+    await federation.abort(input.transactionId)
+    second.close()
+  } finally {
+    await f.close()
+  }
+}, 30000)
 
 it('keeps renderer attachment unavailable until the owner supplies a projector', async () => {
   const f = await fixture()

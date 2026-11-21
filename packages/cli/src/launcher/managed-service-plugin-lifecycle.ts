@@ -2,6 +2,12 @@ import { ManagedConsoleBrowserLaunch } from './managed-console-browser-launch.js
 import { ManagerServiceAuth, type ManagerServiceAuthOperation } from './manager-service-auth.js'
 import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { managedServiceLiveHandler } from './managed-service-live-handler.js'
+import {
+  captureManagedServiceUISources,
+  type ManagedServiceUISourceSnapshot,
+  observeManagedServiceUISources,
+  sameManagedServiceUISources,
+} from './managed-service-ui-fence-sources.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
 import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
@@ -62,6 +68,14 @@ interface ManagedServiceTransaction {
   published: boolean
 }
 
+interface ManagedServiceUIRecovery {
+  readonly stamp: number
+  readonly registryEpoch: number
+  readonly profileId: string
+  readonly runtimeGeneration: string
+  readonly plugins: string
+}
+
 export interface ManagedServicePluginLifecycleOptions {
   readonly runtime: PluginLifecycleRuntime
   readonly profileId: string
@@ -113,9 +127,17 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private readonly nativeProviderListeners = new Set<() => void>()
   private active: ManagedServiceFleet | undefined
   private stopNativeProviders: (() => void) | undefined
+  private stopUISources: (() => void) | undefined
   private nativeRevision = 0
   private mutation: Promise<unknown> = Promise.resolve()
   private disposed = false
+  private uiFenceEpoch = 0
+  private uiFenceBusy = 0
+  private uiFenceFailed = false
+  private uiFenceSourceObservationFailed = false
+  private uiFenceSources: readonly ManagedServiceUISourceSnapshot[] | undefined
+  private readonly uiFencePending = new Map<string, number>()
+  private readonly uiFenceRecovery = new Map<string, ManagedServiceUIRecovery>()
   readonly startup: ManagedServiceStartupAuthority
   readonly startupObserver: StartupObserverV1
   readonly browserConsoleLaunch = new ManagedConsoleBrowserLaunch()
@@ -167,6 +189,27 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
 
   async initialize(activation: CordisXPluginActivationRecordV1): Promise<ManagedServiceStartupSession> {
     if (this.initialized || this.disposed) throw new Error('managed service lifecycle already initialized or disposed')
+    this.beginUIFenceBoundary()
+    try {
+      const session = await this.initializeNow(activation)
+      // A progressive startup can return the observation session before source
+      // adoption. The owner cannot issue a stable UI fence until both settle.
+      void Promise.all([session.coreReady, session.adopted]).then(
+        () => this.endUIFenceBoundary(),
+        () => {
+          this.uiFenceFailed = true
+          this.endUIFenceBoundary()
+        },
+      )
+      return session
+    } catch (error) {
+      this.uiFenceFailed = true
+      this.endUIFenceBoundary()
+      throw error
+    }
+  }
+
+  private async initializeNow(activation: CordisXPluginActivationRecordV1): Promise<ManagedServiceStartupSession> {
     this.initialized = true
     await this.options.validateInitialActivation?.(activation)
     const admissions = await this.resolveAdmissions(activation)
@@ -250,6 +293,38 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     ))
   }
 
+  /**
+   * Owner-only authority for renderer UI projections. The epoch is local to
+   * this runtime instance and never reuses a value after rollback. A caller
+   * must also verify the enclosing owner/session identity before and after I/O.
+   * Undefined includes startup, any unresolved transaction, missing source
+   * observation, cleanup failure, terminal failure, and disposal.
+   */
+  readManagedServiceUIFence(): number | undefined {
+    const fleet = this.active
+    if (
+      !this.initialized || this.disposed || this.uiFenceFailed || this.uiFenceSourceObservationFailed
+      || this.uiFenceBusy !== 0
+      || this.uiFencePending.size !== 0 || this.transactions.size !== 0 || fleet === undefined
+      || fleet.leases.some(lease => typeof lease.activation.subscribeSources !== 'function')
+    ) return undefined
+    try {
+      const captured = captureManagedServiceUISources(fleet.activation?.sources ?? [])
+      if (
+        this.active !== fleet || this.disposed || this.uiFenceFailed || this.uiFenceSourceObservationFailed
+        || this.uiFenceBusy !== 0 || this.uiFencePending.size !== 0 || this.transactions.size !== 0
+      ) return undefined
+      const previous = this.uiFenceSources
+      if (previous !== undefined && !sameManagedServiceUISources(previous, captured)) this.advanceUIFence()
+      this.uiFenceSources = captured
+    } catch {
+      this.uiFenceSourceObservationFailed = true
+      return undefined
+    }
+    if (this.uiFenceFailed) return undefined
+    return this.uiFenceEpoch
+  }
+
   /** Host bootstrap passes this only to B's dedicated Host transport, never plugin metadata. */
   hostStartupCapability(): { readonly token: string; readonly observer: StartupObserverV1 } {
     return this.hostStartupInput ??= { token: this.uniqueToken(), observer: this.startupObserver }
@@ -312,20 +387,32 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   prepare(transactionId: string): RuntimeGenerationFence {
-    if (this.runtime.prepare === undefined) throw new Error('plugin lifecycle prepare is unavailable')
-    return this.runtime.prepare(transactionId)
+    const key = `transaction:${transactionId}`
+    const stamp = this.beginUIFenceBoundary(key)
+    try {
+      if (this.runtime.prepare === undefined) throw new Error('plugin lifecycle prepare is unavailable')
+      return this.runtime.prepare(transactionId)
+    } finally {
+      this.endUIFenceBoundary(key, stamp)
+    }
   }
 
   async prepareBrowserGraph(
     transactionId: string,
     active: CordisXPluginActivationRecordV1,
   ): Promise<RuntimeGenerationFence> {
-    if (this.runtime.prepareBrowserGraph === undefined) throw new Error('browser graph preparation is unavailable')
-    return await this.runtime.prepareBrowserGraph(transactionId, active)
+    return await this.withUITransaction(transactionId, false, async () => {
+      if (this.runtime.prepareBrowserGraph === undefined) throw new Error('browser graph preparation is unavailable')
+      return await this.runtime.prepareBrowserGraph(transactionId, active)
+    })
   }
 
   async stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation> {
-    return await this.enqueue(() => this.stageNow(mutation))
+    return await this.withUITransaction(
+      mutation.transactionId,
+      false,
+      async () => await this.enqueue(() => this.stageNow(mutation)),
+    )
   }
 
   private async stageNow(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation> {
@@ -369,7 +456,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async publish(transactionId: string): Promise<RuntimePublicationObservation> {
-    return await this.enqueue(() => this.publishNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      false,
+      async () => await this.enqueue(() => this.publishNow(transactionId)),
+    )
   }
 
   private async publishNow(transactionId: string): Promise<RuntimePublicationObservation> {
@@ -383,7 +474,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async complete(transactionId: string): Promise<RuntimeCleanupObservation> {
-    return await this.enqueue(() => this.completeNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      false,
+      async () => await this.enqueue(() => this.completeNow(transactionId)),
+    )
   }
 
   private async completeNow(transactionId: string): Promise<RuntimeCleanupObservation> {
@@ -392,7 +487,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async finalize(transactionId: string): Promise<void> {
-    return await this.enqueue(() => this.finalizeNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      true,
+      async () => await this.enqueue(() => this.finalizeNow(transactionId)),
+    )
   }
 
   private async finalizeNow(transactionId: string): Promise<void> {
@@ -408,7 +507,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async rollback(transactionId: string): Promise<RuntimeCleanupObservation> {
-    return await this.enqueue(() => this.rollbackNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      true,
+      async () => await this.enqueue(() => this.rollbackNow(transactionId)),
+    )
   }
 
   private async rollbackNow(transactionId: string): Promise<RuntimeCleanupObservation> {
@@ -420,16 +523,79 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async recoverRollback(plan: Parameters<NonNullable<PluginLifecycleRuntime['recoverRollback']>>[0]) {
-    if (this.runtime.recoverRollback === undefined) throw new Error('plugin lifecycle recovery is unavailable')
-    return await this.runtime.recoverRollback(plan)
+    const key = `transaction:${plan.transactionId}`
+    const stamp = this.beginUIFenceBoundary(key)
+    this.uiFenceRecovery.delete(key)
+    try {
+      if (this.runtime.recoverRollback === undefined) throw new Error('plugin lifecycle recovery is unavailable')
+      const observation = await this.runtime.recoverRollback(plan)
+      try {
+        const target = plan.rollbackTarget
+        const plugins = JSON.stringify(target.plugins)
+        if (
+          this.uiFencePending.get(key) === stamp
+          && observation.transactionId === plan.transactionId && observation.transactionEpoch === plan.transactionEpoch
+          && observation.registryEpoch === plan.rollbackRegistryEpoch
+          && observation.active.profileId === target.profileId
+          && observation.active.runtimeGeneration === target.runtimeGeneration
+          && JSON.stringify(observation.active.plugins) === plugins
+          && JSON.stringify(observation.disposedAfter.plugins) === JSON.stringify(plan.expectedPublished.plugins)
+        ) {
+          this.uiFenceRecovery.set(key, {
+            stamp,
+            registryEpoch: plan.rollbackRegistryEpoch,
+            profileId: target.profileId,
+            runtimeGeneration: target.runtimeGeneration,
+            plugins,
+          })
+        }
+      } catch { /* An unverifiable observation must not reopen the fence. */ }
+      return observation
+    } finally {
+      // The coordinator must also adopt the recovered authority before this
+      // owner can claim that a recovered route is stable.
+      this.endUIFenceBoundary(key, stamp)
+    }
   }
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
-    await this.runtime.adoptRecoveredActivation?.(active, registryEpoch)
+    const key = 'operation:adopt-recovered'
+    const stamp = this.beginUIFenceBoundary(key)
+    const recovery = new Map(this.uiFenceRecovery)
+    let settled = false
+    try {
+      await this.runtime.adoptRecoveredActivation?.(active, registryEpoch)
+      // The adoption API has no transaction ID, so it cannot certify which
+      // recovery it completed when multiple recoveries are outstanding.
+      // Preserve the legacy optional call while keeping that case fenced.
+      const recovered = [...recovery.values()][0]
+      let verified = recovered === undefined
+      try {
+        if (recovered !== undefined) {
+          verified = this.runtime.adoptRecoveredActivation !== undefined && registryEpoch === recovered.registryEpoch
+            && active.profileId === recovered.profileId && active.runtimeGeneration === recovered.runtimeGeneration
+            && JSON.stringify(active.plugins) === recovered.plugins
+        }
+      } catch { /* Unverifiable adoption cannot reopen the fence. */ }
+      if (recovery.size <= 1 && verified) {
+        for (const [transactionKey, transaction] of recovery) {
+          if (this.uiFenceRecovery.get(transactionKey) !== transaction) continue
+          this.uiFenceRecovery.delete(transactionKey)
+          if (this.uiFencePending.get(transactionKey) === transaction.stamp) this.uiFencePending.delete(transactionKey)
+        }
+        settled = true
+      }
+    } finally {
+      this.endUIFenceBoundary(key, stamp, settled)
+    }
   }
 
   async commit(transactionId: string): Promise<void> {
-    return await this.enqueue(() => this.commitNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      true,
+      async () => await this.enqueue(() => this.commitNow(transactionId)),
+    )
   }
 
   private async commitNow(transactionId: string): Promise<void> {
@@ -444,7 +610,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async abort(transactionId: string): Promise<void> {
-    return await this.enqueue(() => this.abortNow(transactionId))
+    return await this.withUITransaction(
+      transactionId,
+      true,
+      async () => await this.enqueue(() => this.abortNow(transactionId)),
+    )
   }
 
   private async abortNow(transactionId: string): Promise<void> {
@@ -454,14 +624,26 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
-    await this.runtime.reload(input)
+    const key = 'operation:reload'
+    const stamp = this.beginUIFenceBoundary(key)
+    let settled = false
+    try {
+      await this.runtime.reload(input)
+      settled = true
+    } finally {
+      this.endUIFenceBoundary(key, stamp, settled)
+    }
   }
 
   terminal(error: unknown): void {
+    this.advanceUIFence()
+    this.uiFenceFailed = true
     this.runtime.terminal?.(error)
   }
 
   async dispose(): Promise<void> {
+    this.advanceUIFence()
+    this.uiFenceFailed = true
     this.managerServiceAuth.close()
     if (this.disposed) return await this.mutation.then(() => undefined)
     this.disposed = true
@@ -697,6 +879,55 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     )
   }
 
+  private advanceUIFence(): number {
+    if (this.uiFenceEpoch === Number.MAX_SAFE_INTEGER) {
+      // Exhaustion is practically unreachable, but reuse would make ABA unsafe.
+      this.uiFenceFailed = true
+    } else this.uiFenceEpoch += 1
+    return this.uiFenceEpoch
+  }
+
+  /** Synchronous: invalidate the old value before queuing or starting work. */
+  private beginUIFenceBoundary(key?: string): number {
+    const stamp = this.advanceUIFence()
+    this.uiFenceBusy += 1
+    if (key !== undefined) this.uiFencePending.set(key, stamp)
+    return stamp
+  }
+
+  private endUIFenceBoundary(key?: string, stamp?: number, settled = false): void {
+    if (key !== undefined) {
+      if (settled && this.uiFencePending.get(key) === stamp) this.uiFencePending.delete(key)
+      else if (!settled && !this.uiFencePending.has(key)) {
+        // A later abort/retry can finish before an older operation. It cannot
+        // certify work that is still running, so reinstate uncertainty when
+        // that older operation eventually returns or fails.
+        this.uiFencePending.set(key, this.advanceUIFence())
+      }
+    }
+    this.uiFenceBusy -= 1
+  }
+
+  private async withUITransaction<T>(
+    transactionId: string,
+    settles: boolean,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const key = `transaction:${transactionId}`
+    const stamp = this.beginUIFenceBoundary(key)
+    let settled = false
+    try {
+      const result = await operation()
+      settled = settles
+      if (settled && this.uiFencePending.get(key) === stamp) this.uiFenceRecovery.delete(key)
+      return result
+    } finally {
+      // A failure can have partially changed a route. Keep it unavailable
+      // until a later confirmed abort, rollback or finalization succeeds.
+      this.endUIFenceBoundary(key, stamp, settled)
+    }
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('managed service lifecycle is disposed'))
     const next = this.mutation.then(operation)
@@ -710,8 +941,18 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   private setActive(fleet: ManagedServiceFleet | undefined): void {
+    this.advanceUIFence()
+    this.uiFenceSources = undefined
     this.stopNativeProviders?.()
     this.stopNativeProviders = undefined
+    try {
+      this.stopUISources?.()
+    } catch {
+      // A failed unsubscribe makes source-observation ownership uncertain.
+      this.uiFenceFailed = true
+    }
+    this.stopUISources = undefined
+    this.uiFenceSourceObservationFailed = false
     this.active = fleet
     if (fleet?.record !== undefined) this.startup.selectOwners(startupRecordOwners(fleet.record))
     // Subscribe before readers can take their next snapshot. Retained components
@@ -720,6 +961,12 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.stopNativeProviders = fleet?.activation?.subscribeNativeProviders?.(() => {
       if (this.active === fleet) this.changedNativeProviders()
     })
+    const observation = observeManagedServiceUISources(fleet?.leases.map(lease => lease.activation) ?? [], () => {
+      // Node host source publication and notification are synchronous.
+      if (this.active === fleet) this.advanceUIFence()
+    })
+    this.uiFenceSourceObservationFailed = !observation.available
+    this.stopUISources = observation.stop
   }
 
   private changedNativeProviders(): void {

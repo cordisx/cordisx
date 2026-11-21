@@ -71,6 +71,7 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
   private joining = 0
   private preflighting = false
   private preflightReservation: string | undefined
+  private preflightInvalid = false
   private transaction: Transaction | undefined
   private pendingAdoption: {
     readonly participants: readonly Participant[]
@@ -84,6 +85,7 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
     mutation: PluginRuntimeMutation,
     identity: RendererAttachmentIdentity,
   ) => unknown | Promise<unknown>
+  private readonly finalizeLast: (identity: RendererAttachmentIdentity) => boolean
 
   constructor(options: {
     readonly scope: RendererAttachmentScope
@@ -94,9 +96,12 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
       mutation: PluginRuntimeMutation,
       identity: RendererAttachmentIdentity,
     ) => unknown | Promise<unknown>
+    /** Owner-selected resource authority whose cleanup must follow other seats. */
+    readonly finalizeLast?: (identity: RendererAttachmentIdentity) => boolean
   }) {
     this.scope = Object.freeze({ ...parseAttachmentScope(options.scope) })
     this.projectMutation = options.projectMutation
+    this.finalizeLast = options.finalizeLast ?? (() => false)
     if (
       options.active.profileId !== this.scope.profileId || options.active.recordKind !== 'active'
       || options.active.runtimeGeneration !== this.scope.generation
@@ -113,6 +118,13 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
 
   get requiresReconciliation(): boolean {
     return this.uncertain || this.pendingAdoption !== undefined
+  }
+
+  snapshot(): Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }> {
+    if (
+      this.requiresReconciliation || this.transaction || this.joining || this.preflighting || this.preflightReservation
+    ) throw new Error('renderer lifecycle snapshot is unavailable')
+    return { active: structuredClone(this.active), registryEpoch: this.registryEpoch }
   }
 
   /** A renderer is admitted only after it confirms the owner's exact activation and registry epoch. */
@@ -140,7 +152,7 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
           }
           if (this.transaction?.participants.some(item => item.peer === peer)) this.uncertain = true
           if (this.pendingAdoption?.participants.some(item => item.peer === peer)) this.uncertain = true
-          this.preflightReservation = undefined
+          if (this.preflightReservation !== undefined) this.preflightInvalid = true
         }),
       }
       if (peer.closed || this.participants.has(peer.identity.rendererId)) {
@@ -157,6 +169,10 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
   }
 
   prepare(transactionId: string): RuntimeGenerationFence {
+    if (this.preflightReservation === transactionId && this.preflightInvalid) {
+      this.cancelPreflight(transactionId)
+      throw new Error('renderer lifecycle admission became stale')
+    }
     if (
       this.uncertain || this.transaction || this.pendingAdoption || this.joining || this.preflighting
       || (this.preflightReservation !== undefined && this.preflightReservation !== transactionId)
@@ -215,6 +231,7 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
         throw new Error('renderer lifecycle admission became stale')
       }
       this.preflightReservation = input.transactionId
+      this.preflightInvalid = false
     } finally {
       this.preflighting = false
     }
@@ -222,7 +239,10 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
 
   /** Release a reservation when the owner cannot start its package transaction. */
   cancelPreflight(transactionId: string): void {
-    if (!this.preflighting && this.preflightReservation === transactionId) this.preflightReservation = undefined
+    if (!this.preflighting && this.preflightReservation === transactionId) {
+      this.preflightReservation = undefined
+      this.preflightInvalid = false
+    }
   }
 
   private current(transactionId: string): Transaction {
@@ -236,6 +256,7 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
     transaction: Transaction,
     method: 'prepare' | 'stage' | 'publish' | 'complete' | 'finalize' | 'rollback',
     payload: (participant: Participant) => unknown | Promise<unknown>,
+    participants: readonly Participant[] = transaction.participants,
   ): Promise<unknown[]> {
     if (transaction.dispatching) throw new Error('renderer lifecycle operation is already in progress')
     transaction.dispatching = true
@@ -243,19 +264,19 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
       // Construct every scoped projection before dispatching any operation.
       // A local projection error is not an unknown renderer execution result.
       const projections = await Promise.allSettled(
-        transaction.participants.map(async participant => await payload(participant)),
+        participants.map(async participant => await payload(participant)),
       )
       if (projections.some(result => result.status === 'rejected') || this.uncertain) {
         throw new Error('renderer lifecycle projection is unavailable')
       }
       const replies = await Promise.allSettled(
-        transaction.participants.map(async (participant, index) =>
+        participants.map(async (participant, index) =>
           await participant.peer.request(method, (projections[index] as PromiseFulfilledResult<unknown>).value)
         ),
       )
       if (replies.some(reply => reply.status === 'rejected') || this.uncertain) {
         if (
-          transaction.participants.some(participant => participant.peer.closed)
+          participants.some(participant => participant.peer.closed)
           || replies.some(reply => reply.status === 'rejected' && !(reply.reason instanceof RendererAttachmentRejected))
         ) this.uncertain = true
         throw new Error('renderer lifecycle participants did not all confirm the operation')
@@ -364,8 +385,14 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
     tx.phase = 'finalizing'
     tx.operating = true
     try {
-      const replies = await this.broadcast(tx, 'finalize', () => ({ transactionId }))
-      if (replies.some(reply => !attachmentEqual(reply, { transactionId }))) {
+      const first = tx.participants.filter(item => !this.finalizeLast(item.peer.identity))
+      const last = tx.participants.filter(item => this.finalizeLast(item.peer.identity))
+      const confirmed = (replies: readonly unknown[]) =>
+        replies.every(reply => attachmentEqual(reply, { transactionId }))
+      if (!confirmed(await this.broadcast(tx, 'finalize', () => ({ transactionId }), first))) {
+        throw new Error('renderer finalization disagrees')
+      }
+      if (!confirmed(await this.broadcast(tx, 'finalize', () => ({ transactionId }), last))) {
         throw new Error('renderer finalization disagrees')
       }
       const { transactionId: _candidateId, ...candidate } = tx.mutation.candidate
@@ -420,6 +447,11 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
   }
 
   async abort(transactionId: string): Promise<void> {
+    this.cancelReserved(transactionId)
+  }
+
+  /** Synchronous cancellation is safe only before any renderer dispatch. */
+  cancelReserved(transactionId: string): void {
     const tx = this.current(transactionId)
     if (tx.phase !== 'reserved') throw new Error('a dispatched renderer transaction needs confirmed rollback')
     this.transaction = undefined
