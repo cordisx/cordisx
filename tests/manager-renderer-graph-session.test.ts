@@ -128,3 +128,20 @@ it('closes on off-host graphs, unexpected fields, or a leaked private value', as
     await fixture.close()
   }
 })
+
+it('does not forward owner service or document capabilities before per-session projection exists', async () => {
+  const fixture = await managerRendererGraphFixture()
+  try {
+    const previous = await fixture.lease('old')
+    const candidate = await fixture.lease('new')
+    for (const field of ['managedServiceUICapabilities', 'ownerDocumentBindings', 'developmentPackage']) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([descriptor(previous)])
+      const payload = { ...stage('old', 'new', descriptor(candidate)), [field]: [{ token: 'private' }] }
+      expect(() => target.projectCommand(command('stage', 1, payload))).toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+      expect(target.closed).toBe(true)
+    }
+  } finally {
+    await fixture.close()
+  }
+})

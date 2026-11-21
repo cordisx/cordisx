@@ -49,11 +49,8 @@ const stageKeys = new Set([
   'candidate',
   'targetId',
   'affectedPluginIds',
-  'managedServiceUICapabilities',
   'package',
-  'developmentPackage',
   'authorizationDecision',
-  'ownerDocumentBindings',
   'privateGraphs',
 ])
 
