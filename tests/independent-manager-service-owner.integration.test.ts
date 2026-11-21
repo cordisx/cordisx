@@ -28,6 +28,8 @@ it('connects the independent manager to a real service owner without Channel or 
   delete env.CORDISX_MANAGER_CHILD_KEY
   env.CORDISX_HOME = home
   env.CORDISX_MODEL_API_PORT = '0'
+  env.HOME = home
+  env.CODEX_HOME = path.join(home, 'codex-home')
   // Simulate a CordisX agent shell whose one-shot parent bootstrap is spent.
   env.CORDISX_SUPERVISOR_HOME = path.join(home, 'stale-owner')
   env.CORDISX_SUPERVISOR_APP = 'other'
@@ -39,27 +41,33 @@ it('connects the independent manager to a real service owner without Channel or 
   const run = async (...args: string[]) =>
     await exec(process.execPath, [cli!, ...args], { env, cwd: home, timeout: 30_000 })
   try {
-    const packed = await exec('npm', [
-      'pack',
-      '--workspace',
-      'cordisx',
-      '--ignore-scripts',
-      '--json',
-      '--pack-destination',
-      home,
-      '--cache',
-      path.join(home, 'npm-cache'),
-    ], { env, cwd: process.cwd(), timeout: 30_000 })
-    const filename = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename
-    if (filename !== path.basename(filename)) throw new Error('invalid package filename')
-    await exec('tar', ['-xzf', path.join(home, filename), '-C', home], { env, timeout: 30_000 })
+    const fixturePackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+    if (fixturePackage !== undefined) {
+      if (!path.isAbsolute(fixturePackage)) throw new Error('fixture package must be an absolute path')
+      await symlink(fixturePackage, path.join(home, 'package'), 'dir')
+    } else {
+      const packed = await exec('npm', [
+        'pack',
+        '--workspace',
+        'cordisx',
+        '--ignore-scripts',
+        '--json',
+        '--pack-destination',
+        home,
+        '--cache',
+        path.join(home, 'npm-cache'),
+      ], { env, cwd: process.cwd(), timeout: 30_000 })
+      const filename = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename
+      if (filename !== path.basename(filename)) throw new Error('invalid package filename')
+      await exec('tar', ['-xzf', path.join(home, filename), '-C', home], { env, timeout: 30_000 })
+      const packageModules = path.join(home, 'package', 'node_modules')
+      await mkdir(packageModules, { recursive: true })
+      for (const name of ['@vitejs', 'vite']) {
+        await symlink(path.resolve('packages/cli/node_modules', name), path.join(packageModules, name), 'dir')
+      }
+    }
     // Resolve lockfile-installed dependencies without installing or changing the user's system.
     await symlink(path.resolve('node_modules'), path.join(home, 'node_modules'), 'dir')
-    const packageModules = path.join(home, 'package', 'node_modules')
-    await mkdir(packageModules, { recursive: true })
-    for (const name of ['@vitejs', 'vite']) {
-      await symlink(path.resolve('packages/cli/node_modules', name), path.join(packageModules, name), 'dir')
-    }
     cli = path.join(home, 'package', 'dist', 'src', 'cli.js')
     expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
       .toMatchObject({ status: 'ready', mode: 'service' })
@@ -112,7 +120,7 @@ it('connects the independent manager to a real service owner without Channel or 
       body: JSON.stringify({ token: url.hash.slice(1) }),
     })
     expect(exchange.status).toBe(200)
-    const { token } = await exchange.json() as { token: string }
+    let { token } = await exchange.json() as { token: string }
     const state = await (await fetch(`${url.origin}/api/state`, { headers: { authorization: `Bearer ${token}` } }))
       .json()
     expect(state).toMatchObject({
@@ -277,6 +285,25 @@ it('connects the independent manager to a real service owner without Channel or 
       body: JSON.stringify({ expectedRevision: review.snapshot.activationRevision, decision }),
     })
     expect(withoutConfirmation.status).toBe(400)
+    expect(
+      await post('/api/permission-review', {
+        expectedRevision: review.snapshot.activationRevision,
+        userConfirmed: true,
+        decision,
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'profile-coordination-unavailable' })
+    expect(await post('/api/renderer/close', {})).toEqual({ closed: true })
+    // A new sidecar session without a live renderer can apply the same review.
+    const nextLine = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
+    const nextUrl = new URL(nextLine)
+    expect(nextUrl.origin).toBe(url.origin)
+    const nextExchange = await fetch(`${nextUrl.origin}/api/session`, {
+      method: 'POST',
+      headers: { origin: nextUrl.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: nextUrl.hash.slice(1) }),
+    })
+    expect(nextExchange.status).toBe(200)
+    token = (await nextExchange.json() as { token: string }).token
     expect(
       await post('/api/permission-review', {
         expectedRevision: review.snapshot.activationRevision + 1,

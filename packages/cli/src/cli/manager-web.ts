@@ -89,6 +89,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     controller: AbortController
     managedServicesUsed: boolean
     channelCredentialsUsed: boolean
+    managedServicesStateful: boolean
+    channelCredentialsStateful: boolean
     rendererOpen?: Promise<ManagerRendererHandle | undefined>
     rendererCommands: boolean
     rendererChannels: readonly string[]
@@ -131,13 +133,29 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     for (const response of session.resources ?? []) response.destroy()
     void session.rendererBundle?.then(result => result.bundle.fill(0)).catch(() => undefined)
     const retireKinds = [
-      ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
-      ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
+      ...(session.managedServicesUsed
+        ? [{
+          kind: 'manager-service-auth',
+          stateful: session.managedServicesStateful,
+          absent: 'OWNER_UNAVAILABLE',
+        }]
+        : []),
+      ...(session.channelCredentialsUsed
+        ? [{
+          kind: 'manager-channel-credentials',
+          stateful: session.channelCredentialsStateful,
+          absent: 'CHANNEL_OWNER_UNAVAILABLE',
+        }]
+        : []),
     ]
-    const retireOperations = retireKinds.map(kind => {
+    const retireOperations = retireKinds.map(({ kind, stateful, absent }) => {
       const operation = { kind, action: 'retire', sessionId: session.id }
       return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 })
-        .then(result => object(result)?.status === 'retired')
+        .then(result => {
+          const value = object(result)
+          return value?.status === 'retired'
+            || !stateful && value?.status === 'unavailable' && value.code === absent
+        })
     })
     // Revoke even if opening is still in flight: the owner tombstones the
     // browser session before admitting a late result.
@@ -174,6 +192,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       controller: new AbortController(),
       managedServicesUsed,
       channelCredentialsUsed: false,
+      managedServicesStateful: false,
+      channelCredentialsStateful: false,
       rendererCommands: false,
       rendererChannels: [],
     }
@@ -698,6 +718,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         }
         if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
         session.channelCredentialsUsed = true
+        // A view creates no credential draft. Mark writes before dispatch so
+        // a lost result still requires a confirmed retirement.
+        if (action !== 'view') session.channelCredentialsStateful = true
         return scopedReply(await scopedRequest(operation as unknown as PluginManagementRpcOperation, action !== 'view'))
       }
       if (url.pathname === '/api/managed-services') {
@@ -735,6 +758,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         }
         if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
         session.managedServicesUsed = true
+        // Only login actions create or consume a per-session lease.
+        if (action !== 'list' && action !== 'view') session.managedServicesStateful = true
         return scopedReply(
           await scopedRequest(
             operation as unknown as PluginManagementRpcOperation,
