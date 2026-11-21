@@ -227,6 +227,63 @@ it('revokes a renderer session even if its owner open call returns after browser
   }
 }, 30_000)
 
+it.each([
+  [{ status: 'ok' }, 200],
+  [{ status: 'unavailable' }, 503],
+])('waits for the owner revoke before acknowledging concurrent renderer closes: %s', async (outcome, status) => {
+  let release!: (value: unknown) => void
+  const revoking = new Promise<unknown>(resolve => release = resolve)
+  const request = vi.fn(async (operation: Record<string, unknown>) => {
+    if (operation.action === 'revoke') return await revoking
+    return {
+      status: 'ok',
+      handle: { rendererId: 'b'.repeat(64), ownerGeneration: 'g', grant: 'c'.repeat(64) },
+      channels: ['plugin-management'],
+    }
+  })
+  const gateway = { pid: 123, processStartedAt: 'fixture', instanceToken: 'a'.repeat(64) }
+  const web = await startManagerWeb(
+    {
+      appId: 'codex',
+      profileId: 'fixture',
+      generation: 'g',
+      isCurrent: async () => true,
+      request,
+    } as unknown as Parameters<typeof startManagerWeb>[0],
+    { rendererGateway: gateway },
+  )
+  try {
+    const origin = new URL(web.url).origin
+    const token = await exchange(web, web.url)
+    const post = (route: string) =>
+      fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: '{}',
+      })
+    expect((await post('/api/renderer/open')).status).toBe(200)
+    let acknowledged = false
+    const first = post('/api/renderer/close').then(response => {
+      acknowledged = true
+      return response
+    })
+    await vi.waitFor(() => expect(request.mock.calls.some(([op]) => op.action === 'revoke')).toBe(true))
+    const second = post('/api/renderer/close').then(response => {
+      acknowledged = true
+      return response
+    })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(acknowledged).toBe(false)
+    release(outcome)
+    expect((await first).status).toBe(status)
+    expect((await second).status).toBe(status)
+    expect(request.mock.calls.filter(([op]) => op.action === 'revoke')).toHaveLength(1)
+  } finally {
+    release({ status: 'unavailable' })
+    await web.close()
+  }
+}, 30_000)
+
 it('aborts the private socket on revocation without claiming a sent operation was cancelled', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-abort-'))
   const socketPath = path.join(directory, 'owner.sock')

@@ -97,7 +97,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     resources?: Set<ServerResponse>
   }
   const sessions = new Map<string, BrowserSession>()
-  const closedSessions = new Map<string, number>()
+  const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
   const retire = async (key: string) => {
     const entry = bootstraps.get(key)
@@ -121,10 +121,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   }
   const retireSession = async (token: string) => {
     const session = sessions.get(token)
-    if (!session) return
+    if (!session) return await closedSessions.get(token)?.retired ?? false
     sessions.delete(token)
-    closedSessions.set(token, Date.now() + 60_000)
-    while (closedSessions.size > 128) closedSessions.delete(closedSessions.keys().next().value!)
     clearTimeout(session.timer)
     session.controller.abort()
     session.graphs?.close()
@@ -137,18 +135,26 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     const retireOperations = retireKinds.map(kind => {
       const operation = { kind, action: 'retire', sessionId: session.id }
       return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 })
+        .then(result => object(result)?.status === 'retired')
     })
     // Revoke even if opening is still in flight: the owner tombstones the
     // browser session before admitting a late result.
     if (session.rendererOpen !== undefined && options.rendererGateway !== undefined) {
-      retireOperations.push(owner.request({
-        kind: 'manager-renderer',
-        action: 'revoke',
-        gateway: options.rendererGateway,
-        browserSessionId: session.id,
-      }, { timeoutMs: 1_000 }))
+      retireOperations.push(
+        owner.request({
+          kind: 'manager-renderer',
+          action: 'revoke',
+          gateway: options.rendererGateway,
+          browserSessionId: session.id,
+        }, { timeoutMs: 1_000 }).then(result => object(result)?.status === 'ok'),
+      )
     }
-    await Promise.allSettled(retireOperations)
+    const retired = Promise.allSettled(retireOperations).then(results =>
+      results.every(result => result.status === 'fulfilled' && result.value)
+    )
+    closedSessions.set(token, { deadline: Date.now() + 60_000, retired })
+    while (closedSessions.size > 128) closedSessions.delete(closedSessions.keys().next().value!)
+    return await retired
   }
   const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
     const previous = sessions.get(token)
@@ -250,11 +256,15 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     if (previousSession === undefined || previousSession.deadline <= Date.now()) {
       if (
         previousSession === undefined && request.method === 'POST' && url.pathname === '/api/renderer/close'
-        && origin === `http://${authority}` && (closedSessions.get(token) ?? 0) > Date.now()
+        && origin === `http://${authority}` && (closedSessions.get(token)?.deadline ?? 0) > Date.now()
         && request.headers['content-type']?.startsWith('application/json')
       ) {
         const input = object(await body(request).catch(() => undefined))
-        if (input && Object.keys(input).length === 0) return json(response, 200, { closed: true })
+        if (input && Object.keys(input).length === 0) {
+          return await retireSession(token)
+            ? json(response, 200, { closed: true })
+            : json(response, 503, { error: 'RENDERER_CLOSE_UNAVAILABLE' })
+        }
       }
       await retireSession(token)
       return json(response, 401, { error: 'UNAUTHORIZED' })
@@ -439,8 +449,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       if (['/api/renderer/session', '/api/renderer/bootstrap', '/api/renderer/close'].includes(url.pathname)) {
         if (Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
         if (url.pathname === '/api/renderer/close') {
-          await retireSession(token)
-          return json(response, 200, { closed: true })
+          return await retireSession(token)
+            ? json(response, 200, { closed: true })
+            : json(response, 503, { error: 'RENDERER_CLOSE_UNAVAILABLE' })
         }
         if (!session.rendererBootstrap || !session.rendererOpen) {
           return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })

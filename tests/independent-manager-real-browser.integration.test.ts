@@ -185,6 +185,25 @@ it.skipIf(chrome === undefined)(
       }
       await change('plugin-enable', 'first-browser-plugin')
       await change('plugin-enable', 'dependent-browser-plugin')
+      // pagehide sends a keepalive revoke asynchronously. Wait for its owner
+      // receipt before starting the next unrelated package transaction. A
+      // disconnect during a transaction remains a separate fail-closed case.
+      const retire = async (page: CdpClient) => {
+        const status = await page.evaluate<number>(`(async () => {
+          const original = window.fetch.bind(window)
+          let finish
+          const receipt = new Promise(resolve => { finish = resolve })
+          window.fetch = (...args) => {
+            const result = original(...args)
+            if (args[0] === '/api/renderer/close') result.then(value => finish(value.status), () => finish(0))
+            return result
+          }
+          window.dispatchEvent(new Event('pagehide'))
+          return await receipt
+        })()`)
+        expect(status).toBe(200)
+      }
+      await retire(first)
       await second.send('Target.closeTarget', { targetId: firstTarget.targetInfo.targetId })
       await first.close().catch(() => undefined)
       first = undefined
@@ -195,6 +214,7 @@ it.skipIf(chrome === undefined)(
       }, { timeout: 20_000 })
       // Keep one unrelated blank target alive while both Manager seats close.
       const spare = await second.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
+      await retire(second)
       await second.send('Target.closeTarget', { targetId: created.targetId }).catch(() => undefined)
       await second.close().catch(() => undefined)
       second = undefined
