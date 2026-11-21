@@ -31,6 +31,7 @@ implementation of those contracts, not a second public specification.
 - [Use Codex CLI with CordisX model services](terminal-model-services.md): original terminal interaction, launch-time provider selection, and per-run instructions.
 - [Supplemental Codex CLI and tools](codex-cli.md): session execution settings, explicit creation defaults, provider-aware operations and shared service management.
 - [Independent manager](independent-manager.md): local browser management, owner scope, lifecycle, and candidate limitations.
+- [Automatic approval review models](approval-review-models.md): profile startup routes, same-provider review and native limitations.
 
 ## Develop and inspect plugins
 

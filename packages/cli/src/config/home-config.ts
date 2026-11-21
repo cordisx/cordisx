@@ -1,3 +1,4 @@
+import { type ApprovalReviewConfiguration, parseApprovalReviewConfiguration } from './approval-review-config.js'
 import { parseSkillSource } from '../launcher/configured-skills.js'
 import { type CodexCreationDefaults, parseCodexCreationDefaults } from '../codex-creation-settings.js'
 import { constants } from 'node:fs'
@@ -135,6 +136,7 @@ export interface HomeConfigProfile {
   /** Captured by all new chats in this profile; changing it never rewrites an existing chat. */
   readonly chatExecution?: ChatExecutionDefaults
   readonly chatCreation?: CodexCreationDefaults
+  readonly approvalReview?: ApprovalReviewConfiguration
   readonly dataMode: HomeDataMode
   /** Launch-scoped default for new native conversation drafts. */
   readonly defaultModelProvider?: string
@@ -424,6 +426,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'managedServiceStartupConfig',
     'chatExecution',
     'chatCreation',
+    'approvalReview',
   ], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
@@ -439,10 +442,12 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     : parseHomeConfigProfileManagement(profile.management, `${label}.management`)
   const chatExecution = parseChatExecutionDefaults(profile.chatExecution)
   const chatCreation = parseCodexCreationDefaults(profile.chatCreation)
+  const approvalReview = parseApprovalReviewConfiguration(profile.approvalReview)
   return {
     displayName,
     ...(chatExecution === undefined ? {} : { chatExecution }),
     ...(chatCreation === undefined ? {} : { chatCreation }),
+    ...(approvalReview === undefined ? {} : { approvalReview }),
     dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
     ...modelOptions,
     ...(managedProviders.length === 0 ? {} : { managedProviders }),

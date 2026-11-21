@@ -51,12 +51,15 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       )
       if (Object.keys(config).length) safe.config = config
       let prepared = object(await controlCall('execution-prepare', { method, params: safe }))
-      if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string' && readNative) {
+      if (
+        prepared.contextRequired && ['thread/resume', 'turn/start'].includes(method)
+        && typeof params.threadId === 'string' && readNative
+      ) {
         const context = {}
         const result = object(await readNative('thread/read', { threadId: params.threadId, includeTurns: false }))
         const thread = object(result.thread)
         if (thread.id !== params.threadId) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
-        for (const field of ['cwd', 'model', 'reasoningEffort']) {
+        for (const field of ['cwd', 'model', 'modelProvider', 'reasoningEffort']) {
           if (thread[field] !== undefined) context[field] = thread[field]
         }
         prepared = object(await controlCall('execution-prepare', { method, params: safe, context }))

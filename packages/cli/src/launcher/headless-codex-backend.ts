@@ -37,6 +37,7 @@ export async function startHeadlessCodexBackend(input: {
   readonly timeoutMs?: number
   readonly environment?: NodeJS.ProcessEnv
   readonly modelCatalogPath?: string
+  readonly modelCatalogPreserveProvider?: boolean
   readonly staticCatalog?: {
     readonly path: string
     readonly bytes: Uint8Array
@@ -69,6 +70,7 @@ export async function startHeadlessCodexBackend(input: {
     environment: { ...input.environment ?? process.env, HOME: input.home },
     experimentalApi: true,
     ...(input.modelCatalogPath ? { modelCatalogPath: input.modelCatalogPath } : {}),
+    ...(input.modelCatalogPreserveProvider ? { modelCatalogPreserveProvider: true } : {}),
   })
   try {
     const catalogReceipt = input.staticCatalog && server.requestWithReceipt

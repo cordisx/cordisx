@@ -1,3 +1,5 @@
+import { loadHomeConfig } from '../config/home-config.js'
+import { prepareApprovalReviewCatalog } from '../launcher/approval-review-catalog.js'
 import { managementMailboxRoot, pluginManagementRpcPaths } from '../launcher/management-rpc.js'
 import { HeadlessProjectCatalog } from '../launcher/headless-project-catalog.js'
 import { CodexChatConfiguration } from '../launcher/codex-chat-configuration.js'
@@ -205,6 +207,17 @@ export async function startHeadlessService(input: {
       environment: backendEnvironment,
     })
     if (catalog) cleanup.push(catalog.close)
+    const profileConfig = (await loadHomeConfig(input.configPath)).apps.codex?.profiles[input.profileId]
+    if (catalog && profileConfig?.approvalReview?.settings) throw new Error('REVIEW_CATALOG_BUDGET_CONFLICT')
+    const reviewCatalog = await prepareApprovalReviewCatalog({
+      settings: profileConfig?.approvalReview?.settings ?? undefined,
+      configPath: input.configPath,
+      nativeVersion: version.replace(/^codex-cli\s+/u, ''),
+    })
+    if (reviewCatalog) {
+      cleanup.push(reviewCatalog.close)
+      authority.execution?.bindReviewProvider(reviewCatalog.providerId, reviewCatalog.modelIds)
+    }
     let native: ChannelNativeSessions | undefined
     let channelTools: ChannelConversationTools | undefined
     const backend = await startHeadlessCodexBackend({
@@ -213,6 +226,7 @@ export async function startHeadlessService(input: {
       home: input.userHome,
       environment: backendEnvironment,
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
+      ...(reviewCatalog ? { modelCatalogPath: reviewCatalog.path, modelCatalogPreserveProvider: true } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
       contextObserver,
       onRequest: (method, params, id) =>
