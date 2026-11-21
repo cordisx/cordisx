@@ -47,6 +47,7 @@ import type { NativeResourceTransform } from './native-predispatch-interception.
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import { nativeManagedModelList } from './native-managed-model-list.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
@@ -626,6 +627,9 @@ export async function prepareNativeSubmissionBootstrap(
             const defaultModelId = models.find(model => model.id === provider.defaultModelId)?.id ?? models[0]!.id
             return [{ ...provider, models, defaultModelId }]
           })
+        control.bindManagedModelList(
+          nativeManagedModelList({ catalog, owns: id => id !== 'openai' && providerSources.source(id) === 'managed' }),
+        )
         if (remote) {
           control.bindUnmarkedProviderGuard(nativeRemoteUnmarkedGuard({
             localSource: id => {

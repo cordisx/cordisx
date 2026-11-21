@@ -10,6 +10,7 @@ import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeThreadSwitchError } from './native-thread-switch-error.js'
 import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import type { NativeManagedModelListRequest } from './native-managed-model-list.js'
 
 // Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
@@ -77,6 +78,7 @@ export interface NativeSubmissionControlServer {
     ) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>,
   ): void
   bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
+  bindManagedModelList(read: (input: NativeManagedModelListRequest) => Promise<unknown | undefined>): void
   bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
@@ -112,6 +114,7 @@ export async function startNativeSubmissionControlServer(
     | ((threadId: string) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>)
     | undefined
   let prepareConfigured: ((providerId?: string) => Promise<Readonly<Record<string, unknown>>>) | undefined
+  let readManagedModelList: ((input: NativeManagedModelListRequest) => Promise<unknown | undefined>) | undefined
   let unmarkedGuard: ((input: { threadId?: string; providerId?: string }) => Promise<boolean>) | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
@@ -568,6 +571,31 @@ export async function startNativeSubmissionControlServer(
         }
         return
       }
+      if (value.type === 'managed-model-list') {
+        if (
+          !authenticated || active >= 32 || !valid(value.providerId, 128)
+          || (value.limit != null && (!Number.isSafeInteger(value.limit) || Number(value.limit) < 1))
+          || (value.cursor != null && !valid(value.cursor, 256))
+          || (value.includeHidden != null && typeof value.includeHidden !== 'boolean')
+        ) throw new Error('Control unavailable')
+        active++
+        activeIds.add(value.id)
+        try {
+          const result = await readManagedModelList?.({
+            providerId: value.providerId,
+            ...(typeof value.limit === 'number' ? { limit: value.limit } : {}),
+            ...(typeof value.cursor === 'string' ? { cursor: value.cursor } : {}),
+            ...(typeof value.includeHidden === 'boolean' ? { includeHidden: value.includeHidden } : {}),
+          })
+          await write(socket, { id: value.id, ok: true, value: result ?? null })
+        } catch {
+          await write(socket, { id: value.id, ok: true, value: null })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
+        return
+      }
       if (value.type === 'hello') {
         if (authenticated || value.nonce !== nonce) throw new Error('Invalid control authentication')
         authenticated = true
@@ -812,6 +840,10 @@ export async function startNativeSubmissionControlServer(
     bindConfiguredProvider(value: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>) {
       if (prepareConfigured) throw new Error('Configured provider already bound')
       prepareConfigured = value
+    },
+    bindManagedModelList(value: (input: NativeManagedModelListRequest) => Promise<unknown | undefined>) {
+      if (readManagedModelList) throw new Error('Managed model list already bound')
+      readManagedModelList = value
     },
     bindController(value: NativeSubmissionController) {
       if (controller) throw new Error('Native controller already bound')
