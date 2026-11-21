@@ -103,6 +103,15 @@ it.skipIf(chrome === undefined)(
       first = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
       await first.send('Runtime.enable')
       await first.send('Page.enable')
+      // The startup migration is a real write. Its localStorage removal is the
+      // renderer's acknowledgement that the write and readback completed.
+      await first.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `if (location.origin === ${JSON.stringify(new URL(firstUrl).origin)}
+          && !sessionStorage.getItem('fixture-migration-seeded')) {
+          sessionStorage.setItem('fixture-migration-seeded', '1')
+          localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
+        }`,
+      })
       await first.send('Page.navigate', { url: firstUrl })
       const ready = async (page: CdpClient) =>
         await vi.waitFor(async () => {
@@ -116,12 +125,45 @@ it.skipIf(chrome === undefined)(
       await ready(first)
       const priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(priorResume).toMatch(/^[a-f0-9]{64}$/u)
-      await first.send('Page.reload')
+      const migrationComplete = async () => {
+        const config = JSON.parse(await readFile(path.join(homeDir, 'config.json'), 'utf8')) as {
+          apps?: {
+            codex?: { profiles?: { default?: { management?: { migrations?: { legacyBrowserSourcesV2?: boolean } } } } }
+          }
+        }
+        return config.apps?.codex?.profiles?.default?.management?.migrations?.legacyBrowserSourcesV2 === true
+      }
+      const migratedAtReady = await migrationComplete()
       await vi.waitFor(async () => {
-        const current = await first!.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
-        expect(current).toMatch(/^[a-f0-9]{64}$/u)
-        expect(current).not.toBe(priorResume)
-      }, { timeout: 20_000 })
+        expect(await first!.evaluate("localStorage.getItem('cordisx.manager.marketplaceSources.v2')")).toBeNull()
+      }, { timeout: 15_000 })
+      const migratedBeforeReload = await migrationComplete()
+      expect(migratedBeforeReload).toBe(true)
+      await first.send('Page.reload')
+      try {
+        await vi.waitFor(async () => {
+          const current = await first!.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
+          expect(current).toMatch(/^[a-f0-9]{64}$/u)
+          expect(current).not.toBe(priorResume)
+        }, { timeout: 20_000 })
+      } catch (error) {
+        const page = await first.evaluate(`({
+          status: document.querySelector('p[role=status]')?.textContent ?? '',
+          hasResume: sessionStorage.getItem('cordisx-manager-resume-id') !== null,
+          requests: performance.getEntriesByType('resource').filter(item =>
+            new URL(item.name).pathname.startsWith('/api/')
+          ).map(item => ({ path: new URL(item.name).pathname.replace(/[a-f0-9]{64}/g, '[id]'), status: item.responseStatus }))
+        })`)
+        throw new Error(
+          'Manager refresh did not resume: ' + JSON.stringify({
+            migratedAtReady,
+            migratedBeforeReload,
+            migratedAfterReload: await migrationComplete(),
+            page,
+          }),
+          { cause: error },
+        )
+      }
       await ready(first)
       expect(await first.evaluate('location.hash')).toBe('')
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }

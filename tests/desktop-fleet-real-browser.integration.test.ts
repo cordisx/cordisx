@@ -63,8 +63,8 @@ it.skipIf(chrome === undefined)(
     const homeDir = path.join(root, 'home')
     const configPath = path.join(homeDir, 'config.json')
     const chromeProfile = path.join(root, 'chrome-profile')
-    await mkdir(homeDir)
-    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
+    await mkdir(homeDir, { mode: 0o700 })
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
     const profileId = 'default'
     const generation = 'desktop-owner-browser-fixture'
     const processStartedAt = (await processStartIdentity(process.pid))!
