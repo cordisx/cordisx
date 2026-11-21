@@ -8,6 +8,7 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { loadServiceConfiguredArchive } from '../packages/cli/src/cli/service-renderer-projection.js'
+import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
 
 const temporary: string[] = []
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
@@ -101,6 +102,54 @@ describe('direct configured package provenance', () => {
       await expect(loadServiceConfiguredArchive(f.root, changed)).rejects.toThrow(
         'renderer-configured-archive-unavailable',
       )
+    }
+    const firstLifetime = new AbortController()
+    const secondLifetime = new AbortController()
+    const firstContext = {
+      profileId: 'default',
+      rendererId: 'a'.repeat(64),
+      ownerGeneration: 'generation',
+      signal: firstLifetime.signal,
+    }
+    const secondContext = { ...firstContext, rendererId: 'b'.repeat(64), signal: secondLifetime.signal }
+    const firstProjection = new ServiceRendererIdentityProjection({
+      homeDir: f.root,
+      context: firstContext,
+      isCurrent: () => true,
+    })
+    const secondProjection = new ServiceRendererIdentityProjection({
+      homeDir: f.root,
+      context: secondContext,
+      isCurrent: () => true,
+    })
+    try {
+      const alias = await firstProjection.issue(firstContext, plugin)
+      const other = await secondProjection.issue(secondContext, plugin)
+      expect(alias).not.toBe(other)
+      expect(alias).not.toContain(source)
+      expect(firstProjection.resolve(firstContext, alias, 'demo')).toMatchObject({ source, digest: staged.digest })
+      expect(() => secondProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(() => firstProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(() => firstProjection.resolve(firstContext, alias, 'other')).toThrow('renderer-identity-unavailable')
+      firstLifetime.abort()
+      expect(() => firstProjection.resolve(firstContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(secondProjection.resolve(secondContext, other, 'demo').digest).toBe(staged.digest)
+      let live = true
+      const pendingProjection = new ServiceRendererIdentityProjection({
+        homeDir: f.root,
+        context: secondContext,
+        isCurrent: () => live,
+      })
+      try {
+        const pending = pendingProjection.issue(secondContext, plugin)
+        live = false
+        await expect(pending).rejects.toThrow('renderer-identity-unavailable')
+      } finally {
+        pendingProjection.close()
+      }
+    } finally {
+      firstProjection.close()
+      secondProjection.close()
     }
     expect(plugin.manifestFiles).toEqual([archive])
     const composition = await buildRendererCompositionSource(config, {}, { omitPluginModules: true })
