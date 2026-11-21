@@ -19,6 +19,15 @@ export type ManagerRendererOperation =
     readonly browserSessionId: string
   }
   | ({ readonly kind: 'manager-renderer'; readonly action: 'close' } & ManagerRendererInvocation)
+  | ({ readonly kind: 'manager-renderer'; readonly action: 'admit' } & ManagerRendererInvocation)
+  | (
+    & { readonly kind: 'manager-renderer'; readonly action: 'poll'; readonly timeoutMs: number }
+    & ManagerRendererInvocation
+  )
+  | (
+    & { readonly kind: 'manager-renderer'; readonly action: 'acknowledge'; readonly receipt: unknown }
+    & ManagerRendererInvocation
+  )
   | (
     & {
       readonly kind: 'manager-renderer'
@@ -85,6 +94,21 @@ export function parseManagerRendererOperation(value: unknown): ManagerRendererOp
     keys(item, ['kind', 'action', 'gateway', 'browserSessionId', 'handle'])
     return { ...common, action: 'close', handle: handle(item.handle) }
   }
+  if (item.action === 'admit') {
+    keys(item, ['kind', 'action', 'gateway', 'browserSessionId', 'handle'])
+    return { ...common, action: 'admit', handle: handle(item.handle) }
+  }
+  if (item.action === 'poll') {
+    keys(item, ['kind', 'action', 'gateway', 'browserSessionId', 'handle', 'timeoutMs'])
+    if (!Number.isSafeInteger(item.timeoutMs) || Number(item.timeoutMs) < 1 || Number(item.timeoutMs) > 30_000) {
+      throw new Error('MANAGER_RENDERER_INVALID')
+    }
+    return { ...common, action: 'poll', handle: handle(item.handle), timeoutMs: Number(item.timeoutMs) }
+  }
+  if (item.action === 'acknowledge') {
+    keys(item, ['kind', 'action', 'gateway', 'browserSessionId', 'handle', 'receipt'])
+    return { ...common, action: 'acknowledge', handle: handle(item.handle), receipt: item.receipt }
+  }
   if (item.action === 'call') {
     keys(item, ['kind', 'action', 'gateway', 'browserSessionId', 'handle', 'channel', 'payload'])
     if (typeof item.channel !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/u.test(item.channel)) {
@@ -103,7 +127,9 @@ export async function dispatchManagerRendererOperation(
   const operation = parseManagerRendererOperation(input)
   if (operation.action === 'open') {
     const result = await authority.open(operation.gateway, operation.browserSessionId)
-    return result ? { status: 'ok', handle: result, channels: authority.channelNames() } : { status: 'unavailable' }
+    return result
+      ? { status: 'ok', handle: result, channels: authority.channelNames(), commands: authority.commandsAvailable() }
+      : { status: 'unavailable' }
   }
   if (operation.action === 'revoke') {
     return await authority.revoke(operation.gateway, operation.browserSessionId)
@@ -115,5 +141,8 @@ export async function dispatchManagerRendererOperation(
       ? { status: 'ok' }
       : { status: 'unavailable' }
   }
+  if (operation.action === 'admit') return await authority.admit(operation)
+  if (operation.action === 'poll') return await authority.poll(operation, operation.timeoutMs)
+  if (operation.action === 'acknowledge') return await authority.acknowledge(operation, operation.receipt)
   return await authority.call(operation, operation.channel, operation.payload)
 }

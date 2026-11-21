@@ -84,6 +84,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     managedServicesUsed: boolean
     channelCredentialsUsed: boolean
     rendererOpen?: Promise<ManagerRendererHandle | undefined>
+    rendererCommands: boolean
   }
   const sessions = new Map<string, BrowserSession>()
   let authority = ''
@@ -147,6 +148,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       controller: new AbortController(),
       managedServicesUsed,
       channelCredentialsUsed: false,
+      rendererCommands: false,
     }
     session.deadline = Date.now() + 8 * 60 * 60_000
     session.timer = timer
@@ -289,6 +291,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               result?.status !== 'ok' || !handle
               || !Array.isArray(result.channels) || result.channels.length !== 1
               || result.channels[0] !== 'plugin-management'
+              || result.commands !== undefined && typeof result.commands !== 'boolean'
               || typeof handle.rendererId !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.rendererId)
               || typeof handle.grant !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.grant)
               || handle.ownerGeneration !== owner.generation
@@ -310,6 +313,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               }, { timeoutMs: 1_000 }).catch(() => undefined)
               return undefined
             }
+            session.rendererCommands = result.commands === true
             return privateHandle
           } catch {
             return undefined
@@ -319,7 +323,49 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (!activeSession()) return revoked()
         return handle === undefined
           ? json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
-          : json(response, 200, { status: 'ok', profileId: owner.profileId, channels: ['plugin-management'] })
+          : json(response, 200, {
+            status: 'ok',
+            profileId: owner.profileId,
+            channels: ['plugin-management'],
+            // Public opaque identity is distinct from the private owner grant.
+            ...(session.rendererCommands
+              ? { commands: true, rendererId: handle.rendererId, generation: handle.ownerGeneration }
+              : {}),
+          })
+      }
+      if (['/api/renderer/admit', '/api/renderer/poll', '/api/renderer/acknowledge'].includes(url.pathname)) {
+        if (!session.rendererCommands || session.rendererOpen === undefined || options.rendererGateway === undefined) {
+          return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
+        }
+        const action = url.pathname.slice('/api/renderer/'.length)
+        if (
+          action === 'admit' && Object.keys(input).length !== 0
+          || action === 'poll' && (Object.keys(input).length !== 1
+              || !Number.isSafeInteger(input.timeoutMs) || Number(input.timeoutMs) < 1
+              || Number(input.timeoutMs) > 10_000)
+          || action === 'acknowledge' && (Object.keys(input).length !== 1
+              || !Object.hasOwn(input, 'receipt') || Buffer.byteLength(JSON.stringify(input)) > 196 * 1024)
+        ) return json(response, 400, { error: 'INVALID_REQUEST' })
+        const handle = await session.rendererOpen
+        if (!activeSession()) return revoked()
+        if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        const common = {
+          kind: 'manager-renderer' as const,
+          gateway: options.rendererGateway,
+          browserSessionId: session.id,
+          handle,
+        }
+        const operation: PluginManagementRpcOperation = action === 'admit'
+          ? { ...common, action: 'admit' }
+          : action === 'poll'
+          ? { ...common, action: 'poll', timeoutMs: Number(input.timeoutMs) }
+          : { ...common, action: 'acknowledge', receipt: input.receipt }
+        // Poll can hand out a command, and acknowledge can settle a mutation.
+        // If either response is lost the caller must reconcile, not retry it.
+        const result = object(await scopedRequest(operation, true))
+        if (result?.status === 'unknown') return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+        if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
+        return scopedReply(result.value)
       }
       if (url.pathname === '/api/renderer/binding') {
         if (

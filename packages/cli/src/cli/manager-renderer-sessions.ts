@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
+import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 
 /** Private to the owner RPC and sidecar memory. Never serialize to the browser. */
 export interface ManagerRendererHandle {
@@ -45,6 +46,8 @@ interface Session {
   readonly handle: ManagerRendererHandle
   readonly controller: AbortController
   readonly timer: ReturnType<typeof setTimeout>
+  peer?: ManagerRendererCommandPeer
+  admission?: Promise<boolean>
   inFlight: number
 }
 
@@ -77,6 +80,15 @@ export class ManagerRendererSessions {
       readonly ownerCurrent: () => boolean
       readonly authenticateGateway: (proof: ManagerRendererGatewayProof) => Promise<boolean>
       readonly channels?: ReadonlyMap<string, ManagerRendererChannel>
+      /** The owner alone may enable a lifecycle participant and its admission. */
+      readonly participant?: {
+        readonly create: (input: {
+          readonly gateway: ManagerRendererGatewayProof
+          readonly browserSessionId: string
+          readonly handle: ManagerRendererHandle
+        }) => ManagerRendererCommandPeer
+        readonly attach: (peer: ManagerRendererCommandPeer) => Promise<void>
+      }
       readonly maxSessions?: number
       readonly sessionLifetimeMs?: number
       readonly monitorIntervalMs?: number
@@ -99,11 +111,16 @@ export class ManagerRendererSessions {
     return [...this.channels.keys()]
   }
 
+  commandsAvailable(): boolean {
+    return this.input.participant !== undefined
+  }
+
   private retire(session: Session): void {
     if (this.sessions.get(session.handle.rendererId) !== session) return
     this.sessions.delete(session.handle.rendererId)
     clearTimeout(session.timer)
     session.controller.abort()
+    session.peer?.close()
     if (this.sessions.size === 0 && this.monitor !== undefined) {
       clearInterval(this.monitor)
       this.monitor = undefined
@@ -171,8 +188,105 @@ export class ManagerRendererSessions {
     session = { gateway: { ...gateway }, browserSessionId, handle, controller, timer, inFlight: 0 }
     this.usedBrowserSessions.add(browserSessionId)
     this.sessions.set(handle.rendererId, session)
+    if (this.input.participant !== undefined) {
+      try {
+        const peer = this.input.participant.create({ gateway: session.gateway, browserSessionId, handle })
+        if (
+          peer.closed || peer.sessionId !== browserSessionId || peer.identity.rendererId !== handle.rendererId
+          || peer.identity.pid !== gateway.pid || peer.identity.processStartedAt !== gateway.processStartedAt
+          || peer.scope.profileId !== this.input.profileId || peer.scope.generation !== this.input.ownerGeneration
+        ) {
+          peer.close()
+          throw new Error('renderer-peer-unavailable')
+        }
+        session.peer = peer
+        peer.onDisconnect(() => this.retire(session))
+      } catch {
+        this.retire(session)
+        return undefined
+      }
+    }
     this.startMonitor()
     return { ...handle }
+  }
+
+  /** Begin federation only after the browser has started polling for synchronize. */
+  async admit(invocation: ManagerRendererInvocation): Promise<ManagerRendererCallResult> {
+    const session = this.lookup(invocation)
+    const peer = session?.peer
+    const participant = this.input.participant
+    if (!session || !peer || !participant || !this.current(session) || session.inFlight >= 8) {
+      return { status: 'unavailable' }
+    }
+    session.inFlight++
+    try {
+      if (!await this.authenticated(session.gateway) || !this.current(session)) return { status: 'unavailable' }
+      session.admission ??= Promise.resolve().then(() => participant.attach(peer)).then(() => true).catch(() => {
+        peer.close()
+        return false
+      })
+      const attached = await session.admission
+      if (!attached || !this.current(session) || peer.closed || !await this.authenticated(session.gateway)) {
+        peer.close()
+        return { status: 'unavailable' }
+      }
+      return this.current(session) ? { status: 'ok', value: { admitted: true } } : { status: 'unavailable' }
+    } finally {
+      session.inFlight--
+    }
+  }
+
+  /** One owner command may be handed to this session at most once. */
+  async poll(invocation: ManagerRendererInvocation, timeoutMs: number): Promise<ManagerRendererCallResult> {
+    const session = this.lookup(invocation)
+    const peer = session?.peer
+    if (!session || !peer || !this.current(session) || session.inFlight >= 8) return { status: 'unavailable' }
+    session.inFlight++
+    let offered = false
+    try {
+      if (!await this.authenticated(session.gateway) || !this.current(session)) return { status: 'unavailable' }
+      const command = await peer.next({ signal: session.controller.signal, timeoutMs })
+      offered = command !== undefined
+      if (!this.current(session) || peer.closed || !await this.authenticated(session.gateway)) {
+        if (offered) peer.close()
+        return { status: offered ? 'unknown' : 'unavailable' }
+      }
+      if (!this.current(session)) {
+        if (offered) peer.close()
+        return { status: offered ? 'unknown' : 'unavailable' }
+      }
+      return { status: 'ok', value: { command: command ?? null } }
+    } catch {
+      // A command may have been offered; never replay it after transport loss.
+      if (offered) peer.close()
+      return { status: offered ? 'unknown' : 'unavailable' }
+    } finally {
+      session.inFlight--
+    }
+  }
+
+  /** Acknowledgements are consumed once and never automatically retried. */
+  async acknowledge(invocation: ManagerRendererInvocation, receipt: unknown): Promise<ManagerRendererCallResult> {
+    const session = this.lookup(invocation)
+    const peer = session?.peer
+    if (!session || !peer || !this.current(session) || session.inFlight >= 8) return { status: 'unavailable' }
+    session.inFlight++
+    let consumed = false
+    try {
+      if (!await this.authenticated(session.gateway) || !this.current(session)) return { status: 'unavailable' }
+      const encoded = JSON.stringify(receipt)
+      if (encoded === undefined || Buffer.byteLength(encoded) > 196 * 1024) return { status: 'unavailable' }
+      consumed = peer.acknowledge(receipt)
+      if (!consumed) return { status: 'unavailable' }
+      if (!this.current(session) || peer.closed || !await this.authenticated(session.gateway)) {
+        return { status: 'unknown' }
+      }
+      return this.current(session) ? { status: 'ok', value: { accepted: true } } : { status: 'unknown' }
+    } catch {
+      return { status: consumed ? 'unknown' : 'unavailable' }
+    } finally {
+      session.inFlight--
+    }
   }
 
   private lookup(invocation: ManagerRendererInvocation): Session | undefined {
