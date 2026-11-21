@@ -384,7 +384,7 @@ export class ManagerRendererSessions {
    * Freeze new Manager writes and admissions before a profile owner drains its
    * other writers and consumers. This does not itself cover non-Manager paths.
    */
-  async suspendMutations(timeoutMs = 15_000): Promise<{ release(): boolean; fence(): void }> {
+  async suspendMutations(timeoutMs = 15_000): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }> {
     if (
       !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
       || this.writeContext.getStore() !== undefined
@@ -400,17 +400,19 @@ export class ManagerRendererSessions {
       throw new Error('renderer-mutation-fence-unavailable')
     }
     let ended = false
+    const current = () =>
+      !ended && this.alive() && !this.mutationsFenced && !this.mutationUncertain && this.mutationFence === reservation
+      && this.writesInFlight === 0
     return {
+      isCurrent: current,
       release: () => {
         if (ended) return false
-        ended = true
-        if (
-          !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== reservation
-          || this.writesInFlight !== 0
-        ) {
+        if (!current()) {
+          ended = true
           this.fenceMutations()
           return false
         }
+        ended = true
         this.mutationFence = undefined
         return true
       },

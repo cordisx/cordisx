@@ -3,6 +3,9 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { ManagerRendererCommandPeer } from '../packages/cli/src/cli/manager-renderer-peer.js'
+import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
+import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
+import { fenceManagerConsumers } from '../packages/cli/src/cli/manager-consumer-fence.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -284,6 +287,77 @@ async function fixture(options: {
     },
   }
 }
+
+it('fences lifecycle writes and new seats only when every existing peer is accounted for', async () => {
+  const f = await fixture()
+  try {
+    const first = await f.attach('first')
+    expect(() => f.lifecycle.reserveExternalMutation([])).toThrow('service renderer fence is unavailable')
+    const lease = f.lifecycle.reserveExternalMutation([first.peer])
+    expect(lease.isCurrent()).toBe(true)
+    expect(() => f.lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
+    const stranger = new ManagerRendererCommandPeer({
+      scope: f.scope,
+      identity: {
+        appId: 'codex',
+        adapterId: 'other',
+        rendererId: 'second',
+        pid: process.pid,
+        processStartedAt: 'fixture',
+      },
+      sessionId: secret(),
+    })
+    await expect(f.lifecycle.attach(stranger)).rejects.toThrow('service renderer attachment is unavailable')
+    expect(stranger.closed).toBe(true)
+    first.peer.close()
+    expect(lease.isCurrent()).toBe(true)
+    expect(lease.release()).toBe(true)
+    const next = await f.attach('after-release')
+    next.peer.close()
+  } finally {
+    await f.close()
+  }
+}, 30_000)
+
+it('does not reserve a fence during an existing transaction and stays closed after uncertainty', async () => {
+  const f = await fixture()
+  try {
+    f.lifecycle.prepare('in-progress')
+    expect(() => f.lifecycle.reserveExternalMutation([])).toThrow('service renderer lifecycle is unavailable')
+    await f.lifecycle.abort('in-progress')
+    const lease = f.lifecycle.reserveExternalMutation([])
+    lease.fence()
+    expect(lease.isCurrent()).toBe(false)
+    expect(() => f.lifecycle.snapshot()).toThrow('service renderer lifecycle is unavailable')
+  } finally {
+    await f.close()
+  }
+}, 30_000)
+
+it('refuses a Manager fence while an unaccounted adapter is attached', async () => {
+  const f = await fixture()
+  const participants = new ServiceRendererParticipants(f.scope)
+  participants.bind(f.lifecycle)
+  const sessions = new ManagerRendererSessions({
+    profileId: f.scope.profileId,
+    ownerGeneration: f.scope.generation,
+    ownerCurrent: () => true,
+    authenticateGateway: async () => true,
+    participant: participants.participant,
+  })
+  try {
+    const foreign = await f.attach('unaccounted-adapter')
+    await expect(fenceManagerConsumers({ sessions, participants, lifecycle: f.lifecycle }))
+      .rejects.toThrow('manager-consumer-fence-unavailable')
+    expect(foreign.peer.closed).toBe(false)
+    expect(await sessions.open({ pid: 42, processStartedAt: 'fixture', instanceToken: secret() }, secret()))
+      .toBeDefined()
+  } finally {
+    sessions.dispose()
+    participants.close()
+    await f.close()
+  }
+}, 30_000)
 
 it('uses one real package authority across zero, two, and zero renderer peers', async () => {
   const f = await fixture()

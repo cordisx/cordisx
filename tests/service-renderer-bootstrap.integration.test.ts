@@ -430,7 +430,11 @@ it('waits for the actual Manager runtime to quiesce before releasing owner admis
     )
     expect((await admitting).status).toBe('ok')
 
-    const quiescence = fenceManagerConsumers({ sessions: f.sessions, participants: f.participants })
+    const quiescence = fenceManagerConsumers({
+      sessions: f.sessions,
+      participants: f.participants,
+      lifecycle: f.lifecycle,
+    })
     void quiescence.catch(() => {})
     const polled = await f.sessions.poll(f.invocation, 3000) as any
     expect(polled.value.command.method).toBe('quiesce')
@@ -449,6 +453,9 @@ it('waits for the actual Manager runtime to quiesce before releasing owner admis
     expect((await f.sessions.acknowledge(f.invocation, receipt)).status).toBe('ok')
     expect(await f.sessions.close(f.invocation)).toBe(true)
     const lease = await quiescence
+    expect(lease.isCurrent()).toBe(true)
+    expect(() => f.lifecycle.prepare('blocked-while-fenced')).toThrow('service renderer fence is active')
+    expect(f.lifecycle.snapshot().active.profileId).toBe(f.profileId)
     expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
     expect(lease.release()).toBe(true)
     expect(await f.sessions.open(f.gateway, secret())).toBeDefined()

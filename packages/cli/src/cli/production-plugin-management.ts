@@ -19,12 +19,13 @@ import { createManagerRendererManagementChannel } from './manager-renderer-manag
 import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
 import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
   /** Owner-only Manager portion of a wider profile mutation barrier. */
-  readonly fenceManagers?: () => Promise<{ release(): boolean; fence(): void }>
+  readonly fenceManagers?: () => Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
   close(): Promise<void>
 }
 export async function openProductionPluginManagementComposition(input: {
@@ -47,6 +48,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
   /** Must be the registry that issued rendererParticipant, never page supplied. */
   readonly rendererParticipants?: ServiceRendererParticipants
+  readonly rendererLifecycle?: ServiceRendererLifecycle
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
   /** Owner-issued, per-renderer read-only managed-service UI bridge. */
@@ -54,6 +56,9 @@ export async function openProductionPluginManagementComposition(input: {
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
+    throw new Error('manager-consumer-fence-scope-invalid')
+  }
+  if (input.rendererLifecycle && !input.rendererParticipants?.isBoundTo(input.rendererLifecycle)) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
   const service = await openPluginManagementService({
@@ -136,7 +141,11 @@ export async function openProductionPluginManagementComposition(input: {
     ...(input.rendererParticipants === undefined ? {} : {
       fenceManagers: async () => {
         if (closed) throw new Error('manager-consumer-fence-unavailable')
-        return await fenceManagerConsumers({ sessions: rendererSessions, participants: input.rendererParticipants! })
+        return await fenceManagerConsumers({
+          sessions: rendererSessions,
+          participants: input.rendererParticipants!,
+          ...(input.rendererLifecycle ? { lifecycle: input.rendererLifecycle } : {}),
+        })
       },
     }),
     async close(): Promise<void> {

@@ -51,6 +51,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   private reservation: { id: string; mode: Mode; invalid: boolean; ready: boolean } | undefined
   private transaction: ActiveTransaction | undefined
   private pendingAdoption: { mode: Mode; epoch: number } | undefined
+  private externalFence: symbol | undefined
   private terminalFailure = false
   private closed = false
 
@@ -108,6 +109,49 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     return { active: structuredClone(this.active!), registryEpoch: this.registryEpoch }
   }
 
+  /**
+   * Freeze lifecycle mutations and new attachments only if the owner has a
+   * way to quiesce every currently attached peer. Other profile writers still
+   * require their own barrier before an external mutation can proceed.
+   */
+  reserveExternalMutation(peers: readonly AttachedRendererPeer[]): {
+    isCurrent(): boolean
+    release(): boolean
+    fence(): void
+  } {
+    this.assertIdle()
+    if (
+      this.externalFence !== undefined || new Set(peers).size !== peers.length
+      || [...this.members.values()].some(member => !peers.includes(member.peer))
+    ) throw new Error('service renderer fence is unavailable')
+    const reservation = Symbol('service-renderer-fence')
+    const active = structuredClone(this.active!)
+    const epoch = this.registryEpoch
+    this.externalFence = reservation
+    let ended = false
+    const current = () =>
+      !this.closed && !this.requiresReconciliation && this.externalFence === reservation && !this.transaction
+      && !this.reservation && this.joining === 0 && this.registryEpoch === epoch && attachmentEqual(this.active, active)
+    return {
+      isCurrent: current,
+      release: () => {
+        if (ended) return false
+        ended = true
+        if (!current()) {
+          this.terminal(new Error('service renderer fence became uncertain'))
+          return false
+        }
+        this.externalFence = undefined
+        return true
+      },
+      fence: () => {
+        if (ended) return
+        ended = true
+        this.terminal(new Error('service renderer fence became uncertain'))
+      },
+    }
+  }
+
   /** Trusted owner cleanup hook, called only after every renderer has finalized. */
   onActivationFinalized(listener: (active: CordisXPluginActivationRecordV1) => void): () => void {
     if (this.closed) throw new Error('service renderer lifecycle is unavailable')
@@ -137,7 +181,8 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
       throw new Error('service renderer attachment is disabled')
     }
     if (
-      !this.initialized || !this.active || this.closed || this.requiresReconciliation || this.reservation
+      !this.initialized || !this.active || this.closed || this.requiresReconciliation || this.externalFence
+      || this.reservation
       || this.transaction
       || this.members.has(peer.identity.rendererId) || peer.closed
     ) {
@@ -176,6 +221,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
 
   async preflight(input: PluginRuntimePreflight): Promise<void> {
     this.assertIdle()
+    if (this.externalFence) throw new Error('service renderer fence is active')
     if (!attachmentEqual(normalizePluginActivation(input.previous), this.active)) {
       throw new Error('service renderer owner activation is stale')
     }
@@ -198,6 +244,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   prepare(transactionId: string) {
+    if (this.externalFence) throw new Error('service renderer fence is active')
     // A concurrent caller cannot consume or cancel a preflight which is still
     // resolving the participant projections.
     if (this.reservation?.id === transactionId && !this.reservation.ready) {
@@ -362,7 +409,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async recoverRollback(plan: Parameters<NonNullable<PluginLifecycleRuntime['recoverRollback']>>[0]) {
-    if (this.closed || this.transaction || this.members.size > 0) {
+    if (this.closed || this.externalFence || this.transaction || this.members.size > 0) {
       throw new Error('service renderer recovery is unavailable')
     }
     const result = await this.headless.recoverRollback!(plan)
@@ -395,6 +442,9 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
+    if (this.externalFence) {
+      throw new Error('service renderer fence is active')
+    }
     return await this.headless.reload(input)
   }
 

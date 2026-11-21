@@ -204,6 +204,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           coordinator,
           rendererParticipant: rendererParticipants.participant,
           rendererParticipants,
+          rendererLifecycle,
           rendererBootstrap: rendererBootstrap.channel(),
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
           mode: 'service',

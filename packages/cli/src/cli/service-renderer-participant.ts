@@ -31,6 +31,18 @@ export class ServiceRendererParticipants {
     this.lifecycle = lifecycle
   }
 
+  /** Owner-only checks used to bind the fence to this exact lifecycle fleet. */
+  isBoundTo(lifecycle: Pick<OwnerRendererLifecycle, 'snapshot' | 'attach'>): boolean {
+    return !this.closed && this.lifecycle === lifecycle
+  }
+
+  ownerPeers(): readonly ManagerRendererCommandPeer[] {
+    if (this.closed || this.fenced || this.quiescence !== undefined || !this.lifecycle) {
+      throw new Error('renderer-quiescence-unavailable')
+    }
+    return [...this.entries.values()].map(entry => entry.peer)
+  }
+
   readonly participant = {
     create: (input: {
       readonly gateway: ManagerRendererGatewayProof
@@ -105,7 +117,7 @@ export class ServiceRendererParticipants {
    * lease. This is only one part of a profile barrier: the caller must also
    * fence other consumers and writers and drain their in-flight operations.
    */
-  async quiesceManagers(): Promise<{ release(): boolean; fence(): void }> {
+  async quiesceManagers(): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }> {
     if (this.closed || this.fenced || this.quiescence !== undefined || !this.lifecycle) {
       throw new Error('renderer-quiescence-unavailable')
     }
@@ -118,10 +130,13 @@ export class ServiceRendererParticipants {
         throw new Error('renderer-quiescence-unavailable')
       }
       let ended = false
+      const current = () =>
+        !ended && !this.closed && !this.fenced && this.quiescence === reservation && this.entries.size === 0
       return {
+        isCurrent: current,
         release: () => {
           if (ended) return false
-          if (this.closed || this.fenced || this.quiescence !== reservation || this.entries.size !== 0) {
+          if (!current()) {
             ended = true
             this.fenced = true
             this.disconnectAll()

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import { fenceManagerConsumers } from '../packages/cli/src/cli/manager-consumer-fence.js'
+import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
 
 const secret = () => randomBytes(32).toString('hex')
 const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
@@ -196,5 +197,25 @@ it('keeps the Manager write fence closed when a consumer cannot confirm cleanup'
   } finally {
     authority.dispose()
     participants.close()
+  }
+})
+
+it('rejects a mismatched lifecycle without freezing an unrelated Manager authority', async () => {
+  const scope = { homeDigest: 'a'.repeat(64), ownerAppId: 'codex', profileId: 'work', generation: 'owner-1' }
+  const participants = new ServiceRendererParticipants(scope)
+  participants.bind({
+    snapshot: () => ({ active: { plugins: [] }, registryEpoch: 0 }) as never,
+    attach: async () => {},
+  })
+  const lifecycle = new ServiceRendererLifecycle({ scope })
+  const { authority, open } = fixture(async () => 'written')
+  try {
+    await expect(fenceManagerConsumers({ sessions: authority, participants, lifecycle }))
+      .rejects.toThrow('manager-consumer-fence-scope-invalid')
+    expect(await open()).toBeDefined()
+  } finally {
+    authority.dispose()
+    participants.close()
+    await lifecycle.close()
   }
 })
