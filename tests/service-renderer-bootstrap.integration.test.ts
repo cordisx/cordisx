@@ -11,6 +11,8 @@ import {
 } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import * as homeConfigLoader from '../packages/cli/src/config/home-config.js'
+import * as configLoader from '../packages/cli/src/launcher/config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
@@ -578,6 +580,62 @@ it('retires a late graph lease when the session is revoked during prepare', asyn
     await f.close()
   }
 }, 30_000)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'holds profile fences until an in-flight configuration check retires',
+  async () => {
+    const f = await fixture({ protectProfileInputs: true })
+    const entered = defer<void>()
+    const release = defer<void>()
+    const loadConfig = configLoader.loadConfig
+    let spy: ReturnType<typeof vi.spyOn> | undefined
+    let policySpy: ReturnType<typeof vi.spyOn> | undefined
+    try {
+      expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+      spy = vi.spyOn(configLoader, 'loadConfig').mockImplementation(async (...args) => {
+        entered.resolve()
+        await release.promise
+        return await loadConfig(...args)
+      })
+      policySpy = vi.spyOn(homeConfigLoader, 'loadHomeConfig').mockRejectedValueOnce(new Error('fixture read failed'))
+      let checked = false
+      const checking = f.call({ action: 'status' }).then(result => {
+        checked = true
+        return result
+      })
+      await entered.promise
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(checked).toBe(false)
+      let closed = false
+      const closing = f.sessions.close(f.invocation).then(result => {
+        closed = true
+        return result
+      })
+      let bootstrapClosed = false
+      const closingBootstrap = f.bootstrap.close().then(result => {
+        bootstrapClosed = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(closed).toBe(false)
+      expect(bootstrapClosed).toBe(false)
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), f.configPath)).rejects.toThrow('plugin configuration is in use')
+      release.resolve()
+      expect(await checking).toEqual({ status: 'unavailable' })
+      expect(await closing).toBe(true)
+      expect(await closingBootstrap).toBe(true)
+    } finally {
+      release.resolve()
+      spy?.mockRestore()
+      policySpy?.mockRestore()
+      await f.close()
+    }
+  },
+  30_000,
+)
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   'waits for a late bootstrap and profile locks before acknowledging renderer retirement',

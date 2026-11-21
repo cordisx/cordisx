@@ -72,11 +72,16 @@ it('attaches the real management composition to one existing Desktop owner and r
     store,
     ownerVerified: true,
     attach: false,
-    configuredPluginCount: 0,
+    configuredPlugins: [],
   }
   expect(await createDesktopManagerOwnerIfEligible({ ...eligibility, ownerVerified: false })).toBeUndefined()
   expect(await createDesktopManagerOwnerIfEligible({ ...eligibility, attach: true })).toBeUndefined()
-  expect(await createDesktopManagerOwnerIfEligible({ ...eligibility, configuredPluginCount: 1 })).toBeUndefined()
+  expect(
+    await createDesktopManagerOwnerIfEligible({
+      ...eligibility,
+      configuredPlugins: [{ id: 'other', entry: '/fixture/other.js', enabled: true, config: {} }],
+    }),
+  ).toBeUndefined()
   const before = await store.loadActive()
   const loadActive = vi.spyOn(store, 'loadActive').mockResolvedValueOnce({ ...before, plugins: [{} as never] })
   expect(await createDesktopManagerOwnerIfEligible(eligibility)).toBeUndefined()
@@ -238,12 +243,12 @@ it('attaches the real management composition to one existing Desktop owner and r
     unregister()
     unregister = undefined
     expect(() => owner.lifecycle.snapshot()).toThrow('unavailable')
-    owner.close()
+    await owner.close()
     expect(() => owner.lifecycle.snapshot()).toThrow('unavailable')
   } finally {
     await composition?.close().catch(() => undefined)
     unregister?.()
-    owner.close()
+    await owner.close()
     await managed.dispose()
     await (dom?.window as any)?.__cordisxRuntime?.dispose()
     managerDom?.window.close()

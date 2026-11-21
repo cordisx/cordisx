@@ -15,7 +15,7 @@ const CHANNEL_PERMISSIONS = new Set([
   'channel.attachments.read',
 ])
 
-function supportedPlugin(plugin: CordisXConfigPlugin): boolean {
+export function supportsReadonlyConfiguredChannel(plugin: CordisXConfigPlugin): boolean {
   const config = plugin.config
   const manifest = plugin.manifest
   if (
@@ -94,7 +94,9 @@ export async function openReadonlyHeadlessChannel(input: {
     }, input.configPath)
   const read = async (): Promise<LocalChannelManagementSnapshot | undefined> => {
     try {
-      if (!supportedPlugin(input.plugin) || !await current()) throw new Error('channel-owner-unavailable')
+      if (!supportsReadonlyConfiguredChannel(input.plugin) || !await current()) {
+        throw new Error('channel-owner-unavailable')
+      }
       const before = await state()
       const fingerprint = JSON.stringify(before)
       if (

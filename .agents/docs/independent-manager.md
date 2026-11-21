@@ -34,20 +34,21 @@ Manager and plugin registration instead of the default preview pages. It is not
 the default experience. With a service owner, it supports capability-free v1
 package graphs and initial read-only access to host-owned v14 managed backends
 that have no declared permissions, plugin configuration or documents. Dynamic
-changes to those managed packages remain unavailable. With a Desktop owner, the
-experiment currently admits only an empty profile that has no configured or
-installed plugins, already has a ready Desktop renderer, and owns the profile
-exclusively. Package and configuration mutations are unavailable while a
-Manager renderer is attached. With a service owner on macOS or Linux, one
-configured Channel archive may also appear as a read-only page when its staged
-browser graph, live service owner and existing source-specific Manager UI
-permissions match. The Host page does not yet support Channel credential or
+changes to those managed packages remain unavailable. A Desktop owner must own
+the profile exclusively, have a ready Desktop renderer, not be in attach mode,
+and have no installed plugin packages. It can admit an empty profile or one
+configured Channel archive. On macOS or Linux, either owner can project that
+Channel as a read-only page when its staged browser graph has an initial
+stylesheet and its live service owner and existing source-specific Manager UI
+permissions match. Legacy Channel graphs without a standalone stylesheet are
+not admitted. Package and configuration mutations are unavailable while a
+Manager renderer is attached. The Host page does not yet support Channel credential or
 configuration writes. Other configured plugins, adapters, concurrent permission
 changes and recovery after an uncertain result are not yet supported. The
 isolated browser tests do not constitute real Codex App validation.
 
-The experimental Host page in service mode and the eligible empty-profile
-Desktop mode can read and save shared model-service declarations through the
+The experimental Host page in service mode and the eligible Desktop mode can
+read and save shared model-service declarations through the
 existing Manager form when the owner advertises the safe-write contract. The
 Desktop path depends on its native settings authority being ready. Edits use the
 owner's revision and credential protection; they retain the app-restart apply
@@ -123,8 +124,8 @@ compiled service owner, actual isolated Codex app-server, authenticated sidecar,
 refresh, profile write fences and owner restart with an isolated simulator.
 This does not validate real Channel credentials, the current user's profile,
 the native Desktop renderer or another adapter. Archives without a staged
-browser graph are unavailable, and permissions from another source are not
-reused.
+browser graph and an initial Channel stylesheet are unavailable, and
+permissions from another source are not reused.
 
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and
@@ -147,8 +148,9 @@ admitting another renderer. An uncertain review keeps coordination closed.
 Other permission writers and native or external consumers are not yet covered
 by a profile-wide barrier.
 
-On macOS and Linux, an experimental service-mode renderer also holds
-profile-scoped fences while its startup snapshot is in use. Current Home
+On macOS and Linux, an experimental service-mode renderer or an eligible
+configured-Channel Desktop renderer holds profile-scoped fences while its
+startup snapshot is in use. Current Home
 configuration writers reject changes to that profile's persisted permissions
 and selected configured-plugin or service configuration until its Manager
 renderers retire. A change that affects only another profile remains available.
@@ -157,9 +159,9 @@ Manager. Older or non-cooperating writers, Windows, package-owned configuration,
 external archive changes and other consumers are not synchronized by these
 fences.
 
-Service-owner renderer revocation waits for any pending bootstrap, owner graph
-leases, dispatched writes and profile fences to finish retiring before it
-acknowledges the close. A write still in flight when its renderer disconnects
+Renderer revocation waits for any pending bootstrap, configuration and policy
+checks, owner graph leases, dispatched writes and profile fences to finish
+retiring before it acknowledges the close. A write still in flight when its renderer disconnects
 has an uncertain outcome; its profile fences stay held until that write settles.
 New admissions and coordinated sidecar writes remain unavailable during that
 cleanup; an unconfirmed result keeps them closed.

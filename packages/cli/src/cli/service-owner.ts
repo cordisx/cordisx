@@ -274,7 +274,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         for (
           const close of [
             () => api?.close(),
-            () => rendererBootstrap?.close(),
+            async () => {
+              if (rendererBootstrap && !await rendererBootstrap.close()) {
+                throw new Error('renderer-bootstrap-retirement-unconfirmed')
+              }
+            },
             () => rendererReadonlyChannel?.close(),
             () => rendererManagedServiceUI?.dispose(),
             () => rendererParticipants?.close(),

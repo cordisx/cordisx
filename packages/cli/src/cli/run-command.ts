@@ -260,7 +260,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       store: lifecycleStore,
       ownerVerified: releaseRuntimeOwner !== undefined,
       attach: invocation.options.attach,
-      configuredPluginCount: configuredComposition.plugins.length,
+      configuredPlugins: configuredComposition.plugins,
       codex: nativeCodexOperations(() => nativeSubmission),
     })
     const platformRuntime = new PlatformProviderPluginLifecycleRuntime(desktopManager?.lifecycle ?? lifecycleRuntime)
@@ -356,6 +356,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       generation: lifecycleGeneration,
       environment: runtime.env ?? process.env,
     }, { runtimeGeneration: lifecycleGeneration, profileOwnerVerified: releaseRuntimeOwner !== undefined })
+    if (channel.plugin && channel.service) desktopManager?.bindConfiguredChannel(channel.plugin, channel.service)
     const channelService = channel.service
     const { consumer: channelConsumer, tools: channelTools, dispose: disposeChannel } =
       await createConfiguredChannelConsumer({
@@ -975,7 +976,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     try {
       startupLifetime.abort()
       if (desktopManager) await productionPluginManagement?.close().catch(() => undefined)
-      desktopManager?.close()
+      if (desktopManager && !await desktopManager.close()) {
+        stdout('[cordisx] Manager resource retirement could not be confirmed.')
+      }
       const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
       await nativeSubmissionBootstrap?.close().catch(() => undefined)
       const host = prelaunchedHostHandedOff ? undefined : prelaunchedHost

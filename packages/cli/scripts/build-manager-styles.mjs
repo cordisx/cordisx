@@ -30,10 +30,24 @@ export { EMPTY_STATE_ILLUSTRATION_STYLES, EMPTY_STATE_STYLES } from './src/rende
   ) throw new Error('Host Manager stylesheet is unavailable')
   const pageHeaderActions = await readFile(path.join(root, 'src/renderer/page-header-actions.css'), 'utf8')
   const standalone = await readFile(path.join(root, 'src/renderer/manager/manager-standalone.css'), 'utf8')
+  // ModelServicesPage normally inserts these after the Manager shell. Keep
+  // that cascade order when strict CSP requires the same-origin asset.
+  const modelStyles = await Promise.all([
+    'src/renderer/model-providers.css',
+    'src/renderer/manager/pages/model-services.css',
+    'src/renderer/manager/pages/model-catalog/model-catalog.css',
+  ].map(file => readFile(path.join(root, file), 'utf8')))
   await mkdir(path.dirname(output), { recursive: true })
   await writeFile(
     output,
-    `${REACT_MANAGER_STYLES}\n${pageHeaderActions}\n${EMPTY_STATE_ILLUSTRATION_STYLES}\n${EMPTY_STATE_STYLES}\n${standalone}`,
+    [
+      REACT_MANAGER_STYLES,
+      pageHeaderActions,
+      EMPTY_STATE_ILLUSTRATION_STYLES,
+      EMPTY_STATE_STYLES,
+      standalone,
+      ...modelStyles,
+    ].join('\n'),
   )
 }
 

@@ -7,13 +7,16 @@ import { c as createTar } from 'tar'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
-import { loadServiceConfiguredArchive } from '../packages/cli/src/cli/service-renderer-projection.js'
+import {
+  loadServiceConfiguredArchive,
+  loadServiceConfiguredChannelArchive,
+} from '../packages/cli/src/cli/service-renderer-projection.js'
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const temporary: string[] = []
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
-async function fixture() {
+async function fixture(id = 'demo') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'configured-plugin-manifest-'))
   temporary.push(root)
   await mkdir(path.join(root, 'dist'))
@@ -23,7 +26,7 @@ async function fixture() {
   const runtime = {
     $schema: schema,
     schemaVersion: 16,
-    id: 'demo',
+    id,
     capabilities: [],
     services: [{
       id: 'runtime',
@@ -37,7 +40,7 @@ async function fixture() {
   const descriptor = {
     $schema: schema.replace('plugin-manifest', 'plugin-package'),
     schemaVersion: 16,
-    id: 'demo',
+    id,
     version: '1.0.0',
     entry: './dist/index.js',
     dependencies: [],
@@ -51,7 +54,7 @@ async function fixture() {
   }
   await writeFile(path.join(root, 'cordisx-package.json'), JSON.stringify(descriptor))
   const config = path.join(root, 'cordisx.config.json')
-  await writeFile(config, JSON.stringify({ version: 1, plugins: [{ id: 'demo', entry: './dist/index.js' }] }))
+  await writeFile(config, JSON.stringify({ version: 1, plugins: [{ id, entry: './dist/index.js' }] }))
   return { root, runtime, config, descriptor }
 }
 afterEach(async () => {
@@ -66,6 +69,23 @@ afterEach(async () => {
 })
 
 describe('direct configured package provenance', () => {
+  it('rejects a configured Channel graph that cannot supply a standalone stylesheet', async () => {
+    const f = await fixture('channel')
+    const archive = path.join(f.root, 'channel.tgz')
+    await createTar({ cwd: f.root, file: archive, gzip: true }, [
+      'package.json',
+      'cordisx-package.json',
+      'runtime-manifest.json',
+      'dist',
+    ])
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './channel.tgz' }] }))
+    const plugin = (await loadConfig(f.config)).plugins[0]!
+    expect((await loadServiceConfiguredArchive(f.root, plugin)).browserArtifact?.manifest.initialStyles).toEqual([])
+    await expect(loadServiceConfiguredChannelArchive(f.root, plugin)).rejects.toThrow(
+      'renderer-configured-channel-style-unavailable',
+    )
+  })
+
   it('carries verified archive identity through the production renderer composition', async () => {
     const f = await fixture()
     const source = 'https://github.com/cordisx/demo'

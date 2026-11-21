@@ -123,11 +123,11 @@ it('withholds Manager admission until the real Desktop owner completes durable s
     unregister!()
     unregister = undefined
     expect(() => owner.snapshot()).toThrow('unavailable')
-    owner.close()
+    await owner.close()
     expect(() => owner.snapshot()).toThrow('unavailable')
   } finally {
     unregister?.()
-    owner.close()
+    await owner.close()
     await managed.dispose()
     const runtime = (dom?.window as any)?.__cordisxRuntime
     await runtime?.dispose()

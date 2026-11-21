@@ -177,9 +177,10 @@ it.skipIf(chrome === undefined)(
       lifecycle,
       managementOptions: { rendererParticipant: participant, rendererBootstrap: bootstrap.channel() },
       close() {
-        bootstrap.close()
+        const closing = bootstrap.close()
         participants.close()
         lifecycle.close()
+        return closing
       },
     }
     // No launcher page-replacement transport exists in this browser fixture.
@@ -432,7 +433,7 @@ it.skipIf(chrome === undefined)(
       await second?.close().catch(() => {})
       await web?.close().catch(() => {})
       await composition?.close().catch(() => {})
-      owner.close()
+      await owner.close()
       unregister?.()
       unregisterSecond?.()
       await secondDesktop?.close().catch(() => {})

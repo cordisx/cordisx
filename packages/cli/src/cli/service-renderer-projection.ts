@@ -48,6 +48,15 @@ export async function loadServiceConfiguredArchive(homeDir: string, plugin: Cord
   return staged
 }
 
+/** Channel's current standalone UI needs a graph stylesheet under the Manager CSP. */
+export async function loadServiceConfiguredChannelArchive(homeDir: string, plugin: CordisXConfigPlugin) {
+  const staged = await loadServiceConfiguredArchive(homeDir, plugin)
+  if (plugin.id !== 'channel' || !staged.browserArtifact?.manifest.initialStyles.length) {
+    throw new Error('renderer-configured-channel-style-unavailable')
+  }
+  return staged
+}
+
 /** Reread the owner-selected immutable package and reject capabilities not yet projected. */
 export async function loadServiceRendererPackage(
   homeDir: string,

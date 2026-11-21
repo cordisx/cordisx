@@ -294,7 +294,7 @@ export async function fixture(
     async close() {
       releaseLease.resolve()
       sessions.dispose()
-      bootstrap.close()
+      await bootstrap.close()
       channelBridge?.close()
       managedUI.dispose()
       participants.close()

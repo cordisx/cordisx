@@ -12,7 +12,7 @@ vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
   createBrandMarkElement: (document: Document) => document.createElement('span'),
 }))
 
-it('builds the Host styles in their existing order with the standalone shell last', async () => {
+it('builds the Host and model-service styles in their existing cascade order', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-style-test-'))
   try {
     const output = path.join(directory, 'manager-host.css')
@@ -29,6 +29,9 @@ it('builds the Host styles in their existing order with the standalone shell las
       '../../../assets/illustrations/empty-state/v4-flat/plugins.css',
       '../host-ui/empty-state.css',
       'manager-standalone.css',
+      '../model-providers.css',
+      'pages/model-services.css',
+      'pages/model-catalog/model-catalog.css',
     ].map(file => readFile(path.join(root, file), 'utf8')))
     let previous = -1
     for (const css of ordered) {

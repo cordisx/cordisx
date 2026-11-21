@@ -211,12 +211,26 @@ it.skipIf(
           ),
         { timeout: 30_000 },
       ).toBe(true)
+      await first.evaluate(
+        'document.querySelector("[data-manager-collection-item] .cxr-manager-collection-open").click()',
+      )
+      await expect.poll(() =>
+        first.evaluate(`(() => {
+        const shell = document.querySelector('[data-channel-manager]');
+        return shell ? {
+          display: getComputedStyle(shell).display,
+          blockedInlineStyles: [...shell.children].filter(element => element.tagName === 'STYLE' && !element.sheet).length,
+        } : undefined;
+      })()`), { timeout: 15_000 }).toEqual({ display: 'flex', blockedInlineStyles: 0 })
 
       await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
       await expect.poll(
         () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
         { timeout: 15_000 },
       ).toBe(true)
+      await expect.poll(
+        () => first.evaluate('getComputedStyle(document.querySelector(".cxms-shared-header")).display'),
+      ).toBe('flex')
       await second.evaluate('document.querySelector("[data-tab=model-services]").click()')
       await expect.poll(
         () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),

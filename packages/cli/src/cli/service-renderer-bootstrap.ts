@@ -26,9 +26,15 @@ import type { LocalChannelService } from '../launcher/channel-service.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
 type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
+type ConfiguredChannel = {
+  readonly plugin: CordisXConfigPlugin
+  readonly service: LocalChannelService
+  readonly bridge: ReadonlyChannelRendererBridge
+}
 type Entry = {
   readonly peer: ManagerRendererCommandPeer
   readonly leases: PluginGenerationGraphLease[]
+  readonly checks: Set<Promise<boolean>>
   readonly unsubscribe: () => void
   stale: boolean
   snapshot?: Snapshot
@@ -63,7 +69,9 @@ export class ServiceRendererBootstrap {
   private readonly unsubscribeFinalization: () => void
   private readonly permissionFence: SharedProfilePermissionFence | undefined
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
+  private configuredChannel: ConfiguredChannel | undefined
   private closed = false
+  private closing: Promise<boolean> | undefined
 
   constructor(
     private readonly input: {
@@ -76,16 +84,13 @@ export class ServiceRendererBootstrap {
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
-      /** Service owner only: fence cooperative Home policy and configured-plugin writers. */
+      /** Fence cooperative Home policy and configured-plugin writers while snapshots are active. */
       readonly protectProfileInputs?: boolean
       /** Owner-selected experimental, read-only configured Channel composition. */
-      readonly experimentalConfiguredChannel?: {
-        readonly plugin: CordisXConfigPlugin
-        readonly service: LocalChannelService
-        readonly bridge: ReadonlyChannelRendererBridge
-      }
+      readonly experimentalConfiguredChannel?: ConfiguredChannel
     },
   ) {
+    this.configuredChannel = input.experimentalConfiguredChannel
     this.permissionFence = input.protectProfileInputs
       ? new SharedProfilePermissionFence(input.configPath, input.profileId)
       : undefined
@@ -107,6 +112,15 @@ export class ServiceRendererBootstrap {
     })
   }
 
+  /** Bind only before an owner publishes Manager admission; never from a browser. */
+  bindConfiguredChannel(channel: ConfiguredChannel): boolean {
+    if (this.closed || !this.input.protectProfileInputs || this.configuredChannel || this.entries.size !== 0) {
+      return false
+    }
+    this.configuredChannel = channel
+    return true
+  }
+
   private current(rendererId: string, entry: Entry): boolean {
     return !this.closed && !entry.stale && this.entries.get(rendererId) === entry && !entry.peer.closed
       && this.input.participants.peer(rendererId) === entry.peer
@@ -118,46 +132,69 @@ export class ServiceRendererBootstrap {
     )
   }
 
-  /** Detect stale startup configuration without comparing the live package epoch. */
-  private async configurationCurrent(rendererId: string, entry: Entry): Promise<boolean> {
+  private async trackCheck(entry: Entry, operation: () => Promise<boolean>): Promise<boolean> {
+    const check = operation()
+    entry.checks.add(check)
     try {
-      if (
-        !this.current(rendererId, entry) || !entry.config || !entry.policies
-        || entry.configuredChannel && !entry.configuredChannel.isCurrent()
-      ) return false
-      const [config, policies] = await Promise.all([
-        loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
-        this.policies(),
-      ])
-      return this.current(rendererId, entry) && attachmentEqual(config, entry.config)
-        && attachmentEqual(policies, entry.policies)
-    } catch {
-      return false
+      return await check
+    } finally {
+      entry.checks.delete(check)
     }
   }
 
-  private async unchanged(rendererId: string, entry: Entry): Promise<boolean> {
-    try {
-      if (
-        !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
-        || entry.configuredChannel && !entry.configuredChannel.isCurrent()
-      ) {
+  /** Detect stale startup configuration without comparing the live package epoch. */
+  private async configurationCurrent(rendererId: string, entry: Entry): Promise<boolean> {
+    return await this.trackCheck(entry, async () => {
+      try {
+        if (
+          !this.current(rendererId, entry) || !entry.config || !entry.policies
+          || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+        ) return false
+        const [configRead, policiesRead] = await Promise.allSettled([
+          loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+          this.policies(),
+        ])
+        if (configRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled') return false
+        const config = configRead.value
+        const policies = policiesRead.value
+        return this.current(rendererId, entry) && attachmentEqual(config, entry.config)
+          && attachmentEqual(policies, entry.policies)
+      } catch {
         return false
       }
-      if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
-      if (!attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)) return false
-      const [config, plugins, policies] = await Promise.all([
-        loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
-        loadPluginComposition(this.input.store, entry.snapshot.active),
-        this.policies(),
-      ])
-      if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
-      return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
-        && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
-        && attachmentEqual(policies, entry.policies)
-    } catch {
-      return false
-    }
+    })
+  }
+
+  private async unchanged(rendererId: string, entry: Entry): Promise<boolean> {
+    return await this.trackCheck(entry, async () => {
+      try {
+        if (
+          !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
+          || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+        ) {
+          return false
+        }
+        if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
+        if (!attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)) return false
+        const [configRead, pluginsRead, policiesRead] = await Promise.allSettled([
+          loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+          loadPluginComposition(this.input.store, entry.snapshot.active),
+          this.policies(),
+        ])
+        if (
+          configRead.status !== 'fulfilled' || pluginsRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled'
+        ) return false
+        const config = configRead.value
+        const plugins = pluginsRead.value
+        const policies = policiesRead.value
+        if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
+        return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
+          && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
+          && attachmentEqual(policies, entry.policies)
+      } catch {
+        return false
+      }
+    })
   }
 
   private retire(rendererId: string, entry: Entry): void {
@@ -173,7 +210,9 @@ export class ServiceRendererBootstrap {
         // A disconnected renderer may still be finishing bootstrap and may
         // acquire a late lease. Do not confirm retirement until that work and
         // both profile locks have actually completed.
-        await Promise.allSettled([entry.preparing, entry.completing].filter(value => value !== undefined))
+        await Promise.allSettled(
+          [entry.preparing, entry.completing, ...entry.checks].filter(value => value !== undefined),
+        )
         const writesSettled = await writes
         const releases = [entry.releasePermissionFence, entry.releasePluginConfigFence]
         delete entry.releasePermissionFence
@@ -224,7 +263,7 @@ export class ServiceRendererBootstrap {
     const unsubscribe = peer.onDisconnect(() => {
       if (entry !== undefined) this.retire(rendererId, entry)
     })
-    entry = { peer, leases, unsubscribe, stale: false }
+    entry = { peer, leases, checks: new Set(), unsubscribe, stale: false }
     this.entries.set(rendererId, entry)
     if (peer.closed) {
       this.retire(rendererId, entry)
@@ -249,17 +288,23 @@ export class ServiceRendererBootstrap {
           entry.releasePluginConfigFence = release
         }
         const snapshot = this.input.lifecycle.snapshot()
-        const [config, plugins, policies] = await Promise.all([
+        const [configRead, pluginsRead, policiesRead] = await Promise.allSettled([
           loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
           loadPluginComposition(this.input.store, snapshot.active),
           this.policies(),
         ])
+        if (
+          configRead.status !== 'fulfilled' || pluginsRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled'
+        ) throw new Error('renderer-bootstrap-unavailable')
+        const config = configRead.value
+        const plugins = pluginsRead.value
+        const policies = policiesRead.value
         // Configured plugins stay closed unless the owner explicitly supplies
         // the constrained read-only Channel composition.
         if (
           plugins.some(plugin => !emptyConfig(plugin.config))
           || config.plugins.length !== 0 && (
-              !this.input.protectProfileInputs || !this.input.experimentalConfiguredChannel
+              !this.input.protectProfileInputs || !this.configuredChannel
               || config.plugins.length !== 1
               || config.plugins[0]?.id !== 'channel' || plugins.some(plugin => plugin.id === 'channel')
             )
@@ -298,7 +343,7 @@ export class ServiceRendererBootstrap {
           }
         }
         if (config.plugins.length === 1) {
-          const channel = this.input.experimentalConfiguredChannel!
+          const channel = this.configuredChannel!
           const configured = await ServiceRendererConfiguredChannel.prepare({
             homeDir: this.input.homeDir,
             configPath: this.input.configPath,
@@ -521,17 +566,32 @@ export class ServiceRendererBootstrap {
     }
   }
 
-  close(): void {
-    if (this.closed) return
+  close(): Promise<boolean> {
+    if (this.closing) return this.closing
     this.closed = true
     this.unsubscribeFinalization()
     for (const [rendererId, entry] of this.entries) {
       entry.peer.close()
       this.retire(rendererId, entry)
     }
-    void Promise.all(this.retirements.values()).then(async results => {
-      if (!results.every(Boolean)) return
-      await Promise.all([this.permissionFence?.close(), this.pluginConfigFence?.close()])
-    }).catch(() => undefined)
+    this.closing = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const results = await Promise.race([
+          Promise.all(this.retirements.values()),
+          new Promise<undefined>(resolve => {
+            timer = setTimeout(() => resolve(undefined), 15_000)
+          }),
+        ])
+        if (!results || !results.every(Boolean)) return false
+        await Promise.all([this.permissionFence?.close(), this.pluginConfigFence?.close()])
+        return true
+      } catch {
+        return false
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+    })()
+    return this.closing
   }
 }

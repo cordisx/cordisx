@@ -14,7 +14,7 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { openReadonlyHeadlessChannel } from './readonly-headless-channel.js'
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
-import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
+import { loadServiceConfiguredChannelArchive } from './service-renderer-projection.js'
 
 type View = NonNullable<Awaited<ReturnType<typeof openReadonlyHeadlessChannel>>>
 
@@ -62,7 +62,7 @@ export class ServiceRendererConfiguredChannel {
       || !input.plugin.source || !owner || owner.source !== input.plugin.source || owner.pluginId !== 'channel'
       || owner.serviceId !== 'runtime' || owner.serviceKind !== 'channel-adapter' || !serviceGeneration
     ) throw new Error('renderer-configured-channel-unavailable')
-    const staged = await loadServiceConfiguredArchive(input.homeDir, input.plugin)
+    const staged = await loadServiceConfiguredChannelArchive(input.homeDir, input.plugin)
     const artifact = staged.browserArtifact
     if (
       !artifact || !input.current() || input.service.managementOwner() !== owner
