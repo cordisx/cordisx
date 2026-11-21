@@ -104,9 +104,9 @@ Channel archive and its already-running service into isolated, read-only
 renderer sessions. It forwards only matching existing Manager UI policies and
 does not provide credential or configuration actions. The production service
 owner does not enable this composition. Its browser tests use a simulator and
-a test lifecycle handshake. A separate two-page test uses the real sidecar and
-lifecycle handshake with an in-process owner transport. Neither validates the
-current user's profile.
+a test lifecycle handshake. A separate two-page test uses the real sidecar,
+authenticated owner socket and lifecycle handshake with the owner composition
+hosted in the test process. Neither validates the current user's profile.
 
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and

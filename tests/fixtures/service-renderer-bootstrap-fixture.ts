@@ -8,7 +8,6 @@ import { ReadonlyChannelRendererBridge } from '../../packages/cli/src/cli/readon
 import { ServiceRendererParticipants } from '../../packages/cli/src/cli/service-renderer-participant.js'
 import { createServiceRendererProjector } from '../../packages/cli/src/cli/service-renderer-projection.js'
 import { ManagerRendererSessions } from '../../packages/cli/src/cli/manager-renderer-sessions.js'
-import { createManagerRendererManagementChannel } from '../../packages/cli/src/cli/manager-renderer-management.js'
 import { createProductionManagedServiceLifecycle } from '../../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../../packages/cli/src/cli/manager-managed-service-ui.js'
 import { createDefaultHomeConfig } from '../../packages/cli/src/config/home-config.js'
@@ -24,7 +23,6 @@ import {
 import { removeStagedPluginPackage } from '../../packages/cli/src/launcher/plugin-package.js'
 import { attachmentHomeDigest } from '../../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererLifecycle } from '../../packages/cli/src/launcher/service-renderer-lifecycle.js'
-import { openPluginManagementService } from '../../packages/cli/src/management/service.js'
 import { decision, localPackage, request } from '../suites/plugin-lifecycle.fixtures.js'
 import { stageServiceModePlugin } from './service-mode-plugin.js'
 import { exactDomPermissionPolicies } from '../helpers/dom-permission.js'
@@ -46,7 +44,6 @@ export async function fixture(
     channelUiGrant?: boolean
     channelGrantOtherSource?: boolean
     channelOwnerMismatch?: boolean
-    includePluginManagement?: boolean
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -189,16 +186,6 @@ export async function fixture(
   })
   await coordinator.recover()
   lifecycle.initialize(await store.bindRuntimeGeneration())
-  const management = options.includePluginManagement
-    ? await openPluginManagementService({
-      homeDir,
-      configPath,
-      appId: 'codex',
-      profileId,
-      lifecycle: { coordinator, runtimeGeneration: generation, mode: 'service' },
-      watch: false,
-    })
-    : undefined
   const startup = await managed.initialize(await store.loadActive())
   await Promise.all([startup.coreReady, startup.adopted])
   await vi.waitFor(() => expect(managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
@@ -243,9 +230,6 @@ export async function fixture(
       : {}),
     participant: participants.participant,
     channels: new Map([
-      ...(management === undefined
-        ? []
-        : [['plugin-management', createManagerRendererManagementChannel(management)] as const]),
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
       ...(channelBridge === undefined ? [] : [['channel-actions', channelBridge.channel] as const]),
@@ -292,6 +276,9 @@ export async function fixture(
     profileId,
     generation,
     lifecycle,
+    coordinator,
+    bootstrap,
+    channelBridge,
     managed,
     managedUI,
     gateway,
@@ -309,7 +296,6 @@ export async function fixture(
       sessions.dispose()
       bootstrap.close()
       channelBridge?.close()
-      management?.close()
       managedUI.dispose()
       participants.close()
       await lifecycle.close()

@@ -1,17 +1,31 @@
 import { accessSync, constants } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ChildProcess } from 'node:child_process'
 import { expect, it } from 'vitest'
-import { dispatchManagerRendererOperation } from '../packages/cli/src/cli/manager-renderer-rpc.js'
+import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
+import { startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
+import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import {
+  effectiveConfigFingerprint,
+  processStartIdentity,
+  writeSupervisorState,
+} from '../packages/cli/src/cli/supervisor-state.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 const managerPackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+const secret = () => randomBytes(32).toString('hex')
 const chrome = [
   process.env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -36,35 +50,14 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       channelArchive: archive!,
       channelUiGrant: true,
       protectProfileInputs: true,
-      includePluginManagement: true,
     })
-    expect(await f.sessions.close(f.invocation)).toBe(true)
     let live = true
     const events: Array<{ action: string; channel?: string; step?: string; status?: string }> = []
-    const moduleUrl = pathToFileURL(path.join(managerPackage!, 'dist/src/cli/manager-web.js')).href
-    const { startManagerWeb } = await import(moduleUrl) as typeof import('../packages/cli/src/cli/manager-web.js')
-    const web = await startManagerWeb({
-      appId: 'codex',
-      profileId: f.profileId,
-      generation: f.generation,
-      isCurrent: async () => live,
-      request: async operation => {
-        if (operation.kind !== 'manager-renderer') return { status: 'unavailable' }
-        const result = await dispatchManagerRendererOperation(f.sessions, operation)
-        const step = operation.action === 'call' && operation.payload && typeof operation.payload === 'object'
-          ? (operation.payload as { action?: unknown }).action
-          : undefined
-        events.push({
-          action: operation.action,
-          ...(operation.action === 'call' ? { channel: operation.channel } : {}),
-          ...(typeof step === 'string' ? { step } : {}),
-          status: (result as { status?: string }).status,
-        })
-        return result
-      },
-    }, { rendererGateway: f.gateway })
     const profile = await mkdtemp(path.join(os.tmpdir(), 'cx-channel-sidecar-browser-'))
     let browser: ChildProcess | undefined
+    let supervisor: Awaited<ReturnType<typeof startSupervisorControlServer>> | undefined
+    let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+    let closeWeb: (() => Promise<void>) | undefined
     const pages: CdpClient[] = []
     const entry = (value: string) => {
       const url = new URL(value)
@@ -101,6 +94,76 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       expect(await page.evaluate('document.body.textContent.includes("fixture-private-reference")')).toBe(false)
     }
     try {
+      expect(await f.sessions.close(f.invocation)).toBe(true)
+      const startedAt = await processStartIdentity(process.pid)
+      if (!startedAt) throw new Error('test process identity unavailable')
+      const gateway = { pid: process.pid, processStartedAt: startedAt, instanceToken: secret() }
+      const gatewayPaths = managerRendererGatewayPaths(f.homeDir, f.profileId)
+      await mkdir(path.dirname(gatewayPaths.socket), { recursive: true, mode: 0o700 })
+      await writeSupervisorState(gatewayPaths, {
+        schemaVersion: 1,
+        appId: 'manager',
+        profileId: f.profileId,
+        phase: 'ready',
+        ...gateway,
+        createdAt: new Date().toISOString(),
+        version: 'fixture',
+        effectiveConfig: effectiveConfigFingerprint({ appId: 'codex', generation: f.generation }),
+      })
+      supervisor = await startSupervisorControlServer({
+        socketPath: gatewayPaths.socket,
+        token: gateway.instanceToken,
+        stop: () => {},
+      })
+      composition = await openProductionPluginManagementComposition({
+        homeDir: f.homeDir,
+        configPath: f.configPath,
+        appId: 'codex',
+        profileId: f.profileId,
+        runtimeGeneration: f.generation,
+        token: secret(),
+        coordinator: f.coordinator,
+        rendererParticipant: f.participants.participant,
+        rendererParticipants: f.participants,
+        rendererLifecycle: f.lifecycle,
+        rendererBootstrap: f.bootstrap.channel(),
+        rendererRetirement: rendererId => f.bootstrap.waitForRetirement(rendererId),
+        rendererWriteLifetimes: f.bootstrap.writeLifetimes,
+        rendererReadonlyChannel: f.channelBridge!.channel,
+        rendererManagedServiceUI: f.managedUI.channel,
+        mode: 'service',
+        processStartedAt: startedAt,
+      })
+      const rpcPaths = pluginManagementRpcPaths(f.homeDir, 'codex', f.profileId)
+      const endpoint = await readPluginManagementRpcEndpoint(rpcPaths)
+      if (!endpoint) throw new Error('test owner endpoint unavailable')
+      const moduleUrl = pathToFileURL(path.join(managerPackage!, 'dist/src/cli/manager-web.js')).href
+      const { startManagerWeb } = await import(moduleUrl) as typeof import('../packages/cli/src/cli/manager-web.js')
+      const web = await startManagerWeb({
+        appId: 'codex',
+        profileId: f.profileId,
+        generation: f.generation,
+        isCurrent: async () => {
+          const current = await readPluginManagementRpcEndpoint(rpcPaths)
+          return live && current?.generation === endpoint.generation && current.token === endpoint.token
+        },
+        request: async (operation, options) => {
+          const result = await requestPluginManagementRpc(rpcPaths, endpoint, operation, options)
+          if (operation.kind === 'manager-renderer') {
+            const step = operation.action === 'call' && operation.payload && typeof operation.payload === 'object'
+              ? (operation.payload as { action?: unknown }).action
+              : undefined
+            events.push({
+              action: operation.action,
+              ...(operation.action === 'call' ? { channel: operation.channel } : {}),
+              ...(typeof step === 'string' ? { step } : {}),
+              status: (result as { status?: string }).status,
+            })
+          }
+          return result
+        },
+      }, { rendererGateway: gateway })
+      closeWeb = async () => await web.close()
       const launched = launchChrome(chrome!, profile)
       browser = launched.browser
       const socketUrl = await waitForChromeTarget(profile, browser, launched.stderr)
@@ -131,7 +194,23 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
           timeout: 25_000,
         }).toBe(true)
       }
-      await expect.poll(() => f.sessions.hasLiveRenderers(), { timeout: 10_000 }).toBe(false)
+      await expect.poll(async () => {
+        const browserSessionId = secret()
+        const opened = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'manager-renderer',
+          action: 'open',
+          gateway,
+          browserSessionId,
+        }) as { status?: string }
+        if (opened.status !== 'ok') return false
+        const closed = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'manager-renderer',
+          action: 'revoke',
+          gateway,
+          browserSessionId,
+        }) as { status?: string }
+        return closed.status === 'ok'
+      }, { timeout: 10_000 }).toBe(true)
       const renewedUrl = entry(web.issueUrl())
       const renewedResponse = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(renewedUrl), {
         method: 'PUT',
@@ -144,7 +223,9 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       live = false
       for (const page of pages) await page.close().catch(() => undefined)
       if (browser) await stopChrome(browser)
-      await web.close()
+      await closeWeb?.()
+      await composition?.close()
+      await supervisor?.close()
       await f.close()
       await rm(profile, { recursive: true, force: true })
     }
