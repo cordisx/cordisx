@@ -1,0 +1,176 @@
+.cordisx-page-chrome-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--cordisx-page-chrome-action-size, 28px);
+  height: var(--cordisx-page-chrome-action-size, 28px);
+  min-width: var(--cordisx-page-chrome-action-size, 28px);
+  flex: 0 0 var(--cordisx-page-chrome-action-size, 28px);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(
+    --color-text-tertiary,
+    var(
+      --color-text-secondary,
+      color-mix(in srgb, currentColor 65%, transparent)
+    )
+  );
+  cursor: pointer;
+  font-family: var(
+    --cordisx-page-chrome-title-font-family,
+    -apple-system,
+    system-ui,
+    sans-serif
+  );
+  font-size: var(--cordisx-page-chrome-action-font-size, 13px);
+  font-weight: var(--cordisx-page-chrome-action-font-weight, 430);
+  line-height: var(--cordisx-page-chrome-action-line-height, 18px);
+}
+.cordisx-page-chrome-action > .cordisx-host-icon {
+  display: inline-flex;
+  width: var(--cordisx-page-chrome-icon-size, 16px);
+  height: var(--cordisx-page-chrome-icon-size, 16px);
+  flex: 0 0 var(--cordisx-page-chrome-icon-size, 16px);
+  align-items: center;
+  justify-content: center;
+}
+.cordisx-page-chrome-action > .cordisx-host-icon > svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.cordisx-page-chrome-action[data-presentation="primary"] {
+  width: auto;
+  max-width: 180px;
+  flex: 0 1 auto;
+  gap: 6px;
+  padding: 0 9px;
+  color: var(--color-text-primary, inherit);
+  background: var(
+    --color-background-surface-hover,
+    color-mix(in srgb, currentColor 8%, transparent)
+  );
+}
+.cordisx-page-chrome-action[data-presentation="text"] {
+  width: auto;
+  max-width: 180px;
+  flex: 0 1 auto;
+  gap: 6px;
+  padding: 0 9px;
+  color: var(--color-text-primary, inherit);
+}
+.cordisx-page-chrome-action[data-presentation="primary"][data-variant="outlined"] {
+  border: 1px solid
+    var(--color-border, color-mix(in srgb, currentColor 14%, transparent));
+  background: transparent;
+}
+.cordisx-page-header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cordisx-page-chrome-action:hover:not(:disabled),
+.cordisx-page-header-menu button:hover:not(:disabled) {
+  background: var(
+    --color-background-surface-hover,
+    color-mix(in srgb, currentColor 8%, transparent)
+  );
+}
+.cordisx-page-chrome-action:focus-visible,
+.cordisx-page-header-menu button:focus-visible {
+  outline: 2px solid
+    var(--color-accent, color-mix(in srgb, currentColor 60%, transparent));
+  outline-offset: 1px;
+}
+.cordisx-page-chrome-action:disabled,
+.cordisx-page-header-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cordisx-page-chrome-action[hidden], .cordisx-page-header-menu [hidden] {
+  display: none;
+}
+[data-cordisx-page-leading] > .cordisx-host-icon,
+[data-cordisx-page-leading] svg {
+  display: block;
+  width: var(--cordisx-page-chrome-icon-size, 16px);
+  height: var(--cordisx-page-chrome-icon-size, 16px);
+}
+.cordisx-page-header-visual {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  flex: none;
+  border-radius: 4px;
+}
+.cordisx-page-header-visual[data-avatar] {
+  border-radius: 50%;
+  background: var(
+    --color-background-surface-hover,
+    color-mix(in srgb, currentColor 8%, transparent)
+  );
+}
+.cordisx-page-header-menu {
+  position: fixed;
+  z-index: 2147483400;
+  box-sizing: border-box;
+  min-width: 160px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid
+    var(--color-border, color-mix(in srgb, currentColor 14%, transparent));
+  border-radius: 9px;
+  background: var(--color-background-surface, var(--cx-surface, #181818));
+  color: var(--color-text-primary, inherit);
+  font: 12px/1.4 system-ui;
+  -webkit-app-region: no-drag;
+}
+.cordisx-page-header-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cordisx-page-header-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cordisx-page-header-menu-leading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}
+.cordisx-page-header-menu-leading > .cordisx-host-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.cordisx-page-header-menu-leading > .cordisx-host-icon > svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}

@@ -20,9 +20,10 @@ export async function buildManagerStyles(output = path.join(root, 'dist/assets/m
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`
   const { REACT_MANAGER_STYLES } = await import(moduleUrl)
   if (typeof REACT_MANAGER_STYLES !== 'string') throw new Error('Host Manager stylesheet is unavailable')
+  const pageHeaderActions = await readFile(path.join(root, 'src/renderer/page-header-actions.css'), 'utf8')
   const standalone = await readFile(path.join(root, 'src/renderer/manager/manager-standalone.css'), 'utf8')
   await mkdir(path.dirname(output), { recursive: true })
-  await writeFile(output, `${REACT_MANAGER_STYLES}\n${standalone}`)
+  await writeFile(output, `${REACT_MANAGER_STYLES}\n${pageHeaderActions}\n${standalone}`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

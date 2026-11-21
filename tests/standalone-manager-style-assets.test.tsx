@@ -24,6 +24,7 @@ it('builds the Host styles in their existing order with the standalone shell las
       'manager-content.css',
       'manager-compact-shell.css',
       'manager-browse.css',
+      '../page-header-actions.css',
       'manager-standalone.css',
     ].map(file => readFile(path.join(root, file), 'utf8')))
     let previous = -1
