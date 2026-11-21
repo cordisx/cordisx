@@ -46,6 +46,13 @@ configuration writes. Other configured plugins, adapters, concurrent permission
 changes and recovery after an uncertain result are not yet supported. The
 isolated browser tests do not constitute real Codex App validation.
 
+The experimental Host page in service mode can also read and save shared
+model-service declarations through the existing Manager form when the owner
+advertises the safe-write contract. Its edits use the owner's revision and
+credential protection; they retain the app-restart apply semantics described
+below. An edit started against an older revision is rejected if another client
+changes the declarations first.
+
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use
 bootstrap in the URL fragment; it is exchanged for a separate session token and
@@ -53,6 +60,9 @@ removed from the address bar. The default page stores its session token in that
 tab's session storage. The experimental Host page keeps its session token in
 memory. On a normal refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
+The Host page also restores supported navigation destinations within that tab.
+Route parameters and unsaved form inputs are not stored; a transient edit page
+returns to its main section after refresh.
 If a write or lifecycle transaction is in progress, retirement is uncertain, or
 browser storage is unavailable, open a new manager entry and check any uncertain
 operation before retrying. When its resource worker loses its in-memory binding,
