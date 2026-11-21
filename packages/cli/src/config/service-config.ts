@@ -41,6 +41,24 @@ export interface StageServiceConfigInput extends ServiceConfigScope {
   readonly now?: Date
 }
 
+type ServiceConfigOwnerGuard = (plugin: HomeConfigPlugin) => void | Promise<void>
+type ReadServiceConfigInput = Omit<ServiceConfigScope, 'generation' | 'ownerToken'> & {
+  readonly initialConfig: JsonValue
+}
+type CommitServiceConfigInput = ServiceConfigScope & {
+  readonly candidateRevision: number
+  readonly applies: HomeConfigServiceApplies
+  readonly initialConfig: JsonValue
+}
+type AbortServiceConfigInput = ServiceConfigScope & {
+  readonly candidateRevision: number
+  readonly initialConfig: JsonValue
+}
+type RestartServiceConfigInput = Pick<ServiceConfigScope, 'profileId' | 'pluginId' | 'serviceId'> & {
+  readonly expectedRevision: number
+  readonly initialConfig: JsonValue
+}
+
 function assertScope(scope: ServiceConfigScope): void {
   if (!PROFILE_ID.test(scope.profileId)) throw new Error('invalid service configuration profile id')
   if (!LOCAL_ID.test(scope.pluginId)) throw new Error('invalid service configuration plugin id')
@@ -96,14 +114,23 @@ function replaceServiceState(
 }
 
 export async function readServiceConfigState(
-  input: Omit<ServiceConfigScope, 'generation' | 'ownerToken'> & { readonly initialConfig: JsonValue },
+  input: ReadServiceConfigInput,
   options?: string | HomeConfigWriteOptions,
+): Promise<HomeConfigPluginServiceProfile> {
+  return await readServiceConfigStateGuarded(input, options)
+}
+
+async function readServiceConfigStateGuarded(
+  input: ReadServiceConfigInput,
+  options?: string | HomeConfigWriteOptions,
+  guard?: ServiceConfigOwnerGuard,
 ): Promise<HomeConfigPluginServiceProfile> {
   if (!PROFILE_ID.test(input.profileId) || !LOCAL_ID.test(input.pluginId) || !LOCAL_ID.test(input.serviceId)) {
     throw new Error('invalid service configuration identity')
   }
   const config = await loadHomeConfig(options)
   const index = pluginIndex(config, input.pluginId)
+  await guard?.(config.plugins[index]!)
   return structuredClone(serviceState(config.plugins[index]!, input.serviceId, input.profileId, input.initialConfig))
 }
 
@@ -111,14 +138,23 @@ export async function stageServiceConfigCandidate(
   input: StageServiceConfigInput,
   options?: string | HomeConfigWriteOptions,
 ): Promise<{ readonly candidateRevision: number }> {
+  return await stageServiceConfigCandidateGuarded(input, options)
+}
+
+async function stageServiceConfigCandidateGuarded(
+  input: StageServiceConfigInput,
+  options?: string | HomeConfigWriteOptions,
+  guard?: ServiceConfigOwnerGuard,
+): Promise<{ readonly candidateRevision: number }> {
   assertScope(input)
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
     throw new Error('expectedRevision must be a non-negative safe integer')
   }
   const candidateRevision = input.expectedRevision + 1
-  await updateHomeConfigAtomic((config) => {
+  await updateHomeConfigAtomic(async (config) => {
     const index = pluginIndex(config, input.pluginId)
     const plugin = config.plugins[index]!
+    await guard?.(plugin)
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     if (state.revision !== input.expectedRevision || state.candidate !== undefined) {
       throw new ServiceConfigConflictError(state.revision)
@@ -139,18 +175,23 @@ export async function stageServiceConfigCandidate(
 }
 
 export async function commitServiceConfigCandidate(
-  input: ServiceConfigScope & {
-    readonly candidateRevision: number
-    readonly applies: HomeConfigServiceApplies
-    readonly initialConfig: JsonValue
-  },
+  input: CommitServiceConfigInput,
   options?: string | HomeConfigWriteOptions,
+): Promise<HomeConfigPluginServiceProfile> {
+  return await commitServiceConfigCandidateGuarded(input, options)
+}
+
+async function commitServiceConfigCandidateGuarded(
+  input: CommitServiceConfigInput,
+  options?: string | HomeConfigWriteOptions,
+  guard?: ServiceConfigOwnerGuard,
 ): Promise<HomeConfigPluginServiceProfile> {
   assertScope(input)
   let committed: HomeConfigPluginServiceProfile | undefined
-  await updateHomeConfigAtomic((config) => {
+  await updateHomeConfigAtomic(async (config) => {
     const index = pluginIndex(config, input.pluginId)
     const plugin = config.plugins[index]!
+    await guard?.(plugin)
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     const candidate = state.candidate
     if (
@@ -187,13 +228,22 @@ export async function commitServiceConfigCandidate(
 }
 
 export async function abortServiceConfigCandidate(
-  input: ServiceConfigScope & { readonly candidateRevision: number; readonly initialConfig: JsonValue },
+  input: AbortServiceConfigInput,
   options?: string | HomeConfigWriteOptions,
 ): Promise<void> {
+  await abortServiceConfigCandidateGuarded(input, options)
+}
+
+async function abortServiceConfigCandidateGuarded(
+  input: AbortServiceConfigInput,
+  options?: string | HomeConfigWriteOptions,
+  guard?: ServiceConfigOwnerGuard,
+): Promise<void> {
   assertScope(input)
-  await updateHomeConfigAtomic((config) => {
+  await updateHomeConfigAtomic(async (config) => {
     const index = pluginIndex(config, input.pluginId)
     const plugin = config.plugins[index]!
+    await guard?.(plugin)
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     const candidate = state.candidate
     if (candidate === undefined) return config
@@ -214,11 +264,16 @@ export async function abortServiceConfigCandidate(
 
 /** Mark the already-published app-restart configuration active after launcher readiness succeeds. */
 export async function markServiceConfigAppRestartApplied(
-  input: Pick<ServiceConfigScope, 'profileId' | 'pluginId' | 'serviceId'> & {
-    readonly expectedRevision: number
-    readonly initialConfig: JsonValue
-  },
+  input: RestartServiceConfigInput,
   options?: string | HomeConfigWriteOptions,
+): Promise<HomeConfigPluginServiceProfile> {
+  return await markServiceConfigAppRestartAppliedGuarded(input, options)
+}
+
+async function markServiceConfigAppRestartAppliedGuarded(
+  input: RestartServiceConfigInput,
+  options?: string | HomeConfigWriteOptions,
+  guard?: ServiceConfigOwnerGuard,
 ): Promise<HomeConfigPluginServiceProfile> {
   if (!PROFILE_ID.test(input.profileId) || !LOCAL_ID.test(input.pluginId) || !LOCAL_ID.test(input.serviceId)) {
     throw new Error('invalid service configuration identity')
@@ -227,9 +282,10 @@ export async function markServiceConfigAppRestartApplied(
     throw new Error('expectedRevision must be a non-negative safe integer')
   }
   let applied: HomeConfigPluginServiceProfile | undefined
-  await updateHomeConfigAtomic((config) => {
+  await updateHomeConfigAtomic(async (config) => {
     const index = pluginIndex(config, input.pluginId)
     const plugin = config.plugins[index]!
+    await guard?.(plugin)
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     if (state.revision !== input.expectedRevision || state.restartRequired !== true || state.candidate !== undefined) {
       throw new ServiceConfigConflictError(state.revision, 'service configuration app-restart state is stale')
@@ -238,4 +294,22 @@ export async function markServiceConfigAppRestartApplied(
     return replaceServiceState(config, index, plugin, input.serviceId, input.profileId, applied)
   }, options)
   return structuredClone(applied!)
+}
+
+/** Check the exact configured owner while holding the existing Home config write lock. */
+export function guardedHomeServiceConfigPersistence(guard: ServiceConfigOwnerGuard): Readonly<{
+  read: typeof readServiceConfigState
+  stage: typeof stageServiceConfigCandidate
+  commit: typeof commitServiceConfigCandidate
+  abort: typeof abortServiceConfigCandidate
+  markAppRestartApplied: typeof markServiceConfigAppRestartApplied
+}> {
+  return Object.freeze({
+    read: async (input, options) => await readServiceConfigStateGuarded(input, options, guard),
+    stage: async (input, options) => await stageServiceConfigCandidateGuarded(input, options, guard),
+    commit: async (input, options) => await commitServiceConfigCandidateGuarded(input, options, guard),
+    abort: async (input, options) => await abortServiceConfigCandidateGuarded(input, options, guard),
+    markAppRestartApplied: async (input, options) =>
+      await markServiceConfigAppRestartAppliedGuarded(input, options, guard),
+  })
 }

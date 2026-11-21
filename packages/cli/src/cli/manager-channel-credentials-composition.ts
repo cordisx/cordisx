@@ -11,8 +11,9 @@ import { configuredChannelManager } from '../launcher/channel-connection-configu
 import { channelConfigurationApi } from './renderer-channel-composition.js'
 import type { ManagerServiceAuthOperation } from '../launcher/manager-service-auth.js'
 import type { ManagerChannelCredentialOperation } from '../launcher/manager-channel-credentials.js'
+import { createConfiguredChannelOwner } from './configured-channel-owner.js'
 
-/** Only a running service with a verifiable active package may own credential writes. */
+/** Only a running service with a verifiable profile and plugin owner may handle credentials. */
 export function createManagerChannelCredentials(input: {
   readonly plugin?: CordisXConfigPlugin | undefined
   readonly service?: LocalChannelService | undefined
@@ -20,20 +21,32 @@ export function createManagerChannelCredentials(input: {
   readonly configPath: string
   readonly profileId: string
   readonly generation: string
+  readonly ownerCurrent?: () => boolean
 }, profileOwnerVerified = false): ManagerChannelCredentials | undefined {
   const { plugin, service } = input
-  if (!profileOwnerVerified || !plugin?.package || !service || plugin.id !== 'channel' || !plugin.enabled) {
+  if (!profileOwnerVerified || !plugin || !service || plugin.id !== 'channel' || !plugin.enabled) {
     return undefined
   }
-  const identity = {
+  const token = randomBytes(32).toString('hex')
+  const homeDir = path.dirname(input.configPath)
+  const configured = plugin.package || !input.ownerCurrent
+    ? undefined
+    : createConfiguredChannelOwner({
+      homeDir,
+      configPath: input.configPath,
+      profileId: input.profileId,
+      plugin,
+      service,
+      ownerCurrent: input.ownerCurrent,
+    })
+  if (!plugin.package && !configured) return undefined
+  const identity = plugin.package === undefined ? undefined : {
     id: plugin.id,
     moduleGeneration: plugin.package.moduleGeneration,
     digest: plugin.package.digest,
     version: plugin.package.version,
     ...(plugin.package.canonicalSource === undefined ? {} : { canonicalSource: plugin.package.canonicalSource }),
   }
-  const token = randomBytes(32).toString('hex')
-  const homeDir = path.dirname(input.configPath)
   const store = new LauncherSecretStore({ homeDir })
   const packageStore = new PackagePluginServiceConfigStore(homeDir, input.profileId, input.generation)
   const openService = (serviceGeneration: string) =>
@@ -44,7 +57,7 @@ export function createManagerChannelCredentials(input: {
       configPath: input.configPath,
       plugin,
       service,
-      persistence: packageStore.persistence,
+      persistence: configured?.persistence ?? packageStore.persistence,
       expectedServiceGeneration: serviceGeneration,
     })
   const manager = configuredChannelManager({ service, configuration: openService })
@@ -55,7 +68,8 @@ export function createManagerChannelCredentials(input: {
     runtime: () => service.snapshot(),
     setEnabled: async ({ enabled, ...request }) =>
       await (enabled ? manager.connections.enable : manager.connections.disable)(request),
-    withOwner: async action => await input.lifecycle.withActivePlugin(identity, action),
+    withOwner: async action =>
+      configured ? await configured.withOwner(action) : await input.lifecycle.withActivePlugin(identity!, action),
     openService,
     store,
     journal: new ManagerChannelDraftJournal({

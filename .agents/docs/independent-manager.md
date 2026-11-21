@@ -85,15 +85,28 @@ login methods needing terminal input or a displayed terminal code are not
 supported here. A synthetic service verifies the bridge; a real provider login is
 not yet verified.
 
-For a running Channel service with a verified active package and profile owner,
-the candidate offers Feishu/Lark credential creation and rotation, tenant
-resolution, and connection enablement. The user enters and confirms credentials;
-the Host validates and stores them without reading them back into the page. A
-staged Channel package and simulator exercise the startup and HTTP/socket path;
-separate synthetic credentials exercise the write and recovery transactions.
-Real Feishu/Lark credentials have not been used in validation. Legacy Channel
-configurations without verified package ownership, other adapters, connection
-deletion, and remaining Channel management features are unavailable.
+For a running Channel service with a verified profile owner, the sidecar's
+existing credential API supports an active package or a configured archive
+whose distribution, staged identity, configuration selection, and live
+service still match the owner's startup selection. It offers Feishu/Lark
+credential creation and rotation, tenant resolution, and connection enablement.
+The user enters and confirms credentials; the Host validates and stores them
+without reading them back into the page. The configured archive path has been
+exercised with a real isolated Channel service and a simulator; separate
+synthetic credentials exercise the write and recovery transactions. Real
+Feishu/Lark credentials have not been used in validation. This API does not
+admit a configured Channel into the experimental Host page. Unverified direct
+entries, other adapters, connection deletion, and remaining Channel management
+features are unavailable.
+
+In service mode, a sidecar-originated Channel configuration commit, tenant
+resolution, or enablement first reserves the renderer lifecycle, drains Manager
+writes, and waits for the other Manager renderers' cleanup receipts. It refuses
+the operation if an attached peer is outside the Manager registry or if the
+originating browser also owns a standalone renderer, because that renderer's
+write handoff is not implemented. An uncertain result keeps coordination
+closed until the owner is reconciled. This is not yet a barrier for all native
+or external configuration writers.
 
 Model-service changes retain the current Host's app-restart apply semantics.
 The manager permits saving only when the active model-service authority reports

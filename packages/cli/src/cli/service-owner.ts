@@ -193,6 +193,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           configPath,
           profileId,
           generation,
+          ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
         }, releaseRuntimeOwner !== undefined)
         management = await openProductionPluginManagementComposition({
           homeDir,
