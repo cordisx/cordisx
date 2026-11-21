@@ -16,6 +16,7 @@ import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-rendere
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../packages/cli/src/cli/manager-managed-service-ui.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -364,7 +365,19 @@ it('builds the real empty manager from the owner and admits its runtime through 
       expect(receipt.ok).toBe(true)
       expect(await f.sessions.acknowledge(f.invocation, receipt)).toEqual({ status: 'ok', value: { accepted: true } })
       expect(await admitting).toEqual({ status: 'ok', value: { admitted: true } })
-      expect(await f.sessions.close(f.invocation)).toBe(true)
+      const config = createDefaultHomeConfig()
+      const policy = createPermissionPolicyRecord({
+        profileId: f.profileId,
+        identity: { source: 'https://example.test/plugin', id: 'fixture' },
+        capability: 'models.read',
+        scope: { providers: ['codex'] },
+        policy: 'deny',
+      })
+      await writeFile(f.configPath, JSON.stringify({ ...config, permissions: [policy] }))
+      expect(await f.call({ action: 'status' })).toEqual({ status: 'unavailable' })
+      await writeFile(f.configPath, JSON.stringify(config))
+      expect(await f.call({ action: 'status' })).toEqual({ status: 'unavailable' })
+      expect(await f.sessions.close(f.invocation)).toBe(false)
       expect(await f.call({ action: 'status' })).toEqual({ status: 'unavailable' })
       await client.close()
     } finally {

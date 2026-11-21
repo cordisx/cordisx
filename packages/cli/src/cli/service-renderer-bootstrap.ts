@@ -24,6 +24,7 @@ type Entry = {
   readonly peer: ManagerRendererCommandPeer
   readonly leases: PluginGenerationGraphLease[]
   readonly unsubscribe: () => void
+  stale: boolean
   snapshot?: Snapshot
   config?: CordisXConfig
   plugins?: readonly CordisXConfigPlugin[]
@@ -77,7 +78,7 @@ export class ServiceRendererBootstrap {
   }
 
   private current(rendererId: string, entry: Entry): boolean {
-    return !this.closed && this.entries.get(rendererId) === entry && !entry.peer.closed
+    return !this.closed && !entry.stale && this.entries.get(rendererId) === entry && !entry.peer.closed
       && this.input.participants.peer(rendererId) === entry.peer
   }
 
@@ -85,6 +86,21 @@ export class ServiceRendererBootstrap {
     return (await loadHomeConfig(this.input.configPath)).permissions.filter(
       policy => policy.key.profileId === this.input.profileId,
     )
+  }
+
+  /** Detect stale startup configuration without comparing the live package epoch. */
+  private async configurationCurrent(rendererId: string, entry: Entry): Promise<boolean> {
+    try {
+      if (!this.current(rendererId, entry) || !entry.config || !entry.policies) return false
+      const [config, policies] = await Promise.all([
+        loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+        this.policies(),
+      ])
+      return this.current(rendererId, entry) && attachmentEqual(config, entry.config)
+        && attachmentEqual(policies, entry.policies)
+    } catch {
+      return false
+    }
   }
 
   private async unchanged(rendererId: string, entry: Entry): Promise<boolean> {
@@ -134,7 +150,7 @@ export class ServiceRendererBootstrap {
     const unsubscribe = peer.onDisconnect(() => {
       if (entry !== undefined) this.retire(rendererId, entry)
     })
-    entry = { peer, leases, unsubscribe }
+    entry = { peer, leases, unsubscribe, stale: false }
     this.entries.set(rendererId, entry)
     if (peer.closed) {
       this.retire(rendererId, entry)
@@ -338,6 +354,11 @@ export class ServiceRendererBootstrap {
               const peer = this.input.participants.peer(context.rendererId)
               if (!peer) throw new Error('renderer-bootstrap-unavailable')
               const entry = this.entries.get(context.rendererId)
+              if (entry?.config && !await this.configurationCurrent(context.rendererId, entry)) {
+                entry.stale = true
+                entry.peer.close()
+                return { status: 'ok', current: false }
+              }
               if (entry?.managedContext) {
                 try {
                   this.input.managedServiceUI?.projectInitial(context)
