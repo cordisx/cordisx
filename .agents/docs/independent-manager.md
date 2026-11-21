@@ -100,11 +100,11 @@ entries, other adapters, connection deletion, and remaining Channel management
 features are unavailable.
 
 In service mode, a sidecar-originated Channel configuration commit, tenant
-resolution, or enablement first reserves the renderer lifecycle, drains Manager
-writes, and waits for the other Manager renderers' cleanup receipts. It refuses
-the operation if an attached peer is outside the Manager registry or if the
-originating browser also owns a standalone renderer, because that renderer's
-write handoff is not implemented. An uncertain result keeps coordination
+resolution, or enablement is unavailable while any standalone Manager renderer
+is open, because its drafts and pending writes cannot yet be handed off safely.
+With no Manager renderer open, the owner reserves the renderer lifecycle and
+blocks new admissions before the write. It refuses the operation if an attached
+peer is outside the Manager registry. An uncertain result keeps coordination
 closed until the owner is reconciled. This is not yet a barrier for all native
 or external configuration writers.
 

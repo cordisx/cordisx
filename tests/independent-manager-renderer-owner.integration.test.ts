@@ -544,48 +544,42 @@ it('coordinates sidecar Channel writes with the service renderer fleet before di
       account: { adapterId: 'feishu' as const, accountId: 'cli_fixture', tenantId: 'tenant' },
       enabled: true,
     }
-    // A renderer cannot dispose itself while waiting for its own result.
+    // Neither the originating renderer nor another open Manager may lose a draft.
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, mutation)).toEqual({
       status: 'unavailable',
       code: 'PROFILE_COORDINATION_UNAVAILABLE',
     })
     expect(handle).not.toHaveBeenCalled()
 
-    const changing = requestPluginManagementRpc(rpcPaths, endpoint, { ...mutation, sessionId: secret() })
-    const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
-    const polled = await requestPluginManagementRpc(rpcPaths, endpoint, {
-      ...common,
-      action: 'poll',
-      timeoutMs: 5_000,
-    }) as {
-      value: { command: { id: string; sequence: number; method: string; payload: { fenceId: string } } }
-    }
-    expect(polled.value.command.method).toBe('quiesce')
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...mutation, sessionId: secret() })).toEqual({
+      status: 'unavailable',
+      code: 'PROFILE_COORDINATION_UNAVAILABLE',
+    })
     expect(handle).not.toHaveBeenCalled()
+    const query = {
+      kind: 'manager-renderer' as const,
+      action: 'call' as const,
+      gateway,
+      browserSessionId,
+      handle: opened.handle,
+      channel: 'plugin-management',
+      payload: JSON.stringify({
+        version: 1,
+        requestId: 'draft-check',
+        token: 'renderer-placeholder',
+        profileId,
+        operation: { kind: 'query' },
+      }),
+    }
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, query)).toMatchObject({ status: 'ok' })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...open, action: 'revoke' }))
+      .toEqual({ status: 'ok' })
+
+    const changing = requestPluginManagementRpc(rpcPaths, endpoint, { ...mutation, sessionId: secret() })
+    await vi.waitFor(() => expect(handle).toHaveBeenCalledOnce())
     const other = { ...open, browserSessionId: secret() }
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toEqual({ status: 'unavailable' })
     expect(() => lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
-    expect(
-      await requestPluginManagementRpc(rpcPaths, endpoint, {
-        ...common,
-        action: 'acknowledge',
-        receipt: {
-          id: polled.value.command.id,
-          sequence: polled.value.command.sequence,
-          ok: true,
-          value: {
-            fenceId: polled.value.command.payload.fenceId,
-            rendererId: opened.handle.rendererId,
-            ownerGeneration: generation,
-            quiesced: true,
-          },
-        },
-      }),
-    ).toEqual({ status: 'ok', value: { accepted: true } })
-    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'close' }))
-      .toEqual({ status: 'ok' })
-    await vi.waitFor(() => expect(handle).toHaveBeenCalledOnce())
-    expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toEqual({ status: 'unavailable' })
     finish.resolve({ status: 'applied' })
     expect(await changing).toEqual({ status: 'applied' })
     const reopened = await requestPluginManagementRpc(rpcPaths, endpoint, other) as { status: string }

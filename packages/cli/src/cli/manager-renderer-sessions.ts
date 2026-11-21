@@ -125,11 +125,9 @@ export class ManagerRendererSessions {
     return this.input.participant !== undefined
   }
 
-  /** Owner-only check before a sidecar action can retire its own renderer. */
-  hasBrowserSession(browserSessionId: string): boolean {
-    return [...this.sessions.values()].some(session =>
-      session.browserSessionId === browserSessionId && this.current(session)
-    )
+  /** Owner-only check before a sidecar action can discard a renderer's drafts. */
+  hasLiveRenderers(): boolean {
+    return [...this.sessions.values()].some(session => this.current(session))
   }
 
   private retire(session: Session): void {

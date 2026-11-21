@@ -19,14 +19,14 @@ export function coordinateManagerChannelCredentials(input: {
     if (!['commit', 'resolve-tenant', 'set-enabled'].includes(operation.action)) {
       return await input.handle(operation)
     }
-    // The current quiescence protocol disconnects a renderer. It cannot yet
-    // safely hand an originating renderer's outstanding write back to it.
-    if (!input.participants || !input.lifecycle || input.sessions.hasBrowserSession(operation.sessionId)) {
+    // Quiescence currently disposes the Manager tree. Until its drafts and an
+    // originating write can be handed off, do not retire any live renderer.
+    if (!input.participants || !input.lifecycle || input.sessions.hasLiveRenderers()) {
       return { status: 'unavailable', code: 'PROFILE_COORDINATION_UNAVAILABLE' }
     }
     let fence: Awaited<ReturnType<typeof fenceManagerConsumers>>
     try {
-      // No await may be inserted between the origin check and reserving the
+      // No await may be inserted between the renderer check and reserving the
       // Manager gate: an in-progress open must see the reservation.
       fence = await fenceManagerConsumers({
         sessions: input.sessions,
