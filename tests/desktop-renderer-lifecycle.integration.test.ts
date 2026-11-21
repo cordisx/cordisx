@@ -36,6 +36,7 @@ async function fixture(
     disconnectOnFinalize?: boolean
     invalidFinalize?: boolean
     desktopCount?: number
+    dependent?: boolean
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-desktop-barrier-')
@@ -62,6 +63,21 @@ async function fixture(
       }),
     ),
   ).toMatchObject({ outcome: 'applied' })
+  if (options.dependent) {
+    const dependent = await localPackage({
+      root,
+      id: 'fixture-dependent',
+      dependencies: [{ id: 'fixture-plugin', version: '1.0.0' }],
+    })
+    const planned = await seed.handle(request({ kind: 'inspect-local', sourceDirectory: dependent }, 1))
+    expect(
+      await seed.handle(request({
+        kind: 'install',
+        candidateId: planned.candidateId!,
+        authorizationDecision: decision(planned.authorizationPlan!),
+      }, 1)),
+    ).toMatchObject({ outcome: 'applied', revision: 2 })
+  }
   const store = new PluginActivationStore(home, 'work', generation)
   const active = await store.bindRuntimeGeneration()
   const plugins = await loadPluginComposition(store, active)
@@ -86,6 +102,8 @@ async function fixture(
   const cdp = new CdpPluginLifecycleRuntime()
   const calls: string[] = []
   const stageEpochs: string[] = []
+  const desktopImpacts: unknown[] = []
+  const managerImpacts: unknown[] = []
   const cdpSession = {
     async send(_method: string, params: Record<string, unknown>) {
       const expression = String(params.expression ?? '')
@@ -97,6 +115,7 @@ async function fixture(
       }
       try {
         const value = await dom.window.eval(expression)
+        if (expression.includes('stagePluginMutation')) desktopImpacts.push(value?.result?.affectedPluginIds)
         return { result: { value: JSON.parse(JSON.stringify(value)) } }
       } catch (error) {
         return { exceptionDetails: { text: error instanceof Error ? error.message : String(error) } }
@@ -128,6 +147,7 @@ async function fixture(
         }
         try {
           const value = await extraDom!.window.eval(expression)
+          if (expression.includes('stagePluginMutation')) desktopImpacts.push(value?.result?.affectedPluginIds)
           return { result: { value: JSON.parse(JSON.stringify(value)) } }
         } catch (error) {
           return { exceptionDetails: { text: error instanceof Error ? error.message : String(error) } }
@@ -209,6 +229,7 @@ async function fixture(
           value = { active: current, registryEpoch: epoch }
         } else if (command.method === 'prepare') value = payload
         else if (command.method === 'stage') {
+          managerImpacts.push(payload.affectedPluginIds)
           if (options.disconnectOnStage) {
             peer.close()
             break
@@ -303,6 +324,8 @@ async function fixture(
     desktop,
     extraDesktop,
     stageEpochs,
+    desktopImpacts,
+    managerImpacts,
     calls,
     attach,
     disable,
@@ -584,3 +607,28 @@ it.each(['desktop', 'manager'] as const)(
   },
   60_000,
 )
+
+// Manager is a protocol peer fixture; the CDP sessions execute real renderer bundles.
+it.each([false, true])('validates a real dependency closure with Manager attached: %s', async withManager => {
+  const f = await fixture({ dependent: true, desktopCount: 2 })
+  try {
+    if (withManager) await f.attach()
+    expect(await f.disable()).toMatchObject({ outcome: 'applied', revision: 3 })
+    expect(f.desktopImpacts).toEqual([
+      ['fixture-plugin', 'fixture-dependent'],
+      ['fixture-plugin', 'fixture-dependent'],
+    ])
+    expect(f.managerImpacts).toEqual(withManager ? [['fixture-dependent', 'fixture-plugin']] : [])
+    expect(f.desktop.activePluginGeneration().plugins.map((item: { enabled: boolean }) => item.enabled)).toEqual([
+      false,
+      false,
+    ])
+    expect(f.extraDesktop.activePluginGeneration()).toEqual(f.desktop.activePluginGeneration())
+    expect(f.stageEpochs).toHaveLength(withManager ? 3 : 2)
+    expect(new Set(f.stageEpochs).size).toBe(1)
+    expect(f.stageEpochs[0]).not.toBe('')
+    expect(f.lifecycle.requiresReconciliation).toBe(false)
+  } finally {
+    await f.close()
+  }
+}, 60_000)

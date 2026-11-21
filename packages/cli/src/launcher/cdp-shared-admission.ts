@@ -293,6 +293,13 @@ export function mutationArtifactLeases(mutation: PluginRuntimeMutation): readonl
     ?? (mutation.runtimeArtifactLease === undefined ? [] : [mutation.runtimeArtifactLease])
 }
 
+export function sameUniquePluginIds(actual: unknown, expected: readonly string[]): boolean {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false
+  const expectedIds = new Set(expected)
+  return expectedIds.size === expected.length && new Set(actual).size === actual.length
+    && actual.every(id => typeof id === 'string' && expectedIds.has(id))
+}
+
 /** Validate every real CDP document, not only the first returned receipt. */
 export function assertSharedCdpReadiness(
   receipts: readonly RuntimeReadinessObservation[],
@@ -304,7 +311,7 @@ export function assertSharedCdpReadiness(
       return receipt.transactionId !== mutation.transactionId || receipt.transactionEpoch !== mutation.transactionEpoch
         || receipt.expectedRegistryEpoch !== mutation.expectedRegistryEpoch
         || receipt.afterRegistryEpoch !== mutation.afterRegistryEpoch
-        || !attachmentEqual(affected, mutation.affectedPluginIds)
+        || !sameUniquePluginIds(affected, mutation.affectedPluginIds)
     })
   ) throw new Error('CDP shared renderer readiness disagrees')
 }

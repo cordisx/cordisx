@@ -7,6 +7,7 @@ import type {
   RuntimeGenerationFence,
 } from './plugin-lifecycle-model.js'
 import { CdpPluginLifecycleRuntime, type CdpSharedAdmission } from './cdp-plugin-lifecycle-runtime.js'
+import { sameUniquePluginIds } from './cdp-shared-admission.js'
 import { RendererLifecycleFederation } from './renderer-lifecycle-federation.js'
 import {
   type AttachedRendererPeer,
@@ -77,7 +78,12 @@ class CdpRendererGroup implements AttachedRendererPeer {
       if (mutation.transactionId !== this.transactionId) throw new Error('CDP renderer group transaction is stale')
       const ready = await this.admission.stage(mutation)
       if (!ready) throw new Error('CDP renderer group did not confirm stage')
-      return ready
+      const affected = (ready as typeof ready & { affectedPluginIds?: unknown }).affectedPluginIds
+      if (!sameUniquePluginIds(affected, mutation.affectedPluginIds)) {
+        throw new Error('CDP renderer group readiness impact disagrees')
+      }
+      // Normalize to the authority order only after validating the exact closure.
+      return { ...ready, affectedPluginIds: [...mutation.affectedPluginIds] }
     }
     if (frame.transactionId !== this.transactionId) throw new Error('CDP renderer group transaction is invalid')
     if (method === 'publish') return await this.admission.publish(frame.transactionId)
