@@ -753,4 +753,59 @@ describe('plugin config runtime', () => {
     expect(conflicted.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false)
     await runtime.dispose()
   })
+
+  it('retains a custom-renderer draft across a committed configuration update', async () => {
+    const { dom, runtime, bridge } = await boot()
+    try {
+      dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const plugin = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="live-config"]')
+        if (plugin) {
+          plugin.click()
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const tab = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')
+        if (tab) {
+          tab.click()
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      for (let attempt = 0; attempt < 200; attempt++) {
+        if (dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]')) break
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')!
+      range.value = '45'
+      range.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      await expect.poll(() =>
+        dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')?.dataset.state
+      ).toBe('dirty')
+      await runtime.updatePluginConfig('live-config', 0, [{ op: 'set', path: ['timeout'], value: 55 }])
+      await expect.poll(() =>
+        dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')?.dataset.state
+      ).toBe('conflict')
+      expect(dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('45')
+      expect(bridge.get('live-config')).toMatchObject({ revision: 1, config: { timeout: 55 } })
+      const review = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxf-alert button')].find(button =>
+        button.textContent?.includes('Review latest and keep my edits')
+      )!
+      expect(review.disabled).toBe(false)
+      review.click()
+      await expect.poll(() =>
+        dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')?.dataset.state
+      ).toBe('dirty')
+      dom.window.document.querySelector<HTMLButtonElement>(
+        '[data-plugin-config-form="live-config"] button[type="submit"]',
+      )!.click()
+      await expect.poll(() => bridge.get('live-config')?.revision).toBe(2)
+      expect(bridge.get('live-config')).toMatchObject({ config: { timeout: 45 } })
+    } finally {
+      await runtime.dispose()
+      dom.window.close()
+    }
+  })
 })

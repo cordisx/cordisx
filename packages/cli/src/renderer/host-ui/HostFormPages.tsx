@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -59,13 +60,15 @@ function restoreFocus(element: HTMLElement | undefined, stack: HTMLElement | nul
 }
 
 /** Keeps the root form and every nested draft page mounted while exposing one page at a time. */
-export function HostFormPageStack({ children, resetKey, layout = 'embedded' }: {
+export function HostFormPageStack({ children, resetKey, layout = 'embedded', onDepthChange }: {
   readonly children: ReactNode
   readonly resetKey: string | number
   readonly layout?: 'embedded' | 'fill'
+  readonly onDepthChange?: (depth: number) => void
 }) {
   const [pages, setPages] = useState<readonly HostFormPageDescriptor[]>([])
   const stack = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => onDepthChange?.(pages.length), [onDepthChange, pages.length])
   useEffect(() => {
     setPages(current => {
       if (current.length > 0) restoreFocus(current[0]?.returnFocus, stack.current)

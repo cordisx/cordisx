@@ -144,6 +144,167 @@ describe('Host React form behavior through TDesign controls', () => {
     expect(input('count').value).toBe('5')
   })
 
+  it('keeps a local draft when another client publishes a new revision', async () => {
+    const update = vi.fn(async () => undefined)
+    const manager = model(update)
+    const initial = [field('name'), field('count', { type: 'natural', value: 2 })]
+    await act(async () => root.render(<HostForm model={manager} plugin={plugin(initial)} />))
+    await edit('name', 'my unsaved name')
+    await act(async () =>
+      root.render(
+        <HostForm
+          model={manager}
+          plugin={plugin([field('name', { value: 'other name' }), field('count', { type: 'natural', value: 8 })], 2)}
+        />,
+      )
+    )
+    expect(input('name').value).toBe('my unsaved name')
+    expect(input('count').value).toBe('2')
+    expect(dom.window.document.querySelector('[data-plugin-config-form]')?.getAttribute('data-state')).toBe('conflict')
+    await submit()
+    expect(update).not.toHaveBeenCalled()
+    const review = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+      button.textContent?.includes('Review latest and keep my edits')
+    )
+    expect(review?.disabled).toBe(false)
+    await act(async () => review!.click())
+    expect(input('name').value).toBe('my unsaved name')
+    expect(input('count').value).toBe('8')
+    await submit()
+    expect(update).toHaveBeenCalledWith('fixture', 2, [{ op: 'set', path: ['name'], value: 'my unsaved name' }])
+  })
+
+  it('retains an in-flight draft when another revision arrives before a conflict receipt', async () => {
+    let reject!: (error: Error) => void
+    const update = vi.fn(() =>
+      new Promise<void>((_resolve, fail) => {
+        reject = fail
+      })
+    )
+    const manager = model(update)
+    await act(async () => root.render(<HostForm model={manager} plugin={plugin([field('name')])} />))
+    await edit('name', 'pending draft')
+    await submit()
+    await act(async () =>
+      root.render(<HostForm model={manager} plugin={plugin([field('name', { value: 'remote' })], 2)} />)
+    )
+    expect(input('name').value).toBe('pending draft')
+    await act(async () => reject(new Error('revision conflict')))
+    expect(input('name').value).toBe('pending draft')
+    expect(dom.window.document.querySelector('[data-plugin-config-form]')?.getAttribute('data-state')).toBe('conflict')
+    expect(dom.window.document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+    expect(update).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an incompatible draft without granting a changed field or source authority', async () => {
+    const update = vi.fn(async () => undefined)
+    const manager = model(update)
+    await act(async () =>
+      root.render(<HostForm model={manager} plugin={{ ...plugin([field('name')]), source: 'first' }} />)
+    )
+    await edit('name', 'retained value')
+    await act(async () =>
+      root.render(
+        <HostForm
+          model={manager}
+          plugin={{ ...plugin([field('name', { disabled: true })], 2), source: 'second' }}
+        />,
+      )
+    )
+    expect(input('name').value).toBe('retained value')
+    expect(input('name').disabled).toBe(true)
+    const review = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+      button.textContent?.includes('Review latest and keep my edits')
+    )
+    expect(review?.disabled).toBe(true)
+    await submit()
+    expect(update).not.toHaveBeenCalled()
+    await act(async () => dom.window.document.querySelector<HTMLButtonElement>('button[type="reset"]')!.click())
+    expect(input('name').value).toBe('initial')
+  })
+
+  it('stops a pending edit when field authority changes at the same revision', async () => {
+    const update = vi.fn(async () => undefined)
+    const manager = model(update)
+    await act(async () => root.render(<HostForm model={manager} plugin={plugin([field('name')])} />))
+    await edit('name', 'keep this draft')
+    await act(async () =>
+      root.render(<HostForm model={manager} plugin={plugin([field('name', { disabled: true })])} />)
+    )
+    expect(input('name').value).toBe('keep this draft')
+    expect(input('name').disabled).toBe(true)
+    expect(dom.window.document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+    await submit()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('does not transfer a draft to a replacement plugin generation', async () => {
+    const update = vi.fn(async () => undefined)
+    const manager = model(update)
+    const installed = {
+      ...plugin([field('name')]),
+      source: 'fixture:source',
+      package: {
+        version: '1',
+        digest: `sha256:${'a'.repeat(64)}` as const,
+        moduleGeneration: 'generation-1',
+        dependencies: [],
+      },
+    }
+    await act(async () => root.render(<HostForm model={manager} plugin={installed} />))
+    await edit('name', 'generation one draft')
+    await act(async () =>
+      root.render(
+        <HostForm
+          model={manager}
+          plugin={{
+            ...installed,
+            package: { ...installed.package, moduleGeneration: 'generation-2' },
+          }}
+        />,
+      )
+    )
+    expect(input('name').value).toBe('generation one draft')
+    expect(input('name').disabled).toBe(true)
+    expect(dom.window.document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+    await submit()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('does not apply an old draft to a field whose schema changed', async () => {
+    const update = vi.fn(async () => undefined)
+    const manager = model(update)
+    await act(async () => root.render(<HostForm model={manager} plugin={plugin([field('name')])} />))
+    await edit('name', 'unsaved text')
+    await act(async () =>
+      root.render(<HostForm model={manager} plugin={plugin([field('name', { type: 'number', value: 1 })], 2)} />)
+    )
+    expect(input('name').value).toBe('unsaved text')
+    const review = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+      button.textContent?.includes('Review latest and keep my edits')
+    )
+    expect(review?.disabled).toBe(true)
+    await submit()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('warns before refreshing a dirty standalone plugin form without storing its values', async () => {
+    dom.window.document.getElementById('root')!.setAttribute('data-manager-surface', 'standalone')
+    await act(async () => root.render(<HostForm model={model()} plugin={plugin([field('name')])} />))
+    const unchanged = new dom.window.Event('beforeunload', { cancelable: true })
+    dom.window.dispatchEvent(unchanged)
+    expect(unchanged.defaultPrevented).toBe(false)
+    await edit('name', 'private draft fixture')
+    const changed = new dom.window.Event('beforeunload', { cancelable: true })
+    dom.window.dispatchEvent(changed)
+    expect(changed.defaultPrevented).toBe(true)
+    expect(JSON.stringify(dom.window.sessionStorage)).not.toContain('private draft fixture')
+    await act(async () => dom.window.document.querySelector<HTMLButtonElement>('button[type="reset"]')!.click())
+    const reset = new dom.window.Event('beforeunload', { cancelable: true })
+    dom.window.dispatchEvent(reset)
+    expect(reset.defaultPrevented).toBe(false)
+  })
+
   it('retains validation semantics for required arrays, natural numbers, role formats and optional clears', async () => {
     const { hostFormValidationIssueText: validate } = await import(
       '../packages/cli/src/renderer/host-ui/HostFormValidation.js'
