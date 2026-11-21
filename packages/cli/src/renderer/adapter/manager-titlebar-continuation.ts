@@ -1,4 +1,5 @@
 import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
+import { isManager1117SplitHeader } from './manager-1117-split.js'
 import { clippedTabSpan, resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 import { type NativeViewportTitlebarOwner, resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
@@ -197,11 +198,24 @@ export function captureManagerTitlebarLease(
   const viewportOwner = resolveNativeViewportTitlebarOwner(header)
   const headerStyle = view.getComputedStyle(header)
   const titleStyle = view.getComputedStyle(title)
+  const markerLightControls = kind === 'split' && isManager1117SplitHeader(header)
+    && controls.filter(({ element }) => start.contains(element)).length >= 1
+    && controls.some(({ element }) =>
+      start.contains(element)
+      && element.matches('button[data-app-shell-sidebar-trigger="true"][aria-controls="app-shell-sidebar"]')
+    )
+    && controls.filter(({ element }) => start.contains(element)).every(({ bounds }) =>
+      bounds.left >= headerRect.left + 80 && bounds.right <= startRect.right + 2
+    )
+    && controls.every(({ bounds }) =>
+      bounds.right <= seat.bounds.left + 2
+      || bounds.left >= seat.bounds.left + seat.bounds.width - 2
+    )
   if (
     viewportOwner === undefined || headerStyle.pointerEvents !== 'none'
     || region(headerStyle) !== 'drag' || titleStyle.pointerEvents !== 'none'
     || controls.length < 2 || controls[0]!.bounds.left < headerRect.left + 80
-    || controls[1]!.bounds.right > headerRect.left + 170
+    || (!markerLightControls && controls[1]!.bounds.right > headerRect.left + 170)
   ) return undefined
   if (
     controls.some(({ element, bounds }) =>

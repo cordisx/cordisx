@@ -1,4 +1,5 @@
 import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
+import { resolveManager1117SplitFrame } from './adapter/manager-1117-split.js'
 import { managerTitlebarPresentationRight } from './adapter/manager-titlebar-presentation.js'
 import {
   type ManagerCollapsedSidebarSeat,
@@ -141,10 +142,11 @@ export function resolveManagerCardSeat(document: Document): {
     child instanceof ElementClass
     && child.hasAttribute('data-app-shell-thread-edge-divider')
   )
-  const frame = frames[0]
-  if (frames.length !== 1 || frame === undefined || !visible(frame)) return undefined
+  const frame = frames.length === 1 ? frames[0] : frames.length === 0 ? resolveManager1117SplitFrame(anchor) : undefined
+  if (frame === undefined || !visible(frame)) return undefined
   if (
-    frame.querySelectorAll('[data-app-shell-main-content-top-fade]').length !== 1
+    (frame.hasAttribute('data-app-shell-thread-edge-divider')
+      && frame.querySelectorAll('[data-app-shell-main-content-top-fade]').length !== 1)
     || frame.querySelectorAll('[data-app-shell-focus-area="main"]').length !== 1
   ) return undefined
   const anchorRect = anchor.getBoundingClientRect()

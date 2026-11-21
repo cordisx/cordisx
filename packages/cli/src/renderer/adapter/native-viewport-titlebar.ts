@@ -1,3 +1,5 @@
+import { isManager1117SplitHeader } from './manager-1117-split.js'
+
 export interface NativeViewportTitlebarOwner {
   readonly position: 'fixed' | 'absolute'
   readonly surface?: HTMLElement
@@ -19,7 +21,8 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
   if (
     surface === null || surface === undefined || frame === null || frame === undefined
     || surface.getAttribute('data-app-shell-page-surface') !== 'true'
-    || !['titlebar', 'page'].includes(surface.getAttribute('data-app-shell-header-placement') ?? '')
+    || (!['titlebar', 'page'].includes(surface.getAttribute('data-app-shell-header-placement') ?? '')
+      && !isManager1117SplitHeader(header))
     || view.getComputedStyle(surface).display !== 'contents'
     || view.getComputedStyle(frame).position !== 'relative'
     || header.getClientRects().length === 0 || frame.getClientRects().length === 0
@@ -57,7 +60,11 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
       && surface.getAttribute('data-app-shell-compact-page-gutter') === 'false'
       && surface.getAttribute('data-app-shell-unified-tab-strip') === 'false'
       && header.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll'
-    const gutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' || collapsedThreadGutter ? 4 : 0
+    const gutter = isManager1117SplitHeader(header)
+      ? 0
+      : frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' || collapsedThreadGutter
+      ? 4
+      : 0
     if (
       !near(rowRect.left, ownerRect.left) || !near(rowRect.top, ownerRect.top)
       || !near(rowRect.right, ownerRect.right) || !near(rowRect.bottom, ownerRect.bottom)

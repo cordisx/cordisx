@@ -1,4 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
+import { isManager1117SplitHeader } from './manager-1117-split.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
@@ -48,12 +49,13 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   const headers = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
     .filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
+  const markerLight = header !== undefined && isManager1117SplitHeader(header)
   if (
     headers.length !== 1 || header === undefined
     || header.parentElement?.getAttribute('data-app-shell-unified-tab-strip') !== 'true'
-    || !['default', 'thread-edge-scroll', 'full-bleed'].includes(
+    || (!markerLight && !['default', 'thread-edge-scroll', 'full-bleed'].includes(
       header.getAttribute('data-app-shell-header-layout') ?? '',
-    )
+    ))
   ) return undefined
   const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout][data-app-shell-workspace-layout="split"]',
@@ -64,7 +66,9 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   )
   const title = titles[0]
   const slots = title?.querySelectorAll<HTMLElement>(
-    '[data-app-shell-titlebar-slot="main"][data-app-shell-focus-area="main"]',
+    markerLight
+      ? ':scope > div > [data-app-shell-focus-area="main"]'
+      : '[data-app-shell-titlebar-slot="main"][data-app-shell-focus-area="main"]',
   )
   const slot = slots?.[0]
   const starts = header.querySelectorAll<HTMLElement>(':scope > [data-app-shell-header-slot="start"]')
@@ -96,13 +100,14 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   // the measured 26.1103 default and thread splits put it against the title.
   // In both cases, the main pane and exact native tab identities bound our seat.
   const compact = header.parentElement?.getAttribute('data-app-shell-compact-page-gutter') === 'true'
-    && header.parentElement?.getAttribute('data-app-shell-header-placement') === 'titlebar'
-    && slot.parentElement?.getAttribute('data-app-shell-header-obstacle') === 'true'
-    && slot.parentElement.parentElement === title
+    && (markerLight || header.parentElement?.getAttribute('data-app-shell-header-placement') === 'titlebar')
+    && (markerLight || slot.parentElement?.getAttribute('data-app-shell-header-obstacle') === 'true')
+    && slot.parentElement?.parentElement === title
     && near(titleRect.right, anchorRect.right)
     && near(titleRect.right - slotRect.right, 6)
     && (near(endRect.left - titleRect.right, 4)
-      || (['default', 'thread-edge-scroll'].includes(header.getAttribute('data-app-shell-header-layout') ?? '')
+      || ((markerLight
+        || ['default', 'thread-edge-scroll'].includes(header.getAttribute('data-app-shell-header-layout') ?? ''))
         && near(endRect.left, titleRect.right)))
   const legacy = near(titleRect.right, slotRect.right) && near(slotRect.right, anchorRect.right)
     && endRect.left >= slotRect.right - 2 && endRect.left <= slotRect.right + 8
