@@ -1,4 +1,5 @@
 import { channelQuestionCard } from './channel-question-card.js'
+import { renderFeishuMarkdown } from './feishu-markdown.js'
 import { createHash } from 'node:crypto'
 import {
   type CardActionEvent,
@@ -254,10 +255,11 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
-            const content = JSON.stringify(
-              delivery.questionCard ? channelQuestionCard(delivery.questionCard) : { text: delivery.text },
-            )
-            const msg_type = delivery.questionCard ? 'interactive' as const : 'text' as const
+            const rendered = delivery.questionCard
+              ? { msg_type: 'interactive' as const, content: channelQuestionCard(delivery.questionCard) }
+              : renderFeishuMarkdown(delivery.text)
+            const content = JSON.stringify(rendered.content)
+            const msg_type = rendered.msg_type
             const response = delivery.target.semantics !== 'conversation'
               ? await channel.rawClient.im.v1.message.reply({
                 path: { message_id: delivery.target.threadId },
