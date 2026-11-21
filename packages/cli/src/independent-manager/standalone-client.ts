@@ -67,7 +67,7 @@ async function bounded<T>(work: Promise<T>, signal: AbortSignal, milliseconds: n
 
 function verifyInitialGraphs(
   initialGraphs: readonly ManagerRendererGraph[],
-  runtime: Runtime,
+  runtime: Runtime & Pick<CordisXRuntimeHandle, 'configuredPluginGraphGenerations'>,
   scope: { readonly profileId: string; readonly generation: string },
 ): void {
   const active = runtime.activePluginGeneration()
@@ -79,9 +79,29 @@ function verifyInitialGraphs(
   ) throw new Error('manager-runtime-stale')
   const plugins = new Map(active.plugins.map(plugin => [plugin.id, plugin]))
   if (plugins.size !== active.plugins.length) throw new Error('manager-runtime-stale')
+  const configured = runtime.configuredPluginGraphGenerations?.() ?? []
+  if (!Array.isArray(configured) || configured.length > 256) throw new Error('manager-runtime-stale')
+  const configuredById = new Map(configured.map(plugin => [plugin.pluginId, plugin]))
+  if (
+    configuredById.size !== configured.length
+    || configured.some(plugin =>
+      !plugin || typeof plugin.pluginId !== 'string'
+      || typeof plugin.moduleGeneration !== 'string' || plugins.has(plugin.pluginId)
+    )
+    || configured.some(plugin =>
+      !initialGraphs.some(graph =>
+        graph.pluginId === plugin.pluginId && graph.moduleGeneration === plugin.moduleGeneration
+      )
+    )
+  ) throw new Error('manager-runtime-stale')
   for (const graph of initialGraphs) {
     const plugin = plugins.get(graph.pluginId)
-    if (!plugin?.enabled || plugin.moduleGeneration !== graph.moduleGeneration) throw new Error('manager-runtime-stale')
+    const configuredPlugin = configuredById.get(graph.pluginId)
+    if (plugin === undefined) {
+      if (configuredPlugin?.moduleGeneration !== graph.moduleGeneration) throw new Error('manager-runtime-stale')
+    } else if (!plugin.enabled || plugin.moduleGeneration !== graph.moduleGeneration) {
+      throw new Error('manager-runtime-stale')
+    }
   }
 }
 

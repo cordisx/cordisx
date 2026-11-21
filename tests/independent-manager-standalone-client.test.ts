@@ -38,6 +38,7 @@ function fixture(input: {
   readonly invalidSessionAt?: number
   readonly bundlePath?: string
   readonly graphs?: readonly unknown[]
+  readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
   readonly loseAck?: boolean
@@ -50,6 +51,7 @@ function fixture(input: {
   const registry = { stage: vi.fn(), publish: vi.fn(), retire: vi.fn(), dispose: vi.fn() }
   const runtime = {
     activePluginGeneration: vi.fn(() => activation),
+    configuredPluginGraphGenerations: vi.fn(() => input.configuredGraphs ?? []),
     pluginRegistryEpoch: vi.fn(() => 3),
     settleRegistryProjection: vi.fn(async () => {}),
     adoptRecoveredActivation: vi.fn(),
@@ -148,6 +150,35 @@ function fixture(input: {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+it('admits a configured graph only when the actual runtime confirms its exact generation', async () => {
+  const baseUrl = `${origin}/api/renderer/graphs/${'e'.repeat(64)}/`
+  const graph = {
+    leaseId: 'f'.repeat(64),
+    pluginId: 'channel',
+    moduleGeneration: 'channel-1',
+    baseUrl,
+    entryUrl: `${baseUrl}module.js`,
+    initialStyleUrls: [`${baseUrl}style.css`],
+  }
+  for (
+    const [configuredGraphs, ready] of [
+      [[{ pluginId: 'channel', moduleGeneration: 'channel-1' }], true],
+      [[{ pluginId: 'channel', moduleGeneration: 'other' }], false],
+      [[], false],
+    ] as const
+  ) {
+    const test = fixture({ graphs: [graph], configuredGraphs })
+    try {
+      expect(await test.manager.ready).toBe(ready)
+      expect(test.runtime.configuredPluginGraphGenerations).toHaveBeenCalled()
+      expect(test.unavailable).toHaveBeenCalledTimes(ready ? 0 : 1)
+    } finally {
+      await test.manager.close()
+      test.dom.window.close()
+    }
+  }
 })
 
 it('authenticates once and admits the existing runtime after synchronizing its actual snapshot', async () => {

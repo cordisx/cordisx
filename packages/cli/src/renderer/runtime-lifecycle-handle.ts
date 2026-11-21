@@ -762,6 +762,15 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  configuredPluginGraphGenerations: () =>
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? runtimeScope.controllers()!.flatMap(controller => (
+        controller.status === 'active' && controller.item.standaloneConfiguredGraph === true
+          && controller.item.package === undefined && typeof controller.item.artifactGeneration === 'string'
+          ? [{ pluginId: controller.item.id, moduleGeneration: controller.item.artifactGeneration }]
+          : []
+      ))
+      : [],
   pluginRegistryEpoch: () => runtimeScope.generationVisibility()!.registryEpoch(),
   releaseCertifiedPermissionChannel: () => {
     const channel = runtimeScope.certifiedPermissionChannel
