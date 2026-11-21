@@ -18,10 +18,9 @@ export const createRuntimeAuthorizePluginV4 = (
     ) {
       throw new Error(`plugin ${id} does not use permission v4`)
     }
-    await runtimeScope.broker()!.authorizeActivationV4(
+    await runtimeScope.broker()!.authorizeReviewedActivationV4(
       controller.identity,
       decision,
-      'enable',
       controller.generationView,
     )
   })

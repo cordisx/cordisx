@@ -758,7 +758,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
     const controller = runtimeScope.activeController()!(id)
     return controller === undefined
       ? undefined
-      : runtimeScope.broker()!.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
+      : runtimeScope.broker()!.reviewAuthorizationPlanV4(controller.identity, controller.generationView)
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
