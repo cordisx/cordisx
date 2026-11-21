@@ -92,4 +92,9 @@ describe('logical continuation source reader', () => {
       expect(f.authority.page).not.toHaveBeenCalled()
     }
   })
+  it('rejects an oversized native page instead of silently clipping or hashing it', async () => {
+    const f = fixture()
+    f.authority.page.mockResolvedValue({ items: [{ type: 'agentMessage', text: 'x'.repeat(2_000_001) }] })
+    await expect(f.reader.read(caller, input({}))).rejects.toThrow('HISTORY_PAGE_UNAVAILABLE')
+  })
 })

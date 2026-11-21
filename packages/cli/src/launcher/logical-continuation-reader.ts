@@ -50,6 +50,31 @@ const validNativeCursor = (value: unknown): value is string =>
 const sessionValid = (value: LogicalSessionRef) =>
   value && [value.hostId, value.appId, value.profileId, value.sessionId].every(valid)
 
+/** Bound the native response before hashing or projecting it; oversized pages are not silently truncated. */
+function boundedNativeJson(items: readonly unknown[]): string {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value: items, depth: 0 }]
+  const seen = new Set<object>()
+  let bytes = 0, nodes = 0
+  while (pending.length) {
+    const { value, depth } = pending.pop()!
+    if (++nodes > 16_384 || depth > 48) throw new Error('HISTORY_PAGE_UNAVAILABLE')
+    bytes += 16
+    if (typeof value === 'string') bytes += Buffer.byteLength(value, 'utf8')
+    else if (value !== null && typeof value === 'object') {
+      if (seen.has(value)) throw new Error('HISTORY_PAGE_UNAVAILABLE')
+      seen.add(value)
+      for (const [key, child] of Object.entries(value)) {
+        bytes += Buffer.byteLength(key, 'utf8') + 8
+        pending.push({ value: child, depth: depth + 1 })
+      }
+    } else if (value !== null && typeof value !== 'boolean' && (typeof value !== 'number' || !Number.isFinite(value))) {
+      throw new Error('HISTORY_PAGE_UNAVAILABLE')
+    }
+    if (bytes > 2_000_000 || pending.length > 16_384) throw new Error('HISTORY_PAGE_UNAVAILABLE')
+  }
+  return JSON.stringify(items)
+}
+
 /** Opaque, per-active-turn cursors cannot select or manufacture a source relationship. */
 export class LogicalContinuationReader {
   private readonly cursors = new Map<string, Cursor>()
@@ -95,7 +120,7 @@ export class LogicalContinuationReader {
     ) {
       throw new Error('HISTORY_PAGE_UNAVAILABLE')
     }
-    const digest = createHmac('sha256', this.digestKey).update(JSON.stringify(native.items)).digest('hex')
+    const digest = createHmac('sha256', this.digestKey).update(boundedNativeJson(native.items)).digest('hex')
     if (cursor?.digest !== undefined && cursor.digest !== digest) throw new Error('HISTORY_CURSOR_INVALID')
     const projected = projectLogicalHistory(native.items, relation.historyCategories, {
       ...(request.limit === undefined ? {} : { limit: Number(request.limit) }),
