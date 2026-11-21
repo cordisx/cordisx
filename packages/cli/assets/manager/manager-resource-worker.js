@@ -37,10 +37,13 @@ self.addEventListener('message', event => {
     const location = new URL(client.url)
     if (location.origin !== self.location.origin || location.pathname !== '/') return
     const value = event.data
-    if (
-      !value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1
-      || !Number.isSafeInteger(value.sequence) || value.sequence < 1
-    ) return
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1) return
+    if (value.kind === 'check' && Object.keys(value).length === 2) {
+      // A health check never touches the sequence or aborts active reads.
+      port.postMessage({ version: 1, ok: typeof clientsState.get(client.id)?.token === 'string' })
+      return
+    }
+    if (!Number.isSafeInteger(value.sequence) || value.sequence < 1) return
     const bind = value.kind === 'bind' && Object.keys(value).length === 4
       && typeof value.token === 'string' && id.test(value.token)
     const unbind = value.kind === 'unbind' && Object.keys(value).length === 3

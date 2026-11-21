@@ -37,6 +37,7 @@ window.fixture = {
     return await client.start()
   },
   recover: async () => await client.recover(),
+  isBound: async () => await client.isBound(),
   revoke: async () => await client.revokeLocal(),
   async rawMessage(value) {
     const channel = new MessageChannel()

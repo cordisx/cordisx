@@ -31,11 +31,13 @@ it('binds and explicitly recovers with the fixed worker, then erases its token o
   const client = createManagerResourceAuthClient({ window: target, sessionToken: token, isSessionCurrent: current })
   expect(await client.start()).toBe(true)
   expect(register).toHaveBeenCalledWith('/manager-resource-worker.js', { scope: '/', updateViaCache: 'none' })
+  expect(await client.isBound()).toBe(true)
   expect(await client.recover()).toBe(true)
   expect(await client.revokeLocal()).toBe(true)
   expect(await client.recover()).toBe(false)
   expect(messages).toEqual([
     { version: 1, kind: 'bind', token, sequence: 1 },
+    { version: 1, kind: 'check' },
     { version: 1, kind: 'bind', token, sequence: 2 },
     { version: 1, kind: 'unbind', sequence: 3 },
   ])

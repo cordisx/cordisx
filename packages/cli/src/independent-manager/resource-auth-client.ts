@@ -4,6 +4,8 @@ const sessionTokenPattern = /^[a-f0-9]{64}$/u
 export interface ManagerResourceAuthClient {
   /** Register the fixed same-origin worker and bind this browser document. */
   start(): Promise<boolean>
+  /** Read the current worker binding without sending a token or interrupting reads. */
+  isBound(): Promise<boolean>
   /** Rebind after worker memory is lost, only after rechecking the server session. */
   recover(): Promise<boolean>
   /** Erase the local token and abort worker requests; the caller must also revoke server authority. */
@@ -56,7 +58,7 @@ async function send(
     readonly version: 1
     readonly sequence: number
     readonly kind: 'unbind'
-  },
+  } | { readonly version: 1; readonly kind: 'check' },
 ): Promise<boolean> {
   const worker = await currentController(container, expectedUrl)
   const channel = new MessageChannel()
@@ -122,6 +124,14 @@ export function createManagerResourceAuthClient(input: {
         await withTimeout(container.register(workerScript, { scope: '/', updateViaCache: 'none' }), 5_000)
         await withTimeout(container.ready, 5_000)
         return await bind()
+      } catch {
+        return false
+      }
+    },
+    async isBound(): Promise<boolean> {
+      if (disposed || !container) return false
+      try {
+        return !disposed && await send(container, expectedUrl, { version: 1, kind: 'check' }) && !disposed
       } catch {
         return false
       }

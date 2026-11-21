@@ -47,6 +47,7 @@ it.skipIf(chrome === undefined)(
       await first.send('Page.navigate', { url: fixture.origin })
       await expect.poll(() => first.evaluate('typeof window.fixture === "object"')).toBe(true)
       expect(await first.evaluate("window.fixture.bind('a'.repeat(64))")).toBe(true)
+      expect(await first.evaluate('window.fixture.isBound()')).toBe(true)
       const result = await first.evaluate(`window.fixture.render(${JSON.stringify(fixture.graphA.baseUrl)})`)
       expect(result).toEqual({ module: 'module:nested', css: true, image: true })
       await expect.poll(() => fixture.events.some(event => event.path.endsWith('/font.woff2') && event.accepted))
@@ -98,8 +99,10 @@ it.skipIf(chrome === undefined)(
 
       await first.send('ServiceWorker.enable')
       await first.send('ServiceWorker.stopAllWorkers')
+      expect(await second.evaluate('window.fixture.isBound()')).toBe(false)
       expect(await second.evaluate(`window.fixture.read(${graphBEntry})`)).toMatchObject({ status: 403 })
       expect(await second.evaluate('window.fixture.recover()')).toBe(true)
+      expect(await second.evaluate('window.fixture.isBound()')).toBe(true)
       expect(await second.evaluate(`window.fixture.read(${graphBEntry})`)).toMatchObject({ status: 200 })
       expect(await first.evaluate('window.fixture.recover()')).toBe(true)
 
@@ -109,6 +112,14 @@ it.skipIf(chrome === undefined)(
       await second.evaluate(`(window.slowResult = window.fixture.read(${slowUrl}), true)`)
       await expect.poll(() =>
         fixture.events.slice(count).some(event => event.label === 'B' && event.path.endsWith('/chunk.js'))
+      )
+        .toBe(true)
+      expect(await second.evaluate('window.fixture.isBound()')).toBe(true)
+      expect(await second.evaluate('window.slowResult')).toMatchObject({ status: 200 })
+      const nextCount = fixture.events.length
+      await second.evaluate(`(window.slowResult = window.fixture.read(${slowUrl}), true)`)
+      await expect.poll(() =>
+        fixture.events.slice(nextCount).some(event => event.label === 'B' && event.path.endsWith('/chunk.js'))
       )
         .toBe(true)
       expect(await second.evaluate('window.fixture.revoke()')).toBe(true)
