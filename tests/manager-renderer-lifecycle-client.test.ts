@@ -158,6 +158,34 @@ it('confirms rollback against the runtime before accepting a durable activation 
   }
 })
 
+it.each([
+  { actual: ['base', 'dependent'], ok: true },
+  { actual: ['base', 'base'], ok: false },
+  { actual: ['base', 'other'], ok: false },
+])('accepts only the same unique affected plugins, independent of runtime order: $actual', async ({ actual, ok }) => {
+  const { runtime, loader, loaded } = fixture()
+  const affectedPluginIds = ['dependent', 'base']
+  const expanded = { ...mutation, targetId: 'base', affectedPluginIds }
+  loaded.mutation = expanded
+  runtime.stagePluginMutation.mockImplementation(async value => ({
+    transactionId: value.transactionId,
+    transactionEpoch: value.transactionEpoch!,
+    expectedRegistryEpoch: value.expectedRegistryEpoch!,
+    afterRegistryEpoch: value.afterRegistryEpoch!,
+    affectedPluginIds: actual,
+  }))
+  const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    await client.handle(command(2, 'prepare', prepare))
+    const result = await client.handle(command(3, 'stage', { rendererId, ...expanded }))
+    if (ok) expect(result).toMatchObject({ ok: true, value: { affectedPluginIds } })
+    else expect(result).toMatchObject({ ok: false })
+  } finally {
+    await client.close()
+  }
+})
+
 it('rejects a stale owner snapshot without adopting or echoing it', async () => {
   const { runtime, loader } = fixture()
   const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })

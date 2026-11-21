@@ -85,7 +85,7 @@ interface TransitionState {
   publication?: PluginGenerationPublication
 }
 
-function pluginEqual(
+export function pluginEqual(
   left: CordisXPluginActivationItemV1 | undefined,
   right: CordisXPluginActivationItemV1 | undefined,
 ): boolean {

@@ -132,10 +132,11 @@ it.skipIf(chrome === undefined)(
       expect(await snapshot(first)).toEqual(await snapshot(second))
       const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
       const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
-      const install = async (id: string) => {
+      const install = async (id: string, dependencies: readonly { id: string; version: string }[] = []) => {
         const sourceDirectory = await localPackage({
           root,
           id,
+          dependencies,
           code: `export function apply() { globalThis.__${id.replaceAll('-', '_')} = true }`,
         })
         const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
@@ -147,6 +148,8 @@ it.skipIf(chrome === undefined)(
           kind: 'execute',
           request: planned.executionRequest,
           expectedRevision: planned.snapshot.revision,
+        }).catch(error => {
+          throw new Error(`install ${id}: ${String(error)}`)
         }) as any
         expect(result.status, JSON.stringify(result.error ?? result.lifecycle?.error ?? {})).toBe('applied')
       }
@@ -157,13 +160,38 @@ it.skipIf(chrome === undefined)(
         expect(await first!.evaluate('globalThis.__first_browser_plugin === true')).toBe(true)
         expect(await second!.evaluate('globalThis.__first_browser_plugin === true')).toBe(true)
       }, { timeout: 20_000 })
+      await install('dependent-browser-plugin', [{ id: 'first-browser-plugin', version: '1.0.0' }])
+      const change = async (kind: 'plugin-disable' | 'plugin-enable', pluginId: string) => {
+        const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'plan',
+          request: { kind, pluginId },
+        }) as any
+        expect(planned.status).toBe('planned')
+        const result = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'execute',
+          request: planned.executionRequest,
+          expectedRevision: planned.snapshot.revision,
+        }).catch(error => {
+          throw new Error(`${kind} ${pluginId}: ${String(error)}`)
+        }) as any
+        expect(result.status, JSON.stringify(result.error ?? result.lifecycle?.error ?? {})).toBe('applied')
+      }
+      // The owner and renderer may enumerate this dependency closure in
+      // opposite order. Both real pages must still confirm the same members.
+      await change('plugin-disable', 'first-browser-plugin')
+      for (const page of [first, second]) {
+        expect((await snapshot(page)).active.plugins.map((item: { enabled: boolean }) => item.enabled))
+          .toEqual([false, false])
+      }
+      await change('plugin-enable', 'first-browser-plugin')
+      await change('plugin-enable', 'dependent-browser-plugin')
       await second.send('Target.closeTarget', { targetId: firstTarget.targetInfo.targetId })
       await first.close().catch(() => undefined)
       first = undefined
       await install('second-browser-plugin')
       await vi.waitFor(async () => {
         expect((await snapshot(second!)).active.plugins.map((item: { id: string }) => item.id).sort())
-          .toEqual(['first-browser-plugin', 'second-browser-plugin'])
+          .toEqual(['dependent-browser-plugin', 'first-browser-plugin', 'second-browser-plugin'])
       }, { timeout: 20_000 })
       // Keep one unrelated blank target alive while both Manager seats close.
       const spare = await second.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
@@ -173,11 +201,11 @@ it.skipIf(chrome === undefined)(
       // Wait for pagehide/peer disconnect before checking the zero-renderer path.
       await vi.waitFor(async () => {
         const planned = await requestPluginManagementRpc(rpcPaths, endpoint, { kind: 'query' }) as any
-        expect(planned.activationRevision).toBe(2)
+        expect(planned.activationRevision).toBe(6)
       }, { timeout: 10_000 })
       await install('headless-after-browser')
       const final = await requestPluginManagementRpc(rpcPaths, endpoint, { kind: 'query' }) as any
-      expect(final.activationRevision).toBe(3)
+      expect(final.activationRevision).toBe(7)
       // A new renderer must cold-boot all currently active package graphs,
       // not just packages installed after it joins.
       third = await CdpClient.connect(await socketFor(spare.targetId))
@@ -186,8 +214,20 @@ it.skipIf(chrome === undefined)(
       await third.send('Page.navigate', { url: await open() })
       await ready(third)
       expect((await snapshot(third)).active.plugins.map((item: { id: string }) => item.id).sort())
-        .toEqual(['first-browser-plugin', 'headless-after-browser', 'second-browser-plugin'])
-      for (const marker of ['first_browser_plugin', 'second_browser_plugin', 'headless_after_browser']) {
+        .toEqual([
+          'dependent-browser-plugin',
+          'first-browser-plugin',
+          'headless-after-browser',
+          'second-browser-plugin',
+        ])
+      for (
+        const marker of [
+          'dependent_browser_plugin',
+          'first_browser_plugin',
+          'second_browser_plugin',
+          'headless_after_browser',
+        ]
+      ) {
         expect(await third.evaluate(`globalThis.__${marker} === true`)).toBe(true)
       }
     } finally {

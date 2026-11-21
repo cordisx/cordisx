@@ -106,6 +106,13 @@ function equalJson(first: unknown, second: unknown, depth = 0): boolean {
     && keys.every((key, index) => key === other[index] && equalJson(left[key], right[key], depth + 1))
 }
 
+/** Runtime dependency order may differ from the owner's impact order. */
+function sameUniqueIds(actual: readonly string[], expected: readonly string[]): boolean {
+  if (actual.length !== expected.length) return false
+  const ids = new Set(actual)
+  return ids.size === actual.length && expected.every(id => ids.has(id))
+}
+
 function activation(value: unknown, scope: Scope, kind: 'active' | 'candidate'): Record<string, unknown> {
   const item = record(value)
   if (
@@ -302,10 +309,12 @@ export function createManagerRendererLifecycleClient(input: {
         receipt.transactionId !== current.id || receipt.transactionEpoch !== current.epoch
         || receipt.expectedRegistryEpoch !== current.registryEpoch
         || receipt.afterRegistryEpoch !== current.registryEpoch + 1
-        || !equalJson(receipt.affectedPluginIds, mutation.affectedPluginIds)
+        || !Array.isArray(receipt.affectedPluginIds)
+        || !sameUniqueIds(receipt.affectedPluginIds, mutation.affectedPluginIds)
       ) throw new Error('renderer-lifecycle-readiness-disagrees')
       current.phase = 'staged'
-      return { ...receipt, observation: mutation.candidate }
+      // Forward the owner-authoritative order after proving identical membership.
+      return { ...receipt, affectedPluginIds: [...mutation.affectedPluginIds], observation: mutation.candidate }
     }
     if (method === 'rollback') {
       const { item, current } = ensureTransaction(payload, true)

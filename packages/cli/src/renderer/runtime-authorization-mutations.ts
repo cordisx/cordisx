@@ -49,6 +49,7 @@ import type {
 } from '../permission-contracts.js'
 import { type CodexAdapterHandle, installCodexAdapter, installPlaygroundAdapter } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
+import { pluginEqual } from './generation-visibility.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import { PageAdmissionBindingRegistry } from './page-admission-lifecycle.js'
@@ -676,9 +677,15 @@ export const createRuntimeStagePluginMutation = (
         mutation.managedServiceUICapabilities ?? [],
       )
       for (const id of handle.affectedPluginIds) {
-        if (!mutation.candidate.plugins.some(item => item.id === id)) {
-          continue
-        }
+        const next = mutation.candidate.plugins.find(item => item.id === id)
+        if (!next) continue
+        const before = mutation.previous.plugins.find(item => item.id === id)
+        // An unchanged disabled dependent stays registered as metadata, but
+        // is not a visible controller to retire. Do not register it twice.
+        if (
+          !next.enabled && before?.enabled === false && pluginEqual(before, next)
+          && runtimeScope.activeController()!(id) !== undefined
+        ) continue
         const candidate = runtimeScope.candidateController()!(handle, mutation, id, module, moduleFactory, modules)
         runtimeScope.registerController()!(candidate.controller, candidate.registerAuthority)
         runtimeScope.controllers()!.push(candidate.controller)
