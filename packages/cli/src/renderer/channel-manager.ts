@@ -56,6 +56,7 @@ import type { RequestedScope } from './platform/platform-permission-store.js'
 import { generationVisibilityFromContext } from './generation-visibility.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
+import { restrictChannelManagerActions } from './channel-manager-actions.js'
 import {
   type ChannelManagerConnectionProjection,
   type ChannelManagerProjectionV1,
@@ -77,6 +78,8 @@ export type {
 
 /** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
 export interface ChannelManagerActionsApi {
+  /** Only a current redacted snapshot can be requested through this bridge. */
+  readonly snapshotOnly?: true
   run(
     action:
       | 'enable'
@@ -146,6 +149,12 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     const wrapped = 'projection' in candidate || 'serviceConfig' in candidate || 'credentialRequest' in candidate
       ? candidate as ChannelManagerServiceInput
       : { projection: candidate as ChannelManagerProjectionV1 }
+    const snapshotOnly = wrapped.actions?.snapshotOnly === true
+    if (
+      snapshotOnly && (wrapped.serviceConfig !== undefined || wrapped.credentialRequest !== undefined
+        || wrapped.createCredentialedConnection !== undefined)
+    ) throw new Error('snapshot-only Channel Manager cannot expose configuration or credentials')
+    const actions = restrictChannelManagerActions(wrapped.actions)
     registerChannelManagerState(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.credentialRequest === undefined ? {} : { credentialRequest: wrapped.credentialRequest }),
@@ -154,7 +163,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       ...(wrapped.createCredentialedConnection === undefined
         ? {}
         : { createCredentialedConnection: wrapped.createCredentialedConnection }),
-      ...(wrapped.actions === undefined ? {} : { actions: wrapped.actions }),
+      ...(actions === undefined ? {} : { actions }),
       localConnections: [],
       listeners: new Set<() => void>(),
       cachedProjection: undefined,
@@ -184,7 +193,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
         },
       })
     }
-    initializeChannelManagerWorkflows(state, wrapped)
+    if (!snapshotOnly) initializeChannelManagerWorkflows(state, wrapped)
     state.publicController = new PublicChannelManagerController({
       profileId: wrapped.profileId ?? 'default',
       hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
@@ -192,15 +201,16 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       ...(state.credentials === undefined ? {} : { credentials: state.credentials }),
       configurationAvailable: () => state.serviceConfig !== undefined && state.projection.service.writable,
       update: (ref, patch) => this.updateConfiguration(ref, patch),
-      actionsAvailable: () => stateFor(this).actions !== undefined,
+      actionsAvailable: () => stateFor(this).actions !== undefined && stateFor(this).actions!.snapshotOnly !== true,
+      logsAvailable: () => !snapshotOnly,
       runAction: async (action, value) => await this.runAction(action, value),
     })
-    if (wrapped.actions) {
+    if (actions && !snapshotOnly) {
       state.conversations = new ChannelConversationWorkflow({
         profileId: wrapped.profileId ?? 'default',
         hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
         controller: state.publicController,
-        actions: wrapped.actions,
+        actions,
         caller: 'detached',
         live: () => false,
         authorize: async () => false,
@@ -957,10 +967,6 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     const create = stateFor(this).createCredentialedConnection
     if (create === undefined) throw new Error('channel-credential-capture-unavailable')
     return create(input)
-  }
-
-  private actionsAvailable(): boolean {
-    return stateFor(this).actions !== undefined
   }
 
   private async runAction(

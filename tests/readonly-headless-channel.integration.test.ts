@@ -12,6 +12,7 @@ import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { CordisXChannelManagerService } from '../packages/cli/src/renderer/channel-manager.js'
+import { restrictChannelManagerActions } from '../packages/cli/src/renderer/channel-manager-actions.js'
 import { normalizePluginManifest } from '../packages/cli/src/renderer/platform/platform-manifest.js'
 import { ownerSnapshotPermissionStore } from '../packages/cli/src/renderer/platform/owner-snapshot-permission-store.js'
 import { PermissionBroker } from '../packages/cli/src/renderer/platform.js'
@@ -133,12 +134,21 @@ describe('read-only independent manager for an existing configured Channel', () 
         await expect(broker.setPolicyV2(identity, capability, 'allow-persistent')).rejects.toThrow()
         expect(await broker.authorizeChannel(identity, capability, scope)).toBe(false)
       }
+      const firstObservedAt = '2025-01-01T00:00:00.000Z'
+      const refreshedObservedAt = '2025-01-02T00:00:00.000Z'
+      let available = true
+      const run = vi.fn(async () =>
+        available
+          ? { status: 'applied' as const, projection: { ...initial.runtime, observedAt: refreshedObservedAt } }
+          : { status: 'unavailable' as const }
+      )
       const root = new Context()
       fiber = root.plugin(CordisXChannelManagerService, {
-        projection: initial.projection,
+        projection: { ...initial.projection, observedAt: firstObservedAt },
         profileId: 'test',
         hostGeneration: 'owner-generation',
         broker,
+        actions: { snapshotOnly: true, run },
       })
       await fiber
       const ctx = root.extend({
@@ -147,14 +157,32 @@ describe('read-only independent manager for an existing configured Channel', () 
         [CORDISX_PLUGIN_GENERATION]: moduleGeneration,
       })
       const own = (ctx.channelManager as ChannelManagerV5).forOwnService()!
-      expect(own.snapshot().accounts).toContainEqual(expect.objectContaining({
+      const beforeRefresh = own.snapshot()
+      expect(beforeRefresh.observedAt).toBe(firstObservedAt)
+      expect(beforeRefresh.accounts).toContainEqual(expect.objectContaining({
         adapterKind: 'simulator',
         connectionState: 'ready',
       }))
-      expect(own.snapshot().accounts.flatMap(account => account.availableOperations)).not.toContain('connection.enable')
-      expect(own.snapshot().accounts.flatMap(account => account.availableOperations)).not.toContain(
-        'connection.disable',
-      )
+      expect(beforeRefresh.accounts.flatMap(account => account.availableOperations)).toEqual([])
+      await own.refreshIdentity(new AbortController().signal)
+      expect(run).toHaveBeenCalledWith('snapshot', {})
+      expect(own.snapshot().observedAt).toBe(refreshedObservedAt)
+      available = false
+      await own.refreshIdentity(new AbortController().signal)
+      expect(own.snapshot().observedAt).toBe(refreshedObservedAt)
+      const account = own.snapshot().accounts[0]!
+      const outcome = await own.execute({
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        requestId: 'disable-read-only',
+        profileId: beforeRefresh.profileId,
+        hostGeneration: beforeRefresh.hostGeneration,
+        expectedRevision: own.snapshot().revision,
+        operation: 'connection.disable',
+        target: { kind: 'connection', connectionToken: account.connectionToken },
+      })
+      expect(outcome.status).toBe('rejected')
+      expect(run).toHaveBeenCalledTimes(2)
       view!.close()
     } finally {
       await fiber?.dispose()
@@ -245,6 +273,51 @@ describe('read-only independent manager for an existing configured Channel', () 
       release()
       await f.dispose()
     }
+  })
+
+  it('does not dispatch any write, workflow, conversation or malformed snapshot through a read-only bridge', async () => {
+    const run = vi.fn(async () => ({ status: 'applied' as const }))
+    const bridge = restrictChannelManagerActions({ snapshotOnly: true, run })!
+    for (
+      const action of [
+        'enable',
+        'disable',
+        'reconnect',
+        'archive',
+        'restore',
+        'unbind',
+        'policy',
+        'policy-set',
+        'continuation-defaults',
+        'continuation-defaults-set',
+        'execution-defaults',
+        'execution-defaults-set',
+        'channel-execution-defaults',
+        'channel-execution-defaults-set',
+        'execution-settings',
+        'execution-settings-set',
+        'model-list',
+        'task-config',
+        'task-config-set',
+        'task-settings',
+        'task-settings-set',
+        'binding-labels',
+        'conversation-page',
+        'conversation-detail',
+        'conversation-activity',
+        'conversation-bindings',
+        'binding-navigation',
+      ] as const
+    ) {
+      await expect(bridge.run(action, {})).resolves.toEqual({ status: 'unavailable', code: 'CHANNEL_READ_ONLY' })
+    }
+    await expect(bridge.run('snapshot', { unexpected: true })).resolves.toEqual({
+      status: 'unavailable',
+      code: 'CHANNEL_READ_ONLY',
+    })
+    expect(run).not.toHaveBeenCalled()
+    await expect(bridge.run('snapshot', {})).resolves.toEqual({ status: 'applied' })
+    expect(run).toHaveBeenCalledOnce()
   })
 
   it('refuses nonempty plugin config, an added capability, and a different service identity', async () => {

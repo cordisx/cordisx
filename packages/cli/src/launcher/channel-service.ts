@@ -570,14 +570,17 @@ export function createLocalChannelService(input: {
         ) return undefined
         const runtime = manager.snapshot()
         if (!runtime) return undefined
-        const projection = normalizeProjection(projectLocalChannelManager({
-          configuration,
-          revision: expected.revision,
-          lastGoodRevision: expected.lastGoodRevision,
-          writable: false,
-          runtime: current.runtime.snapshot(),
-          identity: ref => current.identities.snapshot(ref),
-        }))
+        const projection = normalizeProjection({
+          ...projectLocalChannelManager({
+            configuration,
+            revision: expected.revision,
+            lastGoodRevision: expected.lastGoodRevision,
+            writable: false,
+            runtime: current.runtime.snapshot(),
+            identity: ref => current.identities.snapshot(ref),
+          }),
+          observedAt: runtime.observedAt,
+        })
         // Only accounts in the current configuration and renderer-validated
         // identity data cross this boundary. Runtime error text, store fields,
         // conversations and bindings do not belong to the read-only view.

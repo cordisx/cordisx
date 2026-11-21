@@ -67,6 +67,8 @@ export interface ChannelManagerProjectionV1 {
   readonly contract: 'cordisx.channel-manager-projection/v1'
   readonly schemaVersion: 1
   readonly status: ChannelProductStatus
+  /** Time the Host observed this projection, if it represents a bounded snapshot. */
+  readonly observedAt?: string
   readonly service: {
     readonly configurationKind: 'host'
     readonly configApplies: 'service-restart'
@@ -210,6 +212,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
     'contract',
     'schemaVersion',
     'status',
+    'observedAt',
     'service',
     'connections',
     'routes',
@@ -220,6 +223,12 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   ], 'Channel Manager projection')
   if (projection.contract !== 'cordisx.channel-manager-projection/v1' || projection.schemaVersion !== 1) {
     throw new TypeError('Channel Manager projection contract is unsupported')
+  }
+  const observedAt = projection.observedAt === undefined
+    ? undefined
+    : boundedText(projection.observedAt, 'Channel Manager projection.observedAt', 64)
+  if (observedAt !== undefined && Number.isNaN(Date.parse(observedAt))) {
+    throw new TypeError('Channel Manager projection.observedAt is invalid')
   }
   const service = object(projection.service, 'Channel Manager projection.service')
   exactKeys(
@@ -392,6 +401,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   return {
     contract: 'cordisx.channel-manager-projection/v1',
     schemaVersion: 1,
+    ...(observedAt === undefined ? {} : { observedAt }),
     status: oneOf(
       projection.status,
       ['implemented', 'verified', 'experimental', 'unavailable', 'planned'],
@@ -423,6 +433,7 @@ export function withRuntimeProjection(
   const updates = new Map(runtime.accounts.map(item => [accountKey(item), item]))
   return normalizeProjection({
     ...base,
+    ...(base.observedAt === undefined ? {} : { observedAt: runtime.observedAt }),
     accounts: base.accounts.map(account => {
       const update = updates.get(accountKey(account))
       const { accountName: _name, accountAvatar: _avatar, ...prior } = account

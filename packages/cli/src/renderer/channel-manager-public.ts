@@ -44,6 +44,7 @@ interface PublicChannelManagerInput {
     patch: { displayName?: string; selectors?: readonly string[] },
   ) => Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }>
   readonly actionsAvailable: () => boolean
+  readonly logsAvailable?: () => boolean
   readonly runAction: (
     action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
     input: Record<string, unknown>,
@@ -233,7 +234,9 @@ export class PublicChannelManagerController {
         ...actionOperations,
         ...credentialOperations,
         ...(this.input.configurationAvailable?.() ? ['connection.update'] as const : []),
-        ...(projection.logs === undefined || connection.pendingTenant ? [] : ['logs.query'] as const),
+        ...(projection.logs === undefined || connection.pendingTenant || this.input.logsAvailable?.() === false
+          ? []
+          : ['logs.query'] as const),
       ]
       return [{
         connectionToken: token,
@@ -312,7 +315,7 @@ export class PublicChannelManagerController {
       profileId: this.input.profileId,
       hostGeneration: this.input.hostGeneration,
       revision: this.revision,
-      observedAt: new Date().toISOString(),
+      observedAt: projection.observedAt ?? new Date().toISOString(),
       availableOperations: this.input.credentials === undefined
         ? []
         : ['target.credential.capture.create', 'credential.capture', 'target.connection.create', 'connection.create'],
@@ -633,7 +636,9 @@ export class PublicChannelManagerController {
       throw new Error('TARGET_UNAVAILABLE')
     }
     const projection = this.input.projection()
-    if (projection.logs === undefined) throw new Error('OPERATION_UNAVAILABLE')
+    if (projection.logs === undefined || this.input.logsAvailable?.() === false) {
+      throw new Error('OPERATION_UNAVAILABLE')
+    }
     const filterDigest = JSON.stringify({ levels: [...levels].sort(), events: [...events].sort() })
     let offset = 0
     if (request.query.cursor !== undefined) {
