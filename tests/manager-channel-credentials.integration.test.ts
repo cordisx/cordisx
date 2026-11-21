@@ -6,6 +6,11 @@ import { ensureHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/co
 import { channelConfigurationApi } from '../packages/cli/src/cli/renderer-channel-composition.js'
 import { configuredChannelManager } from '../packages/cli/src/launcher/channel-connection-configuration.js'
 import { ManagedServicePluginLifecycleRuntime } from '../packages/cli/src/launcher/managed-service-plugin-lifecycle.js'
+import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
+import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
+import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import { attachmentHomeDigest } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
+import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { ManagerChannelCredentials } from '../packages/cli/src/launcher/manager-channel-credentials.js'
 import { ManagerChannelDraftJournal } from '../packages/cli/src/launcher/manager-channel-draft-journal.js'
 import { PackagePluginServiceConfigStore } from '../packages/cli/src/launcher/package-plugin-service-config.js'
@@ -19,7 +24,10 @@ import {
   startPluginManagementRpcServer,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { managementMailboxPath, requestManagementMailbox } from '../packages/cli/src/launcher/management-mailbox.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { PluginManagementService } from '../packages/cli/src/management/service.js'
 import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/managed-service-node-host.js'
 import type { PluginLifecycleRuntime } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
@@ -31,12 +39,22 @@ const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'tena
 const requestOp = (action: string, fields: Record<string, unknown> = {}) =>
   ({ kind: 'manager-channel-credentials', action, sessionId, ...fields }) as never
 
-async function fixture() {
+async function fixture(options: { coordinated?: boolean } = {}) {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-channel-manager-'))
   const configPath = path.join(homeDir, 'config.json')
   await ensureHomeConfig(configPath)
   await updateHomeConfigAtomic(
-    config => ({ ...config, plugins: [{ id: 'channel', entry: 'cordisx:channel', config: {} }] }),
+    config => ({
+      ...config,
+      plugins: [{ id: 'channel', entry: 'cordisx:channel', config: {} }],
+      apps: {
+        ...config.apps,
+        codex: {
+          ...config.apps.codex!,
+          profiles: { ...config.apps.codex!.profiles, work: { displayName: 'Work', dataMode: 'shared' } },
+        },
+      },
+    }),
     configPath,
   )
   const packageIdentity = { moduleGeneration: 'plugin-1', digest: `sha256:${'1'.repeat(64)}` as `sha256:${string}` }
@@ -65,7 +83,7 @@ async function fixture() {
         dispose: async () => {},
       }) as unknown as ManagedServiceNodeActivation,
   })
-  await lifecycle.initialize({
+  const active: CordisXPluginActivationRecordV1 = {
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1,
     recordKind: 'active',
@@ -80,7 +98,8 @@ async function fixture() {
       dependencies: [],
       ...packageIdentity,
     }],
-  })
+  }
+  await lifecycle.initialize(active)
   let currentGeneration = 'service-1'
   let failFinalize = false
   const restart = vi.fn(async (_value: unknown, expected?: string) => {
@@ -151,16 +170,49 @@ async function fixture() {
     validateCredentials,
     discoverTenant,
   })
-  const server = await startPluginManagementRpcServer({
-    homeDir,
-    appId: 'codex',
+  const scope = {
+    homeDigest: attachmentHomeDigest(homeDir),
+    ownerAppId: 'codex',
     profileId: 'work',
-    configPath,
     generation: 'host-1',
-    processStartedAt: new Date().toISOString(),
-    service: {} as PluginManagementService,
-    managerChannelCredentials: operation => manager.handle(operation),
-  })
+  }
+  const renderers = options.coordinated ? new ServiceRendererLifecycle({ scope }) : undefined
+  const participants = renderers ? new ServiceRendererParticipants(scope) : undefined
+  if (renderers && participants) {
+    renderers.initialize(active)
+    participants.bind(renderers)
+  }
+  const server = renderers && participants
+    ? await openProductionPluginManagementComposition({
+      mode: 'service',
+      homeDir,
+      appId: 'codex',
+      profileId: 'work',
+      configPath,
+      runtimeGeneration: 'host-1',
+      token: 'd'.repeat(64),
+      coordinator: new PluginLifecycleCoordinator({
+        homeDir,
+        profileId: 'work',
+        runtimeGeneration: 'host-1',
+        permissionPolicies: [],
+        runtime: renderers,
+      }),
+      rendererParticipant: participants.participant,
+      rendererParticipants: participants,
+      rendererLifecycle: renderers,
+      managerChannelCredentials: operation => manager.handle(operation),
+    })
+    : await startPluginManagementRpcServer({
+      homeDir,
+      appId: 'codex',
+      profileId: 'work',
+      configPath,
+      generation: 'host-1',
+      processStartedAt: new Date().toISOString(),
+      service: {} as PluginManagementService,
+      managerChannelCredentials: operation => manager.handle(operation),
+    })
   const paths = pluginManagementRpcPaths(homeDir, 'codex', 'work')
   const endpoint = (await readPluginManagementRpcEndpoint(paths))!
   const request = async (operation: never) =>
@@ -181,6 +233,8 @@ async function fixture() {
     },
     close: async () => {
       await server.close()
+      participants?.close()
+      await renderers?.close()
       await manager.close()
       await lifecycle.dispose()
       await rm(homeDir, { recursive: true, force: true })
@@ -190,7 +244,7 @@ async function fixture() {
 
 describe('local manager Channel credential transactions', () => {
   it('runs user-entered credential capture, commit and enablement through HTTP and the real Host socket', async () => {
-    const f = await fixture()
+    const f = await fixture({ coordinated: true })
     const operations: Array<Record<string, unknown>> = []
     const web = await startManagerWeb(
       {

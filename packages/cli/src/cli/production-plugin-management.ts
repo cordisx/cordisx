@@ -21,6 +21,7 @@ import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
+import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -94,6 +95,16 @@ export async function openProductionPluginManagementComposition(input: {
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
   })
+  const managerChannelCredentials = input.managerChannelCredentials === undefined
+    ? undefined
+    : input.mode === 'service'
+    ? coordinateManagerChannelCredentials({
+      sessions: rendererSessions,
+      ...(input.rendererParticipants === undefined ? {} : { participants: input.rendererParticipants }),
+      ...(input.rendererLifecycle === undefined ? {} : { lifecycle: input.rendererLifecycle }),
+      handle: input.managerChannelCredentials,
+    })
+    : input.managerChannelCredentials
   let server: PluginManagementRpcServer
   try {
     const processStartedAt = input.processStartedAt ?? await processStartIdentity(process.pid)
@@ -121,9 +132,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.codex === undefined ? {} : { codex: input.codex }),
       ...(input.rendererConfiguration === undefined ? {} : { rendererConfiguration: input.rendererConfiguration }),
       ...(input.managerServiceAuth === undefined ? {} : { managerServiceAuth: input.managerServiceAuth }),
-      ...(input.managerChannelCredentials === undefined
+      ...(managerChannelCredentials === undefined
         ? {}
-        : { managerChannelCredentials: input.managerChannelCredentials }),
+        : { managerChannelCredentials }),
     })
   } catch (error) {
     rendererSessions.dispose()

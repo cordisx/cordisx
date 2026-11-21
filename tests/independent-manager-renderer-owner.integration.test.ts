@@ -24,6 +24,8 @@ import {
   requestPluginManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   effectiveConfigFingerprint,
   processStartIdentity,
@@ -459,3 +461,152 @@ it('routes an authenticated session over the real production owner RPC to its re
     await rm(homeDir, { recursive: true, force: true })
   }
 })
+
+it('coordinates sidecar Channel writes with the service renderer fleet before dispatch', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-channel-fence-'))
+  const configPath = path.join(homeDir, 'config.json')
+  const appId = 'codex', profileId = 'default', generation = 'owner-1'
+  const processStartedAt = (await processStartIdentity(process.pid))!
+  const gateway = { pid: process.pid, processStartedAt, instanceToken: secret() }
+  const paths = managerRendererGatewayPaths(homeDir, profileId)
+  await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
+  await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+  await writeSupervisorState(paths, {
+    schemaVersion: 1,
+    appId: 'manager',
+    profileId,
+    phase: 'ready',
+    ...gateway,
+    createdAt: new Date().toISOString(),
+    version: 'fixture',
+    effectiveConfig: effectiveConfigFingerprint({ appId, generation }),
+  })
+  const supervisor = await startSupervisorControlServer({
+    socketPath: paths.socket,
+    token: gateway.instanceToken,
+    stop: () => {},
+  })
+  const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation }
+  const lifecycle = new ServiceRendererLifecycle({ scope, projectMutation: async () => undefined })
+  lifecycle.initialize({
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1,
+    recordKind: 'active',
+    profileId,
+    runtimeGeneration: generation,
+    revision: 0,
+    lastGoodRevision: 0,
+    plugins: [],
+  })
+  const participants = new ServiceRendererParticipants(scope)
+  participants.bind(lifecycle)
+  const coordinator = new PluginLifecycleCoordinator({
+    homeDir,
+    profileId,
+    runtimeGeneration: generation,
+    permissionPolicies: [],
+    runtime: lifecycle,
+  })
+  const finish = deferred<{ status: string }>()
+  const handle = vi.fn(async () => await finish.promise)
+  let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+  try {
+    composition = await openProductionPluginManagementComposition({
+      mode: 'service',
+      configPath,
+      homeDir,
+      appId,
+      profileId,
+      runtimeGeneration: generation,
+      token: secret(),
+      coordinator,
+      rendererParticipant: participants.participant,
+      rendererParticipants: participants,
+      rendererLifecycle: lifecycle,
+      managerChannelCredentials: handle,
+      processStartedAt,
+    })
+    const rpcPaths = pluginManagementRpcPaths(homeDir, appId, profileId)
+    const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
+    const browserSessionId = secret()
+    const open = { kind: 'manager-renderer' as const, action: 'open' as const, gateway, browserSessionId }
+    const opened = await requestPluginManagementRpc(rpcPaths, endpoint, open) as {
+      status: string
+      handle: { rendererId: string; ownerGeneration: string; grant: string }
+    }
+    expect(opened.status).toBe('ok')
+    const mutation = {
+      kind: 'manager-channel-credentials' as const,
+      action: 'set-enabled' as const,
+      sessionId: browserSessionId,
+      serviceGeneration: 'service-1',
+      expectedRevision: 0,
+      account: { adapterId: 'feishu' as const, accountId: 'cli_fixture', tenantId: 'tenant' },
+      enabled: true,
+    }
+    // A renderer cannot dispose itself while waiting for its own result.
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, mutation)).toEqual({
+      status: 'unavailable',
+      code: 'PROFILE_COORDINATION_UNAVAILABLE',
+    })
+    expect(handle).not.toHaveBeenCalled()
+
+    const changing = requestPluginManagementRpc(rpcPaths, endpoint, { ...mutation, sessionId: secret() })
+    const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
+    const polled = await requestPluginManagementRpc(rpcPaths, endpoint, {
+      ...common,
+      action: 'poll',
+      timeoutMs: 5_000,
+    }) as {
+      value: { command: { id: string; sequence: number; method: string; payload: { fenceId: string } } }
+    }
+    expect(polled.value.command.method).toBe('quiesce')
+    expect(handle).not.toHaveBeenCalled()
+    const other = { ...open, browserSessionId: secret() }
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toEqual({ status: 'unavailable' })
+    expect(() => lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
+    expect(
+      await requestPluginManagementRpc(rpcPaths, endpoint, {
+        ...common,
+        action: 'acknowledge',
+        receipt: {
+          id: polled.value.command.id,
+          sequence: polled.value.command.sequence,
+          ok: true,
+          value: {
+            fenceId: polled.value.command.payload.fenceId,
+            rendererId: opened.handle.rendererId,
+            ownerGeneration: generation,
+            quiesced: true,
+          },
+        },
+      }),
+    ).toEqual({ status: 'ok', value: { accepted: true } })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'close' }))
+      .toEqual({ status: 'ok' })
+    await vi.waitFor(() => expect(handle).toHaveBeenCalledOnce())
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toEqual({ status: 'unavailable' })
+    finish.resolve({ status: 'applied' })
+    expect(await changing).toEqual({ status: 'applied' })
+    const reopened = await requestPluginManagementRpc(rpcPaths, endpoint, other) as { status: string }
+    expect(reopened.status).toBe('ok')
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...other, action: 'revoke' }))
+      .toEqual({ status: 'ok' })
+
+    handle.mockResolvedValueOnce({ status: 'unknown' })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...mutation, sessionId: secret() })).toEqual({
+      status: 'unknown',
+      code: 'RESULT_UNKNOWN',
+    })
+    expect(() => lifecycle.snapshot()).toThrow('service renderer lifecycle is unavailable')
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...open, browserSessionId: secret() }))
+      .toEqual({ status: 'unavailable' })
+  } finally {
+    finish.resolve({ status: 'unknown' })
+    await composition?.close()
+    participants.close()
+    await lifecycle.close()
+    await supervisor.close()
+    await rm(homeDir, { recursive: true, force: true })
+  }
+}, 30_000)
