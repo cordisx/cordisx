@@ -17,6 +17,7 @@ import {
   parseChannelServiceConfig,
 } from '@cordisx/channel-runtime'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
+import { normalizeProjection, withRuntimeProjection } from '../renderer/channel-manager-projection.js'
 import {
   type ChannelManagerActionStatus,
   type ChannelManagerApi,
@@ -56,6 +57,12 @@ export interface LocalChannelService {
   snapshot(): ChannelRuntimeSnapshot | undefined
   identity(ref: ChannelRuntimeSnapshot['accounts'][number]['ref']): ChannelAccountIdentity | undefined
   auditSnapshot(): ReturnType<ChannelRuntime['auditSnapshot']>
+  /** Read-only, launcher-private snapshot, serialized with service configuration changes. */
+  readManagementSnapshot(input: {
+    readonly configuration: unknown
+    readonly revision: number
+    readonly lastGoodRevision: number
+  }): Promise<LocalChannelManagementSnapshot | undefined>
   /** Launcher-private runtime controls; never bind this object into renderer code. */
   readonly manager: ChannelManagerApi
   conversationAccess(): ChannelConversationAccess | undefined
@@ -85,6 +92,14 @@ export interface LocalChannelService {
       | undefined,
   ): void
   dispose(): Promise<void>
+}
+
+export interface LocalChannelManagementSnapshot {
+  /** Account transport generation; distinct from owner.serviceGeneration. */
+  readonly generation: string
+  readonly owner: HostServiceCapabilityOwner
+  readonly projection: ChannelManagerProjectionV1
+  readonly runtime: import('./channel-manager-api.js').ChannelManagerRuntimeProjection
 }
 
 /** Build the only renderer-visible Channel state from redacted local service data. */
@@ -530,6 +545,75 @@ export function createLocalChannelService(input: {
     snapshot: () => active?.runtime.snapshot(),
     identity: ref => active?.identities.snapshot(ref),
     auditSnapshot: () => active?.runtime.auditSnapshot() ?? [],
+    async readManagementSnapshot(expected) {
+      return await serial(async () => {
+        const current = active, configuration = activeConfiguration, owner = managementOwner
+        if (
+          disposed || !current || !configuration || !owner || pendingConfiguration !== undefined
+          || !Number.isSafeInteger(expected.revision) || expected.revision < 0
+          || !Number.isSafeInteger(expected.lastGoodRevision) || expected.lastGoodRevision < 0
+          || expected.lastGoodRevision > expected.revision
+        ) return undefined
+        let persisted: ReturnType<typeof parseChannelServiceConfig>
+        try {
+          persisted = parseChannelServiceConfig(expected.configuration)
+        } catch {
+          return undefined
+        }
+        if (JSON.stringify(persisted) !== JSON.stringify(configuration)) return undefined
+        const read = owner.capabilities.find(capability =>
+          capability.name === 'channel.accounts.read' && Object.keys(capability.scope).length === 0
+        )
+        if (
+          !read || owner.pluginId !== 'channel' || owner.serviceId !== 'runtime'
+          || owner.serviceKind !== 'channel-adapter' || !owner.serviceGeneration
+        ) return undefined
+        const runtime = manager.snapshot()
+        if (!runtime) return undefined
+        const projection = normalizeProjection(projectLocalChannelManager({
+          configuration,
+          revision: expected.revision,
+          lastGoodRevision: expected.lastGoodRevision,
+          writable: false,
+          runtime: current.runtime.snapshot(),
+          identity: ref => current.identities.snapshot(ref),
+        }))
+        // Only accounts in the current configuration and renderer-validated
+        // identity data cross this boundary. Runtime error text, store fields,
+        // conversations and bindings do not belong to the read-only view.
+        const limitedRuntime = {
+          contract: runtime.contract,
+          schemaVersion: runtime.schemaVersion,
+          observedAt: runtime.observedAt,
+          accounts: runtime.accounts.flatMap(account => {
+            const visible = projection.accounts.find(candidate => key(candidate.ref) === key(account.ref))
+            if (!visible) return []
+            return [{
+              ref: { ...visible.ref },
+              adapterKind: account.adapterKind,
+              implementationStatus: account.implementationStatus,
+              connectionState: account.connectionState,
+              secretState: account.secretState,
+              generation: account.generation,
+              lastGoodRevision: account.lastGoodRevision,
+              inbound: { ...account.inbound },
+              outbound: { ...account.outbound },
+              ...(visible.accountName === undefined ? {} : { accountName: visible.accountName }),
+              ...(visible.accountAvatar === undefined ? {} : { accountAvatar: visible.accountAvatar }),
+            }]
+          }),
+          bindings: [],
+        }
+        // Validate the entire readback against the same renderer projection rules.
+        withRuntimeProjection(projection, limitedRuntime)
+        return {
+          generation: current.generation,
+          owner: { ...owner, capabilities: [{ name: read.name, scope: {} }] },
+          projection,
+          runtime: limitedRuntime,
+        }
+      })
+    },
     manager,
     conversationAccess: () => {
       const current = active, configuration = activeConfiguration
