@@ -4,8 +4,8 @@ const sessionTokenPattern = /^[a-f0-9]{64}$/u
 export interface ManagerResourceAuthClient {
   /** Register the fixed same-origin worker and bind this browser document. */
   start(): Promise<boolean>
-  /** Read the current worker binding without sending a token or interrupting reads. */
-  isBound(): Promise<boolean>
+  /** Read the binding; undefined means the worker did not give a valid answer. */
+  isBound(): Promise<boolean | undefined>
   /** Rebind after worker memory is lost, only after rechecking the server session. */
   recover(): Promise<boolean>
   /** Erase the local token and abort worker requests; the caller must also revoke server authority. */
@@ -70,7 +70,11 @@ async function send(
     channel.port1.onmessage = event => {
       clearTimeout(timer)
       channel.port1.close()
-      resolve(event.data?.version === 1 && event.data?.ok === true)
+      if (event.data?.version !== 1 || typeof event.data?.ok !== 'boolean') {
+        reject(new Error('manager-resource-worker-unavailable'))
+        return
+      }
+      resolve(event.data.ok)
     }
     try {
       worker.postMessage(message, [channel.port2])
@@ -128,12 +132,13 @@ export function createManagerResourceAuthClient(input: {
         return false
       }
     },
-    async isBound(): Promise<boolean> {
-      if (disposed || !container) return false
+    async isBound(): Promise<boolean | undefined> {
+      if (disposed || !container) return undefined
       try {
-        return !disposed && await send(container, expectedUrl, { version: 1, kind: 'check' }) && !disposed
+        const bound = await send(container, expectedUrl, { version: 1, kind: 'check' })
+        return disposed ? undefined : bound
       } catch {
-        return false
+        return undefined
       }
     },
     async recover(): Promise<boolean> {

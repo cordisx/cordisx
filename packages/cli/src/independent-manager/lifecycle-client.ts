@@ -148,6 +148,8 @@ export function createManagerRendererLifecycleClient(input: {
 }): {
   readonly closed: boolean
   handle(command: unknown): Promise<ManagerRendererLifecycleReceipt>
+  /** Rebind resources only while no lifecycle operation or recovery is in flight. */
+  recoverResources(recover: () => Promise<boolean>): Promise<boolean>
   close(): Promise<void>
 } {
   const { runtime, loader } = input
@@ -400,6 +402,17 @@ export function createManagerRendererLifecycleClient(input: {
   return {
     get closed() {
       return closed
+    },
+    async recoverResources(recover) {
+      if (closed || busy || !synchronized || transaction !== undefined || awaitingAdoption !== undefined) return false
+      busy = true
+      try {
+        return await recover() && !closed && !lifetime.signal.aborted
+      } catch {
+        return false
+      } finally {
+        busy = false
+      }
     },
     async handle(value) {
       let item: Record<string, unknown>

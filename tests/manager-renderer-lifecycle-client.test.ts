@@ -47,6 +47,43 @@ const rollback = {
   disposedAfter: candidate,
 }
 
+it('allows resource recovery only after synchronization and outside a lifecycle transaction', async () => {
+  const { runtime, loader } = fixture()
+  const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })
+  const recover = vi.fn(async () => true)
+  try {
+    expect(await client.recoverResources(recover)).toBe(false)
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(await client.recoverResources(recover)).toBe(true)
+    expect(recover).toHaveBeenCalledOnce()
+    await client.handle(command(2, 'prepare', prepare))
+    expect(await client.recoverResources(recover)).toBe(false)
+    expect(recover).toHaveBeenCalledOnce()
+  } finally {
+    await client.close()
+  }
+})
+
+it('fences a resource recovery if a lifecycle command arrives before it finishes', async () => {
+  const { runtime, loader } = fixture()
+  const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })
+  let finish!: (value: boolean) => void
+  const pending = new Promise<boolean>(resolve => {
+    finish = resolve
+  })
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    const recovery = client.recoverResources(async () => await pending)
+    expect(await client.handle(command(2, 'prepare', prepare))).toMatchObject({ ok: false })
+    finish(true)
+    expect(await recovery).toBe(false)
+    expect(client.closed).toBe(true)
+  } finally {
+    finish(false)
+    await client.close()
+  }
+})
+
 function fixture() {
   let current: typeof base | typeof candidate = structuredClone(base)
   let epoch = 0

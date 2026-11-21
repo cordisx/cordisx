@@ -282,7 +282,23 @@ export function startStandaloneManager(input: {
         if (closed || heartbeatRunning || !resourceAuth) return
         heartbeatRunning = true
         void (async () => {
-          if (!await resourceAuth!.isBound() || !await isSessionCurrent()) fail()
+          const bound = await resourceAuth!.isBound()
+          if (bound === true) {
+            if (!await isSessionCurrent()) fail()
+            return
+          }
+          if (bound !== false) {
+            fail()
+            return
+          }
+          // A worker may lose its in-memory state without its controller
+          // changing. Rebind only while the lifecycle is idle and the owner
+          // still recognizes this exact renderer; never replay a command.
+          const recovered = await lifecycle?.recoverResources(async () =>
+            await isSessionCurrent() && await resourceAuth!.recover()
+            && await resourceAuth!.isBound() === true && await isSessionCurrent()
+          )
+          if (!recovered) fail()
         })().catch(fail).finally(() => {
           heartbeatRunning = false
         })

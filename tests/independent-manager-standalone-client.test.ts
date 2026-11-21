@@ -65,6 +65,7 @@ function fixture(input: {
   let allowAdmission!: () => void
   let checks = 0
   let polls = 0
+  let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
     if (path === '/api/session') return Promise.resolve(response({ token: sessionToken }))
     if (path === '/api/renderer/open') {
@@ -80,7 +81,7 @@ function fixture(input: {
     if (path === '/api/renderer/session') {
       checks++
       return Promise.resolve(
-        response({ current: checks !== input.invalidSessionAt, rendererId, generation: 'owner-1' }),
+        response({ current: sessionCurrent && checks !== input.invalidSessionAt, rendererId, generation: 'owner-1' }),
       )
     }
     if (path === '/api/renderer/bootstrap') {
@@ -122,7 +123,7 @@ function fixture(input: {
   Object.defineProperty(win, 'fetch', { value: fetch })
   const auth = {
     start: vi.fn(async () => true),
-    isBound: vi.fn(async () => true),
+    isBound: vi.fn(async (): Promise<boolean | undefined> => true),
     recover: vi.fn(async () => true),
     revokeLocal: vi.fn(async () => true),
   }
@@ -145,7 +146,22 @@ function fixture(input: {
     createResourceAuth: createResourceAuth as never,
     importBundle: importBundle as never,
   })
-  return { dom, win, serviceWorker, manager, fetch, auth, start, importBundle, unavailable, runtime, registry }
+  return {
+    dom,
+    win,
+    serviceWorker,
+    manager,
+    fetch,
+    auth,
+    start,
+    importBundle,
+    unavailable,
+    runtime,
+    registry,
+    revokeSession: () => {
+      sessionCurrent = false
+    },
+  }
 }
 
 afterEach(() => {
@@ -288,16 +304,77 @@ it('retires the document on a worker controller change without replay or rebind'
   }
 })
 
-it('retires the document if a worker loses its in-memory binding', async () => {
+it('recovers a worker binding only while the owner session remains current', async () => {
   vi.useFakeTimers()
   const test = fixture()
   try {
     expect(await test.manager.ready).toBe(true)
     test.auth.isBound.mockResolvedValue(false)
+    test.auth.recover.mockImplementation(async () => {
+      test.auth.isBound.mockResolvedValue(true)
+      return true
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(test.unavailable).not.toHaveBeenCalled()
+    expect(test.auth.recover).toHaveBeenCalledOnce()
+    expect(test.runtime.dispose).not.toHaveBeenCalled()
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')).toHaveLength(1)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not rebind after the owner revokes the session', async () => {
+  vi.useFakeTimers()
+  const test = fixture()
+  try {
+    expect(await test.manager.ready).toBe(true)
+    test.auth.isBound.mockResolvedValue(false)
+    test.revokeSession()
     await vi.advanceTimersByTimeAsync(15_000)
     await test.manager.close()
     expect(test.unavailable).toHaveBeenCalledOnce()
     expect(test.auth.recover).not.toHaveBeenCalled()
+    expect(test.runtime.dispose).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not rebind when the worker binding check has an uncertain result', async () => {
+  vi.useFakeTimers()
+  const test = fixture()
+  try {
+    expect(await test.manager.ready).toBe(true)
+    test.auth.isBound.mockResolvedValue(undefined)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await test.manager.close()
+    expect(test.unavailable).toHaveBeenCalledOnce()
+    expect(test.auth.recover).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retires a renderer if its owner session is revoked during worker recovery', async () => {
+  vi.useFakeTimers()
+  const test = fixture()
+  try {
+    expect(await test.manager.ready).toBe(true)
+    test.auth.isBound.mockResolvedValue(false)
+    test.auth.recover.mockImplementation(async () => {
+      test.auth.isBound.mockResolvedValue(true)
+      test.revokeSession()
+      return true
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+    await test.manager.close()
+    expect(test.auth.recover).toHaveBeenCalledOnce()
+    expect(test.unavailable).toHaveBeenCalledOnce()
+    expect(test.auth.revokeLocal).toHaveBeenCalledOnce()
     expect(test.runtime.dispose).toHaveBeenCalledOnce()
   } finally {
     await test.manager.close()

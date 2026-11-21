@@ -145,6 +145,7 @@ it.skipIf(chrome === undefined)(
         }
         if (url.pathname === '/api/renderer/poll') {
           if (session.polled) {
+            setTimeout(() => json({ command: null }), 1_000)
             return
           }
           session.polled = true
@@ -204,6 +205,17 @@ it.skipIf(chrome === undefined)(
       expect(events.filter(event => event.path === '/api/renderer/bundle.js').map(event => event.label).sort()).toEqual(
         ['first', 'second'],
       )
+      // Chromium can discard a service worker's memory while keeping its
+      // controller. Each live, idle renderer must rebind only its own session.
+      await first.send('ServiceWorker.enable')
+      await first.send('ServiceWorker.stopAllWorkers')
+      expect(await second.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)")).toBe(403)
+      for (const page of [first, second]) {
+        await expect.poll(() => page.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)"), {
+          timeout: 23_000,
+        }).toBe(200)
+        expect(await page.evaluate('globalThis.__fixtureDisposed === true')).toBe(false)
+      }
       await first.evaluate("dispatchEvent(new Event('pagehide'))")
       await expect.poll(() => first.evaluate('globalThis.__fixtureDisposed === true')).toBe(true)
       await expect.poll(() => sessions.get('c'.repeat(64))?.closed === true).toBe(true)

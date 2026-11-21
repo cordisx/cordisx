@@ -44,8 +44,13 @@ The isolated browser tests do not constitute real Codex App validation.
 
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use
-bootstrap in the URL fragment; it is exchanged for a separate session token,
-removed from the address bar, and stored in that tab's session storage. A session
+bootstrap in the URL fragment; it is exchanged for a separate session token and
+removed from the address bar. The default page stores its session token in that
+tab's session storage. The experimental Host page keeps it in memory and must
+be opened with a new entry after a browser refresh. When its resource worker
+loses its in-memory binding, an idle renderer may rebind only after the owner
+confirms that the same session remains current; concurrent lifecycle work or an
+uncertain health check instead retires the renderer. A session
 expires after eight hours of inactivity or when the manager exits. Browser origin
 checks and Host header checks fence management requests; no API key is placed in
 the URL. The command asks the OS to open the default browser without logging the

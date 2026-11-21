@@ -79,6 +79,21 @@ it('rejects invalid session tokens without registering a worker', () => {
   expect(register).not.toHaveBeenCalled()
 })
 
+it('distinguishes an invalid worker health response from a confirmed missing binding', async () => {
+  const { target, worker } = fixture()
+  const client = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'a'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  expect(await client.start()).toBe(true)
+  worker.postMessage = (_message, ports) => {
+    ports[0]!.postMessage({ version: 1 })
+    ports[0]!.close()
+  }
+  expect(await client.isBound()).toBeUndefined()
+})
+
 it('never sends a session token to another controlling worker or a non-loopback origin', async () => {
   const { target, worker, messages } = fixture()
   worker.scriptURL = 'http://127.0.0.1:43124/unrelated-worker.js'
