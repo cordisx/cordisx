@@ -524,7 +524,15 @@ export function ManagerApp(
         : triggerSeat.ownerDocument.defaultView?.sessionStorage,
     [standaloneMode, triggerSeat],
   )
-  const router = useManagerRouter(playgroundStorage)
+  const standaloneStorage = useMemo(() => {
+    if (!standaloneMode) return undefined
+    try {
+      return triggerSeat.ownerDocument.defaultView?.sessionStorage
+    } catch {
+      return undefined
+    }
+  }, [standaloneMode, triggerSeat])
+  const router = useManagerRouter(playgroundStorage, standaloneStorage)
   const workspaceMode = presentationMode === 'workspace' && playgroundStorage === undefined
     && activatePane !== undefined
   const [open, setOpen] = useState(() =>

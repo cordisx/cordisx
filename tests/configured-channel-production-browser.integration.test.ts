@@ -204,7 +204,13 @@ it.skipIf(
         async () => await first.evaluate('globalThis.__productionBeforeReload === undefined').catch(() => false),
         { timeout: 15_000 },
       ).toBe(true)
-      await showChannel(first)
+      await expect.poll(
+        () =>
+          first.evaluate(
+            'Boolean(document.querySelector("[data-manager-collection-item]")) && (document.body.textContent.includes("Simulator") || document.body.textContent.includes("模拟器"))',
+          ),
+        { timeout: 30_000 },
+      ).toBe(true)
 
       await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
       await expect.poll(
@@ -307,8 +313,6 @@ it.skipIf(
         async () => await first.evaluate('globalThis.__modelServicesBeforeReload === undefined').catch(() => false),
         { timeout: 15_000 },
       ).toBe(true)
-      await showChannel(first)
-      await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
       await expect.poll(
         () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-created]"))'),
         { timeout: 15_000 },
