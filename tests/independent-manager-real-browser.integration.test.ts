@@ -248,7 +248,7 @@ it.skipIf(chrome === undefined)(
         }
       }
       await makeRemovable(root)
-      await rm(root, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   },
   180_000,

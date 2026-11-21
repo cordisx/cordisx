@@ -134,7 +134,7 @@ it.skipIf(chrome === undefined)(
       await Promise.allSettled(clients.map(async client => await client.close()))
       if (browser !== undefined) await stopChrome(browser)
       await fixture.close()
-      await rm(profile, { recursive: true, force: true })
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   },
   45_000,
