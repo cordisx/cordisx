@@ -29,6 +29,19 @@ exclusive profile ownership; this page does not claim concurrent App attachment
 or infer that an adapter is connected. If the owner disappears or is replaced,
 the manager sidecar shuts down. Starting it again requires the new owner.
 
+An experimental `host=1` query on the manager entry loads the existing Host
+Manager and plugin registration instead of the default preview pages. It is not
+the default experience. With a service owner, it supports capability-free v1
+package graphs and initial read-only access to host-owned v14 managed backends
+that have no declared permissions, plugin configuration or documents. Dynamic
+changes to those managed packages remain unavailable. With a Desktop owner, the
+experiment currently admits only an empty profile that has no configured or
+installed plugins, already has a ready Desktop renderer, and owns the profile
+exclusively. Package and configuration mutations are unavailable while a
+Manager renderer is attached. Configured Channel, other adapters, concurrent
+permission changes and recovery after an uncertain result are not yet supported.
+The isolated browser tests do not constitute real Codex App validation.
+
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use
 bootstrap in the URL fragment; it is exchanged for a separate session token,
