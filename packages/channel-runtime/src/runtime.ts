@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { validateOutboundMedia } from './outbound-media.js'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
 import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
@@ -372,7 +373,11 @@ export class ChannelRuntime {
     if (!['completion', 'approval', 'failure', 'reply'].includes(notification.kind)) {
       throw new ChannelIntegrityError('Channel notification kind is invalid')
     }
-    if (!nonEmptyText(notification.text, 100_000)) {
+    const media = notification.media === undefined ? undefined : validateOutboundMedia(notification.media)
+    if (media && (notification.text !== '' || questionCard !== undefined)) {
+      throw new ChannelIntegrityError('Media cannot be combined with text or a question card')
+    }
+    if (!media && !nonEmptyText(notification.text, 100_000)) {
       throw new ChannelIntegrityError('Channel notification text is invalid')
     }
     const key = accountKey(target)
@@ -396,6 +401,7 @@ export class ChannelRuntime {
         if (
           canonical(prior.caller) !== canonical(caller) || canonical(prior.target) !== canonical(target)
           || prior.kind !== notification.kind || prior.text !== notification.text
+          || canonical(prior.media ?? null) !== canonical(media ?? null)
           || canonical(prior.questionCard ?? null) !== canonical(questionCard ?? null)
         ) throw new ChannelIntegrityError('Operation conflict')
         return
@@ -408,6 +414,7 @@ export class ChannelRuntime {
         target,
         kind: notification.kind,
         text: notification.text,
+        ...(media ? { media } : {}),
         ...(questionCard ? { questionCard } : {}),
         createdAt: now,
         updatedAt: now,
@@ -815,11 +822,15 @@ export class ChannelRuntime {
       if (claimed === undefined) continue
 
       try {
+        if (claimed.media && active.connection.supportsOutboundMedia !== true) {
+          throw new ChannelIntegrityError('Channel adapter media support is unavailable')
+        }
         const result = await active.connection.send({
           deliveryId: claimed.deliveryId,
           target: claimed.target,
           kind: claimed.kind,
           text: claimed.text,
+          ...(claimed.media ? { media: validateOutboundMedia(claimed.media) } : {}),
           ...(claimed.questionCard ? { questionCard: claimed.questionCard } : {}),
           createdAt: claimed.createdAt,
         })

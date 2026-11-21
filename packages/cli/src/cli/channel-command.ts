@@ -1,4 +1,5 @@
 import { callChannelCli } from './channel-cli-transport.js'
+import { parseChannelCliMedia } from './channel-cli-media.js'
 import { type ChannelCliScope, requireCliValue } from './channel-cli-scope.js'
 import { serveChannelCli } from './channel-cli-session.js'
 import { runConfiguredChannelCommand } from './channel-configured-command.js'
@@ -99,16 +100,19 @@ export async function runChannelCommand(
   const allowed = action === 'listen'
     ? ['--binding', '--timeout']
     : action === 'send'
-    ? ['--binding', '--operation', '--text']
+    ? ['--binding', '--operation', '--text', '--media']
     : ['--binding']
   const values = parseOptions(args.slice(1), allowed)
   const binding = requireCliValue(values['--binding'], 'binding')
   const timeout = action === 'listen' ? seconds(values['--timeout'], 300, 900) : 30
+  if (values['--media'] !== undefined && values['--text'] !== undefined) throw new Error('MEDIA_TEXT_CONFLICT')
   const request = action === 'send'
     ? {
       action,
       operationId: requireCliValue(values['--operation'], 'operation', 128),
-      text: requireCliValue(values['--text'], 'text', 8192),
+      ...(values['--media'] === undefined
+        ? { text: requireCliValue(values['--text'], 'text', 8192) }
+        : { media: parseChannelCliMedia(values['--media']) }),
     }
     : { action }
   let readbackMatches = true

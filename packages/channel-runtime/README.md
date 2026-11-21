@@ -170,3 +170,64 @@ npm run check
 The full architectural contract, official platform feasibility, UI plan, PR
 boundaries, and validation matrix are in
 `.agents/docs/channel-runtime.md`.
+
+# Outbound media candidate
+
+Launcher-private outbound deliveries may carry one `media` descriptor and empty
+`text`. Descriptors contain an opaque `media:` handle, format, byte size, SHA-256,
+and optional audio duration in milliseconds. Image support is deliberately limited
+to PNG/JPEG (10,000,000 bytes); audio to existing Ogg Opus (30,000,000 bytes).
+No synthesis, conversion, local paths, URLs, or arbitrary fetching is provided.
+Question cards and text cannot be combined with media. Existing text-only store
+rows remain compatible; media rows are validated on reopen. Dedup comparisons
+include the complete descriptor, and receipts retain the existing delivery ID.
+
+## Integration gates
+
+This is an isolated implementation candidate, not an operational media feature.
+Adapters must explicitly set `supportsOutboundMedia: true` after implementing the
+media send path; otherwise the runtime refuses media before calling `send`.
+The public Cordis messages facade refuses media with
+`CHANNEL_MEDIA_PROTOCOL_UNAVAILABLE`. Configured CLI `send`/`send-many` remains
+text-only. Diagnostic binding CLI accepts `--media <descriptor-json>` instead of
+`--text`, but returns `media-authority-unavailable` without reading or uploading
+anything. Neither CLI mode grants filesystem access.
+
+The pinned Protocol revision
+`a474700a998ca4fe2a61eba2776dbcdfebdb7fa6` must gain a versioned outbound media
+contract before exposing media through plugins or configured Channel tools.
+Required definitions include descriptor validation, source/caller-scoped handle
+authorization, expiry and revocation, permission semantics, and explicit
+unsupported-media responses. No public schema or capability is changed here.
+
+## Minimal parent adapter patch
+
+In `packages/cli/src/launcher/feishu-adapter.ts`:
+
+1. Add a launcher-private optional `FeishuMediaAuthority` dependency; never derive
+   it from a remote event, renderer path, or URL. Its `resolve(handle, target,
+   maximumBytes)` must check the full account/tenant/conversation/thread and
+   owning caller grant, expiry/revocation, and enforce the byte bound **before**
+   allocation/read. Resolve only previously authorized quarantined handles.
+2. Set connection `supportsOutboundMedia` only when that authority and the
+   authenticated raw SDK client are available.
+3. Inside the existing same-tenant/stopped guards and raw-client branch, call
+   `prepareFeishuOutboundMedia(delivery.media, delivery.target, authority, {
+   image: data => channel.rawClient.im.v1.image.create({ data }),
+   file: data => channel.rawClient.im.v1.file.create({ data }) })` when media exists.
+   Use its `msg_type` and `content`; otherwise keep the Markdown worker's text/card
+   preparation unchanged. Reject media explicitly in the non-raw-client fallback.
+4. Keep the existing SHA-256-derived delivery UUID, create/reply selection,
+   `reply_in_thread`, message-ID checks, and receipt/recall mapping unchanged.
+   Retry may reupload resources, but message sends must reuse that UUID. Do not
+   retry with a new identity after an unknown send outcome.
+5. Verify SDK argument typing, source-authority rejection, image/audio create and
+   reply, unsupported fallback, retry UUID stability, and receipts in adapter
+   composition tests before enabling the flag. No adapter edit is included here.
+
+Primary API references: [upload image](https://open.larksuite.com/document/server-docs/im-v1/image/create.md),
+[upload file](https://open.larksuite.com/document/server-docs/im-v1/file/create.md),
+and [message content](https://open.larksuite.com/document/server-docs/im-v1/message-content-description/create_json.md).
+Upload requires bot capability and resource upload permission; sending requires
+the appropriate message permission. Header checks are preliminary format checks,
+not complete image/audio decoding or malware scanning.

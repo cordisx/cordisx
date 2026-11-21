@@ -15,6 +15,7 @@ import {
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import type { Socket } from 'node:net'
 import path from 'node:path'
+import { validateOutboundMedia } from '../../../channel-runtime/src/outbound-media.js'
 import { createFeishuAdapterDefinition } from '../launcher/feishu-adapter.js'
 import { type ChannelCliScope, matchesChannelCliScope, requireCliValue } from './channel-cli-scope.js'
 import { type ChannelCliRequest, type ChannelCliTransport, openChannelCliTransport } from './channel-cli-transport.js'
@@ -255,6 +256,14 @@ export async function serveChannelCli(options: CliSessionOptions): Promise<void>
         return write(socket, { event: 'listening', expiresAt })
       }
       if (request.action === 'send') {
+        if (request.media !== undefined) {
+          try {
+            validateOutboundMedia(request.media)
+          } catch {
+            return write(socket, { event: 'error', code: 'invalid-send' }, true)
+          }
+          return write(socket, { event: 'error', code: 'media-authority-unavailable' }, true)
+        }
         let operationId: string
         let text: string
         try {

@@ -15,6 +15,7 @@ export interface ChannelCliRequest {
   readonly action?: unknown
   readonly operationId?: unknown
   readonly text?: unknown
+  readonly media?: unknown
 }
 
 export interface ChannelCliTransport {
