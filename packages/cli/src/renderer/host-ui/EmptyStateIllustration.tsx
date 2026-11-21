@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { type EmptyStateFamily, emptyStateIllustrations } from './empty-state-illustrations.js'
-import themeCss from './empty-state-illustration-theme.css?inline'
+import { EMPTY_STATE_ILLUSTRATION_STYLES } from './empty-state-styles.js'
 
 export function EmptyStateIllustration({ family, compact = false, search = false }: {
   readonly family: EmptyStateFamily
@@ -28,5 +28,5 @@ export function EmptyStateIllustration({ family, compact = false, search = false
 
 /** Keep stylesheet text outside status/count seats, with the same real CSS inline imports. */
 export function EmptyStateIllustrationStyles() {
-  return <style>{themeCss + '\n' + Object.values(emptyStateIllustrations).map(asset => asset.styles).join('\n')}</style>
+  return <style>{EMPTY_STATE_ILLUSTRATION_STYLES}</style>
 }
