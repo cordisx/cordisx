@@ -116,13 +116,10 @@ import { createHostAgentTaskDetailsNavigator } from './host-ui/AgentTaskDetailsN
 import {
   type AgentRuntimeConnection,
   type AgentRuntimeRouteScope,
-  BrowserPermissionAuthorizationPromptV2,
   BrowserPermissionPolicyStore,
-  BrowserPermissionPrompt,
   CordisXPlatformService,
   MemoryPermissionPolicyStore,
   normalizePluginManifest,
-  PermissionBroker,
   type PlatformPermissionSnapshot,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
@@ -275,23 +272,7 @@ export const createRuntimeDisconnectPluginConsoleVisibility = (runtimeScope: Run
     notify: () => runtimeScope.pluginConsole()!.visibilityChanged(runtimeScope.consoleAffectedPluginIds),
   })
 
-export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) =>
-  new PermissionBroker(
-    runtimeScope.permissionStore()!,
-    runtimeScope.metadata()!.hostKind === 'standalone'
-      ? { request: async () => 'deny' as const }
-      : new BrowserPermissionPrompt(),
-    () => new Date(),
-    30000,
-    runtimeScope.metadata()!.profileId,
-    runtimeScope.generation()!,
-    runtimeScope.generationVisibility()!,
-    runtimeScope.pluginConsole()!,
-    runtimeScope.metadata()!.hostKind === 'standalone'
-      ? undefined
-      : new BrowserPermissionAuthorizationPromptV2(document),
-    runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
-  )
+export { createRuntimeBroker } from './runtime-permission-broker.js'
 
 export const createRuntimeHostDomAuthority = (runtimeScope: RuntimeClosureScope) =>
   new HostDomAuthority({

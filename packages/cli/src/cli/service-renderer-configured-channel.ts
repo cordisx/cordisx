@@ -129,7 +129,7 @@ export class ServiceRendererConfiguredChannel {
           retire: this.input.retire,
         },
       })
-      if (!view || !this.isCurrent() || !this.input.plugin.manifest) {
+      if (!view || !this.isCurrent() || !this.input.plugin.manifest || !this.input.plugin.distributionArtifact) {
         view?.close()
         throw new Error('renderer-configured-channel-unavailable')
       }
@@ -143,6 +143,8 @@ export class ServiceRendererConfiguredChannel {
           config: {},
           revision: this.input.plugin.revision ?? 0,
           manifest: this.input.plugin.manifest,
+          // The owner verified this exact archive against its staged browser graph.
+          distributionArtifact: { ...this.input.plugin.distributionArtifact },
           readme: '',
           readmes: {},
           documents: [],

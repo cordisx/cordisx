@@ -24,7 +24,12 @@ const resumeStorageKey = 'cordisx-manager-resume-id'
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
-type Composition = { startStandaloneManagerComposition(signal: AbortSignal): Promise<CordisXRuntimeHandle> }
+type Composition = {
+  startStandaloneManagerComposition(
+    signal: AbortSignal,
+    verifySession: () => Promise<boolean>,
+  ): Promise<CordisXRuntimeHandle>
+}
 type Browser = Window & {
   __cordisxRuntime?: CordisXRuntimeHandle
   __cordisxPluginGenerationResourcesV1?: ManagerRendererResourceRegistry
@@ -347,6 +352,16 @@ export function startStandaloneManager(input: {
           return false
         }
       }
+      const verifyReviewSession = async (): Promise<boolean> => {
+        if (!await rendererAdmission || closed || !resourceAuth || lifecycle?.canResume() !== true) return false
+        if (await resourceAuth.isBound() !== true) {
+          fail()
+          return false
+        }
+        const current = await isSessionCurrent()
+        if (!current) fail()
+        return current && !closed && lifecycle?.canResume() === true
+      }
       resourceAuth = (input.createResourceAuth ?? createManagerResourceAuthClient)({
         window: browser,
         sessionToken: token,
@@ -405,7 +420,9 @@ export function startStandaloneManager(input: {
       if (typeof composition?.startStandaloneManagerComposition !== 'function' || !await isSessionCurrent() || closed) {
         throw new Error('manager-owner-unavailable')
       }
-      const starting = Promise.resolve().then(() => composition.startStandaloneManagerComposition(lifetime.signal))
+      const starting = Promise.resolve().then(() =>
+        composition.startStandaloneManagerComposition(lifetime.signal, verifyReviewSession)
+      )
       void starting.then(started => {
         if (closed) {
           void Promise.allSettled([

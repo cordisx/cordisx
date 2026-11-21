@@ -5,6 +5,7 @@ import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { buildManagerStyles } from '../packages/cli/scripts/build-manager-styles.mjs'
 import { installStandaloneManager } from '../packages/cli/src/renderer/manager/install-standalone.js'
+import { PERMISSION_AUTHORIZATION_STYLES } from '../packages/cli/src/renderer/permission-authorization-styles.js'
 import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
@@ -39,7 +40,8 @@ it('builds the Host and model-service styles in their existing cascade order', a
       expect(position).toBeGreaterThan(previous)
       previous = position
     }
-    expect(actual.endsWith(ordered.at(-1)!)).toBe(true)
+    expect(actual.indexOf(PERMISSION_AUTHORIZATION_STYLES)).toBeGreaterThan(previous)
+    expect(actual.endsWith(PERMISSION_AUTHORIZATION_STYLES)).toBe(true)
     await buildManagerStyles(output)
     expect(await readFile(output, 'utf8')).toBe(actual)
   } finally {

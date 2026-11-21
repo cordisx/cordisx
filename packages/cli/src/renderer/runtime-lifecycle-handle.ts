@@ -1,4 +1,5 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
+import { createStandaloneDomReviewModel } from './standalone-dom-review-model.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -913,6 +914,10 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
   permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone',
+  ...(() => {
+    const review = createStandaloneDomReviewModel(runtimeScope)
+    return review === undefined ? {} : { standaloneDomReview: review }
+  })(),
   ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
     chatExecution: new ChannelExecutionWorkflow({
       document,

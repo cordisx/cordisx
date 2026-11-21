@@ -101,6 +101,28 @@ export class CdpClient {
   }
 }
 
+/** Deliver an actual browser input event, including the target page's focus. */
+export async function trustedClick(page: CdpClient, selector: string): Promise<void> {
+  await page.send('Page.bringToFront')
+  const point = await page.evaluate<{ x: number; y: number }>(
+    '(() => { const node = document.querySelector(' + JSON.stringify(selector) + ');'
+      + ' if (!node) throw new Error("review control is unavailable");'
+      + ' node.scrollIntoView({ block: "center" }); const rect = node.getBoundingClientRect();'
+      + ' return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()',
+  )
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+    try {
+      await page.send('Input.dispatchMouseEvent', {
+        type,
+        ...point,
+        ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }),
+      }, 15_000)
+    } catch (error) {
+      throw new Error('Trusted browser input failed: ' + selector + ' ' + type, { cause: error })
+    }
+  }
+}
+
 export async function stopChrome(process: ChildProcess): Promise<void> {
   if (process.exitCode !== null || process.signalCode !== null) return
   const exited = once(process, 'exit')

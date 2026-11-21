@@ -1,14 +1,73 @@
 import { EmptyState } from '../../host-ui/EmptyState.js'
-import { managerCopy } from '../../ui-copy.js'
-import { Select } from 'tdesign-react'
+import { useState } from 'react'
+import { managerCopy, productLocale } from '../../ui-copy.js'
+import { Button, Select } from 'tdesign-react'
 import type { CordisXPermissionPolicy } from '../../../contracts.js'
-import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
+import type { ManagerModel, ManagerPermissionSnapshot, ManagerSnapshot } from '../../manager.js'
 import type { ManagerRouter } from '../model/routes.js'
 
 const policyOptions = [{ label: '每次询问', value: 'ask' }, { label: '始终允许', value: 'allow' }, {
   label: '始终拒绝',
   value: 'deny',
 }]
+
+function StandaloneDomPermissionReview({ model, permission, locale }: {
+  readonly model: ManagerModel
+  readonly permission: ManagerPermissionSnapshot
+  readonly locale: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const [declined, setDeclined] = useState(false)
+  const points = permission.scope.extensionPoints
+  const pointId = permission.capability === 'ui.extension-points.render' && points?.length === 1
+    ? points[0]
+    : undefined
+  const review = model.standaloneDomReview
+  const artifact = pointId === undefined ? undefined : review?.describe(permission.identity, pointId)
+  if (pointId === undefined || review === undefined || artifact === undefined) return null
+  const chinese = productLocale(locale) === 'zh-CN'
+  return (
+    <section className="cxr-section" data-standalone-dom-review={pointId}>
+      <h3>{chinese ? '当前标签页的页面授权' : 'Page access in this tab'}</h3>
+      <p>
+        {chinese
+          ? '仅对此标签页有效；刷新或与后台失联后需要重新审核。'
+          : 'Only this tab is covered; review again after refresh or disconnection.'}
+      </p>
+      <p>
+        {chinese ? '版本' : 'Version'}: <code>{artifact.version}</code>
+      </p>
+      <p>
+        {chinese ? '制品摘要' : 'Artifact digest'}: <code>{artifact.integrity}</code>
+      </p>
+      {artifact.authorized
+        ? <p role="status">{chinese ? '已在此标签页允许。' : 'Allowed in this tab.'}</p>
+        : (
+          <>
+            <Button
+              tag="button"
+              type="button"
+              theme="default"
+              variant="outline"
+              disabled={busy}
+              onClick={event => {
+                if (!event.nativeEvent.isTrusted || busy) return
+                setBusy(true)
+                setDeclined(false)
+                void review.request(permission.identity, pointId).then(
+                  allowed => setDeclined(!allowed),
+                  () => setDeclined(true),
+                ).finally(() => setBusy(false))
+              }}
+            >
+              {chinese ? '审核此标签页权限' : 'Review access for this tab'}
+            </Button>
+            {declined ? <p role="status">{chinese ? '本次未允许。' : 'Access was not allowed.'}</p> : null}
+          </>
+        )}
+    </section>
+  )
+}
 
 export function PermissionDetailPage(
   { model, snapshot, router }: {
@@ -30,6 +89,7 @@ export function PermissionDetailPage(
   const ownService = permission.authorizationOrigin === 'service-owner'
   return (
     <section className="cxr-page cxr-grid">
+      <StandaloneDomPermissionReview model={model} permission={permission} locale={snapshot.localization.locale} />
       <section className="cxr-section">
         <h3>授权策略</h3>
         <p>{permission.reasonText}</p>

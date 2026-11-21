@@ -1,0 +1,209 @@
+import type { CordisXPluginIdentity } from '../contracts.js'
+import type {
+  CordisXPermissionAuthorizationBindingV2,
+  CordisXPermissionAuthorizationDecisionV3,
+  CordisXPermissionAuthorizationPlanV3,
+} from '../permission-contracts.js'
+import {
+  BrowserPermissionAuthorizationPromptV2,
+  type PermissionAuthorizationPromptV2,
+} from './platform/platform-permission-store.js'
+
+const REVIEWABLE_POINTS = new Set(['manager.settings.navigation-items', 'manager.content'])
+const ALIAS = new RegExp('^https://renderer[.]cordisx[.]invalid/plugin/[a-f0-9]{64}$', 'u')
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
+const reviews = new WeakMap<object, StandaloneDomReview>()
+
+export function isStandaloneDomReviewTarget(identity: CordisXPluginIdentity, pointId: string): boolean {
+  return identity.id === 'channel' && ALIAS.test(identity.source) && REVIEWABLE_POINTS.has(pointId)
+}
+
+export function bindStandaloneDomReview(broker: object, review: StandaloneDomReview): void {
+  if (reviews.has(broker)) throw new Error('standalone review already bound')
+  reviews.set(broker, review)
+}
+
+export function standaloneDomReview(broker: object): StandaloneDomReview | undefined {
+  return reviews.get(broker)
+}
+
+export interface StandaloneDomReviewContext {
+  readonly identity: CordisXPluginIdentity
+  readonly pointId: string
+  readonly profileId: string
+  readonly runtimeGeneration: string
+  readonly moduleGeneration: string
+  readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
+  readonly isCurrent: () => boolean
+  /** Checks the owner-bound renderer and its resources, without exposing its session token. */
+  readonly verifyCurrent: () => Promise<boolean>
+  /** Revoke this renderer's one-time grants when the owner fence is lost. */
+  readonly invalidate: () => void
+}
+
+type ActiveReview = {
+  readonly context: StandaloneDomReviewContext
+  readonly prompt: PermissionAuthorizationPromptV2
+  used: boolean
+  allowed: boolean
+  invalidated: boolean
+}
+
+/** A Host interaction can review only the selected Channel's two Manager UI points, once per tab. */
+export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
+  private active: ActiveReview | undefined
+  private closed = false
+
+  constructor(
+    private readonly createPrompt: (context: StandaloneDomReviewContext) => PermissionAuthorizationPromptV2,
+  ) {}
+
+  private current(active: ActiveReview): boolean {
+    try {
+      return !this.closed && this.active === active && active.context.isCurrent()
+    } catch {
+      return false
+    }
+  }
+
+  private async verified(active: ActiveReview): Promise<boolean> {
+    if (!this.current(active)) {
+      this.invalidate(active)
+      return false
+    }
+    try {
+      if (await active.context.verifyCurrent() && this.current(active)) return true
+    } catch {
+      /* a failed owner check must revoke the temporary grants */
+    }
+    this.invalidate(active)
+    return false
+  }
+
+  private invalidate(active: ActiveReview): void {
+    if (active.invalidated) return
+    active.invalidated = true
+    try {
+      active.context.invalidate()
+    } catch { /* an invalid session remains closed */ }
+  }
+
+  isDomLeaseVisible(identity: CordisXPluginIdentity, pointId: string, moduleGeneration?: string): boolean {
+    const active = this.active
+    return active === undefined || active.context.identity.id !== identity.id
+      || active.context.identity.source !== identity.source || active.context.pointId !== pointId
+      || active.context.moduleGeneration !== moduleGeneration
+  }
+
+  async review(context: StandaloneDomReviewContext, operation: () => Promise<boolean>): Promise<boolean> {
+    if (
+      this.closed || this.active || !isStandaloneDomReviewTarget(context.identity, context.pointId)
+      || !ID.test(context.profileId)
+      || !ID.test(context.runtimeGeneration) || !ID.test(context.moduleGeneration)
+      || !context.artifact.version || context.artifact.version.length > 128
+      || /[\u0000-\u001f\u007f]/u.test(context.artifact.version)
+      || !/^sha256:[a-f0-9]{64}$/u.test(context.artifact.integrity)
+    ) return false
+    const captured: StandaloneDomReviewContext = Object.freeze({
+      ...context,
+      identity: Object.freeze({ ...context.identity }),
+      artifact: Object.freeze({ ...context.artifact }),
+    })
+    let prompt: PermissionAuthorizationPromptV2
+    try {
+      prompt = this.createPrompt(captured)
+    } catch {
+      return false
+    }
+    const active: ActiveReview = { context: captured, prompt, used: false, allowed: false, invalidated: false }
+    this.active = active
+    try {
+      if (!await this.verified(active)) return false
+      const result = await operation()
+      const current = await this.verified(active)
+      return result && active.used && active.allowed && current
+    } catch {
+      this.invalidate(active)
+      return false
+    } finally {
+      if (this.active === active) this.active = undefined
+      try {
+        prompt.dispose?.()
+      } catch { /* cleanup cannot turn a review into an authorization */ }
+    }
+  }
+
+  async request(): Promise<undefined> {
+    return undefined
+  }
+
+  async requestV3(
+    plan: CordisXPermissionAuthorizationPlanV3,
+    identity: CordisXPluginIdentity,
+  ): Promise<CordisXPermissionAuthorizationDecisionV3 | undefined> {
+    const active = this.active
+    const item = plan.declarations[0]
+    if (
+      !active || active.used || !this.current(active) || !active.prompt.requestV3 || plan.schemaVersion !== 3
+      || plan.operation !== 'runtime' || plan.profileId !== active.context.profileId
+      || identity.id !== active.context.identity.id || identity.source !== active.context.identity.source
+      || plan.identity.pluginId !== identity.id || plan.identity.source !== identity.source
+      || plan.binding.runtimeGeneration !== active.context.runtimeGeneration
+      || plan.binding.moduleGeneration !== active.context.moduleGeneration
+      || plan.declarations.length !== 1 || !item || item.capability !== 'ui.extension-points.render'
+      || item.policy !== 'ask' || item.authorizationMode !== 'explicit-user' || !item.decisionRequired
+      || Object.keys(item.scope).some(key => key !== 'extensionPoints')
+      || item.scope.extensionPoints?.length !== 1 || item.scope.extensionPoints[0] !== active.context.pointId
+      || !item.allowedDecisions.includes('allow-once') || !item.allowedDecisions.includes('deny-once')
+    ) return undefined
+    active.used = true
+    const restricted: CordisXPermissionAuthorizationPlanV3 = {
+      ...plan,
+      declarations: [{
+        ...item,
+        persistentAllow: false,
+        persistentDeny: false,
+        allowedDecisions: ['deny-once', 'allow-once'],
+        defaultDecision: 'deny-once',
+      }],
+    }
+    const decision = await active.prompt.requestV3(restricted, identity)
+    if (
+      !decision || decision.decisions.length !== 1
+      || !['allow-once', 'deny-once'].includes(decision.decisions[0]!.decision)
+      || !await this.verified(active)
+    ) return undefined
+    active.allowed = decision.decisions[0]!.decision === 'allow-once'
+    return decision
+  }
+
+  cancelV3(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
+    this.active?.prompt.cancelV3?.(planId, binding)
+  }
+
+  dispose(): void {
+    if (this.closed) return
+    this.closed = true
+    try {
+      this.active?.prompt.dispose?.()
+    } catch { /* closing still invalidates the review */ }
+    this.active = undefined
+  }
+}
+
+/** Use the existing Host dialog with same-origin styles and user-originated decisions. */
+export function createStandaloneDomReview(document: Document): StandaloneDomReview {
+  return new StandaloneDomReview(context =>
+    new BrowserPermissionAuthorizationPromptV2(document, (_plan, identity) => ({
+      plugin: {
+        name: `Channel ${context.artifact.version}`,
+        source: `${identity.source} · ${context.artifact.integrity}`,
+        trust: 'configured',
+      },
+      availability: {},
+      resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
+      scope: scope => scope.extensionPoints?.join(', ') ?? JSON.stringify(scope),
+      requestSource: identity.source,
+    }), { externalStyles: true, requireTrustedEvents: true, hideManage: true })
+  )
+}

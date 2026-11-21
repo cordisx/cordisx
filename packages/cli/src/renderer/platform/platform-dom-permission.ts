@@ -325,6 +325,30 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
     return isPermissionPolicyRecordV3(this.policyRecords.get(this.domLeaseKey(key)))
   }
 
+  /** Read the current generation's lease without starting another permission request. */
+  hasDomLease(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): boolean {
+    const registration = this.registration(identity, view)
+    return registration !== undefined && this.validDomLease(registration, pointId) !== undefined
+      && this.domLeaseVisible(registration, pointId)
+  }
+
+  /** Re-project a lease after a Host review has passed its final fence. */
+  refreshDomAccess(): void {
+    this.changed()
+  }
+
+  private domLeaseVisible(registration: Registration, pointId: string): boolean {
+    try {
+      return this.promptV2?.isDomLeaseVisible?.(
+        registration.identity,
+        pointId,
+        registration.generation.moduleGeneration,
+      ) !== false
+    } catch {
+      return false
+    }
+  }
+
   domPolicies(): readonly DomPermissionPolicyEntry[] {
     return Object.freeze(
       [...this.policyRecords.values()].flatMap(record => {
@@ -380,6 +404,9 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
     }
     const lease = this.validDomLease(registration, pointId)
     if (lease !== undefined) {
+      if (!this.domLeaseVisible(registration, pointId)) {
+        return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
+      }
       return Object.freeze({
         authorized: true,
         state: 'allowed',

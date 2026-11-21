@@ -304,6 +304,8 @@ export interface CordisXRuntimeMetadata {
   readonly hostKind?: 'codex' | 'playground' | 'standalone'
   /** Non-authoritative identifier for this owner-attached renderer. */
   readonly standaloneRendererId?: string
+  /** Host-private owner and resource check supplied by the standalone session. */
+  readonly standaloneReviewSession?: () => Promise<boolean>
   /** Host-only presentation preview; never exposed through plugin Contexts. */
   readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */

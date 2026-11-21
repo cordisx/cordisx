@@ -145,6 +145,33 @@ afterEach(async () => {
 })
 
 describe('Host-owned permission authorization dialog', () => {
+  it('ignores synthetic selection and confirmation for the standalone review', async () => {
+    const instance = dom('dark', false)
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document, undefined, {
+      externalStyles: true,
+      requireTrustedEvents: true,
+      hideManage: true,
+    })
+    const model = viewModel()
+    const request = localizedRequest()
+    const pending = dialog.show(model, request.request)
+    await mounted()
+    const overlay = instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+    expect(overlay.querySelector('style')).toBeNull()
+    expect(overlay.querySelector('[data-permission-action="manage"]')).toBeNull()
+    overlay.querySelector<HTMLElement>(
+      '[data-permission-capability="tasks.control"] [data-permission-decision="allow-once"]',
+    )?.click()
+    const highRisk = model.project(request.request.project()).items.find(item => item.capability === 'tasks.control')!
+    expect(highRisk.authorizationOptions.find(option => option.selected)?.value).toBe('deny-once')
+    overlay.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
+    expect(overlay.isConnected).toBe(true)
+    overlay.querySelector<HTMLButtonElement>('[data-permission-action="cancel"]')?.click()
+    await expect(pending).resolves.toEqual({ status: 'cancelled' })
+    dialog.dispose()
+    instance.window.close()
+  })
+
   it('uses a single heading, flat permission list, radio lifetimes, and Cancel/Confirm decisions', async () => {
     const instance = dom('dark', false)
     const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)

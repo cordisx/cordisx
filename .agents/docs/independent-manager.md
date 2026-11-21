@@ -39,8 +39,8 @@ the profile exclusively, have a ready Desktop renderer, not be in attach mode,
 and have no installed plugin packages. It can admit an empty profile or one
 configured Channel archive. On macOS or Linux, either owner can project that
 Channel as a read-only page when its staged browser graph has an initial
-stylesheet and its live service owner and existing source-specific Manager UI
-permissions match. Legacy Channel graphs without a standalone stylesheet are
+stylesheet and its live service owner matches. An existing source-specific
+Manager UI permission or a separate one-tab review is required. Legacy Channel graphs without a standalone stylesheet are
 not admitted. Package and configuration mutations are unavailable while a
 Manager renderer is attached. The Host page does not yet support Channel credential or
 configuration writes. Other configured plugins, adapters, concurrent permission
@@ -126,6 +126,13 @@ This does not validate real Channel credentials, the current user's profile,
 the native Desktop renderer or another adapter. Archives without a staged
 browser graph and an initial Channel stylesheet are unavailable, and
 permissions from another source are not reused.
+
+When the owner-selected Channel has no matching UI allow, its Manager entry can
+lead to a Host permission review. The user may allow the navigation entry and
+page body separately for that tab. Each dialog identifies the verified archive
+version and digest, offers only one-time decisions, and defaults to denial.
+The grants are not written to profile policy; refresh, renderer retirement or
+owner loss requires a new review. An existing denial is not overridden.
 
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and

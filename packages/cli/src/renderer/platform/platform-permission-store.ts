@@ -20,7 +20,10 @@ import type {
 import { HostThemeProjection } from '../host-theme.js'
 import { PermissionAuthorizationViewModel } from '../../permission-authorization-view-model.js'
 import type { PermissionAuthorizationProjectionInput } from '../../permission-authorization-view-model.js'
-import { BrowserPermissionAuthorizationDialog } from '../permission-authorization-dialog.js'
+import {
+  BrowserPermissionAuthorizationDialog,
+  type PermissionAuthorizationDialogOptions,
+} from '../permission-authorization-dialog.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
   CordisXPermissionAuthorizationDecisionV2,
@@ -275,6 +278,8 @@ export interface PermissionPrompt {
 }
 
 export interface PermissionAuthorizationPromptV2 {
+  /** A Host-owned review may keep a new DOM lease hidden until its final fence. */
+  isDomLeaseVisible?(identity: CordisXPluginIdentity, pointId: string, moduleGeneration?: string): boolean
   requestUsageV6?(
     plan: UsagePermissionAuthorizationPlanV6,
     identity: CordisXPluginIdentity,
@@ -414,8 +419,9 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
       scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
       requestSource: identity.source,
     }),
+    options: PermissionAuthorizationDialogOptions = {},
   ) {
-    this.dialog = new BrowserPermissionAuthorizationDialog(document)
+    this.dialog = new BrowserPermissionAuthorizationDialog(document, undefined, options)
   }
 
   async request(

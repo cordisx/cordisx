@@ -16,6 +16,13 @@ export interface PermissionAuthorizationDialogRequest {
   readonly subscribeLocale?: (listener: () => void) => () => void
 }
 
+export interface PermissionAuthorizationDialogOptions {
+  /** The standalone Host serves the same styles from its fixed same-origin asset. */
+  readonly externalStyles?: boolean
+  readonly requireTrustedEvents?: boolean
+  readonly hideManage?: boolean
+}
+
 interface ActiveDialog {
   readonly requestKey: string
   readonly finish: (result: PermissionAuthorizationDialogResult) => void
@@ -53,7 +60,11 @@ export class BrowserPermissionAuthorizationDialog {
   private active: ActiveDialog | undefined
   private disposed = false
 
-  constructor(private readonly document: Document, theme?: HostThemeProjection) {
+  constructor(
+    private readonly document: Document,
+    theme?: HostThemeProjection,
+    private readonly options: PermissionAuthorizationDialogOptions = {},
+  ) {
     this.theme = theme ?? new HostThemeProjection(document)
     this.ownsTheme = theme === undefined
   }
@@ -174,6 +185,9 @@ export class BrowserPermissionAuthorizationDialog {
               overlay,
               onSelectionChange: render,
               finish,
+              externalStyles: this.options.externalStyles === true,
+              requireTrustedEvents: this.options.requireTrustedEvents === true,
+              hideManage: this.options.hideManage === true,
             }))
           )
         } catch (error) {

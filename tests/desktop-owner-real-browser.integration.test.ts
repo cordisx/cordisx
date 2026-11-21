@@ -31,7 +31,7 @@ import { persistPermissionPolicies } from '../packages/cli/src/launcher/permissi
 import { PlatformProviderPluginLifecycleRuntime } from '../packages/cli/src/launcher/platform-provider-plugin-lifecycle.js'
 import { startPluginGenerationArtifactServer } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
-import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
+import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
@@ -52,7 +52,7 @@ const chrome = [
   }
 })
 
-async function exerciseDesktopOwner(archive?: string) {
+async function exerciseDesktopOwner(archive?: string, review = false) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
   const homeDir = path.join(root, 'home')
@@ -80,15 +80,17 @@ async function exerciseDesktopOwner(archive?: string) {
   await writeFile(configPath, JSON.stringify(initialConfig), { mode: 0o600 })
   const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
   const configuredPlugin = configured.plugins[0]
-  const policies = archive === undefined || !configuredPlugin?.source ? [] : exactDomPermissionPolicies(profileId, [{
-    id: 'channel',
-    entry: configuredPlugin.entry,
-    pointIds: ['manager.settings.navigation-items', 'manager.content'],
-  }]).map(policy => ({
-    ...policy,
-    key: { ...policy.key, identity: { ...policy.key.identity, source: configuredPlugin.source! } },
-  }))
-  if (archive !== undefined) {
+  const policies = archive === undefined || review || !configuredPlugin?.source
+    ? []
+    : exactDomPermissionPolicies(profileId, [{
+      id: 'channel',
+      entry: configuredPlugin.entry,
+      pointIds: ['manager.settings.navigation-items', 'manager.content'],
+    }]).map(policy => ({
+      ...policy,
+      key: { ...policy.key, identity: { ...policy.key.identity, source: configuredPlugin.source! } },
+    }))
+  if (archive !== undefined && !review) {
     expect(configuredPlugin?.source).toBeDefined()
     await persistPermissionPolicies({ configPath }, policies)
   }
@@ -332,6 +334,48 @@ async function exerciseDesktopOwner(archive?: string) {
       })`)
     expect(await snapshot(first)).toEqual(await snapshot(second))
     expect(await snapshot(first)).toEqual(await snapshot(desktop))
+    if (archive !== undefined && review) {
+      for (const page of [first, second]) {
+        await vi.waitFor(async () => {
+          expect(
+            await page.evaluate(
+              'document.querySelector("[data-settings-navigation-item^=channel]")?.dataset.permissionReview',
+            ),
+          )
+            .toBe('pending')
+        }, { timeout: 20_000 })
+      }
+      await first.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
+      await vi.waitFor(async () => {
+        expect(
+          await first!.evaluate(
+            'Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))',
+          ),
+        )
+          .toBe(true)
+      }, { timeout: 15_000 })
+      await trustedClick(first, '[data-standalone-dom-review] button')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('Boolean(document.querySelector("[data-permission-authorization]"))')).toBe(true)
+      }, { timeout: 15_000 })
+      await trustedClick(first, '[data-permission-decision=allow-once]')
+      await trustedClick(first, '[data-permission-action=confirm]')
+      await vi.waitFor(async () => {
+        expect(
+          await first!.evaluate('document.querySelector("[data-standalone-dom-review] [role=status]")?.textContent'),
+        )
+          .toMatch(/已在此标签页允许|Allowed in this tab/u)
+      }, { timeout: 15_000 })
+      expect(
+        await second.evaluate(
+          'document.querySelector("[data-settings-navigation-item^=channel]")?.dataset.permissionReview',
+        ),
+      )
+        .toBe('pending')
+      const saved = JSON.parse(await readFile(configPath, 'utf8')) as { permissions: unknown[] }
+      expect(saved.permissions).toEqual([])
+      return
+    }
     if (archive !== undefined) {
       for (const page of [first, second]) {
         await vi.waitFor(async () => {
@@ -577,5 +621,13 @@ it.skipIf(
 )(
   'projects a configured Channel from the Desktop owner into two Manager pages',
   async () => await exerciseDesktopOwner(channelArchive),
+  180_000,
+)
+
+it.skipIf(
+  chrome === undefined || channelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
+)(
+  'keeps a Desktop owner Channel review local to the selected Manager page',
+  async () => await exerciseDesktopOwner(channelArchive, true),
   180_000,
 )
