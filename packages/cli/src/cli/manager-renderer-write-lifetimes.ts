@@ -30,10 +30,6 @@ export class ManagerRendererWriteLifetimes {
     }
   }
 
-  hasActive(rendererId: string): boolean {
-    return (this.renderers.get(rendererId)?.active ?? 0) > 0
-  }
-
   /** A write still running at retirement has an uncertain result, even after it settles. */
   retire(rendererId: string): Promise<boolean> {
     const state = this.state(rendererId)

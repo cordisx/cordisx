@@ -40,6 +40,7 @@ export async function fixture(
     managedBackend?: boolean
     protectProfileInputs?: boolean
     writeDispatch?: () => Promise<unknown>
+    readDispatch?: () => Promise<unknown>
     channelArchive?: string
     channelUiGrant?: boolean
     channelGrantOtherSource?: boolean
@@ -225,6 +226,7 @@ export async function fixture(
     ownerCurrent: () => true,
     authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
     writeLifetimes: bootstrap.writeLifetimes,
+    readLifetimes: bootstrap.readLifetimes,
     ...(options.protectProfileInputs
       ? { waitForRetirement: async (rendererId: string) => await bootstrap.waitForRetirement(rendererId) }
       : {}),
@@ -238,6 +240,9 @@ export async function fixture(
           'fixture-write',
           { prepare: () => ({ mode: 'write' as const, dispatch: options.writeDispatch! }) },
         ] as const,
+      ]),
+      ...(options.readDispatch === undefined ? [] : [
+        ['fixture-read', { prepare: () => ({ mode: 'read' as const, dispatch: options.readDispatch! }) }] as const,
       ]),
     ]),
   })

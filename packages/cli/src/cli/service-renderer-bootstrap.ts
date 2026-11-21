@@ -20,6 +20,7 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
+import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
@@ -64,6 +65,7 @@ function emptyConfig(value: unknown): boolean {
  */
 export class ServiceRendererBootstrap {
   readonly writeLifetimes = new ManagerRendererWriteLifetimes()
+  readonly readLifetimes = new ManagerRendererReadLifetimes()
   private readonly entries = new Map<string, Entry>()
   private readonly retirements = new Map<string, Promise<boolean>>()
   private readonly unsubscribeFinalization: () => void
@@ -202,9 +204,11 @@ export class ServiceRendererBootstrap {
     // Drain this entry even if it has already been removed from the map.
     if (this.entries.get(rendererId) === entry) this.entries.delete(rendererId)
     entry.unsubscribe()
-    const hasWrite = this.writeLifetimes.hasActive(rendererId)
     const writes = this.writeLifetimes.retire(rendererId)
-    if (hasWrite) entry.peer.close()
+    const reads = this.readLifetimes.retire(rendererId)
+    // A failed bootstrap is no longer a usable participant. Closing the peer
+    // also fences new admissions until all in-flight calls and resources drain.
+    entry.peer.close()
     if (!entry.retirement) {
       entry.retirement = (async () => {
         // A disconnected renderer may still be finishing bootstrap and may
@@ -214,6 +218,7 @@ export class ServiceRendererBootstrap {
           [entry.preparing, entry.completing, ...entry.checks].filter(value => value !== undefined),
         )
         const writesSettled = await writes
+        await reads
         const releases = [entry.releasePermissionFence, entry.releasePluginConfigFence]
         delete entry.releasePermissionFence
         delete entry.releasePluginConfigFence

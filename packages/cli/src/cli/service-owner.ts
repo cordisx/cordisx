@@ -244,6 +244,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererBootstrap: rendererBootstrap.channel(),
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,
+          rendererReadLifetimes: rendererBootstrap.readLifetimes,
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
           rendererModelServices,
           ...(rendererReadonlyChannel === undefined

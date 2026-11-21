@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
+import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 
 /** Private to the owner RPC and sidecar memory. Never serialize to the browser. */
 export interface ManagerRendererHandle {
@@ -82,6 +83,7 @@ export class ManagerRendererSessions {
   private readonly retirementWaiters = new Set<() => void>()
   private readonly channels: ReadonlyMap<string, ManagerRendererChannel>
   private readonly writeLifetimes: ManagerRendererWriteLifetimes
+  private readonly readLifetimes: ManagerRendererReadLifetimes
   private disposed = false
   private monitor: ReturnType<typeof setInterval> | undefined
   private monitoring = false
@@ -103,6 +105,8 @@ export class ManagerRendererSessions {
       readonly waitForRetirement?: (rendererId: string) => Promise<boolean>
       /** Shared with owner resources so their locks outlive a dispatched write. */
       readonly writeLifetimes?: ManagerRendererWriteLifetimes
+      /** Shared with owner resources so their locks outlive a dispatched read. */
+      readonly readLifetimes?: ManagerRendererReadLifetimes
       readonly channels?: ReadonlyMap<string, ManagerRendererChannel>
       /** The owner alone may enable a lifecycle participant and its admission. */
       readonly participant?: {
@@ -121,6 +125,7 @@ export class ManagerRendererSessions {
     // Copy the allowlist: a later mutation cannot silently add authority.
     this.channels = new Map(input.channels)
     this.writeLifetimes = input.writeLifetimes ?? new ManagerRendererWriteLifetimes()
+    this.readLifetimes = input.readLifetimes ?? new ManagerRendererReadLifetimes()
   }
 
   private alive(): boolean {
@@ -168,13 +173,14 @@ export class ManagerRendererSessions {
     this.pendingRetirements.add(retirement)
     this.retiredSessions.set(session.browserSessionId, { gateway: session.gateway, result: retirement })
     const writes = this.writeLifetimes.retire(session.handle.rendererId)
+    const reads = this.readLifetimes.retire(session.handle.rendererId)
     try {
       session.peer?.close()
       const resources = Promise.resolve().then(async () =>
         this.input.waitForRetirement ? await this.input.waitForRetirement(session.handle.rendererId) : true
       )
-      void Promise.all([writes, resources]).then(
-        ([settled, released]) => finish(settled && released),
+      void Promise.all([writes, reads, resources]).then(
+        ([settled, , released]) => finish(settled && released),
         () => finish(false),
       )
     } catch {
@@ -392,6 +398,7 @@ export class ManagerRendererSessions {
     let dispatched: 'read' | 'write' | undefined
     let trackedWrite = false
     let finishWrite: (() => void) | undefined
+    let finishRead: (() => void) | undefined
     const unknown = (): ManagerRendererCallResult => {
       this.mutationUncertain = true
       this.fenceMutations()
@@ -422,6 +429,9 @@ export class ManagerRendererSessions {
         if (!finishWrite) return unavailable
         this.writesInFlight++
         trackedWrite = true
+      } else {
+        finishRead = this.readLifetimes.begin(session.handle.rendererId)
+        if (!finishRead) return unavailable
       }
       dispatched = prepared.mode
       const value = trackedWrite
@@ -443,6 +453,7 @@ export class ManagerRendererSessions {
         if (this.writesInFlight === 0) { for (const notify of this.writeWaiters) notify() }
         finishWrite?.()
       }
+      finishRead?.()
       session.inFlight--
     }
   }

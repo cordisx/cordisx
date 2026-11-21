@@ -175,7 +175,13 @@ it.skipIf(chrome === undefined)(
     }
     const owner = {
       lifecycle,
-      managementOptions: { rendererParticipant: participant, rendererBootstrap: bootstrap.channel() },
+      managementOptions: {
+        rendererParticipant: participant,
+        rendererBootstrap: bootstrap.channel(),
+        rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
+        rendererWriteLifetimes: bootstrap.writeLifetimes,
+        rendererReadLifetimes: bootstrap.readLifetimes,
+      },
       close() {
         const closing = bootstrap.close()
         participants.close()

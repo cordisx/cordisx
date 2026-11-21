@@ -91,6 +91,7 @@ export function createDesktopManagerOwner(input: {
       rendererBootstrap: bootstrap.channel(),
       rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
       rendererWriteLifetimes: bootstrap.writeLifetimes,
+      rendererReadLifetimes: bootstrap.readLifetimes,
       ...(rendererModelServices === undefined ? {} : { rendererModelServices }),
       ...(channelBridge === undefined ? {} : { rendererReadonlyChannel: channelBridge.channel }),
     },

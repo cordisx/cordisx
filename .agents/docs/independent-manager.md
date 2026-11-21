@@ -161,10 +161,13 @@ fences.
 
 Renderer revocation waits for any pending bootstrap, configuration and policy
 checks, owner graph leases, dispatched writes and profile fences to finish
-retiring before it acknowledges the close. A write still in flight when its renderer disconnects
+retiring before it acknowledges the close. Dispatched reads also finish
+before their renderer's profile fences are released. A write still in flight when its renderer disconnects
 has an uncertain outcome; its profile fences stay held until that write settles.
 New admissions and coordinated sidecar writes remain unavailable during that
 cleanup; an unconfirmed result keeps them closed.
+If initial bootstrap fails while assembling the owner graph, its renderer is
+revoked; a new session can join only after the old session has finished cleanup.
 A dispatched Manager write whose result is lost also fences the other Manager
 sessions until the owner is reconciled.
 

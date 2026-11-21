@@ -380,6 +380,45 @@ it('rejects a forged projected path and removes the owner lease', async () => {
   }
 }, 30_000)
 
+it('retires a failed bootstrap before accepting new reads or renderer sessions', async () => {
+  const entered = defer<void>()
+  const release = defer<void>()
+  let reads = 0
+  const f = await fixture({
+    protectProfileInputs: true,
+    readDispatch: async () => {
+      reads++
+      if (reads === 1) {
+        entered.resolve()
+        await release.promise
+      }
+      return 'read complete'
+    },
+  })
+  try {
+    expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+    const reading = f.sessions.call(f.invocation, 'fixture-read', {})
+    await entered.promise
+    expect(await f.call({ action: 'complete', managerOrigin: origin, graphs: [{}] })).toEqual({
+      status: 'unavailable',
+    })
+    expect(await f.sessions.call(f.invocation, 'fixture-read', {})).toEqual({ status: 'unavailable' })
+    expect(reads).toBe(1)
+    expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+    release.resolve()
+    expect(await reading).toEqual({ status: 'unavailable' })
+    expect(await f.sessions.revoke(f.gateway, f.invocation.browserSessionId)).toBe(true)
+    const browserSessionId = secret()
+    const handle = await f.sessions.open(f.gateway, browserSessionId)
+    expect(handle).toBeDefined()
+    const next = { gateway: f.gateway, browserSessionId, handle: handle! }
+    expect(await f.sessions.call(next, 'manager-bootstrap', { action: 'prepare' })).toMatchObject({ status: 'ok' })
+  } finally {
+    release.resolve()
+    await f.close()
+  }
+}, 30_000)
+
 it('refuses a stale composition and retires its initial graph after the authority changes', async () => {
   const f = await fixture()
   try {
@@ -392,9 +431,8 @@ it('refuses a stale composition and retires its initial graph after the authorit
       status: 'unavailable',
     })
     expect((await fetch(privateGraph.entryUrl)).status).toBe(404)
-    // Rebinding still authenticates the live session; a fresh bootstrap is
-    // required before that session can be admitted to the new composition.
-    expect(await f.call({ action: 'status' })).toEqual({ status: 'ok', value: { status: 'ok', current: true } })
+    // A failed bootstrap revokes the old session; recovery needs a fresh one.
+    expect(await f.call({ action: 'status' })).toEqual({ status: 'unavailable' })
   } finally {
     await f.close()
   }
@@ -572,9 +610,10 @@ it('retires a late graph lease when the session is revoked during prepare', asyn
     const pending = f.call({ action: 'prepare' })
     const lease = await f.leaseReady.promise
     expect((await fetch(lease.entryUrl)).status).toBe(200)
-    expect(await f.sessions.close(f.invocation)).toBe(true)
+    const closing = f.sessions.close(f.invocation)
     f.releaseLease.resolve()
     expect(await pending).toEqual({ status: 'unavailable' })
+    expect(await closing).toBe(true)
     expect((await fetch(lease.entryUrl)).status).toBe(404)
   } finally {
     await f.close()
@@ -631,6 +670,49 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
       release.resolve()
       spy?.mockRestore()
       policySpy?.mockRestore()
+      await f.close()
+    }
+  },
+  30_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'holds profile fences until a disconnected renderer read settles',
+  async () => {
+    const entered = defer<void>()
+    const release = defer<void>()
+    const f = await fixture({
+      protectProfileInputs: true,
+      readDispatch: async () => {
+        entered.resolve()
+        await release.promise
+        return 'read complete'
+      },
+    })
+    try {
+      expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+      const reading = f.sessions.call(f.invocation, 'fixture-read', {})
+      await entered.promise
+      let closed = false
+      const closing = f.sessions.close(f.invocation).then(result => {
+        closed = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(closed).toBe(false)
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), f.configPath)).rejects.toThrow('plugin configuration is in use')
+      release.resolve()
+      expect(await reading).toEqual({ status: 'unavailable' })
+      expect(await closing).toBe(true)
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), f.configPath)
+    } finally {
+      release.resolve()
       await f.close()
     }
   },

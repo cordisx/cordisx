@@ -129,6 +129,7 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
         rendererBootstrap: f.bootstrap.channel(),
         rendererRetirement: rendererId => f.bootstrap.waitForRetirement(rendererId),
         rendererWriteLifetimes: f.bootstrap.writeLifetimes,
+        rendererReadLifetimes: f.bootstrap.readLifetimes,
         rendererReadonlyChannel: f.channelBridge!.channel,
         rendererManagedServiceUI: f.managedUI.channel,
         mode: 'service',

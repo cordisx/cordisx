@@ -273,6 +273,48 @@ it('does not acknowledge retirement while a dispatched write is unresolved', asy
   }
 })
 
+it('does not acknowledge retirement while a dispatched read still owns resources', async () => {
+  const pending = deferred<unknown>()
+  const entered = deferred<void>()
+  const authority = new ManagerRendererSessions({
+    profileId: 'work',
+    ownerGeneration: 'owner-1',
+    ownerCurrent: () => true,
+    authenticateGateway: async () => true,
+    channels: new Map([['fixture', {
+      prepare: () => ({
+        mode: 'read',
+        dispatch: async () => {
+          entered.resolve()
+          return await pending.promise
+        },
+      }),
+    }]]),
+  })
+  try {
+    const browserSessionId = secret()
+    const handle = (await authority.open(gateway, browserSessionId))!
+    const invocation = { gateway, browserSessionId, handle }
+    const reading = authority.call(invocation, 'fixture', {})
+    await entered.promise
+    let closed = false
+    const closing = authority.close(invocation).then(result => {
+      closed = true
+      return result
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(closed).toBe(false)
+    expect(await authority.open(gateway, secret())).toBeUndefined()
+    pending.resolve('read complete')
+    expect(await reading).toEqual({ status: 'unavailable' })
+    expect(await closing).toBe(true)
+    expect(await authority.open(gateway, secret())).toBeDefined()
+  } finally {
+    pending.resolve(undefined)
+    authority.dispose()
+  }
+})
+
 it('blocks a write that was waiting for gateway authentication when the fence began', async () => {
   const auth = deferred<boolean>()
   const entered = deferred<void>()
