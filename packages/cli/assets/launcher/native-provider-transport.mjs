@@ -13,7 +13,10 @@ const MAX_WORKERS = 128
  * The inert process default satisfies native provider identity checks and cannot
  * silently send a request when a per-thread override has been lost.
  */
-export function createNativeProviderTransport(primary, { executable, args, env, initialize, diagnostic } = {}) {
+export function createNativeProviderTransport(
+  primary,
+  { executable, args, env, initialize, diagnostic, reviewRouting } = {},
+) {
   const stdout = new PassThrough()
   const workers = new Map()
   const owners = new Map()
@@ -45,11 +48,17 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       if (pending) {
         connection.pending.delete(key(message.id))
         const thread = message.result?.thread
-        if (!message.error && thread?.id && ['thread/start', 'thread/resume', 'thread/fork'].includes(pending.method)) {
+        if (
+          !message.error && thread?.id
+          && (['thread/start', 'thread/resume', 'thread/fork'].includes(pending.method)
+            || reviewRouting && pending.method === 'thread/read')
+        ) {
+          const previous = owners.get(thread.id)
           owners.set(thread.id, {
-            connection,
+            ...(pending.method === 'thread/read' ? previous : {}),
+            connection: pending.method === 'thread/read' && previous ? previous.connection : connection,
             status: thread.status,
-            model: thread.model,
+            model: message.result.model ?? thread.model,
             providerId: message.result.modelProvider ?? thread.modelProvider,
           })
         }
@@ -94,6 +103,11 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
         if (message.method === 'turn/completed') delete owner.turn
         if (message.method === 'thread/closed') owners.delete(threadId)
       }
+    }
+    if (reviewRouting && message.method === 'thread/settings/updated') {
+      const owner = owners.get(message.params?.threadId), settings = message.params?.threadSettings
+      if (owner && typeof settings?.model === 'string') owner.model = settings.model
+      if (owner && typeof settings?.modelProvider === 'string') owner.providerId = settings.modelProvider
     }
     emit(message, original)
   }
@@ -221,6 +235,24 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       && message.id.startsWith('cordisx-provider-request-')
     ) return
     const params = object(message.params)
+    if (
+      reviewRouting
+      && ['thread/start', 'thread/resume', 'thread/fork', 'turn/start', 'thread/settings/update'].includes(
+        message.method,
+      )
+    ) {
+      const owner = owners.get(params?.threadId), config = object(params?.config)
+      const id = params?.modelProvider ?? config?.model_provider ?? owner?.providerId
+      const model = params?.collaborationMode?.settings?.model ?? params?.model ?? config?.model ?? owner?.model
+      if (config?.model_catalog_json !== undefined || config?.profile !== undefined) {
+        throw new Error('REVIEW_NATIVE_CONFIG_CONFLICT')
+      }
+      if (id !== reviewRouting.providerId || config?.model_provider !== undefined && config.model_provider !== id) {
+        throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+      }
+      if (config?.model !== undefined && config.model !== model) throw new Error('REVIEW_NATIVE_CONFIG_CONFLICT')
+      if (!reviewRouting.models.includes(model)) throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+    }
     let connection = owners.get(params?.threadId)?.connection ?? primary
     if (initializeParams && ['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
       const config = object(params?.config)
@@ -262,13 +294,15 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
         for (const { message: frame, original } of frames) {
           try {
             await route(frame, original)
-          } catch {
+          } catch (error) {
             if (frame.id !== undefined) {
               emit({
                 id: frame.id,
                 error: {
                   code: -32000,
-                  message: 'Native provider transport unavailable. Check thread history before retrying.',
+                  message: error?.message?.startsWith('REVIEW_')
+                    ? error.message
+                    : 'Native provider transport unavailable. Check thread history before retrying.',
                 },
               })
             }
