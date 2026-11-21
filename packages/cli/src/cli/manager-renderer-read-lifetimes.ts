@@ -33,6 +33,25 @@ export class ManagerRendererReadLifetimes {
     }
   }
 
+  /** Wait for reads already dispatched before an owner-specific read gate closed. */
+  async drainCurrent(rendererId: string, timeoutMs = 15_000): Promise<boolean> {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) return false
+    const state = this.state(rendererId)
+    if (state.retirement) return false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const drained = await Promise.race([
+        Promise.all(state.active).then(() => true),
+        new Promise<boolean>(resolve => {
+          timer = setTimeout(() => resolve(false), timeoutMs)
+        }),
+      ])
+      return drained && state.retirement === undefined
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+
   /** No new read may start after retirement; existing reads must settle first. */
   retire(rendererId: string): Promise<void> {
     const state = this.state(rendererId)

@@ -28,6 +28,7 @@ import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contr
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
 import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
+import { createConfiguredChannelOwner } from './configured-channel-owner.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -202,6 +203,16 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               && rendererParticipants?.peer(context.rendererId) !== undefined,
           })
         }
+        const configuredServiceOwner = rendererReadonlyChannel && channelOwner
+          ? createConfiguredChannelOwner({
+            homeDir,
+            configPath,
+            profileId,
+            plugin: channelOwner.plugin,
+            service: channelOwner.service,
+            ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
+          })
+          : undefined
         rendererBootstrap = new ServiceRendererBootstrap({
           homeDir,
           configPath,
@@ -213,6 +224,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           store,
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
+          experimentalChannelServiceConfig: configuredServiceOwner !== undefined,
           ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {
             experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },
           }),
@@ -250,6 +262,14 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ...(rendererReadonlyChannel === undefined
             ? {}
             : { rendererReadonlyChannel: rendererReadonlyChannel.channel }),
+          ...(configuredServiceOwner === undefined || channelOwner === undefined ? {} : {
+            rendererConfiguredChannelService: {
+              bootstrap: rendererBootstrap,
+              plugin: channelOwner.plugin,
+              service: channelOwner.service,
+              authority: configuredServiceOwner,
+            },
+          }),
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
           ...(managerChannel === undefined

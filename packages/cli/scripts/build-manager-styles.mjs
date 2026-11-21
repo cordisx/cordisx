@@ -10,6 +10,7 @@ export async function buildManagerStyles(output = path.join(root, 'dist/assets/m
   const result = await build({
     stdin: {
       contents: `export { REACT_MANAGER_STYLES } from './src/renderer/manager/styles.ts';
+export { SHARED_REACT_STYLES } from './src/renderer/react-runtime.ts';
 export { EMPTY_STATE_ILLUSTRATION_STYLES, EMPTY_STATE_STYLES } from './src/renderer/host-ui/empty-state-styles.ts';
 export { HOST_TDESIGN_REACT_STYLES } from './src/renderer/host-ui/tdesign-styles.ts';
 export { PERMISSION_AUTHORIZATION_STYLES } from './src/renderer/permission-authorization-styles.ts';`,
@@ -27,18 +28,21 @@ export { PERMISSION_AUTHORIZATION_STYLES } from './src/renderer/permission-autho
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`
   const {
     REACT_MANAGER_STYLES,
+    SHARED_REACT_STYLES,
     EMPTY_STATE_ILLUSTRATION_STYLES,
     EMPTY_STATE_STYLES,
     HOST_TDESIGN_REACT_STYLES,
     PERMISSION_AUTHORIZATION_STYLES,
   } = await import(moduleUrl)
   if (
-    typeof REACT_MANAGER_STYLES !== 'string' || typeof EMPTY_STATE_ILLUSTRATION_STYLES !== 'string'
+    typeof REACT_MANAGER_STYLES !== 'string' || typeof SHARED_REACT_STYLES !== 'string'
+    || typeof EMPTY_STATE_ILLUSTRATION_STYLES !== 'string'
     || typeof EMPTY_STATE_STYLES !== 'string' || typeof HOST_TDESIGN_REACT_STYLES !== 'string'
     || typeof PERMISSION_AUTHORIZATION_STYLES !== 'string'
   ) throw new Error('Host Manager stylesheet is unavailable')
   const pageHeaderActions = await readFile(path.join(root, 'src/renderer/page-header-actions.css'), 'utf8')
   const standalone = await readFile(path.join(root, 'src/renderer/manager/manager-standalone.css'), 'utf8')
+  const notifications = await readFile(path.join(root, 'src/renderer/notifications/styles.css'), 'utf8')
   // ModelServicesPage normally inserts these after the Manager shell. Keep
   // that cascade order when strict CSP requires the same-origin asset.
   const modelStyles = await Promise.all([
@@ -50,12 +54,14 @@ export { PERMISSION_AUTHORIZATION_STYLES } from './src/renderer/permission-autho
   await writeFile(
     output,
     [
+      SHARED_REACT_STYLES,
       REACT_MANAGER_STYLES,
       pageHeaderActions,
       EMPTY_STATE_ILLUSTRATION_STYLES,
       EMPTY_STATE_STYLES,
       standalone,
       ...modelStyles,
+      notifications,
       // Authorization lives in a Host-owned overlay outside the Manager root.
       HOST_TDESIGN_REACT_STYLES,
       PERMISSION_AUTHORIZATION_STYLES,

@@ -218,14 +218,16 @@ export async function start(
   }
   let ownsSharedReactRuntime = false
   if (globalThis.__cordisxSharedReactRuntime === undefined) {
-    sharedReactRuntime = installSharedReactRuntime(document)
+    sharedReactRuntime = installSharedReactRuntime(document, { externalStyles: metadata.hostKind === 'standalone' })
     ownsSharedReactRuntime = true
   } else {
     sharedReactRuntime = globalThis.__cordisxSharedReactRuntime
   }
   let certifiedPermissionChannel = options.certifiedPermissionChannel
   try {
-    disposeNotifications = installNotificationHost(document, metadata.profileId)
+    disposeNotifications = installNotificationHost(document, metadata.profileId, {
+      externalStyles: metadata.hostKind === 'standalone',
+    })
     disposeDialogs = installDialogHost(document)
     const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
     const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)

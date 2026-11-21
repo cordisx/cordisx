@@ -23,6 +23,7 @@ export class ServiceRendererConfiguredChannel {
   private identity?: ServiceRendererIdentityProjection
   private view?: View
   private bound?: ManagerRendererChannelContext
+  private sourceAlias?: string
   private closed = false
 
   private constructor(
@@ -39,7 +40,7 @@ export class ServiceRendererConfiguredChannel {
     },
     readonly lease: PluginGenerationGraphLease,
     private readonly owner: NonNullable<ReturnType<LocalChannelService['managementOwner']>>,
-    private readonly serviceGeneration: string,
+    private serviceGeneration: string,
   ) {}
 
   static async prepare(input: {
@@ -134,6 +135,7 @@ export class ServiceRendererConfiguredChannel {
         throw new Error('renderer-configured-channel-unavailable')
       }
       this.view = view
+      this.sourceAlias = source
       return {
         plugin: {
           id: this.input.plugin.id,
@@ -164,6 +166,68 @@ export class ServiceRendererConfiguredChannel {
     if (!this.isCurrent() || !this.view || this.bound) throw new Error('renderer-configured-channel-unavailable')
     this.input.bridge.bind(context, this.view)
     this.bound = context
+  }
+
+  /** Reverse only this renderer's owner-issued alias to the verified Channel source. */
+  serviceIdentity(context: ManagerRendererChannelContext, requestedAlias?: string): {
+    readonly alias: string
+    readonly source: string
+  } {
+    const alias = this.sourceAlias
+    if (
+      !this.bound || !this.identity || !alias || !this.isCurrent() || context.admitted !== true
+      || context.signal !== this.bound.signal || requestedAlias !== undefined && requestedAlias !== alias
+    ) throw new Error('renderer-configured-channel-unavailable')
+    const identity = this.identity.resolve(context, alias, 'channel')
+    if (identity.source !== this.input.plugin.source || identity.digest !== this.input.plugin.configuredArchiveDigest) {
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    return { alias, source: identity.source }
+  }
+
+  /** Verify an unchanged view or replace it only after the exact committed service generation is readable. */
+  async handoff(
+    reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>>,
+    expected?: { readonly generation: string; readonly revision: number },
+  ): Promise<void> {
+    const context = this.bound
+    if (!context || !this.view || !reservation.isCurrent() || !this.input.current()) {
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    if (!expected) {
+      const result = await this.view.snapshot()
+      if (result.status !== 'applied' || !this.isCurrent() || !reservation.isCurrent()) {
+        throw new Error('renderer-configured-channel-unavailable')
+      }
+      return
+    }
+    if (
+      !Number.isSafeInteger(expected.revision) || expected.revision < 0
+      || expected.generation === this.serviceGeneration || this.input.service.generation() !== expected.generation
+      || this.input.service.managementOwner() !== this.owner
+    ) throw new Error('renderer-configured-channel-unavailable')
+    this.serviceGeneration = expected.generation
+    const view = await openReadonlyHeadlessChannel({
+      profileId: this.input.profileId,
+      configPath: this.input.configPath,
+      plugin: this.input.plugin,
+      service: this.input.service,
+      fence: {
+        signal: context.signal,
+        current: async () => this.isCurrent() && await this.input.unchanged() && this.isCurrent(),
+        retire: this.input.retire,
+      },
+    })
+    if (
+      !view || !this.isCurrent() || !reservation.isCurrent() || view.initial.generation !== expected.generation
+      || view.initial.projection.service.revision !== expected.revision
+      || view.initial.projection.service.lastGoodRevision !== expected.revision
+    ) {
+      view?.close()
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    if (!reservation.replace(view)) throw new Error('renderer-configured-channel-unavailable')
+    this.view = view
   }
 
   close(): void {

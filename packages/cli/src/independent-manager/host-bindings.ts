@@ -10,6 +10,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
   'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
   'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
+  marketplace: ['__cordisxMarketplaceRequestV1', '__cordisxMarketplaceReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
 } as const
@@ -133,6 +134,8 @@ export function installIndependentHostBindings(input: {
         readOnly: (() => {
           const envelope = JSON.parse(payload) as { operation?: unknown }
           if (channel === 'model-services') return envelope.operation === 'read'
+          if (channel === 'service-config') return envelope.operation === 'list'
+          if (channel === 'marketplace') return true
           if (channel === 'channel-actions') return (envelope as { action?: unknown }).action === 'snapshot'
           if (channel !== 'plugin-management') return false
           const operation = envelope.operation as { kind?: unknown } | undefined
@@ -142,7 +145,7 @@ export function installIndependentHostBindings(input: {
       }
       pending.set(key, request)
       void Promise.resolve().then(async () => {
-        const requiresAdmission = channel === 'channel-actions'
+        const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
           || (channel === 'model-services' || channel === 'plugin-management') && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {
           if (!await input.rendererAdmission) throw new Error('independent-host-session-revoked')

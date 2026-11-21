@@ -528,12 +528,14 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
             ...(runtimeScope.metadata()!.channelManager === undefined
               ? {}
               : { projection: runtimeScope.metadata()!.channelManager }),
-            ...(runtimeScope.serviceConfigBridge()! === undefined ? {} : {
-              serviceConfig: {
-                list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
-                mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
-              },
-            }),
+            ...(runtimeScope.serviceConfigBridge()! === undefined || runtimeScope.metadata()!.hostKind === 'standalone'
+              ? {}
+              : {
+                serviceConfig: {
+                  list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
+                  mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
+                },
+              }),
             ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
               credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
             }),

@@ -3,11 +3,14 @@ import type { openReadonlyHeadlessChannel } from './readonly-headless-channel.js
 
 type View = NonNullable<Awaited<ReturnType<typeof openReadonlyHeadlessChannel>>>
 type Entry = {
+  readonly context: ManagerRendererChannelContext
   readonly signal: AbortSignal
-  readonly view: View
+  view: View
   readonly seen: Set<string>
+  readonly reads: Set<Promise<unknown>>
   readonly onAbort: () => void
 }
+type Suspension = { readonly rendererId: string; readonly entry: Entry }
 
 /**
  * Owner-private bridge for views created by openReadonlyHeadlessChannel.
@@ -17,6 +20,7 @@ type Entry = {
  */
 export class ReadonlyChannelRendererBridge {
   private readonly entries = new Map<string, Entry>()
+  private suspended: Suspension | undefined
   private closed = false
 
   constructor(
@@ -37,13 +41,13 @@ export class ReadonlyChannelRendererBridge {
   }
 
   bind(context: ManagerRendererChannelContext, view: View): void {
-    if (!this.current(context) || this.entries.has(context.rendererId)) {
+    if (!this.current(context) || this.suspended || this.entries.has(context.rendererId)) {
       view.close()
       throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
     }
     let entry!: Entry
     const onAbort = () => this.retire(context.rendererId, entry)
-    entry = { signal: context.signal, view, seen: new Set(), onAbort }
+    entry = { context, signal: context.signal, view, seen: new Set(), reads: new Set(), onAbort }
     this.entries.set(context.rendererId, entry)
     context.signal.addEventListener('abort', onAbort, { once: true })
     if (!this.current(context)) {
@@ -65,11 +69,78 @@ export class ReadonlyChannelRendererBridge {
     entry.view.close()
   }
 
+  /**
+   * Stop new snapshots and drain the sole renderer before its service changes.
+   * The owner must separately reserve Manager writes and the profile lifecycle.
+   */
+  async suspend(rendererId: string, timeoutMs = 15_000): Promise<{
+    isCurrent(): boolean
+    replace(view: View): boolean
+    release(): boolean
+    fence(): void
+  }> {
+    const entry = this.entries.get(rendererId)
+    if (
+      this.closed || this.suspended || this.entries.size !== 1 || !entry || !this.current(entry.context)
+      || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000
+    ) throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
+    const suspension: Suspension = { rendererId, entry }
+    this.suspended = suspension
+    const current = () =>
+      this.suspended === suspension && this.entries.size === 1
+      && this.entries.get(rendererId) === entry && this.current(entry.context)
+    const fence = () => {
+      if (this.suspended !== suspension) return
+      this.retire(rendererId, entry)
+      this.suspended = undefined
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let drained: boolean
+    try {
+      drained = await Promise.race([
+        Promise.allSettled(entry.reads).then(() => true),
+        new Promise<boolean>(resolve => {
+          timer = setTimeout(() => resolve(false), timeoutMs)
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    if (!drained || !current()) {
+      fence()
+      throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
+    }
+    let replaced = false
+    return {
+      isCurrent: current,
+      replace: view => {
+        if (!current() || replaced || view === entry.view) {
+          if (view !== entry.view) view.close()
+          return false
+        }
+        entry.view.close()
+        entry.view = view
+        replaced = true
+        return true
+      },
+      release: () => {
+        if (!current()) {
+          fence()
+          return false
+        }
+        this.suspended = undefined
+        return true
+      },
+      fence,
+    }
+  }
+
   readonly channel: ManagerRendererChannel = {
     prepare: (payload, context) => {
       const entry = this.entries.get(context.rendererId)
       if (
-        !entry || entry.signal !== context.signal || context.admitted !== true || !this.current(context)
+        !entry || this.suspended || entry.signal !== context.signal || context.admitted !== true
+        || !this.current(context)
         || typeof payload !== 'string' || Buffer.byteLength(payload) > 4096
       ) throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
       const value: unknown = JSON.parse(payload)
@@ -88,15 +159,21 @@ export class ReadonlyChannelRendererBridge {
         mode: 'read',
         dispatch: async () => {
           if (
-            !this.current(context) || this.entries.get(context.rendererId) !== entry
+            this.suspended || !this.current(context) || this.entries.get(context.rendererId) !== entry
             || entry.seen.has(requestId) || entry.seen.size >= 4096
           ) throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
           entry.seen.add(requestId)
-          const result = await entry.view.snapshot()
-          if (!this.current(context) || this.entries.get(context.rendererId) !== entry) {
-            throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
+          const read = entry.view.snapshot()
+          entry.reads.add(read)
+          try {
+            const result = await read
+            if (!this.current(context) || this.entries.get(context.rendererId) !== entry) {
+              throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
+            }
+            return { requestId, ok: true, value: result }
+          } finally {
+            entry.reads.delete(read)
           }
-          return { requestId, ok: true, value: result }
         },
       }
     },

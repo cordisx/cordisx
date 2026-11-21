@@ -99,6 +99,31 @@ it('permits refresh with an owner-declared read pending but not with a write pen
   }
 })
 
+it('waits for admission and preserves refresh only for Channel configuration reads', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const fetch = vi.fn(() => new Promise(() => {}))
+  const target = { fetch, __cordisxServiceConfigReceiveV1: vi.fn() } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['service-config'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxServiceConfigRequestV1(JSON.stringify({ requestId: 'read', operation: 'list' }))
+    expect(dispose.canResume()).toBe(true)
+    target.__cordisxServiceConfigRequestV1(JSON.stringify({ requestId: 'write', operation: 'mutate' }))
+    expect(dispose.canResume()).toBe(false)
+    await Promise.resolve()
+    expect(fetch).not.toHaveBeenCalled()
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  } finally {
+    dispose()
+  }
+})
+
 it('rejects forged responses and does not retry an operation whose outcome is unknown', async () => {
   const receiver = vi.fn()
   const fetch = vi.fn(async () => ({

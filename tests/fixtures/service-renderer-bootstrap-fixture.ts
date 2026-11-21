@@ -4,6 +4,8 @@ import path from 'node:path'
 import { expect, vi } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../../packages/channel-runtime/src/simulator.js'
 import { ServiceRendererBootstrap } from '../../packages/cli/src/cli/service-renderer-bootstrap.js'
+import { createConfiguredChannelOwner } from '../../packages/cli/src/cli/configured-channel-owner.js'
+import { createManagerRendererServiceConfigChannel } from '../../packages/cli/src/cli/manager-renderer-service-config.js'
 import { ReadonlyChannelRendererBridge } from '../../packages/cli/src/cli/readonly-channel-renderer-bridge.js'
 import { ServiceRendererParticipants } from '../../packages/cli/src/cli/service-renderer-participant.js'
 import { createServiceRendererProjector } from '../../packages/cli/src/cli/service-renderer-projection.js'
@@ -45,6 +47,7 @@ export async function fixture(
     channelUiGrant?: boolean
     channelGrantOtherSource?: boolean
     channelOwnerMismatch?: boolean
+    channelServiceConfig?: boolean
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -209,6 +212,7 @@ export async function fixture(
     store,
     managedServiceUI: managedUI,
     protectProfileInputs: options.protectProfileInputs === true,
+    experimentalChannelServiceConfig: options.channelServiceConfig === true,
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {
         plugin: options.channelOwnerMismatch
@@ -220,7 +224,30 @@ export async function fixture(
     }),
   })
   const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
-  const sessions = new ManagerRendererSessions({
+  let sessions!: ManagerRendererSessions
+  const configuredOwner = configuredChannel === undefined ? undefined : createConfiguredChannelOwner({
+    homeDir,
+    configPath,
+    profileId,
+    plugin: configuredChannel.plugin,
+    service: configuredChannel.service,
+    ownerCurrent: () => true,
+  })
+  const serviceConfigChannel = options.channelServiceConfig && configuredChannel && configuredOwner
+    ? createManagerRendererServiceConfigChannel({
+      profileId,
+      generation,
+      configPath,
+      plugin: configuredChannel.plugin,
+      service: configuredChannel.service,
+      authority: configuredOwner,
+      bootstrap,
+      participants,
+      lifecycle,
+      sessions: () => sessions,
+    })
+    : undefined
+  sessions = new ManagerRendererSessions({
     profileId,
     ownerGeneration: generation,
     ownerCurrent: () => true,
@@ -235,6 +262,7 @@ export async function fixture(
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
       ...(channelBridge === undefined ? [] : [['channel-actions', channelBridge.channel] as const]),
+      ...(serviceConfigChannel === undefined ? [] : [['service-config', serviceConfigChannel] as const]),
       ...(options.writeDispatch === undefined ? [] : [
         [
           'fixture-write',

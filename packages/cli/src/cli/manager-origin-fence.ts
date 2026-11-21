@@ -1,6 +1,30 @@
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
+
+export interface ManagerOriginFence {
+  readonly rendererId: string
+  isCurrent(): boolean
+  release(): boolean
+  fence(): void
+}
+
+const issued = new WeakMap<ManagerOriginFence, {
+  readonly participants: ServiceRendererParticipants
+  readonly lifecycle: OwnerRendererLifecycle
+  readonly current: () => boolean
+}>()
+
+/** Read-only verification: callers cannot fabricate an origin reservation. */
+export function isCurrentManagerOriginFence(
+  fence: ManagerOriginFence,
+  participants: ServiceRendererParticipants,
+  lifecycle: OwnerRendererLifecycle,
+): boolean {
+  const record = issued.get(fence)
+  return record?.participants === participants && record.lifecycle === lifecycle && record.current()
+}
 
 /**
  * Keep one admitted Manager alive for a write receipt while reserving its
@@ -12,7 +36,7 @@ export async function fenceManagerOrigin(input: {
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: ServiceRendererLifecycle
   readonly timeoutMs?: number
-}): Promise<{ readonly rendererId: string; isCurrent(): boolean; release(): boolean; fence(): void }> {
+}): Promise<ManagerOriginFence> {
   if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-origin-fence-scope-invalid')
   const writes = await input.sessions.suspendMutationsForCurrentWrite(input.timeoutMs)
   let lifecycle: ReturnType<ServiceRendererLifecycle['reserveExternalMutation']>
@@ -51,7 +75,7 @@ export async function fenceManagerOrigin(input: {
       return false
     }
   }
-  return {
+  const result: ManagerOriginFence = Object.freeze({
     rendererId: writes.rendererId,
     isCurrent: current,
     release() {
@@ -78,5 +102,7 @@ export async function fenceManagerOrigin(input: {
       return false
     },
     fence,
-  }
+  })
+  issued.set(result, { participants: input.participants, lifecycle: input.lifecycle, current })
+  return result
 }

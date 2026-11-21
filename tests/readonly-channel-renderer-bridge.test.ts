@@ -114,4 +114,81 @@ describe('readonly Channel renderer bridge', () => {
     f.bridge.close()
     expect(otherClose).toHaveBeenCalledOnce()
   })
+
+  it('drains existing snapshots before replacing the view and blocks new reads during handoff', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const waiting = new Promise<void>(resolve => {
+      finish = resolve
+    })
+    f.snapshot.mockImplementation(async () => {
+      await waiting
+      return { status: 'unavailable' }
+    })
+    f.bridge.bind(f.one, f.view)
+    const pending = f.bridge.channel.prepare(f.request('in-flight'), f.one).dispatch()
+    const prepared = f.bridge.channel.prepare(f.request('before-pause'), f.one)
+    let suspended = false
+    const handoff = f.bridge.suspend('one').then(result => {
+      suspended = true
+      return result
+    })
+    expect(() => f.bridge.channel.prepare(f.request('during-pause'), f.one)).toThrow()
+    await expect(prepared.dispatch()).rejects.toThrow('CHANNEL_RENDERER_UNAVAILABLE')
+    await Promise.resolve()
+    expect(suspended).toBe(false)
+    finish()
+    await expect(pending).resolves.toMatchObject({ ok: true })
+    const reservation = await handoff
+    const nextSnapshot = vi.fn(async () => ({ status: 'applied' as const, projection: {} }))
+    const nextClose = vi.fn()
+    expect(reservation.replace({ snapshot: nextSnapshot, close: nextClose } as unknown as View)).toBe(true)
+    expect(f.close).toHaveBeenCalledOnce()
+    expect(reservation.release()).toBe(true)
+    await expect(f.bridge.channel.prepare(f.request('after-pause'), f.one).dispatch()).resolves.toMatchObject({
+      ok: true,
+      value: { status: 'applied' },
+    })
+    await expect(f.bridge.channel.prepare(f.request('in-flight'), f.one).dispatch()).rejects.toThrow()
+    f.bridge.close()
+    expect(nextClose).toHaveBeenCalledOnce()
+  })
+
+  it('refuses an unaccounted peer and discards a replacement after session loss', async () => {
+    const f = fixture()
+    f.bridge.bind(f.one, f.view)
+    const otherClose = vi.fn()
+    f.bridge.bind(f.two, { ...f.view, close: otherClose })
+    await expect(f.bridge.suspend('one')).rejects.toThrow('CHANNEL_RENDERER_UNAVAILABLE')
+    f.bridge.unbind(f.two)
+    const reservation = await f.bridge.suspend('one')
+    f.first.abort()
+    const nextClose = vi.fn()
+    expect(reservation.replace({ ...f.view, close: nextClose })).toBe(false)
+    expect(nextClose).toHaveBeenCalledOnce()
+    expect(reservation.release()).toBe(false)
+    expect(f.close).toHaveBeenCalledOnce()
+    f.bridge.close()
+    expect(otherClose).toHaveBeenCalledOnce()
+  })
+
+  it('retires the view when a pending read cannot be drained', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const waiting = new Promise<void>(resolve => {
+      finish = resolve
+    })
+    f.snapshot.mockImplementation(async () => {
+      await waiting
+      return { status: 'unavailable' }
+    })
+    f.bridge.bind(f.one, f.view)
+    const pending = f.bridge.channel.prepare(f.request('slow'), f.one).dispatch()
+    const rejected = expect(pending).rejects.toThrow('CHANNEL_RENDERER_UNAVAILABLE')
+    await expect(f.bridge.suspend('one', 100)).rejects.toThrow('CHANNEL_RENDERER_UNAVAILABLE')
+    expect(f.close).toHaveBeenCalledOnce()
+    finish()
+    await rejected
+    f.bridge.close()
+  })
 })

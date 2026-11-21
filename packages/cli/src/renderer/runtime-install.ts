@@ -8,8 +8,8 @@ import {
 } from './runtime-shared.js'
 import { start } from './runtime-start.js'
 
-export function prepareCordisXViteReactRuntime(document: Document): () => void {
-  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document)
+export function prepareCordisXViteReactRuntime(document: Document, externalStyles = false): () => void {
+  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document, { externalStyles })
   let disposed = false
   return () => {
     if (disposed) return
@@ -129,7 +129,10 @@ export function installCordisXComposition(
     try {
       await globalThis.__cordisxRuntime?.dispose()
       signal?.throwIfAborted()
-      const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(document)
+      const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(
+        document,
+        metadata.hostKind === 'standalone',
+      )
       disposeSharedReactRuntime = preparedSharedReactRuntimeDisposer
       const plugins = await loadPlugins()
       signal?.throwIfAborted()

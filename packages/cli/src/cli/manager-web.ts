@@ -56,6 +56,8 @@ const rendererChannelAllowlist = new Set([
   'managed-service-ui',
   'channel-actions',
   'model-services',
+  'service-config',
+  'marketplace',
 ])
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -609,6 +611,18 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         const handle = await session.rendererOpen
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        let serviceConfigWrite = false
+        if (input.channel === 'service-config') {
+          try {
+            const envelope = object(JSON.parse(input.payload))
+            if (!envelope || !['list', 'mutate'].includes(String(envelope.operation))) {
+              return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+            }
+            serviceConfigWrite = envelope.operation === 'mutate'
+          } catch {
+            return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+          }
+        }
         // The owner applies its own strict channel parser and capability
         // checks. A browser cannot choose a handle, gateway, or session ID.
         const result = object(
@@ -620,8 +634,12 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             handle,
             channel: input.channel,
             payload: input.payload,
-          }),
+          }, serviceConfigWrite),
         )
+        if (serviceConfigWrite && result?.status === 'unknown') {
+          await retireSession(token)
+          return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+        }
         if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })
         return scopedReply(result.value)
       }

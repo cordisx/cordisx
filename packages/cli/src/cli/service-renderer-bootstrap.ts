@@ -24,6 +24,8 @@ import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.
 import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
+import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
+import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
 type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
@@ -49,6 +51,7 @@ type Entry = {
   retirement?: Promise<boolean>
   cleanupFailed?: boolean
   configuredChannel?: ServiceRendererConfiguredChannel
+  channelTransition?: { readonly isCurrent: () => boolean }
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
 }
@@ -90,6 +93,8 @@ export class ServiceRendererBootstrap {
       readonly protectProfileInputs?: boolean
       /** Owner-selected experimental, read-only configured Channel composition. */
       readonly experimentalConfiguredChannel?: ConfiguredChannel
+      /** The production owner also supplied the coordinated Channel configuration bridge. */
+      readonly experimentalChannelServiceConfig?: boolean
     },
   ) {
     this.configuredChannel = input.experimentalConfiguredChannel
@@ -250,6 +255,79 @@ export class ServiceRendererBootstrap {
   /** Owner RPC calls this after closing the exact peer, before acknowledging revocation. */
   async waitForRetirement(rendererId: string): Promise<boolean> {
     return await (this.retirements.get(rendererId) ?? Promise.resolve(true))
+  }
+
+  /** Resolve only an admitted renderer's exact, still-current configured Channel identity. */
+  async configuredChannelServiceIdentity(context: ManagerRendererChannelContext, alias?: string): Promise<{
+    readonly alias: string
+    readonly source: string
+  }> {
+    const entry = this.entries.get(context.rendererId)
+    if (
+      !entry?.configuredChannel || entry.channelTransition || !this.current(context.rendererId, entry)
+      || !await this.unchanged(context.rendererId, entry)
+    ) throw new Error('renderer-configured-channel-unavailable')
+    return entry.configuredChannel.serviceIdentity(context, alias)
+  }
+
+  /** Owner-only Channel write handoff; callers must already reserve the originating Manager and lifecycle. */
+  async mutateConfiguredChannel(
+    origin: ManagerOriginFence,
+    action: () => Promise<HostServiceConfigMutationResult>,
+  ): Promise<HostServiceConfigMutationResult> {
+    const rendererId = origin.rendererId
+    const entry = this.entries.get(rendererId)
+    const configured = entry?.configuredChannel
+    const channel = this.configuredChannel
+    const pluginFence = this.pluginConfigFence
+    const ownerLive = () => {
+      try {
+        return isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
+      } catch {
+        return false
+      }
+    }
+    if (
+      !entry || !configured || !channel || !pluginFence || entry.channelTransition
+      || !this.current(rendererId, entry) || !configured.isCurrent() || !ownerLive()
+    ) throw new Error('renderer-configured-channel-unavailable')
+    entry.channelTransition = { isCurrent: ownerLive }
+    let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>> | undefined
+    try {
+      await Promise.allSettled(entry.checks)
+      if (!this.current(rendererId, entry) || !configured.isCurrent() || !ownerLive()) {
+        throw new Error('renderer-configured-channel-unavailable')
+      }
+      reservation = await channel.bridge.suspend(rendererId)
+      if (!await this.readLifetimes.drainCurrent(rendererId) || !reservation.isCurrent() || !ownerLive()) {
+        throw new Error('renderer-configured-channel-unavailable')
+      }
+      const result = await pluginFence.runServiceMutation({
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        isCurrent: () => this.current(rendererId, entry) && ownerLive() && reservation!.isCurrent(),
+      }, async () => {
+        const value = await action()
+        if (value.status === 'applied') {
+          await configured.handoff(reservation!, { generation: value.serviceGeneration, revision: value.revision })
+        } else if (value.status === 'conflict' || value.status === 'rejected') {
+          await configured.handoff(reservation!)
+        } else {
+          throw new Error('renderer-configured-channel-result-uncertain')
+        }
+        return value
+      })
+      if (!this.current(rendererId, entry) || !ownerLive() || !reservation.release()) {
+        throw new Error('renderer-configured-channel-result-uncertain')
+      }
+      delete entry.channelTransition
+      return result
+    } catch (error) {
+      reservation?.fence()
+      delete entry.channelTransition
+      entry.peer.close()
+      throw error
+    }
   }
 
   async prepare(rendererId: string): Promise<unknown> {
@@ -487,6 +565,9 @@ export class ServiceRendererBootstrap {
             channelManager: configured.projection,
             serviceCapabilityOwners: [configured.serviceOwner],
             channelActionsBridgeToken: 'renderer-binding-placeholder',
+            ...(this.input.experimentalChannelServiceConfig
+              ? { serviceConfigBridgeToken: 'renderer-binding-placeholder' }
+              : {}),
           }),
           ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),
         })
@@ -540,6 +621,11 @@ export class ServiceRendererBootstrap {
               const peer = this.input.participants.peer(context.rendererId)
               if (!peer) throw new Error('renderer-bootstrap-unavailable')
               const entry = this.entries.get(context.rendererId)
+              if (entry?.channelTransition) {
+                const current = this.current(context.rendererId, entry) && entry.channelTransition.isCurrent()
+                if (!current) entry.peer.close()
+                return { status: 'ok', current }
+              }
               if (entry?.config && !await this.configurationCurrent(context.rendererId, entry)) {
                 entry.stale = true
                 entry.peer.close()

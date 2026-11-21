@@ -25,6 +25,12 @@ import type { ServiceRendererLifecycle } from '../launcher/service-renderer-life
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
+import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
+import { createManagerRendererMarketplaceChannel } from './manager-renderer-marketplace.js'
+import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import type { CordisXConfigPlugin } from '../launcher/config.js'
+import type { LocalChannelService } from '../launcher/channel-service.js'
+import type { createConfiguredChannelOwner } from './configured-channel-owner.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -64,6 +70,12 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererModelServices?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
   readonly rendererReadonlyChannel?: ManagerRendererChannel
+  readonly rendererConfiguredChannelService?: {
+    readonly bootstrap: ServiceRendererBootstrap
+    readonly plugin: CordisXConfigPlugin
+    readonly service: LocalChannelService
+    readonly authority: NonNullable<ReturnType<typeof createConfiguredChannelOwner>>
+  }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
@@ -72,6 +84,12 @@ export async function openProductionPluginManagementComposition(input: {
   if (input.rendererLifecycle && !input.rendererParticipants?.isBoundTo(input.rendererLifecycle)) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
+  if (
+    input.rendererConfiguredChannelService && (
+      input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
+      || !input.rendererReadonlyChannel
+    )
+  ) throw new Error('manager-consumer-fence-scope-invalid')
   const service = await openPluginManagementService({
     configPath: input.configPath,
     homeDir: input.homeDir,
@@ -84,7 +102,27 @@ export async function openProductionPluginManagementComposition(input: {
     },
   })
   let closed = false
-  const rendererSessions = new ManagerRendererSessions({
+  const rendererMarketplace = input.rendererParticipants === undefined
+    ? undefined
+    : createManagerRendererMarketplaceChannel({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      service,
+      isCurrent: context => !closed && input.rendererParticipants!.peer(context.rendererId) !== undefined,
+    })
+  let rendererSessions!: ManagerRendererSessions
+  const rendererServiceConfig = input.rendererConfiguredChannelService
+    ? createManagerRendererServiceConfigChannel({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      configPath: input.configPath,
+      ...input.rendererConfiguredChannelService,
+      participants: input.rendererParticipants!,
+      lifecycle: input.rendererLifecycle!,
+      sessions: () => rendererSessions,
+    })
+    : undefined
+  rendererSessions = new ManagerRendererSessions({
     profileId: input.profileId,
     ownerGeneration: input.runtimeGeneration,
     ownerCurrent: () => !closed,
@@ -111,6 +149,8 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererReadonlyChannel === undefined
         ? []
         : [['channel-actions', input.rendererReadonlyChannel] as const]),
+      ...(rendererServiceConfig === undefined ? [] : [['service-config', rendererServiceConfig] as const]),
+      ...(rendererMarketplace === undefined ? [] : [['marketplace', rendererMarketplace] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
   })

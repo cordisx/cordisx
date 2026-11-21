@@ -6,6 +6,7 @@ import { expect, it, vi } from 'vitest'
 import { buildManagerStyles } from '../packages/cli/scripts/build-manager-styles.mjs'
 import { installStandaloneManager } from '../packages/cli/src/renderer/manager/install-standalone.js'
 import { PERMISSION_AUTHORIZATION_STYLES } from '../packages/cli/src/renderer/permission-authorization-styles.js'
+import { SHARED_REACT_STYLES } from '../packages/cli/src/renderer/react-runtime.js'
 import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
@@ -19,6 +20,7 @@ it('builds the Host and model-service styles in their existing cascade order', a
     const output = path.join(directory, 'manager-host.css')
     await buildManagerStyles(output)
     const actual = await readFile(output, 'utf8')
+    expect(actual.startsWith(SHARED_REACT_STYLES + '\n')).toBe(true)
     const root = 'packages/cli/src/renderer/manager'
     const ordered = await Promise.all([
       'manager-navigation.css',
@@ -40,7 +42,9 @@ it('builds the Host and model-service styles in their existing cascade order', a
       expect(position).toBeGreaterThan(previous)
       previous = position
     }
-    expect(actual.indexOf(PERMISSION_AUTHORIZATION_STYLES)).toBeGreaterThan(previous)
+    const notifications = await readFile('packages/cli/src/renderer/notifications/styles.css', 'utf8')
+    expect(actual.indexOf(notifications)).toBeGreaterThan(previous)
+    expect(actual.indexOf(PERMISSION_AUTHORIZATION_STYLES)).toBeGreaterThan(actual.indexOf(notifications))
     expect(actual.endsWith(PERMISSION_AUTHORIZATION_STYLES)).toBe(true)
     await buildManagerStyles(output)
     expect(await readFile(output, 'utf8')).toBe(actual)
