@@ -58,6 +58,11 @@ interface Session {
   inFlight: number
 }
 
+interface ActiveWriteContext {
+  readonly token: symbol
+  readonly session: Session
+}
+
 function secretEqual(left: unknown, right: string): boolean {
   if (typeof left !== 'string' || !/^[a-f0-9]{64}$/u.test(left)) return false
   return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'))
@@ -88,12 +93,15 @@ export class ManagerRendererSessions {
   private monitor: ReturnType<typeof setInterval> | undefined
   private monitoring = false
   private mutationFence: symbol | undefined
+  private mutationFenceOrigin: symbol | undefined
   private mutationsFenced = false
   private mutationUncertain = false
   private retirementUncertain = false
   private writesInFlight = 0
+  private admissionsInFlight = 0
   private readonly writeWaiters = new Set<() => void>()
-  private readonly writeContext = new AsyncLocalStorage<symbol>()
+  private readonly writeContext = new AsyncLocalStorage<ActiveWriteContext>()
+  private readonly activeWrites = new Map<symbol, Session>()
 
   constructor(
     private readonly input: {
@@ -194,6 +202,12 @@ export class ManagerRendererSessions {
       }
       for (const notify of this.retirementWaiters) notify()
     })
+    // Losing the writer while its handoff is reserved cannot leave peers
+    // active or wait for another writer's timeout before closing the gate.
+    if (
+      !this.mutationsFenced && this.mutationFenceOrigin !== undefined
+      && this.activeWrites.get(this.mutationFenceOrigin) === session
+    ) this.fenceMutations()
     if (this.sessions.size === 0 && this.monitor !== undefined) {
       clearInterval(this.monitor)
       this.monitor = undefined
@@ -291,27 +305,40 @@ export class ManagerRendererSessions {
     const session = this.lookup(invocation)
     const peer = session?.peer
     const participant = this.input.participant
-    if (!session || !peer || !participant || !this.current(session) || session.inFlight >= 8) {
+    if (!session || !peer || !participant || !this.admissionAvailable(session) || session.inFlight >= 8) {
       return { status: 'unavailable' }
     }
     session.inFlight++
+    this.admissionsInFlight++
     try {
-      if (!await this.authenticated(session.gateway) || !this.current(session)) return { status: 'unavailable' }
+      if (!await this.authenticated(session.gateway) || !this.admissionAvailable(session)) {
+        return { status: 'unavailable' }
+      }
       session.admission ??= Promise.resolve().then(() => participant.attach(peer)).then(() => true).catch(() => {
         peer.close()
         return false
       })
       const attached = await session.admission
-      if (!attached || !this.current(session) || peer.closed || !await this.authenticated(session.gateway)) {
+      if (!attached || !this.admissionAvailable(session) || peer.closed || !await this.authenticated(session.gateway)) {
         peer.close()
         return { status: 'unavailable' }
       }
-      if (!this.current(session)) return { status: 'unavailable' }
+      if (!this.admissionAvailable(session)) {
+        peer.close()
+        return { status: 'unavailable' }
+      }
       session.admitted = true
       return { status: 'ok', value: { admitted: true } }
     } finally {
       session.inFlight--
+      this.admissionsInFlight--
+      for (const notify of this.writeWaiters) notify()
     }
+  }
+
+  private admissionAvailable(session: Session): boolean {
+    return this.current(session) && !this.mutationsFenced && !this.mutationUncertain
+      && this.mutationFence === undefined && !this.retirementUncertain && this.pendingRetirements.size === 0
   }
 
   /** One owner command may be handed to this session at most once. */
@@ -384,6 +411,12 @@ export class ManagerRendererSessions {
       && this.sessions.get(session.handle.rendererId) === session
   }
 
+  private currentWrite(origin: ActiveWriteContext): boolean {
+    return this.activeWrites.get(origin.token) === origin.session && this.current(origin.session)
+      && (this.input.participant === undefined
+        || origin.session.admitted === true && origin.session.peer !== undefined && !origin.session.peer.closed)
+  }
+
   async call(
     invocation: ManagerRendererInvocation,
     channel: string,
@@ -397,6 +430,7 @@ export class ManagerRendererSessions {
     session.inFlight++
     let dispatched: 'read' | 'write' | undefined
     let trackedWrite = false
+    let write: ActiveWriteContext | undefined
     let finishWrite: (() => void) | undefined
     let finishRead: (() => void) | undefined
     const unknown = (): ManagerRendererCallResult => {
@@ -429,14 +463,18 @@ export class ManagerRendererSessions {
         if (!finishWrite) return unavailable
         this.writesInFlight++
         trackedWrite = true
+        write = { token: Symbol('manager-write'), session }
+        this.activeWrites.set(write.token, session)
       } else {
         finishRead = this.readLifetimes.begin(session.handle.rendererId)
         if (!finishRead) return unavailable
       }
       dispatched = prepared.mode
-      const value = trackedWrite
-        ? await this.writeContext.run(Symbol('manager-write'), async () => await prepared.dispatch())
+      const value = write
+        ? await this.writeContext.run(write, async () => await prepared.dispatch())
         : await prepared.dispatch()
+      // A caller must settle its reservation before its receipt can be trusted.
+      if (write && this.mutationFenceOrigin === write.token) return unknown()
       if (!this.current(session)) return dispatched === 'write' ? unknown() : unavailable
       if (!await this.authenticated(session.gateway)) {
         this.retireGateway(session.gateway)
@@ -449,8 +487,9 @@ export class ManagerRendererSessions {
       return dispatched === 'write' ? unknown() : unavailable
     } finally {
       if (trackedWrite) {
+        if (write) this.activeWrites.delete(write.token)
         this.writesInFlight--
-        if (this.writesInFlight === 0) { for (const notify of this.writeWaiters) notify() }
+        for (const notify of this.writeWaiters) notify()
         finishWrite?.()
       }
       finishRead?.()
@@ -463,17 +502,50 @@ export class ManagerRendererSessions {
    * other writers and consumers. This does not itself cover non-Manager paths.
    */
   async suspendMutations(timeoutMs = 15_000): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }> {
+    if (this.writeContext.getStore() !== undefined) throw new Error('renderer-mutation-fence-unavailable')
+    return await this.reserveMutationFence(timeoutMs)
+  }
+
+  /**
+   * Freeze other Manager writes and opens while the authenticated originating
+   * write remains live to receive its result. This is not a reader, lifecycle,
+   * or cross-client barrier; an integrating owner must supply those fences.
+   */
+  async suspendMutationsForCurrentWrite(timeoutMs = 15_000): Promise<{
+    readonly rendererId: string
+    isCurrent(): boolean
+    release(): boolean
+    fence(): void
+  }> {
+    const origin = this.writeContext.getStore()
+    if (!origin || !this.currentWrite(origin)) {
+      throw new Error('renderer-mutation-fence-unavailable')
+    }
+    const fence = await this.reserveMutationFence(timeoutMs, origin)
+    return { rendererId: origin.session.handle.rendererId, ...fence }
+  }
+
+  private async reserveMutationFence(
+    timeoutMs: number,
+    origin?: ActiveWriteContext,
+  ): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }> {
     if (
       !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
       || this.retirementUncertain || this.pendingRetirements.size > 0
-      || this.writeContext.getStore() !== undefined
+      || origin !== undefined && (this.writeContext.getStore() !== origin || !this.currentWrite(origin))
       || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000
     ) throw new Error('renderer-mutation-fence-unavailable')
     const reservation = Symbol('manager-mutation-fence')
     this.mutationFence = reservation
-    const drained = await this.waitForWrites(timeoutMs)
+    this.mutationFenceOrigin = origin?.token
+    const expectedWrites = origin === undefined ? 0 : 1
+    const drained = await this.waitForQuiescence(timeoutMs, expectedWrites)
+    const retired = drained && await this.waitForRetirements(timeoutMs)
     if (
-      !drained || !this.alive() || this.mutationUncertain || this.mutationFence !== reservation
+      !drained || !retired || !this.alive() || this.mutationsFenced || this.mutationUncertain
+      || this.mutationFence !== reservation || this.retirementUncertain || this.pendingRetirements.size > 0
+      || this.writesInFlight !== expectedWrites || this.admissionsInFlight !== 0
+      || origin !== undefined && !this.currentWrite(origin)
     ) {
       this.fenceMutations()
       throw new Error('renderer-mutation-fence-unavailable')
@@ -481,7 +553,9 @@ export class ManagerRendererSessions {
     let ended = false
     const current = () =>
       !ended && this.alive() && !this.mutationsFenced && !this.mutationUncertain && this.mutationFence === reservation
-      && !this.retirementUncertain && this.pendingRetirements.size === 0 && this.writesInFlight === 0
+      && !this.retirementUncertain && this.pendingRetirements.size === 0 && this.writesInFlight === expectedWrites
+      && this.admissionsInFlight === 0
+      && (origin === undefined || this.currentWrite(origin))
     return {
       isCurrent: current,
       release: () => {
@@ -493,6 +567,7 @@ export class ManagerRendererSessions {
         }
         ended = true
         this.mutationFence = undefined
+        this.mutationFenceOrigin = undefined
         return true
       },
       fence: () => {
@@ -503,8 +578,9 @@ export class ManagerRendererSessions {
     }
   }
 
-  private async waitForWrites(timeoutMs: number): Promise<boolean> {
-    if (this.writesInFlight === 0) return true
+  private async waitForQuiescence(timeoutMs: number, expectedWrites: number): Promise<boolean> {
+    if (this.writesInFlight < expectedWrites) return false
+    if (this.writesInFlight === expectedWrites && this.admissionsInFlight === 0) return true
     return await new Promise(resolve => {
       const finish = (value: boolean) => {
         clearTimeout(timer)
@@ -512,7 +588,15 @@ export class ManagerRendererSessions {
         resolve(value)
       }
       const check = () => {
-        if (this.disposed || this.writesInFlight === 0) finish(!this.disposed && this.writesInFlight === 0)
+        if (
+          this.disposed || this.mutationsFenced || this.mutationUncertain || this.writesInFlight < expectedWrites
+          || this.writesInFlight === expectedWrites && this.admissionsInFlight === 0
+        ) {
+          finish(
+            !this.disposed && !this.mutationsFenced && !this.mutationUncertain
+              && this.writesInFlight === expectedWrites && this.admissionsInFlight === 0,
+          )
+        }
       }
       const timer = setTimeout(() => finish(false), timeoutMs)
       timer.unref()
@@ -524,7 +608,7 @@ export class ManagerRendererSessions {
   /** Wait for all peer-specific resource and profile-fence release receipts. */
   async waitForRetirements(timeoutMs = 15_000): Promise<boolean> {
     if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) return false
-    if (this.disposed || this.retirementUncertain) return false
+    if (this.disposed || this.mutationsFenced || this.mutationUncertain || this.retirementUncertain) return false
     if (this.pendingRetirements.size === 0) return true
     return await new Promise(resolve => {
       const finish = (value: boolean) => {
@@ -533,8 +617,14 @@ export class ManagerRendererSessions {
         resolve(value)
       }
       const check = () => {
-        if (this.disposed || this.retirementUncertain || this.pendingRetirements.size === 0) {
-          finish(!this.disposed && !this.retirementUncertain && this.pendingRetirements.size === 0)
+        if (
+          this.disposed || this.mutationsFenced || this.mutationUncertain || this.retirementUncertain
+          || this.pendingRetirements.size === 0
+        ) {
+          finish(
+            !this.disposed && !this.mutationsFenced && !this.mutationUncertain && !this.retirementUncertain
+              && this.pendingRetirements.size === 0,
+          )
         }
       }
       const timer = setTimeout(() => finish(false), timeoutMs)
@@ -547,6 +637,8 @@ export class ManagerRendererSessions {
   private fenceMutations(): void {
     this.mutationsFenced = true
     for (const session of this.sessions.values()) this.retire(session)
+    for (const notify of this.writeWaiters) notify()
+    for (const notify of this.retirementWaiters) notify()
   }
 
   async close(invocation: ManagerRendererInvocation): Promise<boolean> {

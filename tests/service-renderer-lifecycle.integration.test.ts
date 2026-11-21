@@ -6,6 +6,7 @@ import { ManagerRendererCommandPeer } from '../packages/cli/src/cli/manager-rend
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import { fenceManagerConsumers } from '../packages/cli/src/cli/manager-consumer-fence.js'
+import { fenceManagerOrigin } from '../packages/cli/src/cli/manager-origin-fence.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -431,6 +432,147 @@ it('refuses a Manager fence while an unaccounted adapter is attached', async () 
     expect(foreign.peer.closed).toBe(false)
     expect(await sessions.open({ pid: 42, processStartedAt: 'fixture', instanceToken: secret() }, secret()))
       .toBeDefined()
+  } finally {
+    sessions.dispose()
+    participants.close()
+    await f.close()
+  }
+}, 30_000)
+
+it('reserves the real lifecycle while the sole originating Manager receives its write result', async () => {
+  const f = await fixture()
+  const participants = new ServiceRendererParticipants(f.scope)
+  participants.bind(f.lifecycle)
+  let signalReady!: (id: string) => void
+  let finish!: () => void
+  let ready = new Promise<string>(resolve => {
+    signalReady = resolve
+  })
+  let completion = new Promise<void>(resolve => {
+    finish = resolve
+  })
+  let sessions!: ManagerRendererSessions
+  sessions = new ManagerRendererSessions({
+    profileId: f.scope.profileId,
+    ownerGeneration: f.scope.generation,
+    ownerCurrent: () => true,
+    authenticateGateway: async () => true,
+    participant: participants.participant,
+    channels: new Map([['fixture', {
+      prepare: value => ({
+        mode: 'write' as const,
+        dispatch: async () => {
+          const fence = await fenceManagerOrigin({ sessions, participants, lifecycle: f.lifecycle })
+          signalReady(fence.rendererId)
+          await completion
+          if (value === 'disconnect') {
+            expect(fence.isCurrent()).toBe(false)
+            expect(fence.release()).toBe(false)
+            return 'possibly written'
+          }
+          expect(fence.isCurrent()).toBe(true)
+          expect(fence.release()).toBe(true)
+          return 'written'
+        },
+      }),
+    }]]),
+  })
+  try {
+    const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+    const browserSessionId = secret()
+    const handle = (await sessions.open(gateway, browserSessionId))!
+    participants.confirmBootstrap(handle.rendererId, f.lifecycle.snapshot())
+    const invocation = { gateway, browserSessionId, handle }
+    const admission = sessions.admit(invocation)
+    const peer = participants.peer(handle.rendererId)!
+    const synchronize = (await peer.next())!
+    expect(synchronize.method).toBe('synchronize')
+    expect(peer.acknowledge({
+      id: synchronize.id,
+      sequence: synchronize.sequence,
+      ok: true,
+      value: synchronize.payload,
+    })).toBe(true)
+    expect(await admission).toEqual({ status: 'ok', value: { admitted: true } })
+    const write = sessions.call(invocation, 'fixture', {})
+    expect(await ready).toBe(handle.rendererId)
+    expect(peer.closed).toBe(false)
+    expect(await sessions.open(gateway, secret())).toBeUndefined()
+    expect(() => f.lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
+    finish()
+    expect(await write).toEqual({ status: 'ok', value: 'written' })
+    const probeId = secret()
+    const probe = (await sessions.open(gateway, probeId))!
+    expect(await sessions.close({ gateway, browserSessionId: probeId, handle: probe })).toBe(true)
+    ready = new Promise(resolve => {
+      signalReady = resolve
+    })
+    completion = new Promise(resolve => {
+      finish = resolve
+    })
+    const interrupted = sessions.call(invocation, 'fixture', 'disconnect')
+    expect(await ready).toBe(handle.rendererId)
+    const closing = sessions.close(invocation)
+    expect(f.lifecycle.requiresReconciliation).toBe(true)
+    finish()
+    expect(await interrupted).toEqual({ status: 'unknown' })
+    expect(await closing).toBe(false)
+  } finally {
+    finish()
+    sessions.dispose()
+    participants.close()
+    await f.close()
+  }
+}, 30_000)
+
+it('preserves other Managers and refuses an unaccounted adapter during an originating write', async () => {
+  const f = await fixture()
+  const participants = new ServiceRendererParticipants(f.scope)
+  participants.bind(f.lifecycle)
+  let sessions!: ManagerRendererSessions
+  sessions = new ManagerRendererSessions({
+    profileId: f.scope.profileId,
+    ownerGeneration: f.scope.generation,
+    ownerCurrent: () => true,
+    authenticateGateway: async () => true,
+    participant: participants.participant,
+    channels: new Map([['fixture', {
+      prepare: () => ({
+        mode: 'write' as const,
+        dispatch: async () => {
+          try {
+            const fence = await fenceManagerOrigin({ sessions, participants, lifecycle: f.lifecycle })
+            return fence.release() ? 'reserved' : 'unavailable'
+          } catch {
+            return 'unavailable'
+          }
+        },
+      }),
+    }]]),
+  })
+  try {
+    const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+    const browserSessionId = secret()
+    const handle = (await sessions.open(gateway, browserSessionId))!
+    participants.confirmBootstrap(handle.rendererId, f.lifecycle.snapshot())
+    const invocation = { gateway, browserSessionId, handle }
+    const admission = sessions.admit(invocation)
+    const peer = participants.peer(handle.rendererId)!
+    const synchronize = (await peer.next())!
+    peer.acknowledge({ id: synchronize.id, sequence: synchronize.sequence, ok: true, value: synchronize.payload })
+    expect(await admission).toMatchObject({ status: 'ok' })
+    const otherId = secret()
+    const otherHandle = (await sessions.open(gateway, otherId))!
+    const other = participants.peer(otherHandle.rendererId)!
+    expect(await sessions.call(invocation, 'fixture', {})).toEqual({ status: 'ok', value: 'unavailable' })
+    expect(other.closed).toBe(false)
+    expect(peer.closed).toBe(false)
+    expect(await sessions.close({ gateway, browserSessionId: otherId, handle: otherHandle })).toBe(true)
+    const foreign = await f.attach('unaccounted-adapter')
+    expect(await sessions.call(invocation, 'fixture', {})).toEqual({ status: 'ok', value: 'unavailable' })
+    expect(foreign.peer.closed).toBe(false)
+    foreign.peer.close()
+    expect(await sessions.call(invocation, 'fixture', {})).toEqual({ status: 'ok', value: 'reserved' })
   } finally {
     sessions.dispose()
     participants.close()
