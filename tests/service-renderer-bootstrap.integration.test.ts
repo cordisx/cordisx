@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
+import { transform } from 'esbuild'
 import { expect, it, vi } from 'vitest'
 import { ServiceRendererBootstrap } from '../packages/cli/src/cli/service-renderer-bootstrap.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
@@ -203,8 +204,12 @@ it('builds the real empty manager from the owner and admits its runtime through 
     try {
       Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
       Object.assign(dom.window, { TextEncoder, TextDecoder })
-      dom.window.eval(bytes.toString('utf8'))
+      // JSDOM cannot execute modules; adapt the owner's real ESM for this
+      // in-process lifecycle test. Native ESM is exercised in the browser test.
+      const module = await transform(bytes.toString('utf8'), { format: 'iife', globalName: '__testOwnerModule' })
+      dom.window.eval(module.code)
       bytes.fill(0)
+      await (dom.window as any).__testOwnerModule.startStandaloneManagerComposition(new AbortController().signal)
       await vi.waitFor(() => expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true'), {
         timeout: 10_000,
       })
