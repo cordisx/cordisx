@@ -21,6 +21,9 @@ import type {
 import { channelInboxRecordId } from '@cordisx/channel-runtime'
 import type { ChannelServiceConfig, ChannelServiceConnectionConfigV2 } from '@cordisx/channel-runtime'
 import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
+import { ChannelInboundResources } from './channel-inbound-resources.js'
+import { feishuInboundContent } from './feishu-inbound-media.js'
+import { prepareFeishuOutboundMedia } from './feishu-outbound-media.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
 import { createFeishuDiagnostics } from './feishu-diagnostics.js'
 import { FeishuCardActionQueue } from './feishu-card-action-queue.js'
@@ -46,6 +49,7 @@ export interface FeishuChannelFactoryOptions {
 }
 
 export interface FeishuAdapterOptions {
+  readonly resources?: ChannelInboundResources
   readonly connection: ChannelServiceConnectionConfigV2
   readonly configurationRevision: number
   readonly source: string
@@ -166,9 +170,8 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         onProfile: profile => input.identities?.receive(input.connection.ref, profile),
         logger: observation.logger,
       })
-      // Never retain raw event bodies; the normalized text-only envelope is all
-      // that crosses into the durable Channel core.
       let stopped = false
+      const resources = input.resources ?? new ChannelInboundResources()
       const cardActions = new FeishuCardActionQueue(
         async event => {
           if (!stopped) await input.onCardAction?.(input.connection.ref, event)
@@ -181,7 +184,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           reason: message.chatType,
           outcome: message.mentionedBot ? 'mentioned' : 'unaddressed',
         })
-        if (message.content.trim().length === 0 || input.acceptMessage?.(message) === false) {
+        if (input.acceptMessage?.(message) === false) {
           observation.message('filtered', message.messageId, { reason: 'empty-or-accept-filter' })
           return
         }
@@ -194,7 +197,15 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           observation.message('filtered', message.messageId, { reason: 'selectors' })
           return
         }
-        const envelope = inboundEnvelope(message, input.connection)
+        const base = inboundEnvelope(message, input.connection)
+        const content = await feishuInboundContent(
+          message,
+          base.input.source.event,
+          resources,
+          channel.rawClient?.im.v1.messageResource,
+        )
+        if (stopped) return
+        const envelope = { input: { ...base.input, content } }
         const addressing = channelCommandAddressing(message)
         const event = envelope.input.source.event
         const recordId = channelInboxRecordId(event)
@@ -235,6 +246,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         observation.event('connected')
       } catch {
         stopped = true
+        await resources.dispose()
         await cardActions.dispose()
         disposeObservation()
         await channel.disconnect().catch(() => undefined)
@@ -246,6 +258,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       }, 1_000)
       interval.unref()
       return {
+        supportsOutboundMedia: channel.rawClient !== undefined,
         send: async (delivery: ChannelOutboundDelivery): Promise<ChannelSendResult> => {
           if (!sameTenant(delivery.target, input.connection.ref)) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
           if (stopped) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
@@ -254,10 +267,16 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
-            const content = JSON.stringify(
+            const media = delivery.media
+              ? await prepareFeishuOutboundMedia(delivery.media, delivery.target, resources, {
+                image: data => channel.rawClient!.im.v1.image.create({ data }),
+                file: data => channel.rawClient!.im.v1.file.create({ data }),
+              })
+              : undefined
+            const content = media?.content ?? JSON.stringify(
               delivery.questionCard ? channelQuestionCard(delivery.questionCard) : { text: delivery.text },
             )
-            const msg_type = delivery.questionCard ? 'interactive' as const : 'text' as const
+            const msg_type = media?.msg_type ?? (delivery.questionCard ? 'interactive' as const : 'text' as const)
             const response = delivery.target.semantics !== 'conversation'
               ? await channel.rawClient.im.v1.message.reply({
                 path: { message_id: delivery.target.threadId },
@@ -270,7 +289,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             if (response.code !== 0 || !response.data?.message_id) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
             messageId = response.data.message_id
           } else {
-            if (delivery.questionCard) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            if (delivery.questionCard || delivery.media) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
             const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
               ...(delivery.target.semantics !== 'conversation'
                 ? { replyTo: delivery.target.threadId, replyInThread: delivery.target.semantics === 'topic' }
@@ -286,6 +305,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         stop: async () => {
           if (stopped) return
           stopped = true
+          await resources.dispose()
           clearInterval(interval)
           await cardActions.dispose()
           disposeObservation()
