@@ -3,6 +3,14 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  assertBundlePolicyDecision,
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  type DeferredPermissionPlan,
+  withBundlePolicyIntent,
+} from '../permission-deferral.js'
+import { lifecycleDeferredPermissionPlan } from './plugin-lifecycle-deferred.js'
+import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -163,8 +171,10 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     decision:
       | CordisXPermissionAuthorizationDecisionV1
       | CordisXPermissionAuthorizationDecisionV2
-      | CordisXPermissionAuthorizationDecisionV4,
+      | CordisXPermissionAuthorizationDecisionV4
+      | DeferredPermissionDecision,
     operation: 'install' | 'update',
+    bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>,
   ): Promise<CordisXPluginLifecycleResultV1> {
     const candidate = await this.store.loadCandidate(candidateId).catch(() => {
       throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
@@ -181,7 +191,20 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
       throw classify(error)
     })
-    const plan = decision.schemaVersion === 4
+    const plan = decision.schemaVersion === 7
+      ? lifecycleDeferredPermissionPlan(
+        staged,
+        operation,
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        target.moduleGeneration,
+        candidateId,
+        await this.permissionPoliciesV2(),
+        await this.permissionPoliciesV4(),
+        await this.certifiedPermission(staged),
+        await this.permissionPoliciesV1(),
+      )
+      : decision.schemaVersion === 4
       ? authorizationPlanV4(
         staged,
         operation,
@@ -210,7 +233,14 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
         this.options.runtimeGeneration,
         await this.permissionPoliciesV1(),
       )
-    if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
+    const reviewedPlan = decision.schemaVersion === 7 && bundlePolicySelections !== undefined
+      ? withBundlePolicyIntent(plan as DeferredPermissionPlan, new Set(Object.keys(bundlePolicySelections)))
+      : plan
+    if (decision.schemaVersion === 7 && bundlePolicySelections !== undefined) {
+      assertBundlePolicyDecision(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
+    } else if (decision.schemaVersion === 7) {
+      assertDeferredPermissionDecision(reviewedPlan as DeferredPermissionPlan, decision)
+    } else if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
     else if (decision.schemaVersion === 2) validateDecisionV2(plan as CordisXPermissionAuthorizationPlanV2, decision)
     else validateDecision(plan as CordisXPermissionAuthorizationPlanV1, decision)
     const affected = topologicalPluginOrder(candidate.plugins).filter(id => {
@@ -227,6 +257,7 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       affectedPluginIds: affected,
       package: staged,
       authorizationDecision: decision,
+      ...(bundlePolicySelections === undefined ? {} : { bundlePolicySelections }),
     }
     const formalCommitted = await this.activateWithAuthority({
       operation,
@@ -234,8 +265,9 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       candidate,
       targetId,
       staged,
-      authorizationPlan: plan,
+      authorizationPlan: reviewedPlan,
       authorizationDecision: decision,
+      ...(bundlePolicySelections === undefined ? {} : { bundlePolicySelections }),
     })
     if (formalCommitted !== undefined) {
       return {
@@ -304,10 +336,13 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       | CordisXPermissionAuthorizationPlanV1
       | CordisXPermissionAuthorizationPlanV2
       | CordisXPermissionAuthorizationPlanV4
+      | DeferredPermissionPlan
     readonly authorizationDecision:
       | CordisXPermissionAuthorizationDecisionV1
       | CordisXPermissionAuthorizationDecisionV2
       | CordisXPermissionAuthorizationDecisionV4
+      | DeferredPermissionDecision
+    readonly bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>
   }): Promise<CordisXPluginActivationRecordV1 | undefined> {
     const runtime = this.formalRuntime()
     if (runtime === undefined) return undefined
@@ -435,6 +470,7 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
         ...(runtimeArtifactLease === undefined ? {} : { runtimeArtifactLease }),
         ...(runtimeArtifactLeases.length === 0 ? {} : { runtimeArtifactLeases }),
         authorizationDecision: input.authorizationDecision,
+        ...(input.bundlePolicySelections === undefined ? {} : { bundlePolicySelections: input.bundlePolicySelections }),
       })
       if (readiness === undefined) throw new Error('shared registry readiness observation is unavailable')
       if (

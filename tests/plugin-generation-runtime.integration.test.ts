@@ -500,6 +500,56 @@ describe('renderer plugin generation transactions', () => {
     expect([...batchesByEpoch.values()].every(count => count === 1)).toBe(true)
     notifications = 0
 
+    const originalManifest = packageManifest('generation-base')
+    const deferredManifest = {
+      ...originalManifest,
+      runtimeManifest: {
+        ...originalManifest.runtimeManifest!,
+        capabilities: [{
+          name: 'models.read',
+          required: false,
+          reason: { key: 'optional-models', fallback: 'Optional model listing' },
+          scope: {},
+        }],
+      },
+    }
+    const deferredCandidate = { ...candidate, transactionId: 'update-base-v7' }
+    await runtime.stagePluginMutation(
+      {
+        transactionId: 'update-base-v7',
+        operation: 'update',
+        previous: active,
+        candidate: deferredCandidate,
+        targetId: 'generation-base',
+        affectedPluginIds: ['generation-base', 'generation-consumer'],
+        package: { manifest: deferredManifest, digest: digest('d'), identitySource: source('generation-base', 'd') },
+        authorizationDecision: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+          schemaVersion: 7,
+          origin: 'host-no-decision',
+          planId: `${generation}:generation-base`,
+          operation: 'update',
+          profileId: 'work',
+          identity: { source: source('generation-base', 'd'), pluginId: 'generation-base' },
+          binding: {
+            operationId: `${generation}:generation-base`,
+            runtimeGeneration: generation,
+            moduleGeneration: 'generation-base-b',
+            requestId: 'update-base-v7',
+          },
+          decisions: [],
+        },
+      },
+      undefined,
+      undefined,
+      { 'generation-base': nextBase, 'generation-consumer': nextConsumer },
+    )
+    await runtime.abortPluginMutation('update-base-v7')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe(
+      'generation-base-a',
+    )
+
     const uninstallCandidate: CordisXPluginActivationRecordV1 = {
       ...active,
       recordKind: 'candidate',

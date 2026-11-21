@@ -6,7 +6,11 @@ import type {
 } from '../../contracts.js'
 import { permissionRecordKey } from '../../permissions.js'
 import type { PluginGenerationView } from '../generation-visibility.js'
-import { CORDISX_PERMISSION_POLICY_SCHEMA_V2, CORDISX_PERMISSION_POLICY_SCHEMA_V4 } from '../../permission-contracts.js'
+import {
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+} from '../../permission-contracts.js'
 import type {
   CordisXCapabilityDeclarationV2,
   CordisXPermissionAuthorizationBindingV2,
@@ -43,6 +47,14 @@ import {
   persistedPermissionRecordKey,
 } from '../../permission-persistence.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../../permission-persistence.js'
+import {
+  assertBundlePolicyDecision,
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  deferValidatedPermissionPlan,
+  deferValidatedV2PermissionPlan,
+  withBundlePolicyIntent,
+} from '../../permission-deferral.js'
 
 import { permissionPlanDeclarations, Registration } from './platform-permission-types.js'
 
@@ -269,9 +281,69 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     ) {
       throw new Error(`plugin ${identity.id} denies a required permission v4 capability`)
     }
-    const oneShotBinding = this.binding(registration, `${this.generation}:${identity.id}`)
+    await this.commitActivationV4(registration, plan, authorization.decisions, new Set())
+  }
+
+  async authorizeActivationV7(
+    identity: CordisXPluginIdentity,
+    authorization: DeferredPermissionDecision,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+    bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>,
+  ): Promise<void> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    if (registration.manifest.schemaVersion === 4) {
+      const planV2 = this.planV2(registration, operation, authorization.binding)
+      const projected = deferValidatedV2PermissionPlan(planV2)
+      if (bundlePolicySelections === undefined) assertDeferredPermissionDecision(projected, authorization)
+      else {assertBundlePolicyDecision(
+          withBundlePolicyIntent(projected, new Set(Object.keys(bundlePolicySelections))),
+          authorization,
+          bundlePolicySelections,
+        )}
+      const decisions = authorization.decisions.map(item => {
+        const declaration = planV2.declarations.find(candidate => candidate.capability === item.capability)
+        if (declaration === undefined) throw new Error('permission v7 decision has an unknown v2 capability')
+        return { ...item, capability: declaration.capability, scope: declaration.scope }
+      })
+      await this.commitDecisionV2(planV2, {
+        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
+        schemaVersion: 2,
+        planId: planV2.planId,
+        operation: planV2.operation,
+        profileId: planV2.profileId,
+        identity: planV2.identity,
+        binding: planV2.binding,
+        decisions,
+      }, this.binding(registration, `${this.generation}:${identity.id}`))
+      return
+    }
+    const plan = this.authorizationPlanV4(identity, operation, view, authorization.binding)
+    if (plan === undefined) throw new Error(`plugin ${identity.id} does not support permission v7`)
+    const original = deferValidatedPermissionPlan(plan)
+    const deferred = bundlePolicySelections === undefined
+      ? original
+      : withBundlePolicyIntent(original, new Set(Object.keys(bundlePolicySelections)))
+    if (bundlePolicySelections === undefined) assertDeferredPermissionDecision(deferred, authorization)
+    else assertBundlePolicyDecision(deferred, authorization, bundlePolicySelections)
+    await this.commitActivationV4(
+      registration,
+      plan,
+      authorization.decisions,
+      new Set(deferred.declarations.filter(item => item.authorizationMode === 'deferred').map(item => item.capability)),
+    )
+  }
+
+  private async commitActivationV4(
+    registration: Registration,
+    plan: CordisXPermissionAuthorizationPlanV4,
+    decisions: CordisXPermissionAuthorizationDecisionV4['decisions'],
+    deferred: ReadonlySet<string>,
+  ): Promise<void> {
+    const oneShotBinding = this.binding(registration, `${this.generation}:${registration.identity.id}`)
     const persistent: CordisXPersistedPermissionPolicyRecord[] = []
-    for (const selected of authorization.decisions) {
+    for (const selected of decisions) {
       if (selected.decision !== 'allow-persistent' && selected.decision !== 'deny-persistent') continue
       if (isHostDomPermissionCapability(selected.capability)) {
         persistent.push(normalizePermissionPolicyRecordV4({
@@ -316,7 +388,7 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       throw error
     }
     this.onceV2.clearOperation(plan.binding.operationId)
-    for (const selected of authorization.decisions) {
+    for (const selected of decisions) {
       if (selected.decision !== 'allow-once') continue
       this.onceV2.issue({
         profileId: plan.profileId,
@@ -328,7 +400,11 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     }
     for (const item of plan.declarations) {
       if (!isHostDomPermissionCapability(item.capability)) continue
-      const selected = authorization.decisions.find(candidate => candidate.capability === item.capability)?.decision
+      if (deferred.has(item.capability)) {
+        this.clearExactHostDomLease(registration, item.capability)
+        continue
+      }
+      const selected = decisions.find(candidate => candidate.capability === item.capability)?.decision
       const allowed = item.authorizationMode === 'certified-implicit'
         || (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent')
         || selected === 'allow-persistent'

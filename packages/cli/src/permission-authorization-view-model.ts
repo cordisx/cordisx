@@ -92,6 +92,7 @@ export interface PermissionAuthorizationItemProjection {
     deniedBehaviorLabel: string
     deniedBehavior: string
   }>
+  readonly legacyReason?: Readonly<{ label: string; description: string }>
   readonly authorizationLabel: string
   readonly authorizationOptions: readonly PermissionAuthorizationOptionProjection[]
   readonly denialImpact: string
@@ -290,6 +291,12 @@ export class PermissionAuthorizationViewModel {
             feature: resolve(item.rationale.feature),
             deniedBehaviorLabel: resolve(ui('dialog.plugin-denied-behavior')),
             deniedBehavior: resolve(item.rationale.deniedBehavior),
+          }),
+        }),
+        ...(!('legacyReason' in item) || item.legacyReason === undefined ? {} : {
+          legacyReason: Object.freeze({
+            label: resolve(ui('dialog.plugin-rationale')),
+            description: resolve(item.legacyReason as CordisXLocalizedText),
           }),
         }),
         authorizationLabel: resolve(ui('dialog.authorization-method')),

@@ -4,18 +4,6 @@ import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from 'n
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
-  type CordisXPermissionAuthorizationDecisionV1,
-} from '../platform-contracts.js'
-import {
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-  type CordisXPermissionAuthorizationDecisionV2,
-  type CordisXPermissionAuthorizationDecisionV4,
-  type CordisXPermissionAuthorizationItemV4,
-  type CordisXPermissionDecisionV2,
-} from '../permission-contracts.js'
-import {
   CORDISX_PLUGIN_BUNDLE_LIFECYCLE_RESULT_SCHEMA_V1,
   CORDISX_PLUGIN_BUNDLE_MANAGER_SNAPSHOT_SCHEMA_V1,
   CORDISX_PLUGIN_BUNDLE_SCHEMA_V1,
@@ -31,7 +19,7 @@ import {
 import type { CordisXPluginActivationRecordV1, CordisXPluginLifecycleResultV1 } from '../plugin-lifecycle-contracts.js'
 import { loadStagedPluginPackage, type StagedPluginPackage } from './plugin-package.js'
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
-import { isPermissionReviewV4ManifestVersion } from './plugin-lifecycle-model.js'
+import { bundleDeferredDecision } from './plugin-bundle-deferred.js'
 import { PluginPackageSourceSnapshotter } from './packages/integrity.js'
 import { resolvePluginPackageSourceV1 } from './packages/source.js'
 import {
@@ -417,6 +405,7 @@ export class PluginBundleCoordinatorCore {
     record: BundleRecord,
     state: BundleState,
   ): Promise<CordisXPluginLifecycleResultV1> {
+    await this.assertBundlePolicyRevision(state)
     const planned = await this.options.pluginLifecycle.inspectStagedPackage(staged)
     if (planned.outcome !== 'planned' || planned.candidateId === undefined) {
       throw new Error(planned.error?.message ?? `could not plan ${staged.manifest.id}`)
@@ -432,92 +421,19 @@ export class PluginBundleCoordinatorCore {
       const permission = record.members.flatMap(member => member.permissions).find(item => item.permissionId === id)
       return permission === undefined ? 'ask' : this.policyFor(record, state, permission)
     }
-    if (planned.authorizationPlan !== undefined) {
-      const plan = planned.authorizationPlan
-      const decision: CordisXPermissionAuthorizationDecisionV1 = {
-        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
-        schemaVersion: 1,
-        planId: plan.planId,
-        operation: plan.operation,
-        profileId: plan.profileId,
-        identity: plan.identity,
-        decisions: plan.declarations.map(item => ({
-          capability: item.capability,
-          scope: item.scope,
-          decision: policy(item.capability, item.scope) === 'allow' ? 'allow' : 'deny',
-        })),
-      }
-      return await this.options.pluginLifecycle.handleBundleOperation({
-        $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
-        schemaVersion: 1,
-        requestId: `bundle-apply-${randomUUID()}`,
-        ...common,
-        operation: {
-          kind: planned.operation as 'install' | 'update',
-          candidateId: planned.candidateId,
-          authorizationDecision: decision,
-        },
-      })
-    }
-    if (staged.manifest.runtimeManifest.schemaVersion === 4) {
-      const plan = await this.options.pluginLifecycle.permissionReviewPlanV2({
-        requestId: `bundle-plan-${randomUUID()}`,
-        ...common,
-        target: { kind: 'candidate', candidateId: planned.candidateId },
-      })
-      if (plan === undefined) throw new Error('manifest-v4 permission plan is unavailable')
-      const decision: CordisXPermissionAuthorizationDecisionV2 = {
-        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
-        schemaVersion: 2,
-        planId: plan.planId,
-        operation: plan.operation,
-        profileId: plan.profileId,
-        identity: plan.identity,
-        binding: plan.binding,
-        decisions: plan.declarations.filter(item => item.decisionRequired).map(item => ({
-          capability: item.capability,
-          scope: item.scope,
-          securityFingerprint: item.securityFingerprint,
-          decision: this.decisionV2(item, policy(item.capability, item.scope)),
-        })),
-      }
-      return await this.options.pluginLifecycle.applyPermissionReviewV2({
-        requestId: `bundle-apply-${randomUUID()}`,
-        ...common,
-        decision,
-      })
-    }
-    if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
-      throw new Error('bundle members must use runtime manifest v1, v4, or v5 through v14')
-    }
-    const plan = await this.options.pluginLifecycle.permissionReviewPlanV4({
+    const plan = await this.options.pluginLifecycle.permissionReviewPlanV7({
       requestId: `bundle-plan-${randomUUID()}`,
       ...common,
       target: { kind: 'candidate', candidateId: planned.candidateId },
     })
-    if (plan === undefined) throw new Error('manifest-v5 through manifest-v14 permission plan is unavailable')
-    const decision: CordisXPermissionAuthorizationDecisionV4 = {
-      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-      schemaVersion: 4,
-      origin: 'explicit-user',
-      planId: plan.planId,
-      operation: plan.operation,
-      profileId: plan.profileId,
-      identity: plan.identity,
-      binding: plan.binding,
-      decisions: plan.declarations.filter(item => item.decisionRequired).map(item => ({
-        capability: item.capability,
-        scope: item.scope,
-        securityFingerprint: item.securityFingerprint,
-        decision: this.decisionV2(item, policy(item.capability, item.scope)),
-      })),
-    }
-    return await this.options.pluginLifecycle.applyPermissionReviewV4({
+    if (plan === undefined) throw new Error('bundle member permission plan is unavailable')
+    const { decision, selections } = bundleDeferredDecision(plan, policy)
+    await this.assertBundlePolicyRevision(state)
+    return await this.options.pluginLifecycle.applyBundlePermissionReviewV7({
       requestId: `bundle-apply-${randomUUID()}`,
       ...common,
       decision,
-    })
+    }, selections)
   }
 
   protected async enablePlugin(
@@ -525,6 +441,7 @@ export class PluginBundleCoordinatorCore {
     record: BundleRecord,
     state: BundleState,
   ): Promise<CordisXPluginLifecycleResultV1> {
+    await this.assertBundlePolicyRevision(state)
     const active = await this.options.pluginLifecycle.store.loadActive()
     const current = active.plugins.find(plugin => plugin.id === staged.manifest.id)
     if (current === undefined) return await this.applyStaged(staged, record, state)
@@ -535,114 +452,22 @@ export class PluginBundleCoordinatorCore {
       runtimeGeneration: this.options.runtimeGeneration,
       expectedRevision: active.revision,
     }
-    if (staged.manifest.runtimeManifest.schemaVersion === 1) {
-      const preview = await this.options.pluginLifecycle.handleBundleOperation({
-        $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
-        schemaVersion: 1,
-        requestId: `bundle-enable-plan-${randomUUID()}`,
-        ...common,
-        operation: { kind: 'enable', pluginId: staged.manifest.id },
-      })
-      if (preview.outcome !== 'planned' || preview.authorizationPlan === undefined) {
-        throw new Error(preview.error?.message ?? `could not plan enable for ${staged.manifest.id}`)
-      }
-      const decision: CordisXPermissionAuthorizationDecisionV1 = {
-        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
-        schemaVersion: 1,
-        planId: preview.authorizationPlan.planId,
-        operation: preview.authorizationPlan.operation,
-        profileId: preview.authorizationPlan.profileId,
-        identity: preview.authorizationPlan.identity,
-        decisions: preview.authorizationPlan.declarations.map(item => {
-          const permission = record.members.flatMap(member => member.permissions).find(candidate =>
-            candidate.permissionId
-              === pluginBundlePermissionId({
-                pluginId: staged.manifest.id,
-                digest: staged.digest,
-                capability: item.capability,
-                scope: item.scope,
-              })
-          )
-          return {
-            capability: item.capability,
-            scope: item.scope,
-            decision: permission !== undefined && this.policyFor(record, state, permission) === 'allow'
-              ? 'allow' as const
-              : 'deny' as const,
-          }
-        }),
-      }
-      const latest = await this.options.pluginLifecycle.store.loadActive()
-      return await this.options.pluginLifecycle.handleBundleOperation({
-        $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
-        schemaVersion: 1,
-        requestId: `bundle-enable-${randomUUID()}`,
-        profileId: this.options.profileId,
-        runtimeGeneration: this.options.runtimeGeneration,
-        expectedRevision: latest.revision,
-        operation: { kind: 'enable', pluginId: staged.manifest.id, authorizationDecision: decision },
-      })
-    }
-    if (staged.manifest.runtimeManifest.schemaVersion === 4) {
-      const plan = await this.options.pluginLifecycle.permissionReviewPlanV2({
-        requestId: `bundle-enable-plan-${randomUUID()}`,
-        ...common,
-        target: { kind: 'enable', pluginId: staged.manifest.id },
-      })
-      if (plan === undefined) throw new Error('manifest-v4 enable permission plan is unavailable')
-      const decision: CordisXPermissionAuthorizationDecisionV2 = {
-        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
-        schemaVersion: 2,
-        planId: plan.planId,
-        operation: plan.operation,
-        profileId: plan.profileId,
-        identity: plan.identity,
-        binding: plan.binding,
-        decisions: plan.declarations.filter(item => item.decisionRequired).map(item => ({
-          capability: item.capability,
-          scope: item.scope,
-          securityFingerprint: item.securityFingerprint,
-          decision: this.decisionV2(item, this.permissionPolicy(record, state, staged, item.capability, item.scope)),
-        })),
-      }
-      return await this.options.pluginLifecycle.applyPermissionReviewV2({
-        requestId: `bundle-enable-${randomUUID()}`,
-        ...common,
-        decision,
-      })
-    }
-    if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
-      throw new Error('bundle members must use runtime manifest v1, v4, or v5 through v14')
-    }
-    const plan = await this.options.pluginLifecycle.permissionReviewPlanV4({
+    const plan = await this.options.pluginLifecycle.permissionReviewPlanV7({
       requestId: `bundle-enable-plan-${randomUUID()}`,
       ...common,
       target: { kind: 'enable', pluginId: staged.manifest.id },
     })
-    if (plan === undefined) throw new Error('manifest-v5 through manifest-v14 enable permission plan is unavailable')
-    const decision: CordisXPermissionAuthorizationDecisionV4 = {
-      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-      schemaVersion: 4,
-      origin: 'explicit-user',
-      planId: plan.planId,
-      operation: plan.operation,
-      profileId: plan.profileId,
-      identity: plan.identity,
-      binding: plan.binding,
-      decisions: plan.declarations.filter(item => item.decisionRequired).map(item => ({
-        capability: item.capability,
-        scope: item.scope,
-        securityFingerprint: item.securityFingerprint,
-        decision: this.decisionV2(item, this.permissionPolicy(record, state, staged, item.capability, item.scope)),
-      })),
-    }
-    return await this.options.pluginLifecycle.applyPermissionReviewV4({
+    if (plan === undefined) throw new Error('bundle member enable permission plan is unavailable')
+    const { decision, selections } = bundleDeferredDecision(
+      plan,
+      (capability, scope) => this.permissionPolicy(record, state, staged, capability, scope),
+    )
+    await this.assertBundlePolicyRevision(state)
+    return await this.options.pluginLifecycle.applyBundlePermissionReviewV7({
       requestId: `bundle-enable-${randomUUID()}`,
       ...common,
       decision,
-    })
+    }, selections)
   }
 
   protected permissionPolicy(
@@ -664,13 +489,9 @@ export class PluginBundleCoordinatorCore {
     return permission === undefined ? 'ask' : this.policyFor(record, state, permission)
   }
 
-  protected decisionV2(
-    item: Pick<CordisXPermissionAuthorizationItemV4, 'allowedDecisions' | 'defaultDecision'>,
-    policy: CordisXPluginBundlePolicy,
-  ): CordisXPermissionDecisionV2 {
-    const preferred = policy === 'allow'
-      ? ['allow-persistent', 'allow-once'] as const
-      : ['deny-persistent', 'deny-once'] as const
-    return preferred.find(decision => item.allowedDecisions.includes(decision)) ?? item.defaultDecision
+  private async assertBundlePolicyRevision(state: BundleState): Promise<void> {
+    if ((await this.store.load()).revision !== state.revision) {
+      throw new Error('bundle policy revision changed during permission review')
+    }
   }
 }

@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { HostServiceConfigNarrowApi } from '../launcher/service-config.js'
+import type { HostServiceConfigPersistence } from '../launcher/service-config.js'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { createChannelHostServiceConfigContract } from '../launcher/channel-service.js'
 import { createChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import { createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
@@ -24,6 +26,7 @@ import type { ChannelManagerApi } from '../launcher/channel-manager-api.js'
 export interface RendererChannelComposition {
   readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   readonly plugin?: CordisXConfigPlugin
+  readonly persistence?: HostServiceConfigPersistence
   readonly service?: LocalChannelService
   readonly manager?: ChannelManagerBundleProjection
   readonly credentialBridgeToken?: string
@@ -38,14 +41,18 @@ export async function createRendererChannelComposition(input: {
   readonly appId: string
   readonly configPath: string
   readonly homeDir: string
+  readonly generation: string
   readonly environment: NodeJS.ProcessEnv
   readonly dryRun?: boolean
 }): Promise<RendererChannelComposition> {
   const plugin = input.composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
+  const persistence = plugin?.package === undefined
+    ? undefined
+    : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation).persistence
   let service: LocalChannelService | undefined
   const loadManagerProjection = async (): Promise<ChannelManagerBundleProjection | undefined> => {
     if (plugin === undefined || service === undefined) return undefined
-    const state = await readServiceConfigState({
+    const state = await (persistence?.read ?? readServiceConfigState)({
       profileId: input.profileId,
       pluginId: 'channel',
       serviceId: 'runtime',
@@ -67,7 +74,7 @@ export async function createRendererChannelComposition(input: {
   if (plugin === undefined || input.dryRun) {
     return { loadManagerProjection, actionsBridgeToken: randomBytes(32).toString('hex') }
   }
-  const state = await readServiceConfigState({
+  const state = await (persistence?.read ?? readServiceConfigState)({
     profileId: input.profileId,
     pluginId: 'channel',
     serviceId: 'runtime',
@@ -89,6 +96,7 @@ export async function createRendererChannelComposition(input: {
   return {
     plugin,
     service,
+    ...(persistence === undefined ? {} : { persistence }),
     serviceCapabilityOwners: service.managementOwner() === undefined ? [] : [service.managementOwner()!],
     manager: await loadManagerProjection(),
     credentialBridgeToken: randomBytes(32).toString('hex'),
@@ -105,6 +113,7 @@ export function channelConfigurationApi(input: {
   readonly configPath: string
   readonly plugin: CordisXConfigPlugin
   readonly service: LocalChannelService
+  readonly persistence?: HostServiceConfigPersistence
   readonly expectedServiceGeneration?: string
 }): HostServiceConfigNarrowApi {
   const contract = createChannelHostServiceConfigContract({
@@ -118,6 +127,7 @@ export function channelConfigurationApi(input: {
     generation: input.generation,
     ownerToken: input.token,
     configPath: input.configPath,
+    ...(input.persistence === undefined ? {} : { persistence: input.persistence }),
     writable: true,
     authorize: () => true,
     restartService: candidate => input.service.restart(candidate, input.expectedServiceGeneration),
@@ -143,6 +153,7 @@ export function createChannelLaunchBridges(input: {
       configPath: input.configPath,
       plugin: channel.plugin,
       service: channel.service,
+      ...(channel.persistence === undefined ? {} : { persistence: channel.persistence }),
     })
     : undefined
   const credentials = channel.credentialBridgeToken !== undefined && configApi
@@ -171,6 +182,7 @@ export function createChannelLaunchBridges(input: {
                   configPath: input.configPath,
                   plugin: channel.plugin!,
                   service: channel.service!,
+                  ...(channel.persistence === undefined ? {} : { persistence: channel.persistence }),
                   expectedServiceGeneration,
                 }),
             }

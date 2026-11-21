@@ -125,6 +125,7 @@ describe('CdpPluginLifecycleRuntime projection', () => {
       candidate,
       targetId: 'demo',
       affectedPluginIds: ['demo'],
+      bundlePolicySelections: { 'models.read': 'allow' },
       package: {
         manifest: {
           id: 'demo',
@@ -147,6 +148,8 @@ describe('CdpPluginLifecycleRuntime projection', () => {
     expect(expressions[0]).toContain('delete globalThis.__cordisxPendingPluginModuleV1')
     expect(expressions[1]).toContain('stagePluginMutation')
     expect(expressions[1]).toContain('isolatedArtifactSource')
+    expect(expressions[1]).toContain('bundlePolicySelections')
+    expect(expressions[1]).toContain('models.read')
     expect(expressions[1]).toContain('__mainRealmHostDomExecutionWouldBeABug')
 
     await runtime.commit('tx')
