@@ -61,6 +61,18 @@ export async function parseCodexCommand(args: readonly string[], models = false)
   if (!models && route === 'capabilities') {
     operation = 'capabilities'
     accepted = []
+  } else if (!models && ['defaults review get', 'defaults review set', 'defaults review reset'].includes(route)) {
+    const write = !route.endsWith('get')
+    const set = route === 'defaults review set'
+    operation = `review:${write ? 'save' : 'read'}`
+    accepted = write ? ['--revision', ...(set ? ['--input-file'] : [])] : []
+    if (write) {
+      if (!/^\d+$/u.test(options['--revision'] ?? '')) failure()
+      input.expectedRevision = Number(options['--revision'])
+      if (!Number.isSafeInteger(input.expectedRevision)) failure()
+      if (set && !options['--input-file']) failure()
+      input.settings = set ? await readInput(options['--input-file']!) : null
+    }
   } else if (!models && route === 'providers list') {
     operation = 'list'
     accepted = []

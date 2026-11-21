@@ -42,6 +42,12 @@ const identity = (value: unknown): value is string =>
 
 /** Profile-owned chat preferences. No shared Codex database and no Channel binding is a settings owner. */
 export class ChatExecutionPreferences {
+  private reviewProvider: string | undefined
+  private reviewModels: ReadonlySet<string> | undefined
+  bindReviewProvider(providerId: string | undefined, models?: readonly string[]) {
+    this.reviewProvider = providerId
+    this.reviewModels = models ? new Set(models) : undefined
+  }
   private preparation?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>
   private configurationObservation?: (threadId: string, value: unknown) => Promise<void>
   private finalizeConfiguration?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -200,6 +206,20 @@ export class ChatExecutionPreferences {
   }
   async prepare(method: string, value: unknown, context?: Record<string, unknown>) {
     const params = this.preparation ? await this.preparation(method, object(value)) : object(value)
+    if (method === 'thread/settings/update' && this.reviewProvider) {
+      const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
+      const effective = threadId ? this.read('local', threadId)?.effective : undefined
+      const provider = params.modelProvider ?? context?.modelProvider ?? effective?.modelProvider
+      const model = params.model ?? context?.model ?? effective?.model
+      if ((provider === undefined || model === undefined) && context === undefined) {
+        return { params, contextRequired: true }
+      }
+      if (provider !== this.reviewProvider) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+      if (typeof model !== 'string' || this.reviewModels && !this.reviewModels.has(model)) {
+        throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+      }
+      return { params }
+    }
     if (!['thread/start', 'thread/resume', 'turn/start'].includes(method)) return { params }
     const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
     const current = threadId === undefined ? undefined : this.read('local', threadId)
@@ -245,6 +265,26 @@ export class ChatExecutionPreferences {
         ...(fields.config ? { config: { ...object(fields.config), ...object(params.config) } } : {}),
       }
     if (this.finalizeConfiguration) prepared = await this.finalizeConfiguration(method, prepared)
+    if (this.reviewProvider) {
+      if (
+        ['model', 'model_provider', 'model_providers', 'model_catalog_json', 'profile'].some(
+          key => object(prepared.config)[key] !== undefined,
+        )
+      ) throw new Error('REVIEW_NATIVE_CONFIG_CONFLICT')
+      const provider = prepared.modelProvider ?? context?.modelProvider ?? current?.effective?.modelProvider
+      if (provider === undefined && method === 'thread/start') prepared.modelProvider = this.reviewProvider
+      else if (provider === undefined && context === undefined) return { params, contextRequired: true }
+      else if (provider !== this.reviewProvider) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+      const model = object(object(prepared.collaborationMode).settings).model ?? prepared.model ?? context?.model
+        ?? current?.effective?.model
+      if (typeof model !== 'string') {
+        if (method !== 'thread/start' && context === undefined) return { params, contextRequired: true }
+        throw new Error('REVIEW_PARENT_MODEL_REQUIRED')
+      }
+      if (typeof model === 'string' && this.reviewModels && !this.reviewModels.has(model)) {
+        throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+      }
+    }
     const capturedSettings = (method === 'turn/start' || method === 'thread/start') && !current?.override
       ? {
         ...settings,

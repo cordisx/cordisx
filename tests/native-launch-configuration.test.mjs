@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { nativeLaunchConfiguration } from '../packages/cli/assets/launcher/native-launch-configuration.mjs'
 
@@ -30,4 +34,33 @@ describe('owned native launch configuration', () => {
     }, ['--version'])
     expect(other.nativeArgs).toEqual(['--version'])
   })
+})
+
+it('loads the review catalog without replacing the provider or leaking launch variables', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cx-review-launch-')), file = path.join(root, 'catalog.json')
+  const bytes = '{"models":[{"slug":"work"}]}'
+  writeFileSync(file, bytes)
+  try {
+    const env = {
+      CORDISX_NATIVE_CONTROL_SOCKET: '/socket',
+      CORDISX_NATIVE_CONTROL_NONCE: 'nonce',
+      CORDISX_NATIVE_REAL_CODEX_PATH: '/codex',
+      CORDISX_NATIVE_REVIEW_CATALOG_PATH: file,
+      CORDISX_NATIVE_REVIEW_CATALOG_SHA256: createHash('sha256').update(bytes).digest('hex'),
+      CORDISX_NATIVE_REVIEW_CATALOG_VERSION: '0.149.1',
+      CORDISX_NATIVE_REVIEW_PROVIDER: 'gateway',
+      HOME: '/home',
+    }
+    expect(() =>
+      nativeLaunchConfiguration({ ...env, CORDISX_NATIVE_REVIEW_CATALOG_SHA256: 'b'.repeat(64) }, ['app-server'])
+    )
+      .toThrow('integrity')
+    expect(() => nativeLaunchConfiguration({ ...env, CORDISX_NATIVE_STATIC_CATALOG_PATH: '/other' }, ['app-server']))
+      .toThrow()
+    expect(nativeLaunchConfiguration(env, ['app-server', '--stdio']).nativeArgs)
+      .toEqual(['-c', `model_catalog_json=${JSON.stringify(file)}`, 'app-server', '--stdio'])
+    expect(env).toEqual({ HOME: '/home' })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
