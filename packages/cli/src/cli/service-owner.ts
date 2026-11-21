@@ -12,7 +12,8 @@ import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
-import { createServicePluginRuntime } from '../launcher/service-plugin-runtime.js'
+import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
@@ -58,6 +59,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let managerChannel: ReturnType<typeof createManagerChannelCredentials> = undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
+      let rendererLifecycle: ServiceRendererLifecycle | undefined
       let failure: unknown
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
@@ -71,8 +73,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             policy => policy.key.profileId === profileId,
           )
         const config = await loadHomeConfig(configPath)
+        rendererLifecycle = new ServiceRendererLifecycle({
+          scope: { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation },
+        })
         services = createProductionManagedServiceLifecycle({
-          runtime: createServicePluginRuntime(generation),
+          runtime: rendererLifecycle,
           homeDir,
           profileId,
           generation,
@@ -117,7 +122,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           activation: services.nativeActivation(),
           ...(managed === undefined ? {} : { managed }),
         })
-        const startup = await services.initialize(await store.bindRuntimeGeneration())
+        const active = await store.bindRuntimeGeneration()
+        rendererLifecycle.initialize(active)
+        const startup = await services.initialize(active)
         await startup.coreReady
         terminalProvider = createServiceTerminalProvider({
           activation: services.nativeActivation(),
@@ -187,6 +194,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         for (
           const close of [
             () => api?.close(),
+            () => rendererLifecycle?.close(),
             () => management?.close(),
             () => managerChannel?.close(),
             () => terminalProvider?.close(),

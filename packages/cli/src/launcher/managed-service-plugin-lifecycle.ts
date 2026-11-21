@@ -125,6 +125,18 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private readonly endpointReservations = new ManagedServiceEndpointReservations()
   private readonly managerServiceAuth: ManagerServiceAuth
 
+  get preflight(): PluginLifecycleRuntime['preflight'] {
+    return this.runtime.preflight?.bind(this.runtime)
+  }
+
+  get requiresBrowserArtifacts(): PluginLifecycleRuntime['requiresBrowserArtifacts'] {
+    return this.runtime.requiresBrowserArtifacts?.bind(this.runtime)
+  }
+
+  get browserArtifactServer(): PluginLifecycleRuntime['browserArtifactServer'] {
+    return this.runtime.browserArtifactServer?.bind(this.runtime)
+  }
+
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
     this.managerServiceAuth = new ManagerServiceAuth({
       profileId: options.profileId,

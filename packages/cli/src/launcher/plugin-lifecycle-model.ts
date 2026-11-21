@@ -161,9 +161,24 @@ export interface ManagedServiceUICapabilityMutation {
   readonly token: string
 }
 
+/** Owner-only admission before any lifecycle transaction or renderer work begins. */
+export interface PluginRuntimePreflight {
+  readonly transactionId: string
+  readonly operation: PluginRuntimeMutation['operation']
+  readonly previous: CordisXPluginActivationRecordV1
+  readonly candidate: CordisXPluginActivationRecordV1
+  readonly targetId: string
+  readonly package?: StagedPluginPackage
+}
+
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
 export interface PluginLifecycleRuntime {
+  readonly preflight?: ((input: PluginRuntimePreflight) => Promise<void>) | undefined
   prepare?(transactionId: string): RuntimeGenerationFence
+  /** Host-private: true only for the frozen transaction with renderer participants. */
+  readonly requiresBrowserArtifacts?: ((transactionId: string) => boolean) | undefined
+  /** The same owner creates and retains every graph lease; never serialize this server. */
+  readonly browserArtifactServer?: ((transactionId: string) => Promise<PluginGenerationArtifactServer>) | undefined
   /** Host-private first-browser-graph admission; it returns with the normal generation fence already held. */
   prepareBrowserGraph?(
     transactionId: string,
