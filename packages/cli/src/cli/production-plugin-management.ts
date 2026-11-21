@@ -59,6 +59,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererWriteLifetimes?: ManagerRendererWriteLifetimes
   /** Owner-issued, per-renderer read-only managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
+  readonly rendererModelServices?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
   readonly rendererReadonlyChannel?: ManagerRendererChannel
   readonly processStartedAt?: string
@@ -101,6 +102,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererManagedServiceUI === undefined
         ? []
         : [['managed-service-ui', input.rendererManagedServiceUI] as const]),
+      ...(input.rendererModelServices === undefined
+        ? []
+        : [['model-services', input.rendererModelServices] as const]),
       ...(input.rendererReadonlyChannel === undefined
         ? []
         : [['channel-actions', input.rendererReadonlyChannel] as const]),

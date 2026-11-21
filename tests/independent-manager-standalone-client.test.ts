@@ -47,6 +47,8 @@ function fixture(input: {
   readonly issueResume?: boolean
   readonly controlledPoll?: boolean
   readonly holdBindings?: boolean
+  readonly modelServices?: boolean
+  readonly admissionGate?: Promise<void>
 } = {}) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
@@ -103,7 +105,7 @@ function fixture(input: {
         rendererId,
         generation: 'owner-1',
         profileId: 'work',
-        channels: ['config'],
+        channels: ['config', ...(input.modelServices ? ['model-services'] : [])],
         commands: true,
       }))
     }
@@ -143,7 +145,9 @@ function fixture(input: {
     }
     if (path === '/api/renderer/admit') {
       return new Promise((resolve, reject) => {
-        allowAdmission = () => resolve(response({ admitted: true }))
+        allowAdmission = () => {
+          void Promise.resolve(input.admissionGate).then(() => resolve(response({ admitted: true })))
+        }
         options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
       })
     }
@@ -396,6 +400,28 @@ it('authenticates once and admits the existing runtime after synchronizing its a
   expect(test.runtime.dispose).toHaveBeenCalledOnce()
   expect(test.registry.dispose).toHaveBeenCalledOnce()
   expect(test.unavailable).not.toHaveBeenCalled()
+})
+
+it('holds model-service writes until the standalone owner acknowledges admission', async () => {
+  const admission = deferred<void>()
+  const test = fixture({ modelServices: true, admissionGate: admission.promise, holdBindings: true })
+  try {
+    const host = test.win as unknown as Record<string, unknown>
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/admit')).toBe(true))
+    host.__cordisxModelServicesReceiveV1 = vi.fn()
+    ;(host.__cordisxModelServicesRequestV1 as (payload: string) => void)(
+      JSON.stringify({ requestId: 'early-save', operation: 'save' }),
+    )
+    await Promise.resolve()
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(false)
+    admission.resolve()
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+  } finally {
+    admission.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
 })
 
 it('does not start the imported composition after owner authority changes', async () => {

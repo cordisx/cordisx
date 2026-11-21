@@ -120,6 +120,10 @@ export function startStandaloneManager(input: {
 }): { readonly ready: Promise<boolean>; close(): Promise<void> } {
   const browser = input.window as Browser
   const lifetime = new AbortController()
+  let settleRendererAdmission!: (admitted: boolean) => void
+  const rendererAdmission = new Promise<boolean>(resolve => {
+    settleRendererAdmission = resolve
+  })
   const workerContainer = browser.navigator.serviceWorker
   let closed = false
   let closing: Promise<void> | undefined
@@ -235,6 +239,7 @@ export function startStandaloneManager(input: {
   const close = (preserveResume = false): Promise<void> => {
     if (closing) return closing
     closed = true
+    settleRendererAdmission(false)
     lifetime.abort()
     if (heartbeat !== undefined) clearInterval(heartbeat)
     if (navigationTimer !== undefined) clearTimeout(navigationTimer)
@@ -392,6 +397,7 @@ export function startStandaloneManager(input: {
         window: browser,
         sessionToken: token,
         channels: opened.channels as IndependentHostChannel[],
+        rendererAdmission,
         onSessionLost: fail,
       })
       const importBundle = input.importBundle ?? (async (path: string) => await import(/* @vite-ignore */ path))
@@ -449,7 +455,9 @@ export function startStandaloneManager(input: {
         },
         onQuiesced: fail,
       })
-      if (!await pump.admitted || closed) throw new Error('manager-admission-unavailable')
+      const admitted = await pump.admitted
+      settleRendererAdmission(admitted && !closed)
+      if (!admitted || closed) throw new Error('manager-admission-unavailable')
       return true
     } catch {
       fail()

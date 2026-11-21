@@ -70,6 +70,146 @@ describe('Manager shared model services', () => {
       await fixture.dispose()
     }
   })
+  it('offers the existing add form for an empty independent service list', async () => {
+    const fixture = reactManagerFixture()
+    const { value } = client()
+    value.modelServicesRead = vi.fn(async () => ({ ...read, services: [] }))
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" showWhenEmpty />)
+      const add = [...fixture.element('.cxms-shared-header').querySelectorAll('button')]
+        .find(button => button.textContent === 'Add shared service')!
+      await act(async () => add.click())
+      expect(fixture.element('.cxmc-editor')).not.toBeNull()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('refreshes an independent service list without replacing an open editor draft', async () => {
+    const fixture = reactManagerFixture()
+    const { value } = client()
+    let current = read
+    value.modelServicesRead = vi.fn(async () => current)
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" />)
+      expect(fixture.element('[data-shared-model-service="deepseek"]')).not.toBeNull()
+      vi.useFakeTimers()
+      await act(async () => fixture.root.render(<SharedModelServices client={value} locale="en" reconcile />))
+      current = { ...read, revision: 'rev-2', services: read.services.slice(0, 1) }
+      await act(async () => await vi.advanceTimersByTimeAsync(10_000))
+      expect(fixture.document.querySelector('[data-shared-model-service="deepseek"]')).toBeNull()
+      const edit = fixture.element('[data-shared-model-service="sub2tok"] [aria-label^="Edit"]') as HTMLButtonElement
+      await act(async () => edit.click())
+      const calls = vi.mocked(value.modelServicesRead).mock.calls.length
+      current = { ...read, revision: 'rev-3', services: [] }
+      await act(async () => await vi.advanceTimersByTimeAsync(10_000))
+      expect(vi.mocked(value.modelServicesRead)).toHaveBeenCalledTimes(calls)
+      expect(fixture.element('.cxmc-editor')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps the editor revision when an earlier refresh finishes after editing starts', async () => {
+    const fixture = reactManagerFixture()
+    const { value, modelServicesSave } = client()
+    let finishRefresh!: (result: ModelServicesReadResult) => void
+    const refresh = new Promise<ModelServicesReadResult>(resolve => {
+      finishRefresh = resolve
+    })
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" />)
+      vi.useFakeTimers()
+      value.modelServicesRead = vi.fn().mockResolvedValueOnce(read).mockReturnValueOnce(refresh).mockResolvedValue(read)
+      await act(async () => fixture.root.render(<SharedModelServices client={value} locale="en" reconcile />))
+      await act(async () => await vi.advanceTimersByTimeAsync(10_000))
+      const edit = fixture.element('[data-shared-model-service="sub2tok"] [aria-label^="Edit"]')
+      await act(async () => edit.click())
+      await act(async () => finishRefresh({ ...read, revision: 'rev-2' }))
+      await act(async () => fixture.element('.cxmc-editor-actions button:last-child').click())
+      expect(modelServicesSave).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 'rev-1' }))
+    } finally {
+      vi.useRealTimers()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps an open draft and the uncertain-save message when readback is unavailable', async () => {
+    const fixture = reactManagerFixture()
+    const { value } = client()
+    value.modelServicesRead = vi.fn().mockResolvedValueOnce(read)
+      .mockResolvedValueOnce({ status: 'rejected', code: 'unavailable' }).mockResolvedValue(read)
+    value.modelServicesSave = vi.fn(async () => ({ status: 'unknown', code: 'result-unknown' }))
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" />)
+      await fixture.click('[data-shared-model-service="sub2tok"] [aria-label^="Edit"]')
+      await fixture.type('.cxmc-editor [data-config-path="displayName"] input', 'My unsaved edit')
+      await fixture.click('.cxmc-editor-actions button:last-child')
+      expect(fixture.element('.cxmc-editor').textContent).toContain('Check the current services before retrying')
+      expect((fixture.element('.cxmc-editor [data-config-path="displayName"] input') as HTMLInputElement).value)
+        .toBe('My unsaved edit')
+      expect((fixture.element('.cxmc-editor-actions button:last-child') as HTMLButtonElement).disabled).toBe(true)
+      await fixture.click('.cxms-shared-notice button')
+      expect((fixture.element('.cxmc-editor-actions button:last-child') as HTMLButtonElement).disabled).toBe(false)
+      expect((fixture.element('.cxmc-editor [data-config-path="displayName"] input') as HTMLInputElement).value)
+        .toBe('My unsaved edit')
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('does not replace an existing service when a new service uses its id', async () => {
+    const fixture = reactManagerFixture()
+    const { value, modelServicesSave } = client()
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" />)
+      const add = [...fixture.element('.cxms-shared-header').querySelectorAll('button')]
+        .find(button => button.textContent === 'Add shared service')!
+      await act(async () => add.click())
+      await fixture.type('.cxmc-editor [data-config-path="id"] input', 'sub2tok')
+      await fixture.type('.cxmc-editor [data-config-path="displayName"] input', 'Duplicate')
+      await fixture.type('.cxmc-editor [data-config-path="baseUrl"] input', 'https://example.test')
+      await fixture.click('.cxmc-editor-actions button:last-child')
+      expect(modelServicesSave).not.toHaveBeenCalled()
+      expect(fixture.element('.cxmc-editor [role="status"]').textContent).toContain('Enter an ID')
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('asks the user to check the current services after an uncertain save', async () => {
+    const fixture = reactManagerFixture()
+    const { value } = client()
+    value.modelServicesSave = vi.fn(async () => ({ status: 'unknown', code: 'result-unknown' }))
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="en" />)
+      const remove = [...fixture.element('[data-shared-model-service="deepseek"]').querySelectorAll('button')]
+        .find(button => button.textContent === 'Delete')!
+      await act(async () => remove.click())
+      expect(fixture.element('[role="status"]').textContent).toContain('Check the current services before retrying')
+    } finally {
+      await fixture.dispose()
+    }
+  })
   it('lists each declaration with its apps, model counts, and key state', async () => {
     const fixture = reactManagerFixture()
     try {
@@ -126,6 +266,7 @@ describe('Manager shared model services', () => {
         .find(button => button.textContent === '添加跨应用服务')!
       await act(async () => add.click())
       expect(fixture.element('.cxmc-editor h3').textContent).toBe('添加跨应用服务')
+      await fixture.click('.cxmc-editor-actions button:first-child')
 
       await fixture.render(<SharedModelServices client={client(false).value} locale="en" />)
       expect(document.querySelector('[data-shared-model-services]')).toBeNull()

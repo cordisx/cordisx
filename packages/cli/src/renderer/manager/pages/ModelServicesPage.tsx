@@ -52,6 +52,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<ReadonlySet<CatalogFilter>>(() => new Set(['selectable']))
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const [sharedAvailable, setSharedAvailable] = useState(false)
   const transfer = useModelTransfer(client, locale, () => {
     setFilters(new Set())
     void registry?.refresh()
@@ -117,6 +118,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
     void client?.refresh()
   }
   const noConnections = state.providers.length === 0 && catalog.views.length === 0
+  const showCatalogState = registry?.standaloneModelServices === undefined || !sharedAvailable || !noConnections
   const filtering = filters.size !== 1 || !filters.has('selectable')
   const noMatches = normalized.length > 0
     && !providers.some(({ provider }) =>
@@ -257,7 +259,17 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           aria-busy={refreshing}
           data-empty-layout={noConnections ? 'hero' : undefined}
         >
-          {transfer.exporting ? null : <SharedModelServices client={client} locale={locale} />}
+          {transfer.exporting
+            ? null
+            : (
+              <SharedModelServices
+                client={registry?.standaloneModelServices ?? client}
+                locale={locale}
+                showWhenEmpty={registry?.standaloneModelServices !== undefined}
+                reconcile={registry?.standaloneModelServices !== undefined}
+                onAvailabilityChange={setSharedAvailable}
+              />
+            )}
           {transfer.exporting || state.entries.length === 0
             ? null
             : (
@@ -273,7 +285,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                 ))}
               </section>
             )}
-          {!noConnections && !loading && (failed || unavailable)
+          {showCatalogState && !noConnections && !loading && (failed || unavailable)
             ? (
               <EmptyState
                 family="model-services"
@@ -349,7 +361,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           {transfer.exporting && views.length === 0
             ? <p className="cxr-empty">{locale.startsWith('zh') ? '没有可导出的连接' : 'No exportable connections'}</p>
             : null}
-          {!transfer.exporting && (noConnections
+          {!transfer.exporting && showCatalogState && (noConnections
               || (noMatches || noFilterMatches) && !loading && !failed)
             ? (
               <EmptyState

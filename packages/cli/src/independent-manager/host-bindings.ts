@@ -8,6 +8,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'permission-policy': ['__cordisxPermissionPolicyRequestV1', '__cordisxPermissionPolicyReceiveV1'],
   'service-config': ['__cordisxServiceConfigRequestV1', '__cordisxServiceConfigReceiveV1'],
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
+  'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
   'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
@@ -65,6 +66,8 @@ export function installIndependentHostBindings(input: {
   readonly window: Window
   readonly sessionToken: string
   readonly channels: readonly IndependentHostChannel[]
+  /** Owner channels that require a lifecycle participant wait for admission. */
+  readonly rendererAdmission?: Promise<boolean>
   readonly onSessionLost?: () => void
 }): (() => void) & { canResume(): boolean } {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
@@ -127,14 +130,23 @@ export function installIndependentHostBindings(input: {
         receiverName,
         receiver: receiver as Binding,
         controller,
-        readOnly: channel === 'plugin-management' && (() => {
-          const envelope = JSON.parse(payload) as { operation?: { kind?: unknown } }
-          return isRendererManagementRead(envelope.operation?.kind)
+        readOnly: (() => {
+          const envelope = JSON.parse(payload) as { operation?: unknown }
+          if (channel === 'model-services') return envelope.operation === 'read'
+          if (channel === 'channel-actions') return (envelope as { action?: unknown }).action === 'snapshot'
+          if (channel !== 'plugin-management') return false
+          const operation = envelope.operation as { kind?: unknown } | undefined
+          return isRendererManagementRead(operation?.kind)
         })(),
         dispatched: false,
       }
       pending.set(key, request)
-      void Promise.resolve().then(() => {
+      void Promise.resolve().then(async () => {
+        const requiresAdmission = channel === 'channel-actions'
+          || (channel === 'model-services' || channel === 'plugin-management') && !request.readOnly
+        if (requiresAdmission && input.rendererAdmission !== undefined) {
+          if (!await input.rendererAdmission) throw new Error('independent-host-session-revoked')
+        }
         if (controller.signal.aborted) throw new Error('independent-host-session-revoked')
         request.dispatched = true
         return input.window.fetch('/api/renderer/binding', {
@@ -163,7 +175,9 @@ export function installIndependentHostBindings(input: {
           return failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN')
         }
         deliver(key, text)
-      }).catch(() => failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN'))
+      }).catch(() =>
+        failure(key, request.dispatched ? 'INDEPENDENT_HOST_RESULT_UNKNOWN' : 'INDEPENDENT_HOST_SESSION_REVOKED')
+      )
     }
     host[name] = binding
     installed.set(name, binding)

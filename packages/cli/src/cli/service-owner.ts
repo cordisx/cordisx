@@ -18,6 +18,7 @@ import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { createServiceRendererProjector } from './service-renderer-projection.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
+import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
@@ -216,6 +217,19 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },
           }),
         })
+        const codex = channel?.codex ?? createHeadlessCodexOperations({
+          configPath,
+          environment,
+          closed: () => lifetime.signal.aborted,
+        })
+        const rendererModelServices = createManagerRendererModelServicesChannel({
+          profileId,
+          generation,
+          isCurrent: context =>
+            ownerOpen && !lifetime.signal.aborted
+            && rendererParticipants?.peer(context.rendererId) !== undefined,
+          call: codex,
+        })
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -231,6 +245,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
+          rendererModelServices,
           ...(rendererReadonlyChannel === undefined
             ? {}
             : { rendererReadonlyChannel: rendererReadonlyChannel.channel }),
@@ -246,11 +261,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               channel: (operation: string, value: unknown, metadata?: unknown) =>
                 channel!.channel!.tools.callLocal(operation, value, metadata),
             }),
-          codex: channel?.codex ?? createHeadlessCodexOperations({
-            configPath,
-            environment,
-            closed: () => lifetime.signal.aborted,
-          }),
+          codex,
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
         diagnostic({ event: 'service-ready' })

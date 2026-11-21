@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
@@ -140,6 +140,16 @@ it.skipIf(
         configPath,
         JSON.stringify({
           ...createDefaultHomeConfig(),
+          providers: [{
+            id: 'fixture-service',
+            kind: 'model-service',
+            displayName: 'Fixture Models',
+            baseUrl: 'https://example.test',
+            apiKeyEnv: 'FIXTURE_MODEL_KEY',
+            protocols: ['openai-responses'],
+            models: { codex: ['fixture-model'] },
+          }],
+          environmentVariables: [{ name: 'FIXTURE_MODEL_KEY', value: 'fixture-model-secret', enabled: true }],
           plugins: [{
             id: 'channel',
             entry: archive,
@@ -195,6 +205,114 @@ it.skipIf(
         { timeout: 15_000 },
       ).toBe(true)
       await showChannel(first)
+
+      await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
+      await expect.poll(
+        () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
+        { timeout: 15_000 },
+      ).toBe(true)
+      await second.evaluate('document.querySelector("[data-tab=model-services]").click()')
+      await expect.poll(
+        () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
+        { timeout: 15_000 },
+      ).toBe(true)
+      expect(await first.evaluate('document.body.textContent.includes("fixture-model-secret")')).toBe(false)
+      await first.evaluate(`(() => {
+        const row = document.querySelector('[data-shared-model-service=fixture-service]')
+        const remove = [...row.querySelectorAll('button')].find(button =>
+          ['Delete', '删除'].includes(button.textContent.trim()))
+        if (!remove) throw new Error('Model service delete action is unavailable')
+        remove.click()
+      })()`)
+      try {
+        await expect.poll(
+          () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
+          { timeout: 15_000 },
+        ).toBe(false)
+      } catch {
+        const state = await first.evaluate(`({
+          notice: document.querySelector('.cxms-shared-notice')?.textContent?.slice(0, 300),
+          disabled: document.querySelector('[data-shared-model-service=fixture-service] button:last-child')?.disabled,
+        })`)
+        const actual = JSON.parse(await readFile(configPath, 'utf8')) as { providers: Array<{ id: string }> }
+        throw new Error(
+          'Model service removal did not complete: ' + JSON.stringify({
+            state,
+            providerStillPresent: actual.providers.some(item => item.id === 'fixture-service'),
+          }),
+        )
+      }
+      const config = JSON.parse(await readFile(configPath, 'utf8')) as { providers: Array<{ id: string }> }
+      expect(config.providers.some(item => item.id === 'fixture-service')).toBe(false)
+      await expect.poll(
+        () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
+        { timeout: 20_000 },
+      ).toBe(false)
+
+      await first.evaluate(`(() => {
+        const add = [...document.querySelectorAll('.cxms-shared-header button')].find(button =>
+          ['Add shared service', '添加跨应用服务'].includes(button.textContent.trim()))
+        if (!add) throw new Error('Model service add action is unavailable')
+        add.click()
+      })()`)
+      await expect.poll(() =>
+        first.evaluate('Boolean(document.querySelector(".cxmc-editor [data-config-path=id] input"))')
+      )
+        .toBe(true)
+      for (
+        const [field, value] of [
+          ['id', 'fixture-created'],
+          ['displayName', 'Created fixture'],
+          ['baseUrl', 'https://example.test'],
+          ['codexModels', 'fixture-model'],
+          ['apiKey', 'fixture-created-secret'],
+        ]
+      ) {
+        await first.evaluate(`(() => {
+          const input = document.querySelector(${JSON.stringify(`.cxmc-editor [data-config-path="${field}"] input`)})
+          if (!input) throw new Error('Model service field is unavailable')
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)})
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        })()`)
+      }
+      await expect.poll(
+        () => first.evaluate('!document.querySelector(".cxmc-editor-actions button:last-child").disabled'),
+        { timeout: 10_000 },
+      ).toBe(true)
+      await first.evaluate('document.querySelector(".cxmc-editor-actions button:last-child").click()')
+      await expect.poll(
+        () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-created]"))'),
+        { timeout: 15_000 },
+      ).toBe(true)
+      const created = JSON.parse(await readFile(configPath, 'utf8')) as {
+        providers: Array<{ id: string; apiKeyEnv?: string }>
+        environmentVariables: Array<{ name: string; value?: string }>
+      }
+      const declaration = created.providers.find(item => item.id === 'fixture-created')
+      expect(declaration?.apiKeyEnv).toBeDefined()
+      expect(
+        created.environmentVariables.some(item =>
+          item.name === declaration?.apiKeyEnv && item.value === 'fixture-created-secret'
+        ),
+      ).toBe(true)
+      expect(await first.evaluate('document.body.textContent.includes("fixture-created-secret")')).toBe(false)
+      await expect.poll(
+        () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-created]"))'),
+        { timeout: 20_000 },
+      ).toBe(true)
+      await first.evaluate('globalThis.__modelServicesBeforeReload = true')
+      await first.send('Page.reload')
+      await expect.poll(
+        async () => await first.evaluate('globalThis.__modelServicesBeforeReload === undefined').catch(() => false),
+        { timeout: 15_000 },
+      ).toBe(true)
+      await showChannel(first)
+      await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
+      await expect.poll(
+        () => first.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-created]"))'),
+        { timeout: 15_000 },
+      ).toBe(true)
 
       await expect(updateHomeConfigAtomic(current => ({ ...current, permissions: [] }), configPath))
         .rejects.toThrow('permission policy is in use')

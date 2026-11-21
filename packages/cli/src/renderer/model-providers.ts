@@ -11,6 +11,7 @@ import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } f
 import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
+import type { ModelServicesClient } from '../model-service-contracts.js'
 import type { StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/startup/v1'
 import { type ModelStartupState, ModelStartupStore, startupExecutionAvailable } from './model-startup-store.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
@@ -174,6 +175,17 @@ export class ModelProviderRegistry {
   private disconnectManagement: (() => void) | undefined
   private disconnectSource?: () => void
   private sourceReconcile?: ReturnType<typeof setInterval>
+  private standaloneServices?: ModelServicesClient & { dispose(): void }
+
+  get standaloneModelServices(): ModelServicesClient | undefined {
+    return this.standaloneServices
+  }
+
+  attachStandaloneModelServices(client: ModelServicesClient & { dispose(): void }): void {
+    if (this.disposed) return client.dispose()
+    this.standaloneServices?.dispose()
+    this.standaloneServices = client
+  }
 
   hasStartupProvider(providerId: string): boolean {
     return this.startupProviderIds.has(providerId)
@@ -438,6 +450,8 @@ export class ModelProviderRegistry {
   dispose(): void {
     this.disconnectStartup?.()
     this.startupStore.dispose()
+    this.standaloneServices?.dispose()
+    delete this.standaloneServices
     this.disconnectManagement?.()
     this._management?.dispose()
     this.disconnectSource?.()
