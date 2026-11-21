@@ -21,11 +21,7 @@ import { randomBytes } from 'node:crypto'
 import { rendererAgentContext } from './renderer-agent-context.js'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
-import {
-  ensureCordisXHomeDirectory,
-  type HomeConfigIconThemePreference,
-  loadHomeConfig,
-} from '../config/home-config.js'
+import { loadHomeConfig } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../launcher/cdp.js'
 import { findPackageRoot, localDevelopmentPluginIdentity } from '../launcher/development.js'
