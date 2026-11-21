@@ -149,6 +149,8 @@ export function installReactCordisXManager(
     navigationOverflow: string
     rootLeft: string
     rootWidth: string
+    rootTop: string
+    rootHeight: string
     native: NativeState[]
     nativeTitle: NativeState[]
     selected: Array<{ button: HTMLButtonElement; current: string | null; dataSelected: string | null }>
@@ -205,8 +207,13 @@ export function installReactCordisXManager(
       ? anchorRect.left
       : current.sidebarContainer.getBoundingClientRect().left
     resizeHandle.style.left = `${sidebarLeft + next}px`
-    resizeHandle.style.top = `${anchorRect.top}px`
-    resizeHandle.style.height = `${anchorRect.height}px`
+    const sidebarRect = current.sidebarContainer.getBoundingClientRect()
+    resizeHandle.style.top = `${
+      current.provenance === 'codex-26.924-native-two-pane' ? sidebarRect.top : anchorRect.top
+    }px`
+    resizeHandle.style.height = `${
+      current.provenance === 'codex-26.924-native-two-pane' ? sidebarRect.height : anchorRect.height
+    }px`
     if (current.titlebarProvenance === 'rail-only') {
       const titleRect = current.titlebarSlot.getBoundingClientRect()
       const desiredLeft = Math.max(current.titlebarSafeLeft, anchorRect.left + next)
@@ -434,6 +441,8 @@ export function installReactCordisXManager(
     navigationSeat.style.overflow = current.navigationOverflow
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
+    rootSeat.style.top = current.rootTop
+    rootSeat.style.height = current.rootHeight
     if (presentationMode === 'workspace') {
       if (!retainRail) railProjection.leave()
     } else {
@@ -635,6 +644,8 @@ export function installReactCordisXManager(
       navigationOverflow: navigationSeat.style.overflow,
       rootLeft: rootSeat.style.left,
       rootWidth: rootSeat.style.width,
+      rootTop: rootSeat.style.top,
+      rootHeight: rootSeat.style.height,
       native,
       nativeTitle,
       selected,
@@ -676,6 +687,11 @@ export function installReactCordisXManager(
       button.removeAttribute('data-selected')
     }
     rootSeat.dataset.managerSurface = 'pane'
+    if (seat.provenance === 'codex-26.924-native-two-pane') {
+      const inset = Math.max(0, seat.geometry.top - mainRect.top)
+      rootSeat.style.top = `${inset}px`
+      rootSeat.style.height = `calc(100% - ${inset}px)`
+    }
     titlebarSeat.dataset.cordisxManagerTitleDivider = 'true'
     if (seat.provenance === 'codex-26.924-native-two-pane') {
       navigationSeat.style.borderTopLeftRadius = nativeSidebarRadius
@@ -834,6 +850,11 @@ export function installReactCordisXManager(
       'data-app-shell-titlebar-slot',
       'data-app-shell-header-slot',
       'data-app-shell-header-layout',
+      'data-app-shell-header-placement',
+      'data-app-shell-unified-tab-strip',
+      'data-app-shell-compact-page-gutter',
+      'data-app-shell-active-page',
+      'data-app-shell-shared-local-frame',
       'data-app-shell-workspace-layout',
       'data-app-shell-tab-controller',
       'data-app-shell-tab-panel-controller',
