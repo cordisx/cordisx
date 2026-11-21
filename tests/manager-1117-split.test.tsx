@@ -1,6 +1,6 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { resolveManagerPaneSeat } from '../packages/cli/src/renderer/host-probes.js'
+import { resolveManagerPaneSeat, resolveManagerTitlebarSeat } from '../packages/cli/src/renderer/host-probes.js'
 import { resolveManagerSplitTitlebarSeat } from '../packages/cli/src/renderer/adapter/manager-split-titlebar.js'
 import { captureManagerTitlebarLease } from '../packages/cli/src/renderer/adapter/manager-titlebar-continuation.js'
 import { installReactCordisXManager } from '../packages/cli/src/renderer/manager/install.js'
@@ -13,7 +13,7 @@ vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
   createBrandMarkElement: (document: Document) => document.createElement('span'),
 }))
 
-function fixture() {
+function fixture(split = true) {
   const f = reactManagerFixture()
   const { document, dom } = f
   installNativeManagerShell(dom)
@@ -46,8 +46,8 @@ function fixture() {
   const nav = element('nav[role=navigation]')
   const { frame, surface, activePage, workspace, workspaceRow } = placeNativeWorkspaceTitlebar(header, 1920)
   surface.removeAttribute('data-app-shell-header-placement')
-  surface.dataset.appShellUnifiedTabStrip = 'true'
-  surface.dataset.appShellCompactPageGutter = 'true'
+  surface.dataset.appShellUnifiedTabStrip = String(split)
+  surface.dataset.appShellCompactPageGutter = String(split)
   frame.dataset.appShellCompactPageGutter = 'true'
   setRect(frame, rect(0, 0, 1920, 1050))
   setRect(workspaceRow, rect(0, 0, 1920, 1050))
@@ -77,16 +77,17 @@ function fixture() {
   back.dataset.appShellSidebarTrigger = 'true'
   back.setAttribute('aria-controls', 'app-shell-sidebar')
   const end = element('[data-app-shell-header-slot=end]')
-  end.innerHTML =
-    '<div data-app-shell-tab-controller="right" data-tab-id="tab"><button role="tab" aria-selected="true">Tab</button></div>'
-  const tab = element('[role=tab]')
-  tab.style.pointerEvents = 'auto'
+  end.innerHTML = split
+    ? '<div data-app-shell-tab-controller="right" data-tab-id="tab"><button role="tab" aria-selected="true">Tab</button></div>'
+    : '<button data-app-shell-workspace-layout-toggle="main" style="pointer-events:auto">Toggle</button>'
+  const tab = document.querySelector<HTMLElement>('[role=tab]')
+  if (tab !== null) tab.style.pointerEvents = 'auto'
   const panel = document.createElement('div')
   panel.setAttribute('role', 'tabpanel')
   panel.dataset.appShellTabPanelController = 'right'
   panel.dataset.tabId = 'tab'
   panel.innerHTML = '<iframe title="native panel" src="about:blank"></iframe>'
-  activePage.append(panel)
+  if (split) activePage.append(panel)
   const sidebar = document.createElement('div')
   sidebar.id = 'app-shell-sidebar'
   sidebar.append(rail, nav)
@@ -94,18 +95,20 @@ function fixture() {
   const resizer = element('[data-native-manager-resizer]')
   setRect(header, rect(0, 0, 1920, 46))
   setRect(start, rect(0, 0, 326, 46))
-  setRect(element('[data-app-shell-main-titlebar]'), rect(326, 0, 420, 46))
-  setRect(slot, rect(326, 0, 414, 46))
-  setRect(end, rect(746, 0, 1174, 46))
-  setRect(element('[data-app-shell-tab-controller]'), rect(754, 7, 240, 32))
-  setRect(tab, rect(754, 7, 238, 32))
-  setRect(panel, rect(747, 46, 1173, 1004))
+  setRect(element('[data-app-shell-main-titlebar]'), rect(326, 0, split ? 420 : 1554, 46))
+  setRect(slot, rect(326, 0, split ? 414 : 1548, 46))
+  setRect(end, rect(split ? 746 : 1880, 0, split ? 1174 : 40, 46))
+  if (tab !== null) {
+    setRect(element('[data-app-shell-tab-controller]'), rect(754, 7, 240, 32))
+    setRect(tab, rect(754, 7, 238, 32))
+    setRect(panel, rect(747, 46, 1173, 1004))
+  } else setRect(element('[data-app-shell-workspace-layout-toggle]'), rect(1882, 9, 28, 28))
   setRect(aside, rect(0, 46, 326, 1004))
   setRect(rail, rect(0, 46, 52, 1004))
   setRect(nav, rect(52, 46, 274, 1004))
   setRect(resizer, rect(318, 46, 16, 1004))
-  setRect(main, rect(326, 46, 420, 1004))
-  setRect(native, rect(326, 46, 420, 1004))
+  setRect(main, rect(326, split ? 46 : 0, split ? 420 : 1594, split ? 1004 : 1050))
+  setRect(native, rect(326, split ? 46 : 0, split ? 420 : 1594, split ? 1004 : 1050))
   setRect(back, rect(88, 7, 32, 32))
   setRect(element('[data-native-forward]'), rect(286, 9, 28, 28))
   const nativeStyle = dom.window.getComputedStyle.bind(dom.window)
@@ -118,10 +121,10 @@ function fixture() {
       return style
     },
   })
-  return { ...f, element, header, main, native, slot, draft, panel, tab, surface, inner }
+  return { ...f, element, header, main, native, slot, draft, panel, tab, surface, activePage, inner, setRect, rect }
 }
 
-describe('26.1117 marker-light native split thread', () => {
+describe('26.1117 marker-light native thread', () => {
   it('requires the exact measured shell and preserves the native tab and draft on open and close', async () => {
     const f = fixture()
     const pane = resolveManagerPaneSeat(f.document)
@@ -137,7 +140,7 @@ describe('26.1117 marker-light native split thread', () => {
       expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
       expect(f.native.inert).toBe(true)
       expect(f.draft.value).toBe('unsent draft')
-      expect(f.tab.getAttribute('aria-selected')).toBe('true')
+      expect(f.tab?.getAttribute('aria-selected')).toBe('true')
       expect(f.panel.querySelector('iframe')?.getAttribute('src')).toBe('about:blank')
       await act(async () => f.element('[data-cordisx-manager-trigger]').click())
       expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
@@ -145,10 +148,88 @@ describe('26.1117 marker-light native split thread', () => {
       expect(f.draft.value).toBe('unsent draft')
     } finally {
       await act(async () => dispose?.())
+      await f.dispose()
     }
   })
 
-  it('rejects changed frame, tab identity and header geometry', () => {
+  it.each(['active page', 'shared local frame'])(
+    'seats the normal thread below the header in a %s and restores its native frame on close',
+    async mode => {
+      const f = fixture(false)
+      if (mode === 'shared local frame') {
+        f.activePage.removeAttribute('data-app-shell-active-page')
+        f.activePage.dataset.appShellSharedLocalFrame = 'true'
+      }
+      const pane = resolveManagerPaneSeat(f.document)
+      expect(pane).toBeDefined()
+      expect(resolveManagerTitlebarSeat(f.document)?.slot).toBe(f.slot)
+      expect(captureManagerTitlebarLease(f.document, 'native', pane!)).toBeDefined()
+      let dispose: (() => void) | undefined
+      try {
+        await act(async () => {
+          dispose = installReactCordisXManager(f.document, managerModel(), { presentationMode: 'workspace' })
+        })
+        await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+        expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+        expect(f.element('[data-cordisx-react-manager]').style.top).toBe('46px')
+        expect(f.native.inert).toBe(true)
+        await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+        expect(f.native.inert).toBeFalsy()
+        expect(f.draft.value).toBe('unsent draft')
+      } finally {
+        await act(async () => dispose?.())
+        await f.dispose()
+      }
+    },
+  )
+
+  it('retains the mounted Manager when the same thread leaves its split layout', async () => {
+    const f = fixture()
+    const route = {
+      available: true as const,
+      key: 'thread',
+      nativeLocation: { pathname: '/thread', search: '', hash: '' },
+    }
+    let dispose: (() => void) | undefined
+    try {
+      await act(async () => {
+        dispose = installReactCordisXManager(f.document, managerModel(), {
+          presentationMode: 'workspace',
+          nativeRouteHistory: { snapshot: () => route, subscribe: () => () => {} },
+        })
+      })
+      await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+      const manager = f.element('[data-cordisx-react-manager]')
+      const embedded = f.document.createElement('iframe')
+      manager.append(embedded)
+      const embeddedDocument = embedded.contentDocument
+      await act(async () => {
+        f.surface.dataset.appShellUnifiedTabStrip = 'false'
+        f.surface.dataset.appShellCompactPageGutter = 'false'
+        const end = f.element('[data-app-shell-header-slot=end]')
+        end.innerHTML =
+          '<button data-app-shell-workspace-layout-toggle="main" style="pointer-events:auto">Toggle</button>'
+        f.panel.remove()
+        f.setRect(end, f.rect(1880, 0, 40, 46))
+        f.setRect(f.element('[data-app-shell-workspace-layout-toggle]'), f.rect(1882, 9, 28, 28))
+        f.setRect(f.element('[data-app-shell-main-titlebar]'), f.rect(326, 0, 1554, 46))
+        f.setRect(f.slot, f.rect(326, 0, 1548, 46))
+        f.setRect(f.main, f.rect(326, 0, 1594, 1050))
+        f.setRect(f.native, f.rect(326, 0, 1594, 1050))
+        await new Promise(resolve => setTimeout(resolve, 120))
+      })
+      await vi.waitFor(() => expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
+      expect(f.element('[data-cordisx-react-manager]')).toBe(manager)
+      expect(embedded.contentDocument).toBe(embeddedDocument)
+      expect(manager.style.top).toBe('46px')
+      expect(f.draft.value).toBe('unsent draft')
+    } finally {
+      await act(async () => dispose?.())
+      await f.dispose()
+    }
+  })
+
+  it('rejects changed frame, tab identity and header geometry', async () => {
     const f = fixture()
     f.inner.firstElementChild!.removeAttribute('aria-hidden')
     expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
@@ -163,5 +244,15 @@ describe('26.1117 marker-light native split thread', () => {
     f.panel.dataset.tabId = 'tab'
     f.surface.removeAttribute('data-app-shell-compact-page-gutter')
     expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
+    await f.dispose()
+  })
+
+  it('does not admit an explicitly inactive shared local frame', async () => {
+    const f = fixture(false)
+    f.activePage.dataset.appShellSharedLocalFrame = 'true'
+    f.activePage.dataset.appShellActivePage = 'false'
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    await f.dispose()
   })
 })

@@ -1,5 +1,9 @@
 import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
-import { resolveManager1117SplitFrame } from './adapter/manager-1117-split.js'
+import {
+  isManager1117ThreadHeader,
+  isManager1117UnderHeaderThread,
+  resolveManager1117ThreadFrame,
+} from './adapter/manager-1117-thread.js'
 import { managerTitlebarPresentationRight } from './adapter/manager-titlebar-presentation.js'
 import {
   type ManagerCollapsedSidebarSeat,
@@ -142,7 +146,11 @@ export function resolveManagerCardSeat(document: Document): {
     child instanceof ElementClass
     && child.hasAttribute('data-app-shell-thread-edge-divider')
   )
-  const frame = frames.length === 1 ? frames[0] : frames.length === 0 ? resolveManager1117SplitFrame(anchor) : undefined
+  const frame = frames.length === 1
+    ? frames[0]
+    : frames.length === 0
+    ? resolveManager1117ThreadFrame(anchor)
+    : undefined
   if (frame === undefined || !visible(frame)) return undefined
   if (
     (frame.hasAttribute('data-app-shell-thread-edge-divider')
@@ -155,7 +163,8 @@ export function resolveManagerCardSeat(document: Document): {
   const railRect = rail?.getBoundingClientRect()
   const inset = Math.abs(anchorRect.top - frameRect.top) <= 2 ? 0 : pageTitleInset(document, anchorRect, frameRect)
   if (
-    anchorRect.width < 320 || anchorRect.height < 240 || anchorRect.top < 36
+    anchorRect.width < 320 || anchorRect.height < 240
+    || (anchorRect.top < 36 && !isManager1117UnderHeaderThread(anchor))
     || railRect === undefined || anchorRect.left < railRect.right
     || inset === undefined
     || Math.abs(anchorRect.left - frameRect.left) > 2
@@ -222,7 +231,8 @@ export function resolveManagerTwoPaneSeat(document: Document): ManagerTwoPaneSea
       if (
         navRect.width < 180 || navRect.width > 420 || navRect.height < 240
         || !near(railRect.right, navRect.left) || !near(navRect.right, mainRect.left)
-        || !near(navRect.top, mainRect.top) || !near(navRect.bottom, mainRect.bottom)
+        || (!near(navRect.top, mainRect.top) && !isManager1117UnderHeaderThread(card.anchor, navRect.top))
+        || !near(navRect.bottom, mainRect.bottom)
       ) return []
       const children = [...navigation.children]
       const hostRoots = children.filter(child => child.hasAttribute('data-cordisx-manager-sidebar-root'))
@@ -337,8 +347,12 @@ export function resolveManagerTitlebarSeat(document: Document): {
   const titles = bar.querySelectorAll<HTMLElement>(
     ':scope > [data-app-shell-main-titlebar="true"][data-testid="app-shell-header-context-menu-surface"]',
   )
+  const markerLight = isManager1117ThreadHeader(bar)
+    && bar.parentElement?.getAttribute('data-app-shell-unified-tab-strip') === 'false'
   const slots = titles[0]?.querySelectorAll<HTMLElement>(
-    '[data-app-shell-titlebar-slot="main"][data-app-shell-focus-area="main"]',
+    markerLight
+      ? ':scope > div > [data-app-shell-focus-area="main"]'
+      : '[data-app-shell-titlebar-slot="main"][data-app-shell-focus-area="main"]',
   )
   const starts = bar.querySelectorAll<HTMLElement>('[data-app-shell-header-slot="start"]')
   const ends = bar.querySelectorAll<HTMLElement>('[data-app-shell-header-slot="end"]')

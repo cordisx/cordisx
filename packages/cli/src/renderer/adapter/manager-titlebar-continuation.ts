@@ -1,5 +1,5 @@
 import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
-import { isManager1117SplitHeader } from './manager-1117-split.js'
+import { isManager1117ThreadHeader, isManager1117UnderHeaderThread } from './manager-1117-thread.js'
 import { clippedTabSpan, resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 import { type NativeViewportTitlebarOwner, resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
@@ -191,14 +191,15 @@ export function captureManagerTitlebarLease(
     || titleRect === undefined || slotRect === undefined || railRect === undefined
     || navRect === undefined || mainRect === undefined
     || !near(navRect.left, railRect.right) || !near(navRect.right, mainRect.left)
-    || !near(navRect.right, seat.bounds.left) || !near(mainRect.top, headerRect.bottom)
+    || !near(navRect.right, seat.bounds.left)
+    || (!near(mainRect.top, headerRect.bottom) && !isManager1117UnderHeaderThread(pane.main.anchor, navRect.top))
     || header.querySelector('[data-cordisx-manager-titlebar-seat]') !== null
   ) return undefined
   const controls = nativeControls(header, seat.native)
   const viewportOwner = resolveNativeViewportTitlebarOwner(header)
   const headerStyle = view.getComputedStyle(header)
   const titleStyle = view.getComputedStyle(title)
-  const markerLightControls = kind === 'split' && isManager1117SplitHeader(header)
+  const markerLightControls = (kind === 'split' || kind === 'native') && isManager1117ThreadHeader(header)
     && controls.filter(({ element }) => start.contains(element)).length >= 1
     && controls.some(({ element }) =>
       start.contains(element)
@@ -374,7 +375,8 @@ export function resolveManagerTitlebarContinuation(
     || !sameRect(slotRect, baseline.slotRect) || !sameRect(railRect, baseline.railRect)
     || !near(navRect.left, railRect.right) || !near(navRect.top, headerRect.bottom)
     || !near(navRect.width, owner.sidebarWidth) || !near(mainRect.left, navRect.right)
-    || !near(mainRect.top, headerRect.bottom) || !near(mainRect.right, baseline.mainRight)
+    || (!near(mainRect.top, headerRect.bottom) && !isManager1117UnderHeaderThread(main, navRect.top))
+    || !near(mainRect.right, baseline.mainRight)
     || mainRect.width < 320 || handleRect.width < 6 || handleRect.width > 24
     || handleRect.height < navRect.height * 0.8
     || !near((handleRect.left + handleRect.right) / 2, navRect.right)
