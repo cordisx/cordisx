@@ -29,7 +29,9 @@ while IFS= read -r -d '' file; do
   esac
   case "$file" in
     skills/cordisx/*|skills/cordisx-docs/*|skills/cordisx-qa/*|skills/cordisx-plugin-development/*)
-      skill_changed=true ;;
+      skill_changed=true
+      # Shipped Skill validation packs Host and Creator, so prepare both outputs.
+      cli_only=false ;;
   esac
   case "$file" in
     skills/cordisx/*.md|skills/cordisx/version.json|skills/cordisx/agents/openai.yaml|\
