@@ -2,6 +2,39 @@
 
 ## Configured runtime
 
+### Scoped memory (local implementation)
+
+Use `cordisx channel memory guide --context <incoming-context> --input '{}'`
+to discover on-demand `write`, `organize` and `recall` guidance. `navigate` and
+`search-page` return byte-bounded paged cards; `batch` loads selected IDs under a
+separate budget. These operations do not establish style profiles or grants.
+
+`cordisx channel memory remember|get|search|update|forget|index` reuses the
+running Host and requires `--context <incoming-context>` and optional
+`--profile <id>`. Use `--input <JSON>`: remember takes `record` (kind, title,
+summary, tags, entityRefs, evidenceType, confidence); get takes `id`; search
+takes `query` and optional `entity`; update takes `id`, `revision`, `record`;
+forget takes `id`, `revision`; index takes `{}` and rebuilds only the caller's
+current-conversation records. Read `cordisx channel help memory` for details.
+
+This is not automatic ingestion or platform history access. Direct-chat own
+recall needs no administrator. Group own-topic requests derive from actual
+accepted incoming text; grant/revoke/grant-list use configured actor/source
+authority, not claimed admin. Two-account identity-challenge/identity-confirm
+use verified second-account requests with expiry/replay checks. Caller
+actor/admin claims are rejected. See the
+[memory design and delivery ledger](channel-memory-design.md) for tested
+boundaries, identity confirmation gaps and production gates.
+
+Local operator-only operations, rejected with Agent/Channel metadata:
+`memory-authority-set` (account user tuple,scopes,expectedRevision),
+`memory-persona-profile` (personaId,name,identity,style?,expectedRevision),
+`memory-persona-bind` (bot account tuple,personaId,expectedRevision),
+`memory-persona-context` (personaId,conversationId,style,expectedRevision).
+Native generation reads bound persona capsules and task memory spaces. These
+are existing `cordisx channel` operations, not another executable. Public
+Protocol publication and formal delivery remain separate gates.
+
 Ordinary `cordisx channel` commands use the selected profile’s running Host.
 They share its Channel transport and Host credential handles. They do not start
 a second SDK connection or require credentials in arguments.

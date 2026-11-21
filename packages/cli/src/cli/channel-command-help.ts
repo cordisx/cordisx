@@ -57,6 +57,12 @@ const HELP: Readonly<Record<string, string>> = {
     'Read pending task setting requests. Input: {}. Approval is through the authenticated Channel user command or card, never an Agent-claimed user.',
 }
 export function channelCliHelp(operation?: string): string {
+  if (operation === 'memory-guide') {
+    return 'cordisx channel memory guide --context <incoming-context> --input {"topic":"write"}\nOmit topic for navigation; topics: write, organize, recall. Describes implemented operations and missing organization/provider capabilities only.'
+  }
+  if (operation === 'memory') {
+    return 'cordisx channel memory guide|navigate|search-page|batch|remember|get|search|update|forget|index|grant|revoke|grant-list|identity-challenge|identity-confirm|identity-unbind --context <incoming-context> [--profile <id>] --input <JSON>\nStart with guide {}. navigate/search-page support cursor,limit,maxBytes; batch uses ids,maxBytes. Records: {record:{kind,title,summary,tags,entityRefs,evidenceType,confidence,expiresAt?,observedAt?}}. Changes require id/revision. grant input {grant:{source:string,target:{kind:"conversation",id:string},expiresAt?,recordIds?}} uses configured authority and explicit incoming request. identity-challenge {target:accountUserTuple}; identity-confirm {challenge} requires the actual second account request. Actor/admin/intent are never accepted from input.'
+  }
   if (operation && HELP[operation]) {
     return `cordisx channel ${operation} [--profile <id>] [--context <incoming-context>] [--input <JSON>]\n${
       HELP[operation]

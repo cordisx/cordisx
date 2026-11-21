@@ -189,4 +189,7 @@ or protocol sources. Availability depends on the installed CordisX version.
 - [Local model and Agent API](local-model-api.md) — experimental loopback API candidate.
 
 - [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.
+- [Channel memory proposal](channel-memory-design.md): scoped directory-backed memory design, partial local CLI implementation and remaining authority gates.
+- [Channel memory real-model scenarios](channel-memory-model-validation.md): platform-independent model-driven tool calls, reproducible harness and evidence boundaries.
+- [Channel memory Protocol handoff](channel-memory-protocol-handoff.md): exact owner contract contribution and Host integration files for coordinated delivery.
 - [Context threshold and live continuation](context-threshold-continuation.md): effective compaction budget, observed usage, and target-ready handoff boundaries.

@@ -1,4 +1,8 @@
 import { ChannelQuestions } from './channel-questions.js'
+import path from 'node:path'
+import { ChannelMemoryStore } from './channel-memory-store.js'
+import { ChannelMemoryAuthority } from './channel-memory-authority.js'
+import { ChannelMemoryPersonas } from './channel-memory-personas.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
@@ -56,6 +60,9 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
+  memory?: ChannelMemoryStore
+  memoryAuthority?: ChannelMemoryAuthority
+  personas?: ChannelMemoryPersonas
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
@@ -99,7 +106,11 @@ export class ChannelConversationConsumer {
     this.timer.unref()
   }
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
-    return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
+    const consumer = new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
+    consumer.memory = new ChannelMemoryStore(path.join(path.dirname(input.file), 'memory'))
+    consumer.memoryAuthority = new ChannelMemoryAuthority(path.join(path.dirname(input.file), 'memory-authority'))
+    consumer.personas = new ChannelMemoryPersonas(path.join(path.dirname(input.file), 'personas'))
+    return consumer
   }
   bindings(): readonly ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)
@@ -108,6 +119,7 @@ export class ChannelConversationConsumer {
     return channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
   }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
+    if (this.personas) native()?.setPersonaRegistry(this.personas)
     this.extraNative = native
     this.continuation.attachContext()
     this.approvals.attach(native())
