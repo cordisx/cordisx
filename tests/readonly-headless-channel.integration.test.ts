@@ -11,7 +11,7 @@ import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.
 import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
-import { CordisXChannelManagerService } from '../packages/cli/src/renderer/channel-manager.js'
+import { CordisXChannelManagerPresentationService } from '../packages/cli/src/renderer/channel-manager-presentation.js'
 import { restrictChannelManagerActions } from '../packages/cli/src/renderer/channel-manager-actions.js'
 import { normalizePluginManifest } from '../packages/cli/src/renderer/platform/platform-manifest.js'
 import { ownerSnapshotPermissionStore } from '../packages/cli/src/renderer/platform/owner-snapshot-permission-store.js'
@@ -81,6 +81,11 @@ async function fixture() {
 }
 
 describe('read-only independent manager for an existing configured Channel', () => {
+  it('keeps the read-only descriptor even when its snapshot bridge is unavailable', () => {
+    const manager = new CordisXChannelManagerPresentationService(new Context(), { presentationMode: 'snapshot-only' })
+    expect(manager.presentationCapabilities().mode).toBe('snapshot-only')
+  })
+
   it('reads real account state through the existing service and exposes no secret or write authority', async () => {
     const f = await fixture()
     let broker: PermissionBroker | undefined
@@ -118,7 +123,7 @@ describe('read-only independent manager for an existing configured Channel', () 
         [{ ...initial.owner, moduleGeneration, runtimeGeneration: 'owner-generation' }],
       )
       const manifest = normalizePluginManifest(f.input.plugin.manifest, 'channel')
-      broker.register(identity, manifest, { pluginId: 'channel', moduleGeneration })
+      const retire = broker.register(identity, manifest, { pluginId: 'channel', moduleGeneration })
       const channelTenant = { adapterId: 'simulator', accountId: 'local', tenantId: 'test' }
       const channelConversation = { ...channelTenant, conversationId: 'direct-alice', kind: 'direct' as const }
       for (
@@ -143,7 +148,7 @@ describe('read-only independent manager for an existing configured Channel', () 
           : { status: 'unavailable' as const }
       )
       const root = new Context()
-      fiber = root.plugin(CordisXChannelManagerService, {
+      fiber = root.plugin(CordisXChannelManagerPresentationService, {
         projection: { ...initial.projection, observedAt: firstObservedAt },
         profileId: 'test',
         hostGeneration: 'owner-generation',
@@ -157,6 +162,13 @@ describe('read-only independent manager for an existing configured Channel', () 
         [CORDISX_PLUGIN_GENERATION]: moduleGeneration,
       })
       const own = (ctx.channelManager as ChannelManagerV5).forOwnService()!
+      const presentationManager = (ctx.channelManager as unknown as CordisXChannelManagerPresentationService)
+        .forOwnPresentationService()!
+      expect(presentationManager.presentationCapabilities()).toEqual({
+        contract: 'cordisx.channel-manager-presentation-capabilities/v1',
+        schemaVersion: 1,
+        mode: 'snapshot-only',
+      })
       const beforeRefresh = own.snapshot()
       expect(beforeRefresh.observedAt).toBe(firstObservedAt)
       expect(beforeRefresh.accounts).toContainEqual(expect.objectContaining({
@@ -183,6 +195,8 @@ describe('read-only independent manager for an existing configured Channel', () 
       })
       expect(outcome.status).toBe('rejected')
       expect(run).toHaveBeenCalledTimes(2)
+      retire()
+      expect(() => presentationManager.presentationCapabilities()).toThrow('PERMISSION_DENIED')
       view!.close()
     } finally {
       await fiber?.dispose()

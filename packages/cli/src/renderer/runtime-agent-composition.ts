@@ -233,6 +233,7 @@ import {
   type ChannelManagerServiceInput,
   CordisXChannelManagerService,
 } from './channel-manager.js'
+import { CordisXChannelManagerPresentationService } from './channel-manager-presentation.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -501,13 +502,20 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     await runtimeScope.iconThemeFiber
     runtimeScope.visualFiber = runtimeScope.ctx.plugin(CordisXVisualService)
     await runtimeScope.visualFiber
+    const ChannelManagerService = runtimeScope.metadata()!.hostKind === 'standalone'
+      ? CordisXChannelManagerPresentationService
+      : CordisXChannelManagerService
     runtimeScope.channelManagerFiber =
-      runtimeScope.metadata()!.channelManager === undefined && runtimeScope.serviceConfigBridge()! === undefined
-        ? runtimeScope.ctx.plugin(CordisXChannelManagerService)
+      runtimeScope.metadata()!.hostKind !== 'standalone' && runtimeScope.metadata()!.channelManager === undefined
+        && runtimeScope.serviceConfigBridge()! === undefined
+        ? runtimeScope.ctx.plugin(ChannelManagerService)
         : runtimeScope.ctx.plugin(
-          CordisXChannelManagerService,
+          ChannelManagerService,
           {
             profileId: runtimeScope.metadata()!.profileId,
+            ...(runtimeScope.metadata()!.hostKind === 'standalone'
+              ? { presentationMode: 'snapshot-only' as const }
+              : {}),
             document,
             broker: runtimeScope.broker()!,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,

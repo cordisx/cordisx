@@ -121,6 +121,7 @@ export interface ChannelManagerServiceConfigApi {
 
 export interface ChannelManagerServiceInput {
   readonly navigateConversation?: (sessionId: string) => Promise<void> | void
+  readonly presentationMode?: 'standard' | 'snapshot-only'
   readonly profileId?: string
   readonly hostGeneration?: string
   readonly projection?: ChannelManagerProjectionV1
@@ -147,16 +148,18 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
     const wrapped = 'projection' in candidate || 'serviceConfig' in candidate || 'credentialRequest' in candidate
+        || 'presentationMode' in candidate || 'actions' in candidate
       ? candidate as ChannelManagerServiceInput
       : { projection: candidate as ChannelManagerProjectionV1 }
-    const snapshotOnly = wrapped.actions?.snapshotOnly === true
+    const snapshotOnly = wrapped.presentationMode === 'snapshot-only' || wrapped.actions?.snapshotOnly === true
     if (
       snapshotOnly && (wrapped.serviceConfig !== undefined || wrapped.credentialRequest !== undefined
         || wrapped.createCredentialedConnection !== undefined)
     ) throw new Error('snapshot-only Channel Manager cannot expose configuration or credentials')
-    const actions = restrictChannelManagerActions(wrapped.actions)
+    const actions = restrictChannelManagerActions(wrapped.actions, snapshotOnly)
     registerChannelManagerState(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
+      snapshotOnly,
       ...(wrapped.credentialRequest === undefined ? {} : { credentialRequest: wrapped.credentialRequest }),
       ...(wrapped.broker === undefined ? {} : { broker: wrapped.broker }),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
@@ -864,7 +867,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     return serviceOwnerFor(this) === undefined || this.ownedServiceAllowed('channel.accounts.read')
   }
 
-  private assertOwnedRead(): void {
+  protected assertOwnedRead(): void {
     if (!this.ownedReadAllowed()) throw new Error('PERMISSION_DENIED')
   }
 
