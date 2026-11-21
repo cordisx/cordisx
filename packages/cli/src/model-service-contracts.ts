@@ -60,8 +60,15 @@ export type ModelServicesReadResult =
   | { readonly status: 'ok'; readonly revision: string; readonly services: readonly ModelServiceView[] }
   | { readonly status: 'rejected'; readonly code: 'unavailable' }
 
+/** Signals the actual read/write authority implements credential-safe manager CAS. */
+export const MODEL_SERVICE_SAFE_WRITE_CONTRACT = 'cordisx.model-service-safe-write/v1'
+
+/** Wire marker only; the authenticated owner session supplies authority. */
+export const STANDALONE_MODEL_SERVICES_MARKER = 'cordisx-standalone-model-services-v1'
+
 export type ModelServicesSaveResult =
   | { readonly status: 'applied'; readonly applies: 'app-restart'; readonly revision: string }
+  | { readonly status: 'unknown'; readonly code: 'result-unknown' }
   | {
     readonly status: 'rejected'
     readonly code: 'unavailable' | 'conflict' | 'invalid' | 'persist-failed'
@@ -71,6 +78,12 @@ export type ModelServicesSaveResult =
 export interface ModelServicesSaveRequest {
   readonly expectedRevision: string
   readonly services: readonly ModelServiceInput[]
+}
+
+export interface ModelServicesClient {
+  readonly modelServicesAvailable: boolean
+  modelServicesRead(): Promise<ModelServicesReadResult>
+  modelServicesSave(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult>
 }
 
 /** The environment variable a declaration's key lives in, derived from its id. */

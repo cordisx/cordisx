@@ -21,7 +21,7 @@ export class CdpClient {
       if (message.id === undefined) {
         if (
           message.method === 'Runtime.exceptionThrown' || message.method === 'Network.loadingFailed'
-          || message.method === 'Runtime.consoleAPICalled'
+          || message.method === 'Runtime.consoleAPICalled' || message.method === 'Page.javascriptDialogOpening'
         ) {
           this.diagnostics.push({ method: message.method, params: message.params })
           if (this.diagnostics.length > 30) this.diagnostics.shift()

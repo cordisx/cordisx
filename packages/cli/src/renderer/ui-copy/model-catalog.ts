@@ -270,4 +270,13 @@ export const MODEL_CATALOG_COPY = {
     en: 'The services changed elsewhere. Reload and try again.',
     'zh-CN': '服务配置已在别处改动，请刷新后重试。',
   },
+  'catalog.sharedServiceUnknown': {
+    en: 'Save result is unclear. Check the current services before retrying.',
+    'zh-CN': '保存结果未确认，请检查当前服务后再重试。',
+  },
+  'catalog.sharedServiceReadUnavailable': {
+    en: 'Services could not be refreshed. Check the connection before making more changes.',
+    'zh-CN': '服务暂时无法刷新，请检查连接后再修改。',
+  },
+  'catalog.sharedServiceRetryRead': { en: 'Retry', 'zh-CN': '重试' },
 } as const satisfies ProductCopyCatalog<'catalog'>

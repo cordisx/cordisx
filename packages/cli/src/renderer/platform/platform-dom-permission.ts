@@ -505,6 +505,7 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       ]))
     }`
     const plan = this.domPlan(registration, pointId, operationId)
+    let revision = this.policyRecords.revision
     const item = plan.declarations[0]!
     const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({
       profileId: plan.profileId,
@@ -554,6 +555,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
           policy: 'inherit',
         })
       }
+      if (!this.isAuthorizationCurrent(registration, revision)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
+          policy: 'inherit',
+        })
+      }
       if (decision === undefined) {
         this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit review cancelled or timed out')
         return Object.freeze({
@@ -563,12 +572,43 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
           policy: 'inherit',
         })
       }
-      const selected = await this.commitDomDecision(plan, decision)
+      let selected: CordisXPermissionDecisionV2
+      try {
+        selected = await this.commitDomDecision(
+          plan,
+          decision,
+          () => {
+            if (!this.isAuthorizationCurrent(registration, revision)) throw new Error('Invalidated permission request')
+          },
+          () => {
+            if (this.policyRecords.revision !== revision) throw new Error('Invalidated permission policy')
+          },
+        )
+      } catch (error) {
+        if (this.isAuthorizationCurrent(registration, revision)) throw error
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: this.isRegistered(registration)
+            ? 'permission.policy-invalidated'
+            : 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
+      if (selected === 'allow-persistent' || selected === 'deny-persistent') revision++
       if (!this.isRegistered(registration)) {
         return Object.freeze({
           authorized: false,
           state: 'denied',
           reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
+      if (!this.isAuthorizationCurrent(registration, revision)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
           policy: 'inherit',
         })
       }
@@ -602,14 +642,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       origin = 'explicit-user'
     }
     const granted = this.grantDomAccess(registration, pointId, plan, item, origin)
-    return this.isRegistered(registration)
-      ? granted
-      : Object.freeze({
-        authorized: false,
-        state: 'denied',
-        reason: 'permission.generation-invalidated',
-        policy: 'inherit',
-      })
+    if (this.isAuthorizationCurrent(registration, revision)) return granted
+    this.clearExactDomLease(registration, pointId)
+    return Object.freeze({
+      authorized: false,
+      state: 'denied',
+      reason: this.isRegistered(registration) ? 'permission.policy-invalidated' : 'permission.generation-invalidated',
+      policy: 'inherit',
+    })
   }
 
   protected grantDomAccess(
@@ -666,6 +706,8 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
   protected async commitDomDecision(
     plan: CordisXPermissionAuthorizationPlanV3,
     decision: CordisXPermissionAuthorizationDecisionV3,
+    assertCurrent: () => void,
+    assertPublish: () => void,
   ): Promise<CordisXPermissionDecisionV2> {
     if (
       decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3
@@ -697,9 +739,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
         policy: selected.decision,
       })
       const key = permissionRecordKeyV3(record)
-      await this.commitDomPolicyRecords([record], () => {
-        this.policyRecords.set(key, record)
-      })
+      await this.commitDomPolicyRecords(
+        [record],
+        () => {
+          this.policyRecords.set(key, record)
+        },
+        assertCurrent,
+        assertPublish,
+      )
     }
     return selected.decision
   }

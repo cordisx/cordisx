@@ -8,6 +8,7 @@ import { createChannelActionsBridgeHandler } from '../launcher/channel-actions-r
 import { ChannelConversationManagement } from '../launcher/channel-conversation-management.js'
 import { configuredChannelManager } from '../launcher/channel-connection-configuration.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
+import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
 import type { ChannelConversationConsumer } from '../launcher/channel-conversation-consumer.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -35,24 +36,31 @@ export interface RendererChannelComposition {
 }
 
 /** Start the configured Channel service and project its exact state into renderer composition metadata. */
-export async function createRendererChannelComposition(input: {
-  readonly composition: CordisXConfig
-  readonly profileId: string
-  readonly appId: string
-  readonly configPath: string
-  readonly homeDir: string
-  readonly generation: string
-  readonly environment: NodeJS.ProcessEnv
-  readonly dryRun?: boolean
-}): Promise<RendererChannelComposition> {
+export async function createRendererChannelComposition(
+  input: {
+    readonly composition: CordisXConfig
+    readonly profileId: string
+    readonly appId: string
+    readonly configPath: string
+    readonly homeDir: string
+    readonly generation: string
+    readonly environment: NodeJS.ProcessEnv
+    readonly dryRun?: boolean
+  },
+  owner?: { readonly runtimeGeneration: string; readonly profileOwnerVerified: boolean },
+): Promise<RendererChannelComposition> {
   const plugin = input.composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
-  const persistence = plugin?.package === undefined
-    ? undefined
-    : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation).persistence
+  if (owner !== undefined && owner.runtimeGeneration !== input.generation) {
+    throw new Error('package Channel runtime generation is inconsistent')
+  }
+  const packageStore = plugin?.package
+    ? new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation)
+    : undefined
+  const readState = packageStore?.persistence.read ?? readServiceConfigState
   let service: LocalChannelService | undefined
   const loadManagerProjection = async (): Promise<ChannelManagerBundleProjection | undefined> => {
     if (plugin === undefined || service === undefined) return undefined
-    const state = await (persistence?.read ?? readServiceConfigState)({
+    const state = await readState({
       profileId: input.profileId,
       pluginId: 'channel',
       serviceId: 'runtime',
@@ -74,7 +82,18 @@ export async function createRendererChannelComposition(input: {
   if (plugin === undefined || input.dryRun) {
     return { loadManagerProjection, actionsBridgeToken: randomBytes(32).toString('hex') }
   }
-  const state = await (persistence?.read ?? readServiceConfigState)({
+  if (packageStore) {
+    const store = new LauncherSecretStore({ homeDir: input.homeDir })
+    await new ManagerChannelDraftJournal({
+      homeDir: input.homeDir,
+      configPath: input.configPath,
+      profileId: input.profileId,
+      store,
+      packageStore,
+      packageOwnerVerified: owner?.profileOwnerVerified === true,
+    }).recover()
+  }
+  const state = await readState({
     profileId: input.profileId,
     pluginId: 'channel',
     serviceId: 'runtime',
@@ -96,7 +115,7 @@ export async function createRendererChannelComposition(input: {
   return {
     plugin,
     service,
-    ...(persistence === undefined ? {} : { persistence }),
+    ...(packageStore === undefined ? {} : { persistence: packageStore.persistence }),
     serviceCapabilityOwners: service.managementOwner() === undefined ? [] : [service.managementOwner()!],
     manager: await loadManagerProjection(),
     credentialBridgeToken: randomBytes(32).toString('hex'),

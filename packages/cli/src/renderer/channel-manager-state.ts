@@ -19,6 +19,7 @@ import {
 
 export interface ChannelManagerState {
   projection: ChannelManagerProjectionV1
+  readonly snapshotOnly: boolean
   readonly credentialRequest?: ChannelManagerServiceInput['credentialRequest']
   readonly broker?: PermissionBroker
   credentials?: ChannelCredentialWorkflow

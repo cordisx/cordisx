@@ -132,7 +132,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     if (!registration || !declaration || registration.manifest.schemaVersion === 1) return false
     // Shared v2 logic uses the legacy-shaped return only for existing platform callers.
     const result = await this.authorizeDeclarationV2(registration, declaration, requested)
-    return result.ok && this.isRegistered(registration)
+    return result.ok && this.isAuthorizationCurrent(registration, result.value)
   }
   policy(
     identity: CordisXPluginIdentity,
@@ -396,6 +396,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
 
   clearOnce(identity: CordisXPluginIdentity): void {
     const registration = this.registration(identity)
+    this.policyRecords.invalidate()
     this.onceV2.clearOperation(`${this.generation}:${identity.id}`)
     this.onceV2.clearGeneration(this.generation, registration?.generation.moduleGeneration)
     this.clearDomGeneration(registration?.generation.moduleGeneration, identity)
@@ -496,6 +497,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     const key = this.legacyAuthorizationKey(registration, declaration)
     const activationTicket = this.onceV2.consume(key, activationBinding)
     const policy = this.policy(identity, capability, view)
+    let revision = this.policyRecords.revision
     if (policy === 'deny' && !activationTicket) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is denied by policy`)
       this.denied(identityKey, capability, requested)
@@ -517,6 +519,10 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       } finally {
         if (timer !== undefined) clearTimeout(timer)
       }
+      if (!this.isAuthorizationCurrent(registration, revision)) {
+        this.denied(identityKey, capability, requested)
+        return failure('permission-denied', `${capability} authorization was invalidated`)
+      }
       if (decision === 'timeout') {
         this.consoleObserver?.permission(identity, capability, 'deny', `${capability} permission request timed out`)
         this.denied(identityKey, capability, requested)
@@ -530,6 +536,11 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       if (decision === 'allow') {
         try {
           await this.setPolicy(identity, capability, 'allow')
+          revision++
+          if (!this.isAuthorizationCurrent(registration, revision)) {
+            this.denied(identityKey, capability, requested)
+            return failure('permission-denied', `${capability} authorization was invalidated`)
+          }
         } catch {
           this.consoleObserver?.permission(
             identity,
@@ -559,6 +570,10 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     this.audit.set(auditKey, audit)
     this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
     this.changed()
+    if (!this.isAuthorizationCurrent(registration, revision)) {
+      this.denied(identityKey, capability, requested)
+      return failure('permission-denied', `${capability} authorization was invalidated`)
+    }
     return { ok: true, value: { declaration } }
   }
 
@@ -590,7 +605,10 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
     }
     const result = await this.authorizeDeclarationV2(registration, declaration, requested)
-    return result.ok ? { ok: true, value: { declaration: legacyDeclaration } } : result
+    if (!result.ok) return result
+    return this.isAuthorizationCurrent(registration, result.value)
+      ? { ok: true, value: { declaration: legacyDeclaration } }
+      : failure('permission-denied', `${capability} authorization was invalidated`)
   }
 
   /** The common v2 evaluator uses real capability names; Channel never masquerades as Platform. */
@@ -598,7 +616,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     registration: Registration,
     declaration: CordisXCapabilityDeclarationV2,
     requested: RequestedScope,
-  ): Promise<CordisXPlatformResult<true>> {
+  ): Promise<CordisXPlatformResult<bigint>> {
     const identity = registration.identity, identityKey = platformIdentityKey(identity), capability = declaration.name
     if (!scopeAllows(declaration.scope, requested)) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
@@ -617,6 +635,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       requestId,
     }
     const plan = this.planV2(registration, 'runtime', binding, [declaration])
+    let revision = this.policyRecords.revision
     const item = plan.declarations[0]!
     const activationBinding = this.binding(registration, `${this.generation}:${identity.id}`)
     const activationTicket = this.onceV2.consume(this.authorizationKey(plan, item.capability), activationBinding)
@@ -655,9 +674,15 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
         return failure('permission-denied', `${capability} was not authorized for this call`)
       }
       try {
-        if (!this.isRegistered(registration)) throw new Error('Retired permission registration')
+        if (!this.isAuthorizationCurrent(registration, revision)) throw new Error('Invalidated permission request')
         this.assertDecisionV2(plan, decision)
         await this.commitDecisionV2(plan, decision)
+        revision += BigInt(
+          decision.decisions.filter(item => (
+            item.decision === 'allow-persistent' || item.decision === 'deny-persistent'
+          )).length,
+        )
+        if (!this.isAuthorizationCurrent(registration, revision)) throw new Error('Invalidated permission request')
       } catch {
         this.onceV2.clearOperation(binding.operationId)
         this.consoleObserver?.permission(identity, capability, 'deny', `${capability} decision was invalid`)
@@ -696,7 +721,11 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     this.audit.set(auditKey, audit)
     this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
     this.changed()
-    return { ok: true, value: true }
+    if (!this.isAuthorizationCurrent(registration, revision)) {
+      this.denied(identityKey, capability, requested)
+      return failure('permission-denied', `${capability} authorization was invalidated`)
+    }
+    return { ok: true, value: revision }
   }
 
   requiredDenied(

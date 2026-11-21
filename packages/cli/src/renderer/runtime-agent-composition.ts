@@ -120,6 +120,7 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
+import { installStandaloneManagerAdapter } from './standalone-manager-adapter.js'
 import { CodexNativeRouteObserver } from './adapter/native-route-observer.js'
 import {
   createHostManagerSelfConfigurationNavigationOptions,
@@ -232,6 +233,7 @@ import {
   type ChannelManagerServiceInput,
   CordisXChannelManagerService,
 } from './channel-manager.js'
+import { CordisXChannelManagerPresentationService } from './channel-manager-presentation.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -500,13 +502,20 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     await runtimeScope.iconThemeFiber
     runtimeScope.visualFiber = runtimeScope.ctx.plugin(CordisXVisualService)
     await runtimeScope.visualFiber
+    const ChannelManagerService = runtimeScope.metadata()!.hostKind === 'standalone'
+      ? CordisXChannelManagerPresentationService
+      : CordisXChannelManagerService
     runtimeScope.channelManagerFiber =
-      runtimeScope.metadata()!.channelManager === undefined && runtimeScope.serviceConfigBridge()! === undefined
-        ? runtimeScope.ctx.plugin(CordisXChannelManagerService)
+      runtimeScope.metadata()!.hostKind !== 'standalone' && runtimeScope.metadata()!.channelManager === undefined
+        && runtimeScope.serviceConfigBridge()! === undefined
+        ? runtimeScope.ctx.plugin(ChannelManagerService)
         : runtimeScope.ctx.plugin(
-          CordisXChannelManagerService,
+          ChannelManagerService,
           {
             profileId: runtimeScope.metadata()!.profileId,
+            ...(runtimeScope.metadata()!.hostKind === 'standalone'
+              ? { presentationMode: 'snapshot-only' as const }
+              : {}),
             document,
             broker: runtimeScope.broker()!,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
@@ -529,7 +538,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
               credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
             }),
             ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
-              actions: { run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input) },
+              actions: {
+                ...(runtimeScope.metadata()!.hostKind === 'standalone' ? { snapshotOnly: true as const } : {}),
+                run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input),
+              },
             }),
           } satisfies ChannelManagerServiceInput,
         )
@@ -765,7 +777,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       runtimeScope.slotService.subscribeInternal(runtimeScope.notifyFrom()!('surfaces')),
       runtimeScope.iconThemeRegistry()!.subscribe(runtimeScope.notifyFrom()!('icon-themes')),
     )
-    runtimeScope.adapterHandle = runtimeScope.metadata()!.hostKind === 'playground'
+    runtimeScope.adapterHandle = runtimeScope.metadata()!.managerPresentationMode === 'standalone'
+      ? installStandaloneManagerAdapter(runtimeScope.routeService, runtimeScope.extensionPointDescriptors()!)
+      : runtimeScope.metadata()!.hostKind === 'playground'
       ? installPlaygroundAdapter(
         document,
         runtimeScope.slotService,
@@ -870,8 +884,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     const pluginManagement = runtimeScope.pluginManagementBinding()
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
-      nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
-      presentationMode: runtimeScope.metadata()!.managerPresentationMode === 'workspace' ? 'workspace' : 'overlay',
+      ...(runtimeScope.metadata()!.hostKind === 'standalone'
+        ? { standaloneStyleHref: '/manager-host.css' as const }
+        : { nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!) }),
+      presentationMode: runtimeScope.metadata()!.managerPresentationMode ?? 'overlay',
       ...(runtimeScope.metadata()!.nativeAppVersion === undefined
         ? {}
         : { nativeAppVersion: runtimeScope.metadata()!.nativeAppVersion! }),
@@ -883,7 +899,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
         }
         : {}),
     })
-    if (runtimeScope.metadata()!.hostKind !== 'playground') {
+    if (runtimeScope.metadata()!.hostKind !== 'playground' && runtimeScope.metadata()!.hostKind !== 'standalone') {
       const native = globalThis as typeof globalThis & {
         __cordisxNativeProviderOwner?: NativeProviderSelectionOwner
         __cordisxNativeProviderCommandChannel?: NativeProviderSelectionCommandChannel

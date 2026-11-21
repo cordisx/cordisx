@@ -72,6 +72,38 @@ import {
   scopeAllows,
 } from './platform-permission-types.js'
 
+/** A process-local, monotonic fence; it does not replace the profile owner barrier. */
+class PermissionPolicyRevisionMap extends Map<string, CordisXPersistedPermissionPolicyRecord> {
+  #revision = 0n
+
+  get revision(): bigint {
+    return this.#revision
+  }
+
+  invalidate(): void {
+    this.#revision++
+  }
+
+  override set(key: string, value: CordisXPersistedPermissionPolicyRecord): this {
+    super.set(key, value)
+    this.invalidate()
+    return this
+  }
+
+  override delete(key: string): boolean {
+    const deleted = super.delete(key)
+    if (deleted) this.invalidate()
+    return deleted
+  }
+
+  override clear(): void {
+    if (this.size > 0) {
+      super.clear()
+      this.invalidate()
+    }
+  }
+}
+
 export abstract class PlatformPermissionBrokerBase {
   private readonly serviceOwnership: ServiceCapabilityOwnership
   protected readonly registrations = new Map<string, Registration>()
@@ -86,7 +118,7 @@ export abstract class PlatformPermissionBrokerBase {
   protected certifiedProjectionAvailable = false
 
   /** One profile ledger index for both the retiring v1 records and authoritative v2 records. */
-  protected readonly policyRecords = new Map<string, CordisXPersistedPermissionPolicyRecord>()
+  protected readonly policyRecords = new PermissionPolicyRevisionMap()
 
   protected readonly audit = new Map<string, AuditRecord>()
 
@@ -402,6 +434,10 @@ export abstract class PlatformPermissionBrokerBase {
     return [...this.registrations.values()].some(candidate => candidate.token === registration.token)
   }
 
+  protected isAuthorizationCurrent(registration: Registration, revision: bigint): boolean {
+    return this.isRegistered(registration) && this.policyRecords.revision === revision
+  }
+
   runtimeExactRequest(
     identity: CordisXPluginIdentity,
     capability: CordisXPlatformCapability,
@@ -423,9 +459,13 @@ export abstract class PlatformPermissionBrokerBase {
   protected commitDomPolicyRecords(
     records: readonly CordisXPermissionPolicyRecordV3[],
     publish: () => void,
+    assertCurrent: () => void = () => {},
+    assertPublish: () => void = assertCurrent,
   ): Promise<void> {
     const task = this.domPolicyCommitTail.then(async () => {
+      assertCurrent()
       await this.persistV3(records)
+      assertPublish()
       publish()
       this.changed()
     })

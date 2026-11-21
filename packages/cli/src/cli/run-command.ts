@@ -2,6 +2,8 @@ import { productionStartupReady } from './production-startup-ready.js'
 import { startupTerminalRequests } from '../launcher/startup-provider-admission.js'
 import { abortable } from '../launcher/cdp-session.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
+import { createDesktopManagerOwnerIfEligible } from './desktop-manager-owner.js'
+import { createCliProxyStartupMarker } from './cli-proxy-startup.js'
 import { acquireProfileRuntimeOwner } from '../launcher/profile-runtime-owner.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createStartupHostBridge } from './startup-host-bridge.js'
@@ -21,11 +23,7 @@ import { randomBytes } from 'node:crypto'
 import { rendererAgentContext } from './renderer-agent-context.js'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
-import {
-  ensureCordisXHomeDirectory,
-  type HomeConfigIconThemePreference,
-  loadHomeConfig,
-} from '../config/home-config.js'
+import { loadHomeConfig } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../launcher/cdp.js'
 import { findPackageRoot, localDevelopmentPluginIdentity } from '../launcher/development.js'
@@ -62,14 +60,11 @@ import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/se
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
 import { type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import type { ChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
-import { markServiceConfigAppRestartApplied, readServiceConfigState } from '../config/service-config.js'
 import {
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL,
   CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID,
   CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
-  CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
-  CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
 } from '../providers/cli-proxy-service-config.js'
@@ -141,6 +136,7 @@ import {
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createChannelLaunchBridges, createRendererChannelComposition } from './renderer-channel-composition.js'
+import { createManagerChannelCredentials, managerUserAuthorities } from './manager-channel-credentials-composition.js'
 import {
   configuredChannelManagementToolHandler,
   configuredChannelToolHandler,
@@ -185,6 +181,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
   let nativeSubmissionUnavailable = false
   let rendererComposition: RendererComposition | undefined
   let productionPluginManagement: ProductionPluginManagementComposition | undefined
+  let desktopManager: Awaited<ReturnType<typeof createDesktopManagerOwnerIfEligible>>
   let profileLease: ProductionHostBootstrap['profileLease']
   let prelaunchedHost: ProductionHostBootstrap['prelaunchedHost']
   let profileLeaseHandedOff = false
@@ -252,9 +249,23 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       lifecycleGeneration,
     )
     const lifecycleRuntime = new CdpPluginLifecycleRuntime()
-    const platformProviderLifecycleRuntime = new PlatformProviderPluginLifecycleRuntime(lifecycleRuntime)
+    desktopManager = await createDesktopManagerOwnerIfEligible({
+      homeDir: rootFromConfigPath(configPath),
+      configPath,
+      appId,
+      profileId: selection.profileId,
+      generation: lifecycleGeneration,
+      cdp: lifecycleRuntime,
+      artifactServer: activePluginGenerationArtifactServer,
+      store: lifecycleStore,
+      ownerVerified: releaseRuntimeOwner !== undefined,
+      attach: invocation.options.attach,
+      configuredPlugins: configuredComposition.plugins,
+      codex: nativeCodexOperations(() => nativeSubmission),
+    })
+    const platformRuntime = new PlatformProviderPluginLifecycleRuntime(desktopManager?.lifecycle ?? lifecycleRuntime)
     managedServiceLifecycleRuntime = createProductionManagedServiceLifecycle({
-      runtime: platformProviderLifecycleRuntime,
+      runtime: platformRuntime,
       homeDir: rootFromConfigPath(configPath),
       profileId: selection.profileId,
       generation: lifecycleGeneration,
@@ -321,6 +332,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const { activatedPlugins } = packageGraphs
     hasManagedBackends = packageGraphs.hasManagedBackends
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
+    desktopManager?.initialize(activeLifecycleActivation, recoveryPlan !== undefined)
     const startupSession = await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     startupBridge = createStartupHostBridge(managedServiceLifecycleRuntime, selection.profileId, lifecycleGeneration)
     const permissionIdentities = new PluginPermissionIdentityRegistry([
@@ -343,7 +355,8 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       homeDir: rootFromConfigPath(configPath),
       generation: lifecycleGeneration,
       environment: runtime.env ?? process.env,
-    })
+    }, { runtimeGeneration: lifecycleGeneration, profileOwnerVerified: releaseRuntimeOwner !== undefined })
+    if (channel.plugin && channel.service) desktopManager?.bindConfiguredChannel(channel.plugin, channel.service)
     const channelService = channel.service
     const { consumer: channelConsumer, tools: channelTools, dispose: disposeChannel } =
       await createConfiguredChannelConsumer({
@@ -577,34 +590,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         lifecycleGeneration,
       )
       : undefined
-    const markCliProxyStartupConfigApplied = async (): Promise<void> => {
-      if (!cliProxyConfigured) return
-      try {
-        const read = cliProxyPackageServiceConfig?.persistence.read ?? readServiceConfigState
-        const state = await read({
-          profileId: selection.profileId,
-          pluginId: 'cli-proxy-api',
-          serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
-          initialConfig: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as Parameters<
-            typeof readServiceConfigState
-          >[0]['initialConfig'],
-        }, configPath)
-        if (state.restartRequired !== true) return
-        const markApplied = cliProxyPackageServiceConfig?.persistence.markAppRestartApplied
-          ?? markServiceConfigAppRestartApplied
-        await markApplied({
-          profileId: selection.profileId,
-          pluginId: 'cli-proxy-api',
-          serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
-          expectedRevision: state.revision,
-          initialConfig: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as Parameters<
-            typeof markServiceConfigAppRestartApplied
-          >[0]['initialConfig'],
-        }, configPath)
-      } catch (error) {
-        stdout(`[cordisx] failed to mark CLIProxy startup configuration applied: ${String(error)}`)
-      }
-    }
+    const markCliProxyStartupConfigApplied = createCliProxyStartupMarker({
+      configured: cliProxyConfigured,
+      configPath,
+      profileId: selection.profileId,
+      stdout,
+      ...(cliProxyPackageServiceConfig === undefined ? {} : { persistence: cliProxyPackageServiceConfig.persistence }),
+    })
     const launcherCliProxy = cliProxyConfigured
       ? await (async () => {
         const entry = bundledPluginEntry('plugin-cli-proxy-api')
@@ -653,7 +645,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           : { serviceConfigPersistence: cliProxyPackageServiceConfig.persistence }),
       })
     if (providerFleet !== undefined && platformProviderServices !== undefined) {
-      platformProviderLifecycleRuntime.connect(async activation =>
+      platformRuntime.connect(async activation =>
         await platformProviderServices.reconfigure(
           providerFleet,
           fleetConfigs,
@@ -709,6 +701,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         execution: (operation, args) => chatExecutionOperation(nativeSubmission?.channelSession, operation, args),
       })
     if (channelConfigApi) services.push({ pluginId: 'channel', serviceId: 'runtime', api: channelConfigApi })
+    const managerChannel = createManagerChannelCredentials({
+      ...channel,
+      lifecycle: managedServiceLifecycleRuntime,
+      configPath,
+      profileId: selection.profileId,
+      generation: lifecycleGeneration,
+    }, releaseRuntimeOwner !== undefined)
     const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
       ? undefined
       : createServiceConfigBridgeHandler({
@@ -720,9 +719,30 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const disposeConfiguredLaunch = configuredLaunchCleanup({
       documents: ownerDocuments,
       credentials: channelCredentialBridge,
+      ...(managerChannel === undefined ? {} : { managerCredentials: managerChannel }),
       channel: disposeChannel,
       providers: closeProviderFleet,
     })
+    const openManagement = () =>
+      openProductionPluginManagementComposition({
+        configPath,
+        homeDir: rootFromConfigPath(configPath),
+        appId,
+        profileId: selection.profileId,
+        runtimeGeneration: lifecycleGeneration,
+        token: pluginManagementToken,
+        coordinator: pluginLifecycleCoordinator,
+        ...(desktopManager === undefined ? {} : desktopManager.managementOptions),
+        rendererConfiguration: operation =>
+          desktopManager === undefined
+            ? lifecycleRuntime.pluginConfiguration(operation)
+            : desktopManager.lifecycle.pluginConfiguration(operation),
+        ...managerUserAuthorities(managedServiceLifecycleRuntime!, managerChannel),
+        modelExport: nativeCatalogExport(() => nativeSubmission),
+        codex: nativeCodexOperations(() => nativeSubmission),
+        ...configuredChannelManagementToolHandler(channelTools),
+        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
+      })
     if (invocation.options.attach) {
       try {
         assertProductionGraphLaunchOwnership(true, rendererComposition.hasLoopbackGraph)
@@ -736,19 +756,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         await disposeConfiguredLaunch()
         return
       }
-      productionPluginManagement = await openProductionPluginManagementComposition({
-        configPath,
-        homeDir: rootFromConfigPath(configPath),
-        appId,
-        profileId: selection.profileId,
-        runtimeGeneration: lifecycleGeneration,
-        token: pluginManagementToken,
-        coordinator: pluginLifecycleCoordinator,
-        modelExport: nativeCatalogExport(() => nativeSubmission),
-        codex: nativeCodexOperations(() => nativeSubmission),
-        ...configuredChannelManagementToolHandler(channelTools),
-        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
-      })
+      productionPluginManagement = await openManagement()
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
         await runHost({
@@ -888,19 +896,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           stdout,
         )
       }
-      productionPluginManagement = await openProductionPluginManagementComposition({
-        configPath,
-        homeDir: rootFromConfigPath(configPath),
-        appId,
-        profileId: selection.profileId,
-        runtimeGeneration: lifecycleGeneration,
-        token: pluginManagementToken,
-        coordinator: pluginLifecycleCoordinator,
-        modelExport: nativeCatalogExport(() => nativeSubmission),
-        codex: nativeCodexOperations(() => nativeSubmission),
-        ...configuredChannelManagementToolHandler(channelTools),
-        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
-      })
+      productionPluginManagement = await openManagement()
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
       const runHostInput: Parameters<typeof runHost>[0] = {
@@ -979,6 +975,10 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
   } finally {
     try {
       startupLifetime.abort()
+      if (desktopManager) await productionPluginManagement?.close().catch(() => undefined)
+      if (desktopManager && !await desktopManager.close()) {
+        stdout('[cordisx] Manager resource retirement could not be confirmed.')
+      }
       const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
       await nativeSubmissionBootstrap?.close().catch(() => undefined)
       const host = prelaunchedHostHandedOff ? undefined : prelaunchedHost

@@ -18,10 +18,17 @@ const guest: CordisXPageHeaderActionV4 = {
   visual: { kind: 'avatar' },
   menu: [command('profile'), { ...command('disabled'), disabled: { value: true } }, command('settings')],
 }
-function fixture(action = guest) {
+function fixture(action = guest, standalone = false) {
   const dom = new JSDOM('<body><header></header><button id="after">After</button></body>')
   const document = dom.window.document
   const chrome = document.querySelector('header')!
+  if (standalone) {
+    const style = document.createElement('link')
+    style.id = 'cordisx-react-manager-style'
+    style.rel = 'stylesheet'
+    style.href = '/manager-host.css'
+    document.head.append(style)
+  }
   const calls: string[] = []
   let available = true
   let refresh = () => {}
@@ -72,6 +79,17 @@ function fixture(action = guest) {
 }
 
 describe('Host page v4 headers', () => {
+  it('uses the standalone stylesheet without inserting a blocked inline style', () => {
+    const f = fixture(guest, true)
+    try {
+      expect(f.document.querySelector('header style')).toBeNull()
+      expect(f.trigger.classList.contains('cordisx-page-chrome-action')).toBe(true)
+    } finally {
+      f.dispose()
+      f.dom.window.close()
+    }
+  })
+
   it.each(['light', 'dark'])('aligns mixed icon and text menu rows in the %s theme', theme => {
     const f = fixture({
       ...guest,
@@ -91,7 +109,7 @@ describe('Host page v4 headers', () => {
       expect(rows.map(row => row.textContent)).toEqual(['profile', 'source', 'settings'])
       for (const row of rows) {
         expect(f.dom.window.getComputedStyle(row).display).toBe('grid')
-        expect(f.dom.window.getComputedStyle(row).gridTemplateColumns).toBe('16px minmax(0,1fr)')
+        expect(f.dom.window.getComputedStyle(row).gridTemplateColumns.replace(/\s+/gu, '')).toBe('16pxminmax(0,1fr)')
         const leading = row.firstElementChild!
         expect(leading.className).toBe('cordisx-page-header-menu-leading')
         expect(leading.getAttribute('aria-hidden')).toBe('true')

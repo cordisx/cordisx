@@ -758,10 +758,20 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
     const controller = runtimeScope.activeController()!(id)
     return controller === undefined
       ? undefined
-      : runtimeScope.broker()!.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
+      : runtimeScope.broker()!.reviewAuthorizationPlanV4(controller.identity, controller.generationView)
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  configuredPluginGraphGenerations: () =>
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? runtimeScope.controllers()!.flatMap(controller => (
+        controller.status === 'active' && controller.item.standaloneConfiguredGraph === true
+          && controller.item.package === undefined && typeof controller.item.artifactGeneration === 'string'
+          ? [{ pluginId: controller.item.id, moduleGeneration: controller.item.artifactGeneration }]
+          : []
+      ))
+      : [],
+  pluginRegistryEpoch: () => runtimeScope.generationVisibility()!.registryEpoch(),
   releaseCertifiedPermissionChannel: () => {
     const channel = runtimeScope.certifiedPermissionChannel
     runtimeScope.certifiedPermissionChannel = undefined
@@ -902,6 +912,7 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
+  permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone',
   ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
     chatExecution: new ChannelExecutionWorkflow({
       document,

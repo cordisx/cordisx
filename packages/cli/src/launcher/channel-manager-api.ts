@@ -107,6 +107,8 @@ export interface ChannelManagerActionInput {
 
 export interface ChannelManagerConnectionActionInput extends ChannelManagerActionInput {
   readonly ref: ChannelTenantRef
+  /** Optional CAS guard for an explicit local-manager action. */
+  readonly expectedRevision?: number
 }
 
 export interface ChannelManagerBindingActionInput extends ChannelManagerActionInput {

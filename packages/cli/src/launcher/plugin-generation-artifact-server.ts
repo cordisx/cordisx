@@ -491,7 +491,8 @@ async function readVerifiedFile(
   }
 }
 
-function resourceRegistryInstallSource(): string {
+/** Existing browser registry bootstrap, emitted as static JS by Host launchers. */
+export function resourceRegistryInstallSource(): string {
   return `(() => {
   if (globalThis.__cordisxPluginGenerationResourcesV1 !== undefined) return;
   const records = new Map();

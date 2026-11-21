@@ -31,6 +31,7 @@ export async function stageServiceModePlugin(
   profileId: string,
   withService: boolean,
   canonicalSource: string | null = 'https://example.test/fixtures',
+  browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
   const dir = path.join(root, id)
@@ -78,7 +79,7 @@ apply.inject = ['managedServices']
   await Promise.all([
     writeFile(
       path.join(dir, 'index.mjs'),
-      'export function apply() { throw new Error("Desktop fixture must never activate") }',
+      browserSource,
     ),
     writeFile(path.join(dir, 'gateway.mjs'), service),
     writeFile(path.join(dir, 'server.mjs'), backend, { mode: 0o755 }),

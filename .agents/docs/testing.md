@@ -52,8 +52,9 @@ restricted-content fixture skips without its variable; a skipped fixture is
 not browser evidence. CI installs the exact official Chrome for Testing
 156.0.8078.80 Linux archive into a private runner directory, checks its size and
 checksum, and sets both variables to that executable. Setup does not execute the
-browser; the first fixture retains the first launch and its original readiness
-budget. A missing or invalid archive fails the browser job.
+browser; the first fixture retains the cold launch and its 15-second debug-port
+budget. Once the port is published, the first page target has a separate bounded
+10-second readiness budget. A missing or invalid archive fails the browser job.
 Native App smoke remains a separate explicit command, not an ordinary test
 prerequisite. Missing local Chrome does not block unrelated Node/service work.
 

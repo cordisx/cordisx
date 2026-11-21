@@ -18,6 +18,8 @@ export async function startSupervisorControlServer(input: {
   readonly stop: () => void
   readonly readPresentation?: () => Promise<ShortcutPresentation>
   readonly refreshDock?: (recordPath?: string, signal?: AbortSignal) => Promise<boolean>
+  readonly issueManagerLink?: () => Promise<string>
+  readonly issueManagerEntry?: () => Promise<string>
 }): Promise<SupervisorControlServer> {
   await rm(input.socketPath, { force: true })
   const connections = new Set<Socket>()
@@ -53,7 +55,13 @@ export async function startSupervisorControlServer(input: {
         if (request.token !== input.token || Object.keys(request).some(key => !fields.includes(key))) {
           throw new Error('unauthorized control request')
         }
-        if (request.command === 'read-shortcut-presentation' && input.readPresentation) {
+        if (request.command === 'ping') {
+          socket.end('{"ok":true}\n')
+        } else if (request.command === 'issue-manager-entry' && input.issueManagerEntry) {
+          socket.end(JSON.stringify({ entry: await input.issueManagerEntry() }) + '\n')
+        } else if (request.command === 'issue-manager-link' && input.issueManagerLink) {
+          socket.end(JSON.stringify({ url: await input.issueManagerLink() }) + '\n')
+        } else if (request.command === 'read-shortcut-presentation' && input.readPresentation) {
           socket.end(JSON.stringify(presentation(await input.readPresentation())) + '\n')
         } else if (request.command === 'refresh-dock' && input.refreshDock) {
           if (request.recordPath !== undefined && typeof request.recordPath !== 'string') {
@@ -63,8 +71,7 @@ export async function startSupervisorControlServer(input: {
           timer = setTimeout(() => socket.destroy(), DOCK_REFRESH_TIMEOUT_MS)
           socket.end(JSON.stringify({ ok: await input.refreshDock(request.recordPath, controller.signal) }) + '\n')
         } else if (request.command === 'stop') {
-          socket.end('{"ok":true}\n')
-          input.stop()
+          socket.end('{"ok":true}\n', input.stop)
         } else throw new Error('unknown control request')
       } catch {
         socket.end('{"ok":false}\n')
@@ -88,6 +95,57 @@ export async function startSupervisorControlServer(input: {
   }
 }
 
+export async function requestManagerEntry(socketPath: string, token: string): Promise<string | undefined> {
+  return await new Promise(resolve => {
+    const socket = connect(socketPath)
+    let response = ''
+    socket.setTimeout(4_000, () => socket.destroy())
+    socket.setEncoding('utf8')
+    socket.on('error', () => {})
+    socket.on('data', chunk => {
+      response += chunk
+      if (response.length > MAX_LINE) socket.destroy()
+    })
+    socket.once('close', () => {
+      try {
+        const value = JSON.parse(response) as { entry?: unknown }
+        resolve(typeof value.entry === 'string' ? value.entry : undefined)
+      } catch {
+        resolve(undefined)
+      }
+    })
+    socket.once('connect', () => socket.end(JSON.stringify({ token, command: 'issue-manager-entry' }) + '\n'))
+  })
+}
+
+/** Only the profile-scoped private control socket may mint an ephemeral browser link. */
+export async function requestManagerLink(socketPath: string, token: string): Promise<string | undefined> {
+  return await new Promise(resolve => {
+    const socket = connect(socketPath)
+    let response = ''
+    socket.setTimeout(4_000, () => socket.destroy())
+    socket.setEncoding('utf8')
+    socket.on('error', () => {})
+    socket.on('data', chunk => {
+      response += chunk
+      if (response.length > MAX_LINE) socket.destroy()
+    })
+    socket.once('close', () => {
+      try {
+        const value = JSON.parse(response) as { url?: unknown }
+        resolve(
+          typeof value.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/#[a-f0-9]{64}$/u.test(value.url)
+            ? value.url
+            : undefined,
+        )
+      } catch {
+        resolve(undefined)
+      }
+    })
+    socket.once('connect', () => socket.end(JSON.stringify({ token, command: 'issue-manager-link' }) + '\n'))
+  })
+}
+
 export async function requestDockRefresh(socketPath: string, token: string, recordPath?: string): Promise<boolean> {
   return await new Promise(resolve => {
     const socket = connect(socketPath)
@@ -108,6 +166,14 @@ export async function requestDockRefresh(socketPath: string, token: string, reco
 }
 
 export async function requestSupervisorStop(socketPath: string, token: string): Promise<boolean> {
+  return await requestSupervisorBoolean(socketPath, token, 'stop')
+}
+
+export async function requestSupervisorPing(socketPath: string, token: string): Promise<boolean> {
+  return await requestSupervisorBoolean(socketPath, token, 'ping')
+}
+
+async function requestSupervisorBoolean(socketPath: string, token: string, command: 'stop' | 'ping'): Promise<boolean> {
   return await new Promise<boolean>(resolve => {
     const socket: Socket = connect(socketPath)
     let response = ''
@@ -118,7 +184,7 @@ export async function requestSupervisorStop(socketPath: string, token: string): 
       response += chunk
     })
     socket.once('close', () => resolve(response === '{"ok":true}\n'))
-    socket.once('connect', () => socket.end(`${JSON.stringify({ token, command: 'stop' })}\n`))
+    socket.once('connect', () => socket.end(`${JSON.stringify({ token, command })}\n`))
   })
 }
 

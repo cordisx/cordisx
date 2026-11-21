@@ -34,6 +34,7 @@ import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from '
 import { type HomeMcpConfig, parseHomeMcpConfig } from './home-config-mcp.js'
 import { type HomeConfigPublisherGrantIssuer, parsePublisherGrantIssuer } from './home-config-issuers.js'
 import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-execution-settings.js'
+import { captureHomeProfileInputs, fenceChangedHomeProfileInputs } from './home-profile-input-fence.js'
 
 export type { JsonValue } from './home-config-values.js'
 export type { HomeConfigPublisherGrantIssuer } from './home-config-issuers.js'
@@ -964,9 +965,35 @@ export async function updateHomeConfigAtomic(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       current = createDefaultHomeConfig()
     }
+    const previousInputs = captureHomeProfileInputs(current)
     const updated = parseHomeConfig(await updater(current))
-    await publishAtomic(configPath, updated)
-    return updated
+    const releaseProfileInputs = await fenceChangedHomeProfileInputs(
+      configPath,
+      previousInputs,
+      updated,
+    )
+    try {
+      await publishAtomic(configPath, updated)
+      return updated
+    } finally {
+      await releaseProfileInputs()
+    }
+  } finally {
+    await lock.release()
+  }
+}
+
+/** Read the complete existing document while excluding normal CordisX config writers. */
+export async function withLockedExistingHomeConfig<T>(
+  configPath: string,
+  action: (raw: unknown) => Promise<T>,
+): Promise<T> {
+  const absolutePath = path.resolve(configPath)
+  const lock = await acquireLock(absolutePath, {}, 'home config')
+  try {
+    const raw = await readConfigDocument(absolutePath, 'home config')
+    validateConfigDocument(raw, absolutePath, 'home config', parseHomeConfig)
+    return await action(raw)
   } finally {
     await lock.release()
   }

@@ -12,12 +12,22 @@ import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
-import { createServicePluginRuntime } from '../launcher/service-plugin-runtime.js'
+import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
+import { ServiceRendererParticipants } from './service-renderer-participant.js'
+import { createServiceRendererProjector } from './service-renderer-projection.js'
+import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
+import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
+import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
+import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
+import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
+import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -50,9 +60,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+      let terminalProvider: ReturnType<typeof createServiceTerminalProvider> | undefined
       let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
+      let managerChannel: ReturnType<typeof createManagerChannelCredentials> = undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
+      let rendererLifecycle: ServiceRendererLifecycle | undefined
+      let rendererParticipants: ServiceRendererParticipants | undefined
+      let rendererBootstrap: ServiceRendererBootstrap | undefined
+      let rendererReadonlyChannel: ReadonlyChannelRendererBridge | undefined
+      let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
+      let ownerOpen = true
       let failure: unknown
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
@@ -66,8 +84,20 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             policy => policy.key.profileId === profileId,
           )
         const config = await loadHomeConfig(configPath)
+        const rendererScope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation }
+        rendererParticipants = new ServiceRendererParticipants(rendererScope)
+        rendererLifecycle = new ServiceRendererLifecycle({
+          scope: rendererScope,
+          projectMutation: createServiceRendererProjector({
+            homeDir,
+            profileId,
+            generation,
+            isLive: identity => rendererParticipants!.isLive(identity),
+          }),
+        })
+        rendererParticipants.bind(rendererLifecycle)
         services = createProductionManagedServiceLifecycle({
-          runtime: createServicePluginRuntime(generation),
+          runtime: rendererLifecycle,
           homeDir,
           profileId,
           generation,
@@ -76,6 +106,14 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           startupConfig: config.apps[appId]?.profiles[profileId]?.managedServiceStartupConfig,
           dryRun: false,
           requireOwnedProcess: true,
+        })
+        rendererManagedServiceUI = createManagerManagedServiceUIBridge({
+          profileId,
+          runtimeGeneration: generation,
+          ownerGeneration: generation,
+          ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
+          readLifecycleFence: () => services!.readManagedServiceUIFence(),
+          runtime: services,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)
@@ -112,8 +150,14 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           activation: services.nativeActivation(),
           ...(managed === undefined ? {} : { managed }),
         })
-        const startup = await services.initialize(await store.bindRuntimeGeneration())
+        const active = await store.bindRuntimeGeneration()
+        rendererLifecycle.initialize(active)
+        const startup = await services.initialize(active)
         await startup.coreReady
+        terminalProvider = createServiceTerminalProvider({
+          activation: services.nativeActivation(),
+          ...(managed === undefined ? {} : { managed }),
+        })
         lifetime.signal.removeEventListener('abort', stopServices)
         lifetime.signal.throwIfAborted()
         if (appId === 'codex') {
@@ -124,6 +168,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             appId,
             profileId,
             generation,
+            profileOwnerVerified: releaseRuntimeOwner !== undefined,
             userHome,
             codexHome: environment.CODEX_HOME || path.join(userHome, '.codex'),
             codexExecutable: 'codex',
@@ -133,6 +178,58 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           })
         }
         lifetime.signal.throwIfAborted()
+        managerChannel = createManagerChannelCredentials({
+          plugin: channel?.managerChannelOwner?.plugin,
+          service: channel?.managerChannelOwner?.service,
+          lifecycle: services,
+          configPath,
+          profileId,
+          generation,
+          ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
+        }, releaseRuntimeOwner !== undefined)
+        const protectProfileInputs = process.platform === 'darwin' || process.platform === 'linux'
+        const channelOwner = channel?.managerChannelOwner
+        if (
+          protectProfileInputs && releaseRuntimeOwner !== undefined && channelOwner
+          && channelOwner.plugin.configuredArchiveDigest !== undefined
+          && channelOwner.plugin.package === undefined && channelOwner.plugin.development === undefined
+        ) {
+          rendererReadonlyChannel = new ReadonlyChannelRendererBridge({
+            profileId,
+            generation,
+            isCurrent: context =>
+              ownerOpen && !lifetime.signal.aborted
+              && rendererParticipants?.peer(context.rendererId) !== undefined,
+          })
+        }
+        rendererBootstrap = new ServiceRendererBootstrap({
+          homeDir,
+          configPath,
+          appId,
+          profileId,
+          generation,
+          lifecycle: rendererLifecycle,
+          participants: rendererParticipants,
+          store,
+          managedServiceUI: rendererManagedServiceUI,
+          protectProfileInputs,
+          ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {
+            experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },
+          }),
+        })
+        const codex = channel?.codex ?? createHeadlessCodexOperations({
+          configPath,
+          environment,
+          closed: () => lifetime.signal.aborted,
+        })
+        const rendererModelServices = createManagerRendererModelServicesChannel({
+          profileId,
+          generation,
+          isCurrent: context =>
+            ownerOpen && !lifetime.signal.aborted
+            && rendererParticipants?.peer(context.rendererId) !== undefined,
+          call: codex,
+        })
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -141,14 +238,31 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           runtimeGeneration: generation,
           token: randomUUID(),
           coordinator,
+          rendererParticipant: rendererParticipants.participant,
+          rendererParticipants,
+          rendererLifecycle,
+          rendererBootstrap: rendererBootstrap.channel(),
+          rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
+          rendererWriteLifetimes: rendererBootstrap.writeLifetimes,
+          rendererReadLifetimes: rendererBootstrap.readLifetimes,
+          rendererManagedServiceUI: rendererManagedServiceUI.channel,
+          rendererModelServices,
+          ...(rendererReadonlyChannel === undefined
+            ? {}
+            : { rendererReadonlyChannel: rendererReadonlyChannel.channel }),
           mode: 'service',
+          managerServiceAuth: operation => services!.managerAuth(operation),
+          ...(managerChannel === undefined
+            ? {}
+            : { managerChannelCredentials: operation => managerChannel!.handle(operation) }),
+          terminalProvider: request => terminalProvider!.request(request),
           ...(channel?.channel === undefined
             ? {}
             : {
               channel: (operation: string, value: unknown, metadata?: unknown) =>
                 channel!.channel!.tools.callLocal(operation, value, metadata),
             }),
-          ...(channel === undefined ? {} : { codex: channel.codex }),
+          codex,
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
         diagnostic({ event: 'service-ready' })
@@ -156,11 +270,23 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       } catch (error) {
         if (!lifetime.signal.aborted) failure = error
       } finally {
+        ownerOpen = false
         lifetime.signal.removeEventListener('abort', stopServices)
         for (
           const close of [
             () => api?.close(),
+            async () => {
+              if (rendererBootstrap && !await rendererBootstrap.close()) {
+                throw new Error('renderer-bootstrap-retirement-unconfirmed')
+              }
+            },
+            () => rendererReadonlyChannel?.close(),
+            () => rendererManagedServiceUI?.dispose(),
+            () => rendererParticipants?.close(),
+            () => rendererLifecycle?.close(),
             () => management?.close(),
+            () => managerChannel?.close(),
+            () => terminalProvider?.close(),
             () => channel?.close(),
             () => services?.dispose(),
             () => managed?.close(),

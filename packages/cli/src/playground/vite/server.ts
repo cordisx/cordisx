@@ -22,6 +22,7 @@ export interface VitePlaygroundOptions {
   readonly homeDir?: string
   readonly port?: number
   readonly host?: '127.0.0.1' | '::1'
+  readonly managerPresentationMode?: 'standalone'
 }
 
 export interface VitePlaygroundHandle {
@@ -52,6 +53,9 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
   let vite: ViteDevServer | undefined
   const session = await createPlaygroundSession(options.configPath, {
     ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+    ...(options.managerPresentationMode === undefined
+      ? {}
+      : { managerPresentationMode: options.managerPresentationMode }),
     onEffectiveConfigCommitted() {
       const composition = vite?.moduleGraph.getModuleById(RESOLVED_COMPOSITION_ID)
       if (composition !== undefined) vite?.moduleGraph.invalidateModule(composition)

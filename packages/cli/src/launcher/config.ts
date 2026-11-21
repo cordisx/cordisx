@@ -54,6 +54,8 @@ export interface CordisXConfigPlugin {
   readonly source?: string
   /** Host-verified distribution identity for configured archives, independent of activation records. */
   readonly distributionArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
+  /** Owner-private staged package digest for a verified configured archive. */
+  readonly configuredArchiveDigest?: `sha256:${string}`
   /** Host-private immutable service entry for a configured archive. */
   readonly configuredServiceEntry?: './services/runtime.mjs'
   readonly manifest?:

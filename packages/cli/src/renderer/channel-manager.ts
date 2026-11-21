@@ -56,13 +56,19 @@ import type { RequestedScope } from './platform/platform-permission-store.js'
 import { generationVisibilityFromContext } from './generation-visibility.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
+import { type ChannelManagerActionsApi, restrictChannelManagerActions } from './channel-manager-actions.js'
+export type { ChannelManagerActionsApi } from './channel-manager-actions.js'
+import {
+  adoptChannelSnapshot,
+  markChannelSnapshotUnavailable,
+  readChannelSnapshot,
+} from './channel-manager-unavailable.js'
 import {
   type ChannelManagerConnectionProjection,
   type ChannelManagerProjectionV1,
   compositeRef,
   EMPTY_PROJECTION,
   normalizeProjection,
-  withRuntimeProjection,
 } from './channel-manager-projection.js'
 export type {
   ChannelManagerAccountProjection,
@@ -75,42 +81,6 @@ export type {
   ChannelProductStatus,
 } from './channel-manager-projection.js'
 
-/** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
-export interface ChannelManagerActionsApi {
-  run(
-    action:
-      | 'enable'
-      | 'disable'
-      | 'reconnect'
-      | 'archive'
-      | 'restore'
-      | 'unbind'
-      | 'snapshot'
-      | 'policy'
-      | 'policy-set'
-      | 'continuation-defaults'
-      | 'continuation-defaults-set'
-      | 'execution-defaults'
-      | 'execution-defaults-set'
-      | 'channel-execution-defaults'
-      | 'channel-execution-defaults-set'
-      | 'execution-settings'
-      | 'execution-settings-set'
-      | 'model-list'
-      | 'task-config'
-      | 'task-config-set'
-      | 'task-settings'
-      | 'task-settings-set'
-      | 'binding-labels'
-      | 'conversation-page'
-      | 'conversation-detail'
-      | 'conversation-activity'
-      | 'conversation-bindings'
-      | 'binding-navigation',
-    input: Record<string, unknown>,
-  ): Promise<ChannelManagerActionResult>
-}
-
 export interface ChannelManagerServiceConfigApi {
   list(): Promise<readonly HostServiceConfigDescriptor[]>
   mutate(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
@@ -118,6 +88,7 @@ export interface ChannelManagerServiceConfigApi {
 
 export interface ChannelManagerServiceInput {
   readonly navigateConversation?: (sessionId: string) => Promise<void> | void
+  readonly presentationMode?: 'standard' | 'snapshot-only'
   readonly profileId?: string
   readonly hostGeneration?: string
   readonly projection?: ChannelManagerProjectionV1
@@ -144,17 +115,25 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
     const wrapped = 'projection' in candidate || 'serviceConfig' in candidate || 'credentialRequest' in candidate
+        || 'presentationMode' in candidate || 'actions' in candidate
       ? candidate as ChannelManagerServiceInput
       : { projection: candidate as ChannelManagerProjectionV1 }
+    const snapshotOnly = wrapped.presentationMode === 'snapshot-only' || wrapped.actions?.snapshotOnly === true
+    if (
+      snapshotOnly && (wrapped.serviceConfig !== undefined || wrapped.credentialRequest !== undefined
+        || wrapped.createCredentialedConnection !== undefined)
+    ) throw new Error('snapshot-only Channel Manager cannot expose configuration or credentials')
+    const actions = restrictChannelManagerActions(wrapped.actions, snapshotOnly)
     registerChannelManagerState(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
+      snapshotOnly,
       ...(wrapped.credentialRequest === undefined ? {} : { credentialRequest: wrapped.credentialRequest }),
       ...(wrapped.broker === undefined ? {} : { broker: wrapped.broker }),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
       ...(wrapped.createCredentialedConnection === undefined
         ? {}
         : { createCredentialedConnection: wrapped.createCredentialedConnection }),
-      ...(wrapped.actions === undefined ? {} : { actions: wrapped.actions }),
+      ...(actions === undefined ? {} : { actions }),
       localConnections: [],
       listeners: new Set<() => void>(),
       cachedProjection: undefined,
@@ -184,7 +163,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
         },
       })
     }
-    initializeChannelManagerWorkflows(state, wrapped)
+    if (!snapshotOnly) initializeChannelManagerWorkflows(state, wrapped)
     state.publicController = new PublicChannelManagerController({
       profileId: wrapped.profileId ?? 'default',
       hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
@@ -192,15 +171,17 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       ...(state.credentials === undefined ? {} : { credentials: state.credentials }),
       configurationAvailable: () => state.serviceConfig !== undefined && state.projection.service.writable,
       update: (ref, patch) => this.updateConfiguration(ref, patch),
-      actionsAvailable: () => stateFor(this).actions !== undefined,
+      actionsAvailable: () => stateFor(this).actions !== undefined && stateFor(this).actions!.snapshotOnly !== true,
+      logsAvailable: () => !snapshotOnly,
       runAction: async (action, value) => await this.runAction(action, value),
     })
-    if (wrapped.actions) {
+    if (snapshotOnly && actions === undefined) markChannelSnapshotUnavailable(state)
+    if (actions && !snapshotOnly) {
       state.conversations = new ChannelConversationWorkflow({
         profileId: wrapped.profileId ?? 'default',
         hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
         controller: state.publicController,
-        actions: wrapped.actions,
+        actions,
         caller: 'detached',
         live: () => false,
         authorize: async () => false,
@@ -644,18 +625,14 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     signal.throwIfAborted()
     this.assertOwnedRead()
     const state = stateFor(this)
-    if (state.actions === undefined || state.disposed || !state.isCurrent()) return
-    const sequence = ++state.refreshSequence
-    const result = await state.actions.run('snapshot', {})
+    const result = await readChannelSnapshot(state, signal, () => this.notifyListeners())
     if (
-      signal.aborted || state.disposed || !state.isCurrent() || state.refreshSequence !== sequence
-      || result.projection === undefined
+      result === undefined || signal.aborted || state.disposed || !state.isCurrent()
+      || state.refreshSequence !== result.sequence
     ) return
     this.assertOwnedRead()
     const before = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
-    // Normalize the entire readback before it can replace any last-good account data.
-    withRuntimeProjection(state.projection, result.projection)
-    state.runtimeProjection = result.projection
+    adoptChannelSnapshot(state, result.projection, () => this.notifyListeners())
     const after = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
     if (before === after) return
     state.cachedProjection = undefined
@@ -854,7 +831,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     return serviceOwnerFor(this) === undefined || this.ownedServiceAllowed('channel.accounts.read')
   }
 
-  private assertOwnedRead(): void {
+  protected assertOwnedRead(): void {
     if (!this.ownedReadAllowed()) throw new Error('PERMISSION_DENIED')
   }
 
@@ -957,10 +934,6 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     const create = stateFor(this).createCredentialedConnection
     if (create === undefined) throw new Error('channel-credential-capture-unavailable')
     return create(input)
-  }
-
-  private actionsAvailable(): boolean {
-    return stateFor(this).actions !== undefined
   }
 
   private async runAction(

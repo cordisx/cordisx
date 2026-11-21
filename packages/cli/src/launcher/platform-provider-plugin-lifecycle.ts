@@ -32,6 +32,18 @@ export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRu
 
   constructor(private readonly runtime: PluginLifecycleRuntime) {}
 
+  get preflight(): PluginLifecycleRuntime['preflight'] {
+    return this.runtime.preflight?.bind(this.runtime)
+  }
+
+  get requiresBrowserArtifacts(): PluginLifecycleRuntime['requiresBrowserArtifacts'] {
+    return this.runtime.requiresBrowserArtifacts?.bind(this.runtime)
+  }
+
+  get browserArtifactServer(): PluginLifecycleRuntime['browserArtifactServer'] {
+    return this.runtime.browserArtifactServer?.bind(this.runtime)
+  }
+
   connect(reconfigure: (activation: CordisXPluginActivationRecordV1) => Promise<ProviderTransaction>): void {
     this.reconfigure = reconfigure
   }

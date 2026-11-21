@@ -17,13 +17,28 @@ import type { HostServiceCapabilityOwner } from '../service-capability-ownership
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 import { readPluginDocuments } from './plugin-documents.js'
 import { resolveOwningPackageVersion } from './package-version.js'
+import { resourceRegistryInstallSource } from './plugin-generation-artifact-server.js'
+import { isStandaloneRuntimeGraph } from './standalone-runtime-graph.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
+
+/** Owner-private, per-session admission; never populated from a browser request. */
+export interface StandaloneOwnerAttachment {
+  readonly rendererId: string
+  readonly profileId: string
+  readonly generation: string
+  readonly managerOrigin: string
+  /** Must recheck the current owner generation and live renderer session. */
+  readonly isCurrent: () => boolean | Promise<boolean>
+}
 
 export interface BuildRendererBundleOptions {
   readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   /** Use only explicit CordisX Playground seats; never inspect Codex DOM. */
   readonly playground?: boolean
   /** Host-private preview mode; normal launches retain the overlay presentation. */
-  readonly managerPresentationMode?: 'workspace'
+  readonly managerPresentationMode?: 'workspace' | 'standalone'
+  /** Only a live profile owner may supply this private assembly capability. */
+  readonly standaloneOwner?: StandaloneOwnerAttachment
   readonly nativeAppVersion?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
@@ -83,6 +98,95 @@ export interface RendererCompositionSource {
 export interface ProductionRendererBundleAudit {
   readonly bytes: number
   readonly hasInlineSourceMap: boolean
+}
+
+async function assertStandaloneOwner(
+  config: CordisXConfig,
+  options: BuildRendererBundleOptions,
+): Promise<boolean> {
+  const owner = options.standaloneOwner
+  if (options.managerPresentationMode !== 'standalone') {
+    if (owner !== undefined) throw new Error('Standalone owner scope is only valid for the standalone Manager')
+    return false
+  }
+  if (options.playground === true) {
+    if (owner !== undefined) throw new Error('Standalone owner scope cannot be combined with Playground')
+    return false
+  }
+  if (owner === undefined) {
+    throw new Error('Standalone Manager runtime is not yet available outside the isolated UI Playground')
+  }
+  const activation = options.pluginActivation
+  let managerOriginValid = false
+  try {
+    const origin = new URL(owner.managerOrigin)
+    managerOriginValid = origin.origin === owner.managerOrigin && origin.protocol === 'http:'
+      && origin.hostname === '127.0.0.1' && origin.port !== ''
+  } catch { /* invalid origins cannot admit a renderer */ }
+  if (
+    !/^[a-f0-9]{64}$/u.test(owner.rendererId)
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(owner.profileId)
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(owner.generation)
+    || typeof owner.isCurrent !== 'function' || !managerOriginValid
+    || options.profileId !== owner.profileId || options.generation !== owner.generation
+    || options.permission?.profileId !== owner.profileId
+    || options.permission.policies.some(policy => policy.key.profileId !== owner.profileId)
+    || options.permission.bridgeToken !== undefined
+      && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
+    || activation?.recordKind !== 'active' || !Array.isArray(activation.plugins)
+    || activation.profileId !== owner.profileId
+    || activation.runtimeGeneration !== owner.generation
+    || !Number.isSafeInteger(options.initialRegistryEpoch) || (options.initialRegistryEpoch as number) < 0
+    || options.pluginManagement !== undefined && options.pluginManagement.profileId !== owner.profileId
+  ) throw new Error('Standalone Manager owner scope is invalid')
+  const configuredPackages = config.plugins.filter(plugin => plugin.package !== undefined)
+  for (const plugin of config.plugins) {
+    if (plugin.enabled && usesIsolatedWorker(plugin)) {
+      throw new Error('Standalone Manager isolated worker projection is unavailable')
+    }
+    if (
+      plugin.package === undefined && plugin.runtimeGraph !== undefined
+      && !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
+        origin: owner.managerOrigin,
+        pluginId: plugin.id,
+        generation: plugin.runtimeGraph.moduleGeneration,
+      })
+    ) throw new Error('Standalone Manager plugin graph projection is unavailable')
+  }
+  if (configuredPackages.length !== activation.plugins.length) {
+    throw new Error('Standalone Manager activation projection is incomplete')
+  }
+  const byId = new Map(configuredPackages.map(plugin => [plugin.id, plugin]))
+  if (
+    byId.size !== configuredPackages.length
+    || new Set(activation.plugins.map(item => item.id)).size !== activation.plugins.length
+  ) {
+    throw new Error('Standalone Manager activation projection is invalid')
+  }
+  for (const item of activation.plugins) {
+    const plugin = byId.get(item.id)
+    if (
+      !plugin || !plugin.package || plugin.enabled !== item.enabled || plugin.package.digest !== item.digest
+      || plugin.package.version !== item.version || plugin.package.moduleGeneration !== item.moduleGeneration
+      || JSON.stringify(plugin.package.dependencies) !== JSON.stringify(item.dependencies)
+      || plugin.package.canonicalSource !== item.canonicalSource
+    ) throw new Error('Standalone Manager activation projection is stale')
+    if (
+      plugin.enabled && !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
+        origin: owner.managerOrigin,
+        pluginId: plugin.id,
+        generation: plugin.package.moduleGeneration,
+      })
+    ) throw new Error('Standalone Manager plugin graph projection is unavailable')
+  }
+  let current = false
+  try {
+    current = await owner.isCurrent() === true
+  } catch { /* unavailable ownership never admits a renderer */ }
+  if (!current) {
+    throw new Error('Standalone Manager owner attachment is unavailable')
+  }
+  return true
 }
 
 function bundledArtifactGeneration(plugin: CordisXConfigPlugin, moduleSource: string): string {
@@ -183,6 +287,10 @@ export async function buildRendererCompositionSource(
   options: BuildRendererBundleOptions = {},
   sourceOptions: RendererCompositionSourceOptions = {},
 ): Promise<RendererCompositionSource> {
+  const attachedStandalone = await assertStandaloneOwner(config, options)
+  if (attachedStandalone && (sourceOptions.omitPluginModules === true || sourceOptions.awaitBoot === true)) {
+    throw new Error('Standalone Manager owner composition cannot use an implicit development bootstrap')
+  }
   if (config.codex.agentLoopBackend === 'mock' && options.playground !== true) {
     throw new Error('config.codex.agentLoopBackend mock is available only in the explicit UI Playground')
   }
@@ -300,6 +408,9 @@ export async function buildRendererCompositionSource(
       const artifactGenerationField = index === undefined || plugin.package !== undefined
         ? ''
         : `, artifactGeneration: ${JSON.stringify(pluginBundles[index]!.artifactGeneration)}`
+      const configuredGraphField = attachedStandalone && plugin.package === undefined && graphModule !== undefined
+        ? ', standaloneConfiguredGraph: true'
+        : ''
       const readme = readmes[pluginIndex]
       const readmeField = readme?.default === undefined ? '' : `, readme: ${JSON.stringify(readme.default)}`
       const localizedReadmes = readme === undefined ? {} : {
@@ -324,7 +435,7 @@ export async function buildRendererCompositionSource(
         JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)
       }, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${
         plugin.revision ?? 0
-      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
+      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${configuredGraphField}${moduleField}${isolatedArtifactField} }`
     }).join(',')
   }]`
   const providers = [
@@ -382,14 +493,18 @@ export async function buildRendererCompositionSource(
   if (options.playgroundSessionScenarios !== undefined && options.playground !== true) {
     throw new Error('Playground Session scenarios are available only in the explicit UI Playground')
   }
-  const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${
-    JSON.stringify(config.rootDir)
+  const metadata = `{ version: ${JSON.stringify(version)}${
+    attachedStandalone ? '' : `, workspaceCwd: ${JSON.stringify(config.rootDir)}`
   }, executionPlatform: ${
     JSON.stringify(options.executionPlatform ?? (process.platform === 'win32' ? 'win32' : 'posix'))
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${
     JSON.stringify(permission.policies)
-  }${options.playground === true ? ', hostKind: "playground"' : ''}${
-    options.managerPresentationMode === 'workspace' ? ', managerPresentationMode: "workspace"' : ''
+  }${options.playground === true ? ', hostKind: "playground"' : attachedStandalone ? ', hostKind: "standalone"' : ''}${
+    attachedStandalone ? `, standaloneRendererId: ${JSON.stringify(options.standaloneOwner!.rendererId)}` : ''
+  }${
+    options.managerPresentationMode === undefined
+      ? ''
+      : `, managerPresentationMode: ${JSON.stringify(options.managerPresentationMode)}`
   }${options.nativeAppVersion === undefined ? '' : `, nativeAppVersion: ${JSON.stringify(options.nativeAppVersion)}`}${
     config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''
   }${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${
@@ -486,8 +601,9 @@ export async function buildRendererCompositionSource(
     : `const __cordisxPluginGraphModules = await Promise.all([${graphLoads.join(',')}])`
   const graphPublishSource = runtimeGraphs.map(graph => `${graph.publishSource};`).join('\n')
   const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
+  const standaloneSignal = attachedStandalone ? ', undefined, signal' : ''
   const boot = runtimeGraphs.length === 0
-    ? `installCordisX(${composition}, ${metadata})`
+    ? `installCordisX(${composition}, ${metadata}${standaloneSignal})`
     : `installCordisXComposition(async () => {
 ${graphLoadSource}
 return ${composition}
@@ -495,11 +611,13 @@ return ${composition}
 ${graphPublishSource}
 }, () => {
 ${graphRetireSource}
-})`
+}${standaloneSignal})`
   const compositionBoot = `const __cordisxCompositionBoot = ${boot}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
+  const registryBootstrap = attachedStandalone ? resourceRegistryInstallSource() : ''
   const hostGraphLaunchSource =
-    `export async function bootCordisXComposition(installCordisX, installCordisXComposition) {
+    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal) {
+${registryBootstrap}
 return await ${boot}
 }
 `
@@ -517,17 +635,39 @@ return await ${boot}
       providers,
       profileId: permission.profileId,
       playground: options.playground === true,
+      attachedStandalone,
       managerPresentationMode: options.managerPresentationMode,
       agentLoopBackend: config.codex.agentLoopBackend,
       appId: options.appId,
       iconThemePreference: options.iconThemePreference,
     }))
     .digest('hex')
-  const source = sourceOptions.awaitBoot === true
-    ? `${imports.join('\n')}\n${compositionBoot}\nexport const runtime = await __cordisxCompositionBoot\n`
+  const source = attachedStandalone
+    ? `${imports.join('\n')}
+let __cordisxStandaloneStarted = false;
+export function startStandaloneManagerComposition(signal) {
+  if (__cordisxStandaloneStarted || !signal || signal.aborted || typeof signal.addEventListener !== 'function') {
+    throw new Error('Standalone Manager session is unavailable');
+  }
+  __cordisxStandaloneStarted = true;
+  ${registryBootstrap};
+  return Promise.resolve().then(() => {
+    signal.throwIfAborted();
+    return ${boot};
+  }).catch(error => {
+    globalThis.__cordisxPluginGenerationResourcesV1?.dispose();
+    throw error;
+  });
+}
+`
+    : sourceOptions.awaitBoot === true
+    ? `${
+      imports.join('\n')
+    }\n${registryBootstrap}\n${compositionBoot}\nexport const runtime = await __cordisxCompositionBoot\n`
     : `${
       imports.join('\n')
-    }\n${compositionBoot}\nvoid __cordisxCompositionBoot.catch(error => console.error('[cordisx] boot failed', error))\n`
+    }\n${registryBootstrap}\n${compositionBoot}\nvoid __cordisxCompositionBoot.catch(error => console.error('[cordisx] boot failed', error))\n`
+  if (attachedStandalone) await assertStandaloneOwner(config, options)
   return {
     source,
     hostGraphLaunchSource,
@@ -560,7 +700,7 @@ export async function buildRendererBundle(
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'cordisx-composition.ts' },
     bundle: true,
-    format: 'iife',
+    format: options.standaloneOwner === undefined ? 'iife' : 'esm',
     platform: 'browser',
     target: ['chrome120'],
     // Native production injection is one CDP payload.  Never put an inline
@@ -579,6 +719,7 @@ export async function buildRendererBundle(
   })
   const output = result.outputFiles[0]
   if (output === undefined) throw new Error('esbuild produced no renderer bundle')
+  if (options.standaloneOwner !== undefined) await assertStandaloneOwner(config, options)
   return output.text
 }
 

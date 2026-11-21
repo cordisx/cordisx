@@ -545,6 +545,18 @@ export function createManagedServiceSource(
           error: Object.freeze({ code: 'binding-replaced' as const, message: 'binding was replaced' }),
         }))
       }
+      if (request.expectedSequence !== sequence) {
+        return Promise.resolve(Object.freeze({
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+          contract: 'cordisx.managed-service-login-result/v1',
+          schemaVersion: 1,
+          requestId: request.requestId,
+          binding,
+          status: 'denied' as const,
+          error: Object.freeze({ code: 'stale-revision' as const, message: 'projection sequence is stale' }),
+        }))
+      }
       return options.registrationHandle.authenticate('login').then(result => {
         ensureNotDisposed()
         sequence += 1

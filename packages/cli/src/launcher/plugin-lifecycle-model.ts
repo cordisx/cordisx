@@ -1,7 +1,12 @@
 import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
-import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
+import {
+  assertBundlePolicyDecision,
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  type DeferredPermissionPlan,
+} from '../permission-deferral.js'
 import {
   type CordisXPluginManifestV12,
   type CordisXPluginManifestV13,
@@ -165,9 +170,24 @@ export interface ManagedServiceUICapabilityMutation {
   readonly token: string
 }
 
+/** Owner-only admission before any lifecycle transaction or renderer work begins. */
+export interface PluginRuntimePreflight {
+  readonly transactionId: string
+  readonly operation: PluginRuntimeMutation['operation']
+  readonly previous: CordisXPluginActivationRecordV1
+  readonly candidate: CordisXPluginActivationRecordV1
+  readonly targetId: string
+  readonly package?: StagedPluginPackage
+}
+
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
 export interface PluginLifecycleRuntime {
+  readonly preflight?: ((input: PluginRuntimePreflight) => Promise<void>) | undefined
   prepare?(transactionId: string): RuntimeGenerationFence
+  /** Host-private: true only for the frozen transaction with renderer participants. */
+  readonly requiresBrowserArtifacts?: ((transactionId: string) => boolean) | undefined
+  /** The same owner creates and retains every graph lease; never serialize this server. */
+  readonly browserArtifactServer?: ((transactionId: string) => Promise<PluginGenerationArtifactServer>) | undefined
   /** Host-private first-browser-graph admission; it returns with the normal generation fence already held. */
   prepareBrowserGraph?(
     transactionId: string,
@@ -435,7 +455,7 @@ export function authorizationPlanV2(
     throw new LifecycleFailure('permission-denied', 'Permission V2 review requires manifest-v4.')
   }
   const catalog = new CapabilityRiskCatalog()
-  return buildPermissionAuthorizationPlanV2({
+  const plan = buildPermissionAuthorizationPlanV2({
     planId: `${generation}:${staged.manifest.id}`,
     operation,
     profileId,
@@ -458,6 +478,13 @@ export function authorizationPlanV2(
       }
     },
   }, catalog)
+  const operationId = permissionReviewOperationId(plan)
+  return Object.freeze({ ...plan, planId: operationId, binding: Object.freeze({ ...plan.binding, operationId }) })
+}
+
+/** Bind a lifecycle review to the exact owner-projected plan without exposing its policies. */
+export function permissionReviewOperationId(plan: unknown): string {
+  return `review:${createHash('sha256').update(JSON.stringify(plan)).digest('hex')}`
 }
 
 export function authorizationPlanV4(
@@ -478,7 +505,7 @@ export function authorizationPlanV4(
     )
   }
   const catalog = new CapabilityRiskCatalog()
-  return buildPermissionAuthorizationPlanV4({
+  const plan = buildPermissionAuthorizationPlanV4({
     planId: `${generation}:${staged.manifest.id}`,
     operation,
     profileId,
@@ -498,6 +525,8 @@ export function authorizationPlanV4(
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
   }, catalog)
+  const operationId = permissionReviewOperationId(plan)
+  return Object.freeze({ ...plan, binding: Object.freeze({ ...plan.binding, operationId }) })
 }
 
 export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {
@@ -528,6 +557,20 @@ export function validateDecisionV2(
       && item.decision.startsWith('deny')
     ))
   ) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+}
+
+/** The exact v7 review is checked before any activation can begin. */
+export function validateDecisionV7(
+  plan: DeferredPermissionPlan,
+  decision: DeferredPermissionDecision,
+  selections?: Readonly<Record<string, 'allow' | 'deny'>>,
+): void {
+  try {
+    if (selections === undefined) assertDeferredPermissionDecision(plan, decision)
+    else assertBundlePolicyDecision(plan, decision, selections)
+  } catch {
+    throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+  }
 }
 
 export function validateDecisionV4(

@@ -3,6 +3,10 @@ import type { TerminalProviderRequest, TerminalProviderResult } from '../launche
 import type { ModelExportRequest } from './model-export-parse.js'
 import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
+import type { RendererConfigOperation, RendererConfigResult } from '../launcher/renderer-config-management.js'
+import type { ManagerServiceAuthOperation } from '../launcher/manager-service-auth.js'
+import type { ManagerChannelCredentialOperation } from '../launcher/manager-channel-credentials.js'
+import { applyManagementPermissionReview } from '../launcher/permission-review-management.js'
 import { openPluginManagementService } from '../management/service.js'
 import {
   type PluginManagementBridgeHandler,
@@ -10,9 +14,22 @@ import {
   startPluginManagementRpcServer,
 } from '../launcher/management-rpc.js'
 import { processStartIdentity } from './supervisor-state.js'
+import { createManagerRendererGatewayAuthenticator } from './manager-renderer-gateway.js'
+import { createManagerRendererManagementChannel } from './manager-renderer-management.js'
+import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
+import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
+import type { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
+import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
+import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import { fenceManagerConsumers } from './manager-consumer-fence.js'
+import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
+import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
+  /** Owner-only Manager portion of a wider profile mutation barrier. */
+  readonly fenceManagers?: () => Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
   close(): Promise<void>
 }
 export async function openProductionPluginManagementComposition(input: {
@@ -28,8 +45,33 @@ export async function openProductionPluginManagementComposition(input: {
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
+  readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
+  readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  /** Owner-created participant; never supplied by the browser or plugin. */
+  readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
+  /** Must be the registry that issued rendererParticipant, never page supplied. */
+  readonly rendererParticipants?: ServiceRendererParticipants
+  readonly rendererLifecycle?: ServiceRendererLifecycle
+  /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
+  readonly rendererBootstrap?: ManagerRendererChannel
+  /** Owner resource retirement must finish before a renderer revocation is acknowledged. */
+  readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
+  readonly rendererWriteLifetimes?: ManagerRendererWriteLifetimes
+  readonly rendererReadLifetimes?: ManagerRendererReadLifetimes
+  /** Owner-issued, per-renderer read-only managed-service UI bridge. */
+  readonly rendererManagedServiceUI?: ManagerRendererChannel
+  readonly rendererModelServices?: ManagerRendererChannel
+  /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
+  readonly rendererReadonlyChannel?: ManagerRendererChannel
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
+  if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
+    throw new Error('manager-consumer-fence-scope-invalid')
+  }
+  if (input.rendererLifecycle && !input.rendererParticipants?.isBoundTo(input.rendererLifecycle)) {
+    throw new Error('manager-consumer-fence-scope-invalid')
+  }
   const service = await openPluginManagementService({
     configPath: input.configPath,
     homeDir: input.homeDir,
@@ -41,6 +83,63 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.mode === undefined ? {} : { mode: input.mode }),
     },
   })
+  let closed = false
+  const rendererSessions = new ManagerRendererSessions({
+    profileId: input.profileId,
+    ownerGeneration: input.runtimeGeneration,
+    ownerCurrent: () => !closed,
+    authenticateGateway: createManagerRendererGatewayAuthenticator({
+      homeDir: input.homeDir,
+      profileId: input.profileId,
+      ownerAppId: input.appId,
+      ownerGeneration: input.runtimeGeneration,
+    }),
+    ...(input.rendererRetirement === undefined ? {} : { waitForRetirement: input.rendererRetirement }),
+    ...(input.rendererWriteLifetimes === undefined ? {} : { writeLifetimes: input.rendererWriteLifetimes }),
+    ...(input.rendererReadLifetimes === undefined ? {} : { readLifetimes: input.rendererReadLifetimes }),
+    channels: new Map([
+      ['plugin-management', createManagerRendererManagementChannel(service)],
+      ...(input.rendererBootstrap === undefined
+        ? []
+        : [['manager-bootstrap', input.rendererBootstrap] as const]),
+      ...(input.rendererManagedServiceUI === undefined
+        ? []
+        : [['managed-service-ui', input.rendererManagedServiceUI] as const]),
+      ...(input.rendererModelServices === undefined
+        ? []
+        : [['model-services', input.rendererModelServices] as const]),
+      ...(input.rendererReadonlyChannel === undefined
+        ? []
+        : [['channel-actions', input.rendererReadonlyChannel] as const]),
+    ]),
+    ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
+  })
+  const managerChannelCredentials = input.managerChannelCredentials === undefined
+    ? undefined
+    : input.mode === 'service'
+    ? coordinateManagerChannelCredentials({
+      sessions: rendererSessions,
+      ...(input.rendererParticipants === undefined ? {} : { participants: input.rendererParticipants }),
+      ...(input.rendererLifecycle === undefined ? {} : { lifecycle: input.rendererLifecycle }),
+      handle: input.managerChannelCredentials,
+    })
+    : input.managerChannelCredentials
+  const permissionReview = input.mode === 'service'
+    ? coordinateManagerPermissionReview({
+      sessions: rendererSessions,
+      ...(input.rendererParticipants === undefined ? {} : { participants: input.rendererParticipants }),
+      ...(input.rendererLifecycle === undefined ? {} : { lifecycle: input.rendererLifecycle }),
+      coordinator: input.coordinator,
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+    })
+    : async (operation: Parameters<typeof applyManagementPermissionReview>[0]['operation']) =>
+      await applyManagementPermissionReview({
+        coordinator: input.coordinator,
+        profileId: input.profileId,
+        generation: input.runtimeGeneration,
+        operation,
+      })
   let server: PluginManagementRpcServer
   try {
     const processStartedAt = input.processStartedAt ?? await processStartIdentity(process.pid)
@@ -54,16 +153,23 @@ export async function openProductionPluginManagementComposition(input: {
       processStartedAt,
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
+      managerRenderer: async operation => await dispatchManagerRendererOperation(rendererSessions, operation),
+      permissionReview,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
       ...(input.channel === undefined ? {} : { channel: input.channel }),
       ...(input.codex === undefined ? {} : { codex: input.codex }),
+      ...(input.rendererConfiguration === undefined ? {} : { rendererConfiguration: input.rendererConfiguration }),
+      ...(input.managerServiceAuth === undefined ? {} : { managerServiceAuth: input.managerServiceAuth }),
+      ...(managerChannelCredentials === undefined
+        ? {}
+        : { managerChannelCredentials }),
     })
   } catch (error) {
+    rendererSessions.dispose()
     service.close()
     throw error
   }
-  let closed = false
   return {
     handler: {
       token: input.token,
@@ -72,9 +178,20 @@ export async function openProductionPluginManagementComposition(input: {
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
+    ...(input.rendererParticipants === undefined ? {} : {
+      fenceManagers: async () => {
+        if (closed) throw new Error('manager-consumer-fence-unavailable')
+        return await fenceManagerConsumers({
+          sessions: rendererSessions,
+          participants: input.rendererParticipants!,
+          ...(input.rendererLifecycle ? { lifecycle: input.rendererLifecycle } : {}),
+        })
+      },
+    }),
     async close(): Promise<void> {
       if (closed) return
       closed = true
+      rendererSessions.dispose()
       try {
         await server.close()
       } finally {

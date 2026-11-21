@@ -3,8 +3,6 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  assertBundlePolicyDecision,
-  assertDeferredPermissionDecision,
   type DeferredPermissionDecision,
   type DeferredPermissionPlan,
   withBundlePolicyIntent,
@@ -141,6 +139,7 @@ import {
   validateDecision,
   validateDecisionV2,
   validateDecisionV4,
+  validateDecisionV7,
   withGenerations,
 } from './plugin-lifecycle-model.js'
 
@@ -236,10 +235,8 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     const reviewedPlan = decision.schemaVersion === 7 && bundlePolicySelections !== undefined
       ? withBundlePolicyIntent(plan as DeferredPermissionPlan, new Set(Object.keys(bundlePolicySelections)))
       : plan
-    if (decision.schemaVersion === 7 && bundlePolicySelections !== undefined) {
-      assertBundlePolicyDecision(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
-    } else if (decision.schemaVersion === 7) {
-      assertDeferredPermissionDecision(reviewedPlan as DeferredPermissionPlan, decision)
+    if (decision.schemaVersion === 7) {
+      validateDecisionV7(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
     } else if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
     else if (decision.schemaVersion === 2) validateDecisionV2(plan as CordisXPermissionAuthorizationPlanV2, decision)
     else validateDecision(plan as CordisXPermissionAuthorizationPlanV1, decision)
@@ -347,6 +344,20 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     const runtime = this.formalRuntime()
     if (runtime === undefined) return undefined
     const transactionId = input.candidate.transactionId!
+    if (runtime.preflight !== undefined) {
+      try {
+        await runtime.preflight({
+          transactionId,
+          operation: input.operation,
+          previous: input.active,
+          candidate: input.candidate,
+          targetId: input.targetId,
+          ...(input.staged === undefined ? {} : { package: input.staged }),
+        })
+      } catch {
+        throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+      }
+    }
     const runtimeManifest = input.staged?.manifest.runtimeManifest
     const targetUsesIsolatedWorker = usesIsolatedWorker(runtimeManifest)
     let fence: RuntimeGenerationFence
@@ -370,7 +381,18 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     let activationRequested = false
     let published = false
     let commitCompleted = false
+    const runtimeArtifactLeases: PluginGenerationGraphLease[] = []
     try {
+      // A headless owner normally has no browser graph. When a renderer was
+      // admitted, the runtime freezes participants before this check and the
+      // same candidate authority resolves every affected browser module.
+      const needsBrowserArtifacts = !this.options.headless
+        || runtime.requiresBrowserArtifacts?.(transactionId) === true
+      let artifactServer = this.options.pluginGenerationArtifactServer
+      if (this.options.headless && needsBrowserArtifacts) {
+        artifactServer ??= await runtime.browserArtifactServer?.(transactionId)
+        if (artifactServer === undefined) throw new Error('renderer artifact authority is unavailable')
+      }
       const authority = await this.authority
       prepared = await authority.prepare({
         ownerId: 'cordisx-launcher',
@@ -409,9 +431,8 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       }, 'stage')
       let runtimeArtifactSource: string | undefined
       let runtimeArtifactLease: PluginGenerationGraphLease | undefined
-      const runtimeArtifactLeases: PluginGenerationGraphLease[] = []
       let stageResolutionFailure: unknown
-      for (const pluginId of this.options.headless ? [] : resolvedStage.activationOrder) {
+      for (const pluginId of needsBrowserArtifacts ? resolvedStage.activationOrder : []) {
         const candidatePlugin = resolvedStage.after.plugins.find(plugin => plugin.id === pluginId)
         if (candidatePlugin?.enabled === true && resolvedStage.affectedPluginIds.includes(pluginId)) {
           try {
@@ -421,13 +442,13 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
               : await loadStagedPluginPackage(this.options.homeDir, candidatePlugin.digest)
             const isolatedWorker = usesIsolatedWorker(stagedPackage.manifest.runtimeManifest)
             if (pluginId === input.targetId && !isolatedWorker) {
-              if (this.options.pluginGenerationArtifactServer === undefined) {
+              if (artifactServer === undefined) {
                 runtimeArtifactSource = await loadPluginGenerationArtifact(runtimeModule)
               } else {
                 const loaded = await loadPluginGenerationArtifactForRuntime(
                   runtimeModule,
                   candidatePlugin.moduleGeneration,
-                  this.options.pluginGenerationArtifactServer,
+                  artifactServer,
                 )
                 runtimeArtifactSource = loaded.runtimeArtifactSource
                 if (loaded.kind === 'browser-esm-graph') {
@@ -437,12 +458,12 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
               }
             } else if (
               !isolatedWorker && stagedPackage.browserArtifact !== undefined
-              && this.options.pluginGenerationArtifactServer !== undefined
+              && artifactServer !== undefined
             ) {
               const loaded = await loadPluginGenerationArtifactForRuntime(
                 runtimeModule,
                 candidatePlugin.moduleGeneration,
-                this.options.pluginGenerationArtifactServer,
+                artifactServer,
               )
               if (loaded.kind === 'browser-esm-graph') runtimeArtifactLeases.push(loaded.lease)
             }
@@ -606,6 +627,12 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       throw error
     } finally {
       this.pendingPermissionReviews.delete(transactionId)
+      // In headless-with-renderer mode the authority may resolve some graphs
+      // before staging or a participant fails. A failed transaction must not
+      // leave those owner URLs live even if a wrapper rejected before stage.
+      if (this.options.headless && !commitCompleted) {
+        for (const lease of runtimeArtifactLeases) lease.retire()
+      }
     }
   }
 

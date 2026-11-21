@@ -16,6 +16,7 @@ if (args.includes('--help') || args.includes('-h')) {
   console.log('Default fixture: cordisx.config.playground.json (Comprehensive UI demos).')
   console.log('Use --config to load another real local plugin composition.')
   console.log('Set CORDISX_PLAYGROUND_HOME to reuse one explicit external isolated Playground home.')
+  console.log('Use --manager-only to preview the existing Manager with the isolated plugin composition.')
   process.exit(0)
 }
 const rawPort = value(args, '--port')
@@ -29,6 +30,7 @@ const playground = await startVitePlayground({
   configPath,
   ...(externalHome === undefined ? {} : { homeDir: externalHome }),
   ...(port === undefined ? {} : { port }),
+  ...(args.includes('--manager-only') ? { managerPresentationMode: 'standalone' as const } : {}),
 })
 console.log(`[cordisx] UI Playground: ${playground.url}`)
 console.log(`[cordisx] isolated CORDISX_HOME: ${playground.homeDir}`)

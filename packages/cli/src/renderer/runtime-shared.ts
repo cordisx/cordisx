@@ -251,7 +251,8 @@ export function cloneRendererValue<Value>(value: Value): Value {
 export interface CordisXRuntimeMetadata {
   readonly serviceCapabilityOwners?: readonly RuntimeServiceCapabilityOwner[]
   readonly version: string
-  readonly workspaceCwd: string
+  /** Omitted when a standalone owner has not granted a workspace. */
+  readonly workspaceCwd?: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
   readonly appId?: string
@@ -299,10 +300,12 @@ export interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
-  /** Development-only host with explicit semantic seats and no Codex DOM probes. */
-  readonly hostKind?: 'codex' | 'playground'
+  /** Host-selected runtime; standalone has no Codex DOM seats or Playground simulator. */
+  readonly hostKind?: 'codex' | 'playground' | 'standalone'
+  /** Non-authoritative identifier for this owner-attached renderer. */
+  readonly standaloneRendererId?: string
   /** Host-only presentation preview; never exposed through plugin Contexts. */
-  readonly managerPresentationMode?: 'workspace'
+  readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */
   readonly nativeAppVersion?: string
   readonly executionPlatform: 'posix' | 'win32'
@@ -321,6 +324,8 @@ export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'packag
   }
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
+  /** Owner-issued initial graph for a configured plugin in an independent Host. */
+  readonly standaloneConfiguredGraph?: true
   /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
@@ -547,6 +552,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
+  /** Actual configured graphs loaded into this independent renderer. */
+  configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
+  /** Host-private registry readback for confirming an attached renderer's snapshot. */
+  pluginRegistryEpoch(): number
   /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */
   releaseCertifiedPermissionChannel():
     | import('./certified-permission-channel.js').CertifiedPermissionDocumentChannel

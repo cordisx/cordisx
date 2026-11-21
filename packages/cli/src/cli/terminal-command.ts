@@ -12,7 +12,11 @@ import { prepareClaudeMcp, projectMcpToCodex } from '../launcher/mcp-projection.
 import { codexHome } from './run-support.js'
 import type { HomeConfig } from '../config/home-config.js'
 import { MODEL_SERVICE_HEADER_ENV_PREFIX } from '../config/model-service-runtime-options.js'
-import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
+import {
+  connectExistingTerminalProvider,
+  type ExistingTerminalProviderSource,
+  TerminalOwnerDiscoveryError,
+} from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
 import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
@@ -125,7 +129,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   }
   let request: ((input: TerminalProviderRequest) => Promise<TerminalProviderResult>) | undefined
-  let host: { homeDir: string; profileId: string } | undefined
+  let host: ExistingTerminalProviderSource | undefined
   let shared: ReturnType<typeof prepareSharedTerminalService>
   let declared: ReturnType<typeof sharedTerminalServices> = []
   let homeConfig: HomeConfig | undefined
@@ -142,22 +146,49 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   if (!invocation.list && homeConfig) {
     Object.assign(environment, mergeHomeEnvironment(environment, homeConfig.environmentVariables))
   }
-  if (invocation.service || invocation.list || invocation.profile) {
+  if (invocation.service || invocation.list || invocation.profile || invocation.ownerApp) {
     const config = homeConfig ?? await loadHomeConfig(configPath)
     declared = sharedTerminalServices(config, client)
     if (invocation.service && invocation.model) {
       shared = prepareSharedTerminalService(config, client, invocation.service, invocation.model, environment)
     }
+    if (shared && invocation.ownerApp) {
+      throw new Error('--owner-app does not apply to a shared model-service declaration')
+    }
     if (shared) Object.assign(environment, shared.environment)
-    const app = config.apps.codex
+    const app = invocation.ownerApp === undefined
+      ? config.apps.codex ?? config.apps[config.defaultApp]
+      : config.apps[invocation.ownerApp]
+    if (invocation.ownerApp !== undefined && app === undefined) throw new Error('CordisX owner app is not configured')
     const profileId = invocation.profile ?? app?.defaultProfile
-    const profile = profileId && Object.hasOwn(app?.profiles ?? {}, profileId) ? app!.profiles[profileId] : undefined
-    if (!profile || !profileId) throw new Error('Existing CordisX Codex profile required; CLI never creates profiles')
-    if (profile.dataMode === 'host-isolated' && client === 'codex') {
+    const matchingProfiles = profileId === undefined
+      ? []
+      : Object.values(config.apps).flatMap(value =>
+        Object.hasOwn(value.profiles, profileId) ? [value.profiles[profileId]!] : []
+      )
+    const profile = profileId === undefined ? undefined : invocation.ownerApp === undefined
+      ? config.apps.codex?.profiles[profileId] ?? config.apps[config.defaultApp]?.profiles[profileId]
+        ?? (matchingProfiles.length === 1 ? matchingProfiles[0] : undefined)
+      : app?.profiles[profileId]
+    if (!profile || !profileId) throw new Error('Existing CordisX profile required; CLI never creates profiles')
+    const codexProfile = Object.hasOwn(config.apps.codex?.profiles ?? {}, profileId)
+      ? config.apps.codex!.profiles[profileId]
+      : undefined
+    if (client === 'codex' && codexProfile === undefined && profile.dataMode === 'host-isolated') {
+      throw new Error('An isolated Codex profile must be configured explicitly for this profile ID')
+    }
+    if (codexProfile?.dataMode === 'host-isolated' && client === 'codex') {
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
     if (!shared && (invocation.service || invocation.list)) {
-      host = { homeDir: path.dirname(configPath), profileId }
+      host = {
+        homeDir: path.dirname(configPath),
+        profileId,
+        appIds: Object.entries(config.apps).filter(([, value]) => Object.hasOwn(value.profiles, profileId)).map((
+          [id],
+        ) => id),
+        ...(invocation.ownerApp === undefined ? {} : { selectedAppId: invocation.ownerApp }),
+      }
     }
   }
   const executable = invocation.list ? undefined : await (runtime.internalCheckTerminalClient ?? checkTerminalClient)(
@@ -167,7 +198,11 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   if (host) {
     try {
       request = await connectExistingTerminalProvider(host)
-    } catch {
+    } catch (error) {
+      if (error instanceof TerminalOwnerDiscoveryError && error.reason !== 'no-owner') throw error
+      if (invocation.ownerApp !== undefined) {
+        throw new Error('No verified CordisX owner matches --owner-app and the selected profile')
+      }
       if (!invocation.list) {
         throw new Error(
           'CordisX plugin service selection requires an already-running compatible Host; no App was started',

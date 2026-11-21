@@ -17,11 +17,6 @@ import type {
   CordisXPointPolicy,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import {
-  isPermissionPolicyRecordV2,
-  isPermissionPolicyRecordV3,
-  isPermissionPolicyRecordV4,
-} from '../permission-persistence.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationDecisionV4,
@@ -46,12 +41,7 @@ import { CordisXI18nService } from './i18n.js'
 import { CordisXPageService, CordisXRouteService } from './navigation.js'
 import { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
-import {
-  type AgentRuntimeConnection,
-  type AgentRuntimeRouteScope,
-  BrowserPermissionPolicyStore,
-  MemoryPermissionPolicyStore,
-} from './platform.js'
+import { type AgentRuntimeConnection, type AgentRuntimeRouteScope } from './platform.js'
 import { CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice } from './controlled-surfaces.js'
@@ -78,7 +68,7 @@ import { createRuntimeModelProviders } from './runtime-model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { prepareAgentContextBootstrap } from './agent-context-binding.js'
-import { BindingPermissionPolicyStore } from './permission-binding.js'
+import { createRuntimePermissionStore } from './runtime-permission-store.js'
 import { createRuntimeManagementBindings } from './runtime-management-bindings.js'
 import { PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
@@ -140,7 +130,7 @@ export async function start(
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let disposePreparedSharedReactRuntime = options.disposePreparedSharedReactRuntime
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
-  const blockedPlugins = readBlockedPlugins()
+  const blockedPlugins = metadata.hostKind === 'standalone' ? new Set<string>() : readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
   if (metadata.providers.length > 0 && metadata.providerBridgeToken !== undefined) {
@@ -173,19 +163,7 @@ export async function start(
         metadata.iconThemePreference,
       )
   let disposeIconThemePreferenceSubscription: (() => void) | undefined
-  const permissionStore = metadata.permissionBridgeToken === undefined
-    ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
-      ? new MemoryPermissionPolicyStore(
-        metadata.permissionPolicies.filter(record =>
-          !isPermissionPolicyRecordV2(record)
-          && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
-        ),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV3),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV4),
-      )
-      : new BrowserPermissionPolicyStore(metadata.profileId)
-    : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
+  const permissionStore = createRuntimePermissionStore(metadata)
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
@@ -572,7 +550,7 @@ export async function start(
       : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence)
     const agentLoopBrokerV4 = runtimeClosures1.createRuntimeAgentLoopBrokerV4(closureScope)
     // One Host-private authority backs all public Agent/Session services; the environment selects its transport.
-    const desktopAgentSessionTransport = metadata.hostKind === 'playground'
+    const desktopAgentSessionTransport = metadata.hostKind === 'playground' || metadata.hostKind === 'standalone'
       ? undefined
       : await CodexDesktopAgentSessionTransport.connect()
     const playgroundAgentSessionPersistence = runtimeClosures1.createRuntimePlaygroundAgentSessionPersistence(
@@ -672,7 +650,9 @@ export async function start(
     const externalProviderStatuses = runtimeClosures1.createRuntimeExternalProviderStatuses(closureScope)
     const capabilityAvailability = runtimeClosures1.createRuntimeCapabilityAvailability(closureScope)
     const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
-    const legacyExtensionPointPolicies = new BrowserExtensionPointPolicyStore().read()
+    const legacyExtensionPointPolicies = metadata.hostKind === 'standalone'
+      ? []
+      : new BrowserExtensionPointPolicyStore().read()
     const extensionPointBroker = runtimeClosures1.createRuntimeExtensionPointBroker(closureScope)
     const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
     const moduleGenerationOf = (controller: PluginController): string =>
@@ -969,13 +949,26 @@ export async function start(
     ): Readonly<{ revision: number; pluginRevision: number }> =>
       runtimeClosures5.createRuntimeAdoptPluginBundleSnapshot(closureScope, snapshot)
 
-    const dispose = async (): Promise<void> => {
-      try {
-        await runtimeClosures5.createRuntimeDispose(closureScope)
-      } finally {
-        disposeDialogs()
-        disposeNotifications()
-      }
+    let disposal: Promise<void> | undefined
+    const dispose = (): Promise<void> => {
+      if (disposal !== undefined) return disposal
+      let resolve!: () => void
+      let reject!: (error: unknown) => void
+      // Publish the shared completion before starting cleanup: a second
+      // caller must not mistake an in-progress disposal for a completed one.
+      disposal = new Promise<void>((done, failed) => {
+        resolve = done
+        reject = failed
+      })
+      void (async () => {
+        try {
+          await runtimeClosures5.createRuntimeDispose(closureScope)
+        } finally {
+          disposeDialogs()
+          disposeNotifications()
+        }
+      })().then(resolve, reject)
+      return disposal
     }
 
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)

@@ -1,6 +1,7 @@
 import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { nativeModelProviderRegistry } from './model-providers.js'
 import type { CordisXRuntimeMetadata } from './runtime-shared.js'
+import { StandaloneModelServices } from './standalone-model-services.js'
 
 /** Compose the runtime-owned model bridge and its startup observation once. */
 export function createRuntimeModelProviders(metadata: CordisXRuntimeMetadata, generation: string) {
@@ -14,6 +15,10 @@ export function createRuntimeModelProviders(metadata: CordisXRuntimeMetadata, ge
         metadata.startupHostCapability,
       )
   const modelProviders = nativeModelProviderRegistry(managedServiceBridge)
+  if (metadata.hostKind === 'standalone') {
+    const services = StandaloneModelServices.connect()
+    if (services) modelProviders.attachStandaloneModelServices(services)
+  }
   const hostStartup = managedServiceBridge?.bindHostStartup()
   if (hostStartup !== undefined) modelProviders.connectStartup(hostStartup)
   return { managedServiceBridge, modelProviders }

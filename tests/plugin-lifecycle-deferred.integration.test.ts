@@ -244,6 +244,10 @@ it('projects a manifest-v4 review without changing its required decision or v2 p
       decision: 'allow-once' as const,
     }],
   }
+  await expect(coordinator.applyPermissionReviewV7({
+    ...enableRequest,
+    decision: { ...enableDecision, decisions: [] },
+  })).rejects.toMatchObject({ code: 'permission-denied', outcome: 'rejected' })
   expect((await coordinator.applyPermissionReviewV7({ ...enableRequest, decision: enableDecision })).outcome).toBe(
     'applied',
   )

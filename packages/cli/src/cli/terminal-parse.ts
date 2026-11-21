@@ -6,6 +6,7 @@ export interface TerminalInvocation {
   readonly help: boolean
   readonly list: boolean
   readonly profile?: string
+  readonly ownerApp?: string
   readonly service?: string
   readonly model?: string
   readonly instructionsFile?: string
@@ -21,6 +22,7 @@ export const TERMINAL_HELP = `Usage:
 Options:
   -M, --mode cli           start: run the original terminal client
   --profile ID             Existing CordisX Codex profile
+  --owner-app ID           Require this configured App namespace to own the selected profile
   -s, --service PROVIDER   Shared model service or live plugin provider ID
   -m, --model MODEL       Exact model ID for the selected service
   --instructions-file PATH Replace Codex built-in instructions for this invocation
@@ -44,7 +46,14 @@ export function parseTerminalCli(argv: readonly string[]): TerminalInvocation {
   const options = boundary < 0 ? argv.slice(1) : argv.slice(1, boundary)
   const codexArgs = boundary < 0 ? [] : argv.slice(boundary + 1)
   const flags = new Set(['--list', '--help', '-h'])
-  const values = new Set(['--profile', '--service', '--model', '--instructions-file', '--codex-executable'])
+  const values = new Set([
+    '--profile',
+    '--owner-app',
+    '--service',
+    '--model',
+    '--instructions-file',
+    '--codex-executable',
+  ])
   const aliases = new Map([['-s', '--service'], ['-m', '--model'], ['--executable', '--codex-executable']])
   const positionals: string[] = []
   const seen = new Map<string, string>()
@@ -73,6 +82,7 @@ export function parseTerminalCli(argv: readonly string[]): TerminalInvocation {
     seen.set(key, value)
   }
   const profile = seen.get('--profile'), service = seen.get('--service'), model = seen.get('--model')
+  const ownerApp = seen.get('--owner-app')
   const instructionsFile = seen.get('--instructions-file'), executable = seen.get('--codex-executable')
   const help = seen.has('--help') || seen.has('-h'), list = seen.has('--list')
   const client = positionals[0] ?? 'codex'
@@ -85,11 +95,17 @@ export function parseTerminalCli(argv: readonly string[]): TerminalInvocation {
   if (profile !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile)) {
     throw new CordisXCliParseError('invalid-option-value', 'Invalid CordisX profile ID')
   }
+  if (ownerApp !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(ownerApp)) {
+    throw new CordisXCliParseError('invalid-option-value', 'Invalid CordisX owner app ID')
+  }
   if (!help && (service === undefined) !== (model === undefined)) {
     throw new CordisXCliParseError('conflicting-options', '--service and --model must be selected together')
   }
+  if (!help && ownerApp !== undefined && !list && service === undefined) {
+    throw new CordisXCliParseError('conflicting-options', '--owner-app requires --list or --service')
+  }
   if (list && (service || model || instructionsFile || executable || codexArgs.length)) {
-    throw new CordisXCliParseError('conflicting-options', '--list accepts only --profile')
+    throw new CordisXCliParseError('conflicting-options', '--list accepts only --profile and --owner-app')
   }
   return {
     action: 'terminal',
@@ -98,6 +114,7 @@ export function parseTerminalCli(argv: readonly string[]): TerminalInvocation {
     codexArgs,
     ...(client === 'codex' ? {} : { client: 'claude-code' as const }),
     ...(profile === undefined ? {} : { profile }),
+    ...(ownerApp === undefined ? {} : { ownerApp }),
     ...(service === undefined ? {} : { service }),
     ...(model === undefined ? {} : { model }),
     ...(instructionsFile === undefined ? {} : { instructionsFile }),

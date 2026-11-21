@@ -1,9 +1,22 @@
 import path from 'node:path'
+import os from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
+import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
+import { ensureHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import { HostServiceConfigNarrowApi } from '../packages/cli/src/launcher/service-config.js'
+import {
+  createServiceConfigBridgeHandler,
+  parseServiceConfigBindingRequest,
+  type ServiceConfigBridgeHandler,
+} from '../packages/cli/src/launcher/service-config-rpc.js'
+import { CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT } from '../packages/cli/src/providers/cli-proxy-service-config.js'
+import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 
 interface RuntimeHandle {
   snapshot(): {
@@ -39,7 +52,7 @@ interface BridgeState {
   candidate?: { revision: number; config: unknown }
 }
 
-async function boot(): Promise<{
+async function boot(options: { serviceHandler?: ServiceConfigBridgeHandler } = {}): Promise<{
   dom: JSDOM
   runtime: RuntimeHandle
   bridge: Map<string, BridgeState>
@@ -83,7 +96,14 @@ async function boot(): Promise<{
     ],
   }
   const token = 'a'.repeat(64)
-  const bundle = await buildRendererBundle(config, { profileId: 'work', configBridgeToken: token })
+  const bundle = await buildRendererBundle(config, {
+    profileId: 'work',
+    configBridgeToken: token,
+    ...(options.serviceHandler === undefined ? {} : {
+      serviceConfigBridgeToken: options.serviceHandler.token,
+      generation: options.serviceHandler.generation,
+    }),
+  })
   const dom = new JSDOM(
     `<!doctype html><html lang="en"><head></head><body>
     <div id="root"></div>
@@ -247,6 +267,23 @@ async function boot(): Promise<{
       receive?.(JSON.stringify(response))
     })
   }
+  if (options.serviceHandler) {
+    const handler = options.serviceHandler
+    ;(dom.window as unknown as Record<string, unknown>).__cordisxServiceConfigRequestV1 = (payload: string) => {
+      const request = parseServiceConfigBindingRequest(
+        JSON.parse(payload),
+        handler.token,
+        handler.profileId,
+        handler.generation,
+      )
+      void handler.handle(request).then(value => {
+        const receive = (dom.window as unknown as Record<string, unknown>).__cordisxServiceConfigReceiveV1 as
+          | ((value: string) => void)
+          | undefined
+        receive?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+      })
+    }
+  }
   dom.window.eval(bundle)
   for (
     let attempt = 0;
@@ -261,6 +298,206 @@ async function boot(): Promise<{
 }
 
 describe('plugin config runtime', () => {
+  it('runs an actual plugin fiber restart through the external configuration fence', async () => {
+    const { dom, runtime, bridge } = await boot()
+    const state = (dom.window as unknown as {
+      __cordisxRestartConfigFixture: { restartApply: string[]; restartDispose: number }
+    }).__cordisxRestartConfigFixture
+    const lifecycle = new CdpPluginLifecycleRuntime()
+    const session = {
+      async send(_method: string, params: { expression: string }) {
+        return { result: { value: await dom.window.eval(params.expression) } }
+      },
+    }
+    const remove = lifecycle.register(session as never)
+    try {
+      expect(
+        await lifecycle.pluginConfiguration({
+          kind: 'plugin-configuration',
+          action: 'update',
+          pluginId: 'restart-config',
+          expectedRevision: 0,
+          operations: [{ op: 'set', path: ['label'], value: 'external' }],
+        }),
+      ).toMatchObject({ status: 'ok', configuration: { revision: 1, value: { label: 'external' } } })
+      expect(state.restartApply).toEqual(['good', 'external'])
+      expect(state.restartDispose).toBe(1)
+      expect(bridge.get('restart-config')).toMatchObject({ revision: 1, config: { label: 'external' } })
+      expect(
+        await lifecycle.pluginConfiguration({
+          kind: 'plugin-configuration',
+          action: 'update',
+          pluginId: 'service-restart-config',
+          expectedRevision: 0,
+          operations: [{ op: 'set', path: ['endpoint'], value: 'remote' }],
+        }),
+      ).toEqual({ status: 'rejected', reason: 'configuration-read-only' })
+    } finally {
+      remove()
+      await runtime.dispose()
+      dom.window.close()
+    }
+  })
+
+  it('preserves unknown when the renderer disconnects after a committed fiber restart', async () => {
+    const { dom, runtime, bridge } = await boot()
+    const lifecycle = new CdpPluginLifecycleRuntime()
+    let remove = () => {}
+    remove = lifecycle.register({
+      async send(_method: string, params: { expression: string }) {
+        const value = await dom.window.eval(params.expression)
+        remove()
+        return { result: { value } }
+      },
+    } as never)
+    try {
+      expect(
+        await lifecycle.pluginConfiguration({
+          kind: 'plugin-configuration',
+          action: 'update',
+          pluginId: 'restart-config',
+          expectedRevision: 0,
+          operations: [{ op: 'set', path: ['label'], value: 'committed' }],
+        }),
+      ).toEqual({ status: 'unknown', reason: 'renderer-disconnected' })
+      expect(bridge.get('restart-config')).toMatchObject({ revision: 1, config: { label: 'committed' } })
+    } finally {
+      remove()
+      await runtime.dispose()
+      dom.window.close()
+    }
+  })
+
+  it('completes a real service configuration transaction and provider-fleet restart under the fence', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-external-service-config-'))
+    const target = path.join(root, 'config.json')
+    await ensureHomeConfig(target)
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      plugins: [{ id: 'restart-config', entry: 'file:///fixture', config: {} }],
+    }), target)
+    const fleet = await ProviderFleet.create([])
+    let failFinalize = false
+    const token = 'c'.repeat(64)
+    const generation = 'external-config-service'
+    const contract = {
+      ...CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+      identity: { ...CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.identity, pluginId: 'restart-config' },
+    }
+    const api = new HostServiceConfigNarrowApi({
+      contract,
+      profileId: 'work',
+      generation,
+      ownerToken: token,
+      configPath: target,
+      writable: true,
+      authorize: () => true,
+      restartService: async () => {
+        const result = await fleet.reconfigure([])
+        return {
+          ...result,
+          finalize: async () => {
+            await result.finalize()
+            if (failFinalize) throw new Error('validation-failed')
+          },
+        }
+      },
+    })
+    const serviceHandler = createServiceConfigBridgeHandler({
+      token,
+      profileId: 'work',
+      generation,
+      services: [{ pluginId: 'restart-config', serviceId: contract.identity.serviceId, api }],
+    })
+    const { dom, runtime } = await boot({ serviceHandler })
+    const lifecycle = new CdpPluginLifecycleRuntime()
+    const remove = lifecycle.register({
+      async send(_method: string, params: { expression: string }) {
+        return { result: { value: await dom.window.eval(params.expression) } }
+      },
+    } as never)
+    try {
+      const listed = await lifecycle.pluginConfiguration({
+        kind: 'plugin-configuration',
+        action: 'services',
+        pluginId: 'restart-config',
+      })
+      if (listed.status !== 'ok' || !('services' in listed)) throw new Error('missing service descriptor')
+      const descriptor = listed.services[0]!
+      expect(descriptor).toMatchObject({ configApplies: 'service-restart', revision: 0 })
+      const result = await lifecycle.pluginConfiguration({
+        kind: 'plugin-configuration',
+        action: 'update-service',
+        pluginId: 'restart-config',
+        mutation: {
+          contract: 'cordisx.service-config-mutation/v1',
+          schemaVersion: 1,
+          identity: descriptor.identity,
+          scope: descriptor.scope,
+          expectedRevision: descriptor.revision,
+          configuration: { contract: 'cordisx.cli-proxy-provider-runtime-config/v1', schemaVersion: 1, providers: [] },
+        },
+      })
+      expect(result).toMatchObject({
+        status: 'ok',
+        result: { status: 'applied', revision: 1, configApplies: 'service-restart' },
+      })
+      expect(await api.descriptor()).toMatchObject({ revision: 1, lastGoodRevision: 1 })
+      failFinalize = true
+      const web = await startManagerWeb(
+        {
+          appId: 'codex',
+          profileId: 'work',
+          generation,
+          isCurrent: async () => true,
+          request: async (operation: Parameters<typeof lifecycle.pluginConfiguration>[0]) =>
+            await lifecycle.pluginConfiguration(operation),
+        } as unknown as Parameters<typeof startManagerWeb>[0],
+      )
+      try {
+        const url = new URL(web.url)
+        const session = await fetch(`${url.origin}/api/session`, {
+          method: 'POST',
+          headers: { origin: url.origin, 'content-type': 'application/json' },
+          body: JSON.stringify({ token: url.hash.slice(1) }),
+        })
+        const { token: browserToken } = await session.json() as { token: string }
+        const current = await api.descriptor()
+        const failed = await fetch(`${url.origin}/api/plugin-configuration`, {
+          method: 'POST',
+          headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${browserToken}` },
+          body: JSON.stringify({
+            action: 'update-service',
+            pluginId: 'restart-config',
+            mutation: {
+              contract: 'cordisx.service-config-mutation/v1',
+              schemaVersion: 1,
+              identity: current.identity,
+              scope: current.scope,
+              expectedRevision: current.revision,
+              configuration: {
+                contract: 'cordisx.cli-proxy-provider-runtime-config/v1',
+                schemaVersion: 1,
+                providers: [],
+              },
+            },
+          }),
+        })
+        expect(await failed.json()).toMatchObject({ status: 'ok', result: { status: 'rejected' } })
+        // The error was raised after commit; the stored revision has advanced despite "rejected".
+        expect(await api.descriptor()).toMatchObject({ revision: 2, lastGoodRevision: 2 })
+      } finally {
+        await web.close()
+      }
+    } finally {
+      remove()
+      await runtime.dispose()
+      dom.window.close()
+      await fleet.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('stages app-restart values without mutating the current fiber and refuses unbound service restarts', async () => {
     const { dom, runtime, bridge } = await boot()
     const appState = (dom.window as unknown as {

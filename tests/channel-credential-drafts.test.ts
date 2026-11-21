@@ -46,9 +46,40 @@ function fixture() {
   })
   const capture = (owner = 'owner') =>
     broker.handle({ operation: 'capture', owner, purpose: 'create', account: ref, secret: 'test-only' }, 'document')
-  return { broker, service, backend, values, capture, validateCredentials, discoverTenant }
+  return { broker, store, service, backend, values, capture, validateCredentials, discoverTenant }
 }
 describe('Host-owned credential draft transactions', () => {
+  it('does not write a credential when its crash-recovery intent cannot be persisted', async () => {
+    const f = fixture()
+    const recordDraft = vi.fn(async () => {
+      expect(f.backend.upsert).not.toHaveBeenCalled()
+      throw new Error('journal unavailable')
+    })
+    const broker = new ChannelCredentialDraftBroker({
+      profileId: 'test',
+      store: f.store,
+      service: f.service as never,
+      validateCredentials: f.validateCredentials,
+      discoverTenant: f.discoverTenant,
+      recordDraft,
+    })
+    try {
+      const result = await broker.handle({
+        operation: 'capture',
+        owner: 'owner',
+        purpose: 'create',
+        account: ref,
+        secret: 'synthetic-secret',
+        expectedRevision: 0,
+      }, 'document')
+      expect(result).toEqual({ status: 'unavailable', code: 'DRAFT_JOURNAL_UNAVAILABLE' })
+      expect(recordDraft).toHaveBeenCalledOnce()
+      expect(f.backend.upsert).not.toHaveBeenCalled()
+    } finally {
+      await broker.dispose()
+      await f.broker.dispose()
+    }
+  })
   it('bounds a stalled optional tenant lookup and still captures authenticated credentials', async () => {
     vi.useFakeTimers()
     const f = fixture()

@@ -36,6 +36,12 @@ export function configuredChannelManager(input: {
       const descriptor = await configuration.descriptor()
       if (input.service.generation() !== generation) return result('unavailable', 'STALE_GENERATION')
       if (!descriptor.writable) return result('unavailable', 'PERMISSION_DENIED')
+      if (
+        request.expectedRevision !== undefined && (!Number.isSafeInteger(request.expectedRevision)
+          || request.expectedRevision < 0 || request.expectedRevision !== descriptor.revision)
+      ) {
+        return result('unavailable', 'REVISION_CONFLICT')
+      }
       const stored = descriptor.configuration as { connections: Array<Record<string, JsonValue>> }
       const index = stored.connections.findIndex(connection => {
         const ref = connection.ref as Record<string, JsonValue>
@@ -48,7 +54,7 @@ export function configuredChannelManager(input: {
         schemaVersion: 1,
         identity: descriptor.identity,
         scope: descriptor.scope,
-        expectedRevision: descriptor.revision,
+        expectedRevision: request.expectedRevision ?? descriptor.revision,
         configuration: {
           ...stored,
           connections: stored.connections.map((connection, candidate) =>
@@ -59,7 +65,9 @@ export function configuredChannelManager(input: {
       if (mutation.status === 'applied') return result('applied')
       return result(
         'unavailable',
-        mutation.status === 'staged'
+        mutation.status === 'conflict'
+          ? 'REVISION_CONFLICT'
+          : mutation.status === 'staged'
           ? 'CONNECTION_CONFIGURATION_FAILED'
           : mutation.error.code.toUpperCase().replaceAll('-', '_'),
       )

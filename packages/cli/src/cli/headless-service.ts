@@ -27,6 +27,8 @@ import type { ChannelConversationTools } from '../launcher/channel-conversation-
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
 import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
+import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
+import { LauncherSecretStore } from '../launcher/secret-store.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -59,6 +61,7 @@ export async function startHeadlessService(input: {
   readonly cwd: string
   readonly environment: NodeJS.ProcessEnv
   readonly generation: string
+  readonly profileOwnerVerified?: boolean
   readonly report: (code: string) => void
 }) {
   const cleanup: (() => Promise<void>)[] = []
@@ -113,6 +116,7 @@ export async function startHeadlessService(input: {
       cleanup.push(() => configuration.close())
       return {
         channel: undefined,
+        managerChannelOwner: undefined,
         codex: createHeadlessCodexOperations({
           configuration: (operation, args, metadata) => configuration.call(operation, args, metadata),
           configPath: input.configPath,
@@ -124,10 +128,21 @@ export async function startHeadlessService(input: {
         close,
       }
     }
-    const readChannelConfig = plugin.package === undefined
-      ? readServiceConfigState
-      : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation).persistence.read
-    const state = await readChannelConfig({
+    const packageStore = plugin.package === undefined
+      ? undefined
+      : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation)
+    if (packageStore) {
+      const credentials = new LauncherSecretStore({ homeDir: input.homeDir })
+      await new ManagerChannelDraftJournal({
+        homeDir: input.homeDir,
+        configPath: input.configPath,
+        profileId: input.profileId,
+        store: credentials,
+        packageStore,
+        packageOwnerVerified: input.profileOwnerVerified === true,
+      }).recover()
+    }
+    const state = await (packageStore?.persistence.read ?? readServiceConfigState)({
       profileId: input.profileId,
       pluginId: 'channel',
       serviceId: 'runtime',
@@ -286,7 +301,7 @@ export async function startHeadlessService(input: {
       preparing: metadata => channel.consumer?.agentAccess.preparation(metadata) === true,
       closed: () => closing !== undefined,
     })
-    return { channel, codex, snapshot: () => service.snapshot(), close }
+    return { channel, codex, managerChannelOwner: { plugin, service }, snapshot: () => service.snapshot(), close }
   } catch (error) {
     try {
       await close()

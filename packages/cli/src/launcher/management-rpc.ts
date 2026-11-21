@@ -20,6 +20,18 @@ import type {
   PluginManagementSnapshot,
 } from '../management/contracts.js'
 import type { PluginManagementService } from '../management/service.js'
+import {
+  parseRendererConfigOperation,
+  type RendererConfigOperation,
+  type RendererConfigResult,
+} from './renderer-config-management.js'
+import { parsePermissionReviewOperation, type PermissionReviewOperation } from './permission-review-management.js'
+import { type ManagerServiceAuthOperation, parseManagerServiceAuthOperation } from './manager-service-auth.js'
+import {
+  type ManagerChannelCredentialOperation,
+  parseManagerChannelCredentialOperation,
+} from './manager-channel-credentials.js'
+import { type ManagerRendererOperation, parseManagerRendererOperation } from '../cli/manager-renderer-rpc.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -27,6 +39,11 @@ export const MAX_MANAGEMENT_REQUEST_BYTES = 256 * 1024
 const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
+  | ManagerRendererOperation
+  | ManagerServiceAuthOperation
+  | ManagerChannelCredentialOperation
+  | PermissionReviewOperation
+  | RendererConfigOperation
   | { readonly kind: 'query' }
   | {
     readonly kind: 'codex'
@@ -136,6 +153,11 @@ export function parsePluginManagementRpcRequest(
   if (
     ![
       'query',
+      'manager-renderer',
+      'manager-service-auth',
+      'manager-channel-credentials',
+      'plugin-configuration',
+      'permission-review-apply',
       'model-export',
       'terminal-provider',
       'channel',
@@ -148,6 +170,11 @@ export function parsePluginManagementRpcRequest(
       'migrate-legacy-sources',
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
+  if (operation.kind === 'manager-renderer') parseManagerRendererOperation(operation)
+  if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
+  if (operation.kind === 'manager-service-auth') parseManagerServiceAuthOperation(operation)
+  if (operation.kind === 'manager-channel-credentials') parseManagerChannelCredentialOperation(operation)
+  if (operation.kind === 'permission-review-apply') parsePermissionReviewOperation(operation, scope.profileId)
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
     operation.kind === 'channel' && (typeof operation.operation !== 'string'
@@ -175,7 +202,16 @@ export async function handlePluginManagementRpcRequest(
   request: PluginManagementRpcRequest,
 ): Promise<unknown> {
   const operation = request.operation
+  if (operation.kind === 'manager-renderer') throw new Error('Manager renderer requires the local owner')
+  if (operation.kind === 'manager-service-auth') {
+    throw new Error('Local manager authentication requires the lifecycle owner')
+  }
+  if (operation.kind === 'manager-channel-credentials') {
+    throw new Error('Local manager credentials require the service owner')
+  }
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
+  if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
+  if (operation.kind === 'permission-review-apply') throw new Error('Permission review requires the lifecycle owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
@@ -245,6 +281,11 @@ export async function startPluginManagementRpcServer(input: {
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
+  readonly permissionReview?: (operation: PermissionReviewOperation) => Promise<unknown>
+  readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
+  readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  readonly managerRenderer?: (operation: ManagerRendererOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
@@ -263,7 +304,22 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'codex'
+    return request.operation.kind === 'manager-renderer'
+      ? await (input.managerRenderer?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable' }))
+      : request.operation.kind === 'manager-channel-credentials'
+      ? await (input.managerChannelCredentials?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' }))
+      : request.operation.kind === 'manager-service-auth'
+      ? await (input.managerServiceAuth?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', code: 'OWNER_UNAVAILABLE' }))
+      : request.operation.kind === 'permission-review-apply'
+      ? await (input.permissionReview?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'lifecycle-unavailable' }))
+      : request.operation.kind === 'plugin-configuration'
+      ? await (input.rendererConfiguration?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'renderer-unavailable' }))
+      : request.operation.kind === 'codex'
       ? await (input.codex?.(request.operation.operation, request.operation.input, {
         ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
         ...(request.operation.callerThreadId ? { 'openai/threadId': request.operation.callerThreadId } : {}),
@@ -424,7 +480,9 @@ export async function requestPluginManagementRpc(
   paths: PluginManagementRpcPaths,
   endpoint: PluginManagementRpcEndpoint,
   operation: PluginManagementRpcOperation,
+  options: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
 ): Promise<unknown> {
+  if (options.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
   const requestId = `management-${randomBytes(12).toString('hex')}`
   return await new Promise((resolve, reject) => {
     const socket = connect(paths.socket)
@@ -434,11 +492,18 @@ export async function requestPluginManagementRpc(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
       operation()
     }
     // Executing an install/update can download and stage a large package.
-    const deadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const normalDeadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const deadline = options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
+      ? normalDeadline
+      : Math.max(1, Math.min(normalDeadline, options.timeoutMs))
     const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), deadline)
+    const abort = () => socket.destroy(new Error('MANAGER_SESSION_REVOKED'))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
     socket.setEncoding('utf8')
     socket.once('error', error => settle(() => reject(error)))
     socket.on('data', chunk => {
@@ -462,7 +527,8 @@ export async function requestPluginManagementRpc(
         settle(() => reject(error))
       }
     })
-    socket.once('connect', () =>
+    socket.once('connect', () => {
+      if (options.signal?.aborted) return abort()
       socket.write(`${
         JSON.stringify({
           version: 1,
@@ -471,7 +537,8 @@ export async function requestPluginManagementRpc(
           profileId: endpoint.profileId,
           operation,
         })
-      }\n`))
+      }\n`)
+    })
   })
 }
 

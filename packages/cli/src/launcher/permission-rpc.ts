@@ -119,22 +119,93 @@ export async function persistPermissionPolicies(
   records: readonly CordisXPersistedPermissionPolicyRecord[],
 ): Promise<readonly CordisXPersistedPermissionPolicyRecord[]> {
   const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
-  const keys = new Set(normalized.map(persistedPermissionRecordKey))
-  const migrated = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
   const updated = await updateHomeConfigAtomic(current => ({
     ...current,
-    permissions: [
-      ...current.permissions.filter(item =>
-        !keys.has(persistedPermissionRecordKey(item))
-        && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
-      ),
-      ...normalized,
-    ],
+    permissions: mergePermissionPolicies(current.permissions, normalized),
   }), context.configPath)
-  const persisted = new Map(updated.permissions.map(item => [persistedPermissionRecordKey(item), item]))
-  return normalized.map((record) => {
+  return readbackPermissionPolicies(updated.permissions, normalized)
+}
+
+function mergePermissionPolicies(
+  existing: readonly CordisXPersistedPermissionPolicyRecord[],
+  normalized: readonly CordisXPersistedPermissionPolicyRecord[],
+): readonly CordisXPersistedPermissionPolicyRecord[] {
+  const keys = new Set(normalized.map(persistedPermissionRecordKey))
+  const migrated = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
+  return [
+    ...existing.filter(item =>
+      !keys.has(persistedPermissionRecordKey(item))
+      && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
+    ),
+    ...normalized,
+  ]
+}
+
+function readbackPermissionPolicies(
+  policies: readonly CordisXPersistedPermissionPolicyRecord[],
+  requested: readonly CordisXPersistedPermissionPolicyRecord[],
+): readonly CordisXPersistedPermissionPolicyRecord[] {
+  const persisted = new Map(policies.map(item => [persistedPermissionRecordKey(item), item]))
+  return requested.map((record) => {
     const readback = persisted.get(persistedPermissionRecordKey(record))
     if (readback === undefined) throw new Error('permission policy persistence readback failed')
     return readback
   })
+}
+
+function policySnapshot(
+  records: readonly CordisXPersistedPermissionPolicyRecord[],
+  profileId: string,
+): string {
+  return JSON.stringify(
+    records.filter(record => record.key.profileId === profileId)
+      .map(record => normalizePersistedPermissionPolicyRecord(record))
+      .sort((a, b) => persistedPermissionRecordKey(a).localeCompare(persistedPermissionRecordKey(b))),
+  )
+}
+
+/** An owner's projected snapshot no longer matches the shared profile ledger. */
+export class PermissionPolicyConflictError extends Error {
+  constructor() {
+    super('Permission policy snapshot has changed')
+    this.name = 'PermissionPolicyConflictError'
+  }
+}
+
+/**
+ * Compare and write while holding the existing cross-process Home config lock.
+ * This prevents a stale renderer from overwriting another writer. It does not
+ * synchronize live renderer caches; the owner must fence and synchronize all
+ * consumers separately, including non-Manager clients.
+ */
+export async function persistPermissionPoliciesIfUnchanged(
+  context: Pick<PermissionPersistenceContext, 'configPath' | 'profileId'> & {
+    readonly expected: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly assertCurrent: () => void | Promise<void>
+  },
+  records: readonly CordisXPersistedPermissionPolicyRecord[],
+): Promise<{
+  readonly records: readonly CordisXPersistedPermissionPolicyRecord[]
+  readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
+}> {
+  const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
+  const expected = context.expected.map(item => normalizePersistedPermissionPolicyRecord(item))
+  if (
+    normalized.length === 0 || normalized.some(item => item.key.profileId !== context.profileId)
+    || expected.some(item => item.key.profileId !== context.profileId)
+    || new Set(normalized.map(persistedPermissionRecordKey)).size !== normalized.length
+    || new Set(expected.map(persistedPermissionRecordKey)).size !== expected.length
+  ) throw new Error('Permission policy snapshot is invalid')
+  const expectedSnapshot = policySnapshot(expected, context.profileId)
+  const updated = await updateHomeConfigAtomic(async current => {
+    await context.assertCurrent()
+    if (policySnapshot(current.permissions, context.profileId) !== expectedSnapshot) {
+      throw new PermissionPolicyConflictError()
+    }
+    return { ...current, permissions: mergePermissionPolicies(current.permissions, normalized) }
+  }, context.configPath)
+  return {
+    records: readbackPermissionPolicies(updated.permissions, normalized),
+    policies: updated.permissions.filter(item => item.key.profileId === context.profileId),
+  }
 }

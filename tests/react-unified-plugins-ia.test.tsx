@@ -383,6 +383,40 @@ describe('unified Plugins information architecture', () => {
     }
   })
 
+  it('restores a standalone destination with a working back route', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+      url: 'http://127.0.0.1:43123/',
+    })
+    const previous = {
+      document: globalThis.document,
+      window: globalThis.window,
+      IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    }
+    Object.assign(globalThis, {
+      document: dom.window.document,
+      window: dom.window,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })
+    const saved = { kind: 'manager-content', id: 'channel:settings', reference: { id: 'settings' } } as const
+    dom.window.sessionStorage.setItem('cordisx.standalone.manager.route.v1', JSON.stringify(saved))
+    let router: ReturnType<typeof useManagerRouter> | undefined
+    function Harness() {
+      router = useManagerRouter(undefined, dom.window.sessionStorage)
+      return null
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () => root.render(<Harness />))
+      expect(router?.route).toEqual(saved)
+      await act(async () => router?.back())
+      expect(router?.route).toEqual({ kind: 'primary', page: 'plugins' })
+    } finally {
+      await act(async () => root.unmount())
+      Object.assign(globalThis, previous)
+      dom.window.close()
+    }
+  })
+
   it('falls through from bundle inspection only for an explicit invalid-bundle result', async () => {
     const plugin = vi.fn(async () => pluginResult('install'))
     const bundle = vi.fn(async () => bundleResult('invalid-bundle'))

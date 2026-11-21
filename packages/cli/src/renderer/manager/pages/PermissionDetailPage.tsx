@@ -34,31 +34,37 @@ export function PermissionDetailPage(
         <h3>授权策略</h3>
         <p>{permission.reasonText}</p>
         {ownService ? <p>{managerCopy(snapshot.localization.locale, 'permission.service-owner-reason')}</p> : (
-          <Select
-            value={permission.policy}
-            options={permission.authorizationOrigin === 'local-development' || certifiedAutomatic
-              ? policyOptions.map(option =>
-                option.value === (certifiedAutomatic ? 'ask' : 'allow')
-                  ? {
-                    ...option,
-                    label: managerCopy(
-                      snapshot.localization.locale,
-                      certifiedAutomatic
-                        ? 'permission.certified-automatic-authorization'
-                        : 'permission.development-authorized',
-                    ),
-                  }
-                  : option
-              )
-              : policyOptions}
-            onChange={value =>
-              void model.setPermissionPolicy(
-                route.pluginId,
-                route.capability,
-                value as CordisXPermissionPolicy,
-                permission.scope,
-              )}
-          />
+          <>
+            <Select
+              value={permission.policy}
+              disabled={model.permissionPolicyWritable === false}
+              options={permission.authorizationOrigin === 'local-development' || certifiedAutomatic
+                ? policyOptions.map(option =>
+                  option.value === (certifiedAutomatic ? 'ask' : 'allow')
+                    ? {
+                      ...option,
+                      label: managerCopy(
+                        snapshot.localization.locale,
+                        certifiedAutomatic
+                          ? 'permission.certified-automatic-authorization'
+                          : 'permission.development-authorized',
+                      ),
+                    }
+                    : option
+                )
+                : policyOptions}
+              onChange={value =>
+                void model.setPermissionPolicy(
+                  route.pluginId,
+                  route.capability,
+                  value as CordisXPermissionPolicy,
+                  permission.scope,
+                )}
+            />
+            {model.permissionPolicyWritable === false
+              ? <p role="status">{managerCopy(snapshot.localization.locale, 'permission.read-only')}</p>
+              : null}
+          </>
         )}
       </section>
       <section className="cxr-section">
