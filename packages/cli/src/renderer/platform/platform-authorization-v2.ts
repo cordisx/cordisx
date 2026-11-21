@@ -114,8 +114,6 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     if (!this.isAuthorizationCurrent(registration, review.revision)) {
       throw new Error('permission review was invalidated')
     }
-    this.localV2Reviews.clear()
-    this.localV4Reviews.clear()
     await this.commitDecisionV2(
       review.plan,
       authorization,
@@ -362,8 +360,6 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
         )
       )
     ) throw new Error(`plugin ${identity.id} denies a required permission v4 capability`)
-    this.localV2Reviews.clear()
-    this.localV4Reviews.clear()
     await this.commitActivationV4(
       registration,
       review.plan,
@@ -505,6 +501,8 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     if (isCurrent && (revision === undefined || !isCurrent(revision))) {
       throw new Error('permission review was invalidated')
     }
+    this.localV2Reviews.clear()
+    this.localV4Reviews.clear()
     for (const record of persistent) this.policyRecords.set(persistedPermissionRecordKey(record), record)
     try {
       await this.persistMixed(persistent)
@@ -609,6 +607,8 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     if (isCurrent && (revision === undefined || !isCurrent(revision))) {
       throw new Error('permission review was invalidated')
     }
+    this.localV2Reviews.clear()
+    this.localV4Reviews.clear()
     for (const record of persistent) this.policyRecords.set(permissionRecordKeyV2(record), record)
     try {
       if (persistent.length > 0) await this.persistV2(persistent)

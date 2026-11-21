@@ -193,6 +193,20 @@ describe('PermissionBroker permission-v2 integration', () => {
     }
   })
 
+  it('invalidates a renderer review when another activation issues a one-shot grant without a policy write', async () => {
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), legacyPrompt, () => new Date(), 50)
+    broker.register(identity, manifest('models.read', { providers: ['codex'] }))
+    try {
+      const stale = broker.reviewAuthorizationPlanV2(identity)
+      const ownerPlan = broker.authorizationPlanV2(identity)
+      await broker.authorizeActivationV2(identity, decision(ownerPlan, 'allow-once'))
+      await expect(broker.authorizeReviewedActivationV2(identity, decision(stale, 'allow-once')))
+        .rejects.toThrow('permission review was invalidated')
+    } finally {
+      broker.dispose()
+    }
+  })
+
   it('binds lifecycle allow-once to one exact profile/identity/scope/fingerprint/generation grant', async () => {
     const store = new MemoryPermissionPolicyStore()
     const broker = new PermissionBroker(
