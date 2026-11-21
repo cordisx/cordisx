@@ -485,7 +485,7 @@ describe('independent renderer plugin graph projection', () => {
         response.end(
           request.url === '/'
             ? '<!doctype html><title>Projection fixture</title><div class="icon">fixture</div><script type="module" src="/bootstrap.js"></script>'
-            : '<!doctype html><title>Owner Host fixture</title><script src="/host.js"></script>',
+            : '<!doctype html><title>Owner Host fixture</title><script type="module" src="/host-entry.js"></script>',
         )
         return
       }
@@ -497,6 +497,13 @@ describe('independent renderer plugin graph projection', () => {
       if (request.url === '/host.js') {
         response.setHeader('content-type', 'text/javascript')
         response.end(hostBundle)
+        return
+      }
+      if (request.url === '/host-entry.js') {
+        response.setHeader('content-type', 'text/javascript')
+        response.end(`import { startStandaloneManagerComposition } from '/host.js';
+          globalThis.__beforeOwnerStart = { runtime: !!globalThis.__cordisxRuntime, plugin: !!globalThis.__fixturePluginMounted };
+          await startStandaloneManagerComposition(new AbortController().signal);`)
         return
       }
       if (request.url === '/manager-host.css') {
@@ -618,6 +625,7 @@ describe('independent renderer plugin graph projection', () => {
       // Dynamic Host style elements remain a separate CSP/visual limitation.
       await cdp.send('Page.navigate', { url: manager + '/host' })
       await expect.poll(() => cdp!.evaluate('document.documentElement.dataset.cordisxReady')).toBe('true')
+      expect(await cdp.evaluate('globalThis.__beforeOwnerStart')).toEqual({ runtime: false, plugin: false })
       expect(await cdp.evaluate('globalThis.__fixturePluginMounted === true')).toBe(true)
       expect(await cdp.evaluate('document.querySelector("[data-manager-surface=standalone]") !== null')).toBe(true)
       // Opening a projected SVG as a document must not give it script execution.

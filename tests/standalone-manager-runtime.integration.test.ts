@@ -1,6 +1,7 @@
 import { JSDOM } from 'jsdom'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { transform } from 'esbuild'
 import { expect, it, vi } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
@@ -104,7 +105,17 @@ it('mounts the original Manager and registered plugin in an owner-scoped standal
   try {
     Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
     Object.assign(dom.window, { TextEncoder, TextDecoder })
-    dom.window.eval(bundle)
+    const fixtureBundle = await transform(bundle, { format: 'iife', globalName: '__testStandaloneModule' })
+    dom.window.eval(fixtureBundle.code)
+    const module = (dom.window as unknown as {
+      __testStandaloneModule: {
+        startStandaloneManagerComposition(signal: AbortSignal): Promise<unknown>
+      }
+    }).__testStandaloneModule
+    expect((dom.window as unknown as { __cordisxRuntime?: unknown }).__cordisxRuntime).toBeUndefined()
+    await module.startStandaloneManagerComposition(new AbortController().signal)
+    expect(() => module.startStandaloneManagerComposition(new AbortController().signal))
+      .toThrow('Standalone Manager session is unavailable')
     const doc = dom.window.document
     await vi.waitFor(() => expect(doc.documentElement.dataset.cordisxReady).toBe('true'), { timeout: 10_000 })
     const root = doc.querySelector<HTMLElement>('[data-manager-surface="standalone"]')!

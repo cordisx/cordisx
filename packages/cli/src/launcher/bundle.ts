@@ -285,8 +285,8 @@ export async function buildRendererCompositionSource(
   sourceOptions: RendererCompositionSourceOptions = {},
 ): Promise<RendererCompositionSource> {
   const attachedStandalone = await assertStandaloneOwner(config, options)
-  if (attachedStandalone && sourceOptions.omitPluginModules === true) {
-    throw new Error('Standalone Manager owner composition cannot omit plugin modules')
+  if (attachedStandalone && (sourceOptions.omitPluginModules === true || sourceOptions.awaitBoot === true)) {
+    throw new Error('Standalone Manager owner composition cannot use an implicit development bootstrap')
   }
   if (config.codex.agentLoopBackend === 'mock' && options.playground !== true) {
     throw new Error('config.codex.agentLoopBackend mock is available only in the explicit UI Playground')
@@ -595,8 +595,9 @@ export async function buildRendererCompositionSource(
     : `const __cordisxPluginGraphModules = await Promise.all([${graphLoads.join(',')}])`
   const graphPublishSource = runtimeGraphs.map(graph => `${graph.publishSource};`).join('\n')
   const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
+  const standaloneSignal = attachedStandalone ? ', undefined, signal' : ''
   const boot = runtimeGraphs.length === 0
-    ? `installCordisX(${composition}, ${metadata})`
+    ? `installCordisX(${composition}, ${metadata}${standaloneSignal})`
     : `installCordisXComposition(async () => {
 ${graphLoadSource}
 return ${composition}
@@ -604,12 +605,12 @@ return ${composition}
 ${graphPublishSource}
 }, () => {
 ${graphRetireSource}
-})`
+}${standaloneSignal})`
   const compositionBoot = `const __cordisxCompositionBoot = ${boot}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
   const registryBootstrap = attachedStandalone ? resourceRegistryInstallSource() : ''
   const hostGraphLaunchSource =
-    `export async function bootCordisXComposition(installCordisX, installCordisXComposition) {
+    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal) {
 ${registryBootstrap}
 return await ${boot}
 }
@@ -635,7 +636,25 @@ return await ${boot}
       iconThemePreference: options.iconThemePreference,
     }))
     .digest('hex')
-  const source = sourceOptions.awaitBoot === true
+  const source = attachedStandalone
+    ? `${imports.join('\n')}
+let __cordisxStandaloneStarted = false;
+export function startStandaloneManagerComposition(signal) {
+  if (__cordisxStandaloneStarted || !signal || signal.aborted || typeof signal.addEventListener !== 'function') {
+    throw new Error('Standalone Manager session is unavailable');
+  }
+  __cordisxStandaloneStarted = true;
+  ${registryBootstrap};
+  return Promise.resolve().then(() => {
+    signal.throwIfAborted();
+    return ${boot};
+  }).catch(error => {
+    globalThis.__cordisxPluginGenerationResourcesV1?.dispose();
+    throw error;
+  });
+}
+`
+    : sourceOptions.awaitBoot === true
     ? `${
       imports.join('\n')
     }\n${registryBootstrap}\n${compositionBoot}\nexport const runtime = await __cordisxCompositionBoot\n`
@@ -675,7 +694,7 @@ export async function buildRendererBundle(
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'cordisx-composition.ts' },
     bundle: true,
-    format: 'iife',
+    format: options.standaloneOwner === undefined ? 'iife' : 'esm',
     platform: 'browser',
     target: ['chrome120'],
     // Native production injection is one CDP payload.  Never put an inline
