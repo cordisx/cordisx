@@ -22,6 +22,12 @@ import {
   resourceRegistryInstallSource,
   startPluginGenerationArtifactServer,
 } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
+import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
+import { createStandaloneRuntimeGraph } from '../packages/cli/src/launcher/standalone-runtime-graph.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+} from '../packages/cli/src/contracts.js'
 
 const directories = new Set<string>()
 const servers = new Set<PluginGenerationArtifactServer>()
@@ -54,7 +60,8 @@ async function fixture(): Promise<{
   directories.add(directory)
   await mkdir(path.join(directory, 'assets'))
   await mkdir(path.join(directory, 'chunks'))
-  const module = "export const load = () => import('./chunks/lazy.js')\n"
+  const module =
+    "export function apply() { globalThis.__fixturePluginMounted = true }\nexport const load = () => import('./chunks/lazy.js')\n"
   const chunk = 'export const value = 2\n'
   const style = '.icon { background-image: url(./pixel.svg); color: rgb(1, 2, 3) }\n'
   const image = '<svg xmlns="http://www.w3.org/2000/svg"><script>globalThis.svgExecuted = true</script></svg>\n'
@@ -465,23 +472,36 @@ describe('independent renderer plugin graph projection', () => {
     directories.add(profile)
     let session: SessionPluginGraphProjection | undefined
     let bootstrap = ''
+    let hostBundle = ''
     // This fixture explicitly bypasses authentication to test the resource
     // responses only. Production must authenticate and select its session first.
     const http = createServer((request, response) => {
-      if (request.url === '/') {
+      if (request.url === '/' || request.url === '/host') {
         response.setHeader(
           'content-security-policy',
           "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'",
         )
         response.setHeader('content-type', 'text/html')
         response.end(
-          '<!doctype html><title>Projection fixture</title><div class="icon">fixture</div><script type="module" src="/bootstrap.js"></script>',
+          request.url === '/'
+            ? '<!doctype html><title>Projection fixture</title><div class="icon">fixture</div><script type="module" src="/bootstrap.js"></script>'
+            : '<!doctype html><title>Owner Host fixture</title><script src="/host.js"></script>',
         )
         return
       }
       if (request.url === '/bootstrap.js') {
         response.setHeader('content-type', 'text/javascript')
         response.end(bootstrap)
+        return
+      }
+      if (request.url === '/host.js') {
+        response.setHeader('content-type', 'text/javascript')
+        response.end(hostBundle)
+        return
+      }
+      if (request.url === '/manager-host.css') {
+        response.setHeader('content-type', 'text/css')
+        response.end('')
         return
       }
       void (async () => {
@@ -528,6 +548,62 @@ describe('independent renderer plugin graph projection', () => {
         write: false,
       })
       bootstrap = bundle.outputFiles[0]!.text
+      const digest = `sha256:${'a'.repeat(64)}` as const
+      const activationItem = {
+        id: pluginId,
+        version: '1.0.0',
+        digest,
+        moduleGeneration,
+        enabled: true,
+        dependencies: [],
+      }
+      const active = {
+        $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+        schemaVersion: 1 as const,
+        recordKind: 'active' as const,
+        profileId: 'fixture',
+        revision: 1,
+        lastGoodRevision: 1,
+        runtimeGeneration: 'owner-1',
+        plugins: [activationItem],
+      }
+      const manifest = {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1 as const,
+        id: pluginId,
+        name: 'Graph fixture',
+        capabilities: [],
+      }
+      const config = {
+        version: 1 as const,
+        rootDir: path.resolve('.'),
+        codex: { debugPort: 9229 },
+        providers: [],
+        plugins: [{
+          id: pluginId,
+          entry: path.join(input.directory, 'module.js'),
+          enabled: true,
+          config: {},
+          manifest,
+          package: { version: '1.0.0', digest, moduleGeneration, dependencies: [] },
+          runtimeGraph: createStandaloneRuntimeGraph(descriptor, manager),
+        }],
+      }
+      hostBundle = await buildRendererBundle(config, {
+        managerPresentationMode: 'standalone',
+        standaloneOwner: {
+          rendererId: 'e'.repeat(64),
+          profileId: 'fixture',
+          generation: 'owner-1',
+          managerOrigin: manager,
+          isCurrent: () => true,
+        },
+        profileId: 'fixture',
+        generation: 'owner-1',
+        pluginActivation: active,
+        initialRegistryEpoch: 0,
+        permission: { profileId: 'fixture', policies: [] },
+      })
       const launched = launchChrome(chrome, profile)
       browser = launched.browser
       cdp = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
@@ -538,6 +614,12 @@ describe('independent renderer plugin graph projection', () => {
         .toEqual({ value: 2, color: 'rgb(1, 2, 3)' })
       await expect.poll(() => input.server.requestTrace().some(item => item.artifactPath === './assets/pixel.svg'))
         .toBe(true)
+      // Load the generated owner-scoped Host as an external same-origin script.
+      // Dynamic Host style elements remain a separate CSP/visual limitation.
+      await cdp.send('Page.navigate', { url: manager + '/host' })
+      await expect.poll(() => cdp!.evaluate('document.documentElement.dataset.cordisxReady')).toBe('true')
+      expect(await cdp.evaluate('globalThis.__fixturePluginMounted === true')).toBe(true)
+      expect(await cdp.evaluate('document.querySelector("[data-manager-surface=standalone]") !== null')).toBe(true)
       // Opening a projected SVG as a document must not give it script execution.
       await cdp.send('Page.navigate', { url: new URL('./pixel.svg', graph.initialStyleUrls[0]).href })
       await expect.poll(() => cdp!.evaluate('document.readyState')).toBe('complete')
@@ -548,5 +630,5 @@ describe('independent renderer plugin graph projection', () => {
       http.closeAllConnections()
       await new Promise<void>(resolve => http.close(() => resolve()))
     }
-  }, 30_000)
+  }, 60_000)
 })
