@@ -548,10 +548,39 @@ it('requires a proven rollback before allowing the desktop or manager to join ag
     expect(f.desktop.activePluginGeneration().plugins[0].enabled).toBe(true)
     expect(f.desktop.pluginRegistryEpoch()).toBe(2)
     expect(manager.methods).toEqual(['synchronize', 'prepare', 'stage', 'publish', 'rollback', 'synchronize'])
+    expect(manager.peer.closed).toBe(false)
     expect(f.lifecycle.requiresReconciliation).toBe(false)
     const join = f.cdp.beginJoin({ send: async () => ({}) } as never)
     join.abort()
   } finally {
+    await f.close()
+  }
+}, 60_000)
+
+it('keeps a confirmed rollback alive while its durable adoption is pending', async () => {
+  const entered = deferred()
+  const release = deferred()
+  const f = await fixture({ rejectPublish: true })
+  const adopt = f.lifecycle.adoptRecoveredActivation.bind(f.lifecycle)
+  vi.spyOn(f.lifecycle, 'adoptRecoveredActivation').mockImplementation(async (active, epoch) => {
+    entered.resolve()
+    await release.promise
+    await adopt(active, epoch)
+  })
+  try {
+    const manager = await f.attach()
+    const disabling = f.disable()
+    await entered.promise
+    const id = f.stageEpochs[0]!.split(':')[0]!
+    await expect(f.lifecycle.rollback('stale-transaction')).rejects.toThrow()
+    await expect(f.lifecycle.rollback(id)).rejects.toThrow()
+    expect(manager.peer.closed).toBe(false)
+    release.resolve()
+    expect(await disabling).toMatchObject({ outcome: 'rolled-back' })
+    expect(manager.peer.closed).toBe(false)
+    expect(f.lifecycle.requiresReconciliation).toBe(false)
+  } finally {
+    release.resolve()
     await f.close()
   }
 }, 60_000)
@@ -655,7 +684,7 @@ it('does not finalize the CDP graph authority if a live manager returns a wrong 
   try {
     const manager = await f.attach()
     expect(await f.disable()).toMatchObject({ outcome: 'rollback-failed' })
-    expect(manager.peer.closed).toBe(false)
+    expect(manager.peer.closed).toBe(true)
     expect(f.calls).toContain('manager:finalize')
     expect(f.calls).not.toContain('desktop:finalize')
     expect(f.lifecycle.requiresReconciliation).toBe(true)

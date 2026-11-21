@@ -418,6 +418,14 @@ it.skipIf(chrome === undefined)(
       expect(interrupted.status).toBe('rejected')
       expect(interrupted.error?.code ?? interrupted.lifecycle?.error?.code).toBe('rollback-failed')
       expect(lifecycle.requiresReconciliation).toBe(true)
+      await vi.waitFor(async () => {
+        const status = await second!.evaluate<{ hidden: boolean; text: string }>(`({
+          hidden: document.querySelector('p[role=status]')?.hidden,
+          text: document.querySelector('p[role=status]')?.textContent ?? ''
+        })`)
+        expect(status.hidden).toBe(false)
+        expect(status.text).toContain('连接不可用')
+      }, { timeout: 10_000 })
     } finally {
       releaseStage()
       await first?.close().catch(() => {})

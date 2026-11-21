@@ -401,10 +401,20 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     }
   }
   async rollback(id: string) {
-    const reservation = this.current(id)
-    const result = await this.federation.rollback(id)
-    reservation.pendingAdoption = true
-    return result
+    try {
+      const reservation = this.current(id)
+      const result = await this.federation.rollback(id)
+      reservation.pendingAdoption = true
+      return result
+    } catch (error) {
+      // A stale caller or the normal adoption window does not terminate a
+      // healthy rollback. An uncertain rollback for this transaction does.
+      if (
+        this.reservation?.id === id && !this.reservation.pendingAdoption
+        && this.federation.requiresReconciliation
+      ) this.terminal(error)
+      throw error
+    }
   }
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
     const reservation = this.reservation
@@ -436,6 +446,10 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   terminal(error: unknown): void {
     this.failed = true
     this.federation.terminal()
+    // No renderer may keep serving a session after the owner has fenced an
+    // uncertain generation. Confirmed rollback uses a separate nonterminal path.
+    for (const peer of this.joiningPeers) peer.close()
+    for (const peer of this.managers) peer.close()
     this.input.cdp.terminal(error)
   }
   async commit(): Promise<void> {

@@ -428,6 +428,7 @@ it('adopts the package authority rollback only after every renderer confirms', a
     expect(f.lifecycle.requiresReconciliation).toBe(false)
     for (const item of [first, second]) {
       expect(item.methods).toEqual(['synchronize', 'prepare', 'stage', 'publish', 'rollback', 'synchronize'])
+      expect(item.peer.closed).toBe(false)
     }
     expect(f.lifecycle.snapshot().registryEpoch).toBe(2)
   } finally {
@@ -633,3 +634,18 @@ it('finishes an interrupted package rollback before service renderer initializat
     await f.close()
   }
 }, 30000)
+
+it('revokes every service renderer when the owner enters terminal failure', async () => {
+  const f = await fixture()
+  try {
+    const first = await f.attach('first')
+    const second = await f.attach('second')
+    f.lifecycle.terminal(new Error('fixture terminal failure'))
+    expect(first.peer.closed).toBe(true)
+    expect(second.peer.closed).toBe(true)
+    expect(f.lifecycle.requiresReconciliation).toBe(true)
+    expect(() => f.lifecycle.snapshot()).toThrow('unavailable')
+  } finally {
+    await f.close()
+  }
+}, 30_000)

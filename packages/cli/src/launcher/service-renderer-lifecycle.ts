@@ -401,6 +401,8 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   terminal(error: unknown): void {
     this.terminalFailure = true
     this.federation?.terminal()
+    for (const peer of this.joiningPeers) peer.close()
+    for (const member of this.members.values()) member.peer.close()
     this.headless.terminal?.(error)
   }
 
