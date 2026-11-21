@@ -130,6 +130,11 @@ export class ManagerRendererSessions {
     return [...this.sessions.values()].some(session => this.current(session))
   }
 
+  mutationAvailability(): 'available' | 'busy' | 'unavailable' {
+    if (!this.alive() || this.mutationsFenced || this.mutationUncertain) return 'unavailable'
+    return this.mutationFence === undefined ? 'available' : 'busy'
+  }
+
   private retire(session: Session): void {
     if (this.sessions.get(session.handle.rendererId) !== session) return
     this.sessions.delete(session.handle.rendererId)

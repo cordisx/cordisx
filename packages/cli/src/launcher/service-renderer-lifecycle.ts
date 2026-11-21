@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { normalizePluginActivation } from './plugin-activation.js'
 import type { PluginLifecycleRuntime, PluginRuntimeMutation, PluginRuntimePreflight } from './plugin-lifecycle-model.js'
@@ -52,6 +53,8 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   private transaction: ActiveTransaction | undefined
   private pendingAdoption: { mode: Mode; epoch: number } | undefined
   private externalFence: symbol | undefined
+  private activeExternalMutation: symbol | undefined
+  private readonly externalMutationContext = new AsyncLocalStorage<symbol>()
   private terminalFailure = false
   private closed = false
 
@@ -103,6 +106,13 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     ) throw new Error('service renderer lifecycle is unavailable')
   }
 
+  private assertMutationAuthority(): void {
+    const current = this.externalMutationContext.getStore()
+    if (current === undefined && this.externalFence === undefined) return
+    if (current !== undefined && current === this.externalFence && current === this.activeExternalMutation) return
+    throw new Error(current === undefined ? 'service renderer fence is active' : 'service renderer fence is stale')
+  }
+
   /** Trusted owner bootstrap can bind a renderer to this exact idle snapshot. */
   snapshot(): Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }> {
     this.assertIdle()
@@ -116,6 +126,8 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
    */
   reserveExternalMutation(peers: readonly AttachedRendererPeer[]): {
     isCurrent(): boolean
+    runExclusive<T>(action: () => Promise<T>): Promise<T>
+    adoptCommitted(active: CordisXPluginActivationRecordV1): boolean
     release(): boolean
     fence(): void
   } {
@@ -125,19 +137,48 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
       || [...this.members.values()].some(member => !peers.includes(member.peer))
     ) throw new Error('service renderer fence is unavailable')
     const reservation = Symbol('service-renderer-fence')
-    const active = structuredClone(this.active!)
-    const epoch = this.registryEpoch
+    let active = structuredClone(this.active!)
+    let epoch = this.registryEpoch
     this.externalFence = reservation
     let ended = false
-    const current = () =>
+    let running = false
+    let used = false
+    let adopted = false
+    const idle = () =>
       !this.closed && !this.requiresReconciliation && this.externalFence === reservation && !this.transaction
-      && !this.reservation && this.joining === 0 && this.registryEpoch === epoch && attachmentEqual(this.active, active)
+      && !this.reservation && this.joining === 0
+    const current = () => idle() && this.registryEpoch === epoch && attachmentEqual(this.active, active)
     return {
       isCurrent: current,
+      runExclusive: async action => {
+        if (ended || running || used || !current()) throw new Error('service renderer fence is unavailable')
+        used = true
+        running = true
+        this.activeExternalMutation = reservation
+        try {
+          return await this.externalMutationContext.run(reservation, action)
+        } finally {
+          this.activeExternalMutation = undefined
+          running = false
+        }
+      },
+      adoptCommitted: value => {
+        if (ended || running || !used || !idle()) return false
+        try {
+          const confirmed = this.validateActive(value)
+          if (!attachmentEqual(this.active, confirmed)) return false
+          active = structuredClone(confirmed)
+          epoch = this.registryEpoch
+          adopted = true
+          return true
+        } catch {
+          return false
+        }
+      },
       release: () => {
-        if (ended) return false
+        if (ended || running) return false
         ended = true
-        if (!current()) {
+        if (!current() || used && !adopted) {
           this.terminal(new Error('service renderer fence became uncertain'))
           return false
         }
@@ -221,7 +262,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
 
   async preflight(input: PluginRuntimePreflight): Promise<void> {
     this.assertIdle()
-    if (this.externalFence) throw new Error('service renderer fence is active')
+    this.assertMutationAuthority()
     if (!attachmentEqual(normalizePluginActivation(input.previous), this.active)) {
       throw new Error('service renderer owner activation is stale')
     }
@@ -244,7 +285,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   prepare(transactionId: string) {
-    if (this.externalFence) throw new Error('service renderer fence is active')
+    this.assertMutationAuthority()
     // A concurrent caller cannot consume or cancel a preflight which is still
     // resolving the participant projections.
     if (this.reservation?.id === transactionId && !this.reservation.ready) {
@@ -282,6 +323,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   private current(id: string): ActiveTransaction {
+    this.assertMutationAuthority()
     if (this.closed || this.terminalFailure || this.transaction?.id !== id) {
       throw new Error('service renderer transaction requires reconciliation')
     }
@@ -409,7 +451,8 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async recoverRollback(plan: Parameters<NonNullable<PluginLifecycleRuntime['recoverRollback']>>[0]) {
-    if (this.closed || this.externalFence || this.transaction || this.members.size > 0) {
+    this.assertMutationAuthority()
+    if (this.closed || this.transaction || this.members.size > 0) {
       throw new Error('service renderer recovery is unavailable')
     }
     const result = await this.headless.recoverRollback!(plan)
@@ -419,6 +462,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
+    this.assertMutationAuthority()
     const pending = this.pendingAdoption
     if (!pending || pending.epoch !== registryEpoch || this.closed) {
       throw new Error('service renderer recovery adoption is unavailable')
@@ -442,9 +486,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
-    if (this.externalFence) {
-      throw new Error('service renderer fence is active')
-    }
+    this.assertMutationAuthority()
     return await this.headless.reload(input)
   }
 

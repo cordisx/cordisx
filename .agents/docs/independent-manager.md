@@ -113,6 +113,13 @@ peer is outside the Manager registry. An uncertain result keeps coordination
 closed until the owner is reconciled. This is not yet a barrier for all native
 or external configuration writers.
 
+The same draft protection applies to sidecar-originated permission reviews in
+service mode. With no Manager renderer open, the owner reserves the lifecycle,
+applies the review exclusively and reads back the committed activation before
+admitting another renderer. An uncertain review keeps coordination closed.
+Other permission writers and native or external consumers are not yet covered
+by a profile-wide barrier.
+
 Model-service changes retain the current Host's app-restart apply semantics.
 The manager permits saving only when the active model-service authority reports
 the explicit safe-write contract; an older owner without that capability remains

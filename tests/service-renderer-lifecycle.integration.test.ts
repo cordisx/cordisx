@@ -334,6 +334,85 @@ it('does not reserve a fence during an existing transaction and stays closed aft
   }
 }, 30_000)
 
+it('permits only the reserved owner review and requires its committed activation readback', async () => {
+  const f = await fixture()
+  let resume!: () => void
+  let entered!: () => void
+  let resumeGap!: () => void
+  let gap!: Promise<unknown>
+  let resumeLate!: () => void
+  let late!: Promise<unknown>
+  const started = new Promise<void>(resolve => {
+    entered = resolve
+  })
+  const paused = new Promise<void>(resolve => {
+    resume = resolve
+  })
+  const lateSignal = new Promise<void>(resolve => {
+    resumeLate = resolve
+  })
+  const gapSignal = new Promise<void>(resolve => {
+    resumeGap = resolve
+  })
+  try {
+    const lease = f.lifecycle.reserveExternalMutation([])
+    const original = f.lifecycle.snapshot().active
+    const review = lease.runExclusive(async () => {
+      gap = gapSignal.then(() => f.lifecycle.prepare('expired-review'))
+      late = lateSignal.then(() => f.lifecycle.prepare('late-review'))
+      entered()
+      await paused
+      f.lifecycle.prepare('owner-review')
+      await f.lifecycle.abort('owner-review')
+    })
+    await started
+    expect(() => f.lifecycle.prepare('unrelated')).toThrow('service renderer fence is active')
+    expect(lease.adoptCommitted(original)).toBe(false)
+    await expect(lease.runExclusive(async () => {})).rejects.toThrow('service renderer fence is unavailable')
+    resume()
+    await review
+    resumeGap()
+    await expect(gap).rejects.toThrow('service renderer fence is stale')
+    expect(lease.adoptCommitted({ ...original, revision: original.revision + 1 })).toBe(false)
+    expect(lease.adoptCommitted(f.lifecycle.snapshot().active)).toBe(true)
+    expect(lease.release()).toBe(true)
+    resumeLate()
+    await expect(late).rejects.toThrow('service renderer fence is stale')
+    f.lifecycle.prepare('after-review')
+    await f.lifecycle.abort('after-review')
+  } finally {
+    resume()
+    resumeGap()
+    resumeLate()
+    await f.close()
+  }
+}, 30_000)
+
+it('does not let an expired review context finish a dangling transaction', async () => {
+  const f = await fixture()
+  let resume!: () => void
+  let late!: Promise<unknown>
+  const signal = new Promise<void>(resolve => {
+    resume = resolve
+  })
+  try {
+    const lease = f.lifecycle.reserveExternalMutation([])
+    const original = f.lifecycle.snapshot().active
+    await lease.runExclusive(async () => {
+      f.lifecycle.prepare('unfinished-review')
+      late = signal.then(async () => await f.lifecycle.abort('unfinished-review'))
+    })
+    resume()
+    await expect(late).rejects.toThrow('service renderer fence is stale')
+    expect(lease.adoptCommitted(original)).toBe(false)
+    expect(lease.release()).toBe(false)
+    expect(() => f.lifecycle.snapshot()).toThrow('service renderer lifecycle is unavailable')
+  } finally {
+    resume()
+    await f.close()
+  }
+}, 30_000)
+
 it('refuses a Manager fence while an unaccounted adapter is attached', async () => {
   const f = await fixture()
   const participants = new ServiceRendererParticipants(f.scope)

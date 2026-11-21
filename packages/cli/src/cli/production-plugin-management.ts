@@ -22,6 +22,7 @@ import type { ServiceRendererParticipants } from './service-renderer-participant
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
+import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -110,6 +111,22 @@ export async function openProductionPluginManagementComposition(input: {
       handle: input.managerChannelCredentials,
     })
     : input.managerChannelCredentials
+  const permissionReview = input.mode === 'service'
+    ? coordinateManagerPermissionReview({
+      sessions: rendererSessions,
+      ...(input.rendererParticipants === undefined ? {} : { participants: input.rendererParticipants }),
+      ...(input.rendererLifecycle === undefined ? {} : { lifecycle: input.rendererLifecycle }),
+      coordinator: input.coordinator,
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+    })
+    : async (operation: Parameters<typeof applyManagementPermissionReview>[0]['operation']) =>
+      await applyManagementPermissionReview({
+        coordinator: input.coordinator,
+        profileId: input.profileId,
+        generation: input.runtimeGeneration,
+        operation,
+      })
   let server: PluginManagementRpcServer
   try {
     const processStartedAt = input.processStartedAt ?? await processStartIdentity(process.pid)
@@ -124,13 +141,7 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
       managerRenderer: async operation => await dispatchManagerRendererOperation(rendererSessions, operation),
-      permissionReview: async operation =>
-        await applyManagementPermissionReview({
-          coordinator: input.coordinator,
-          profileId: input.profileId,
-          generation: input.runtimeGeneration,
-          operation,
-        }),
+      permissionReview,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
       ...(input.channel === undefined ? {} : { channel: input.channel }),

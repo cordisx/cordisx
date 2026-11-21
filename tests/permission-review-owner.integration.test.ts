@@ -16,13 +16,15 @@ const run = promisify(execFile)
 it('applies scoped deferred reviews for V5 and V4 manifests through the real service owner and socket', async () => {
   const root = await mkdtemp('/tmp/cx-permission-review-owner-')
   const cordisxHome = path.join(root, 'cordisx')
-  const cli = path.resolve('packages/cli/dist/src/cli.js')
+  const cli = process.env.CORDISX_CLI_FIXTURE ?? path.resolve('packages/cli/dist/src/cli.js')
   const profile = 'review-fixture'
   const env: NodeJS.ProcessEnv = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith('CORDISX_')),
   )
   env.CORDISX_HOME = cordisxHome
   env.CORDISX_MODEL_API_PORT = '0'
+  env.HOME = root
+  env.CODEX_HOME = path.join(root, 'codex-home')
   const command = async (action: string) =>
     await run(process.execPath, [
       cli,
@@ -33,6 +35,8 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
       profile,
       '--json',
     ], { env, cwd: root, timeout: 30000 })
+  const manager = async (...args: string[]) =>
+    await run(process.execPath, [cli, 'manager', ...args, '--profile', profile], { env, cwd: root, timeout: 30000 })
   try {
     await mkdir(cordisxHome)
     const v4Package = await localPackageV5(root)
@@ -141,6 +145,31 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
     ).toEqual({ status: 'rejected', reason: 'permission-denied' })
     expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
 
+    // The real sidecar must not discard an open Manager session to apply a
+    // review arriving over the owner socket. Closing it permits the review.
+    const entry = (await manager('open', '--print-url')).stdout.trim().split(' ').at(-1)!
+    const url = new URL(entry)
+    const exchange = await fetch(`${url.origin}/api/session`, {
+      method: 'POST',
+      headers: { origin: url.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: url.hash.slice(1) }),
+    })
+    expect(exchange.status).toBe(200)
+    const { token } = await exchange.json() as { token: string }
+    const post = async (route: string) =>
+      await (await fetch(`${url.origin}${route}`, {
+        method: 'POST',
+        headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      })).json()
+    expect(await post('/api/renderer/open')).toMatchObject({ status: 'ok' })
+    expect(await request(operation)).toEqual({
+      status: 'unavailable',
+      reason: 'profile-coordination-unavailable',
+    })
+    expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
+    expect(await post('/api/renderer/close')).toEqual({ closed: true })
+
     const applied = await Promise.all([request(operation), request(operation)])
     expect(applied).toContainEqual(expect.objectContaining({
       status: 'ok',
@@ -198,6 +227,7 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
       result: { outcome: 'applied', operation: 'install', revision: 2 },
     })
   } finally {
+    await manager('stop').catch(() => undefined)
     await command('stop').catch(() => undefined)
     const allowRemoval = async (directory: string) => {
       await chmod(directory, 0o700)
