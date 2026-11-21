@@ -265,11 +265,22 @@ describe('manager managed-service UI bridge', () => {
     })
     const pending = sessions.call(invocation, 'managed', request(token))
     await started
-    await sessions.close(invocation)
-    finish({ requestId: 'request-1', ok: true, value: descriptor() })
-    expect(await pending).toEqual({ status: 'unavailable' })
-    expect(await sessions.call(invocation, 'managed', request(token))).toEqual({ status: 'unavailable' })
-    sessions.dispose()
-    bridge.dispose()
+    try {
+      let retired = false
+      const closing = sessions.close(invocation).then(result => {
+        retired = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(retired).toBe(false)
+      finish({ requestId: 'request-1', ok: true, value: descriptor() })
+      expect(await pending).toEqual({ status: 'unavailable' })
+      expect(await closing).toBe(true)
+      expect(await sessions.call(invocation, 'managed', request(token))).toEqual({ status: 'unavailable' })
+    } finally {
+      finish({ requestId: 'request-1', ok: true, value: descriptor() })
+      sessions.dispose()
+      bridge.dispose()
+    }
   })
 })
