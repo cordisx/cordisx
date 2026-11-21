@@ -19,6 +19,7 @@ import { readPluginDocuments } from './plugin-documents.js'
 import { resolveOwningPackageVersion } from './package-version.js'
 import { resourceRegistryInstallSource } from './plugin-generation-artifact-server.js'
 import { isStandaloneRuntimeGraph } from './standalone-runtime-graph.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 
 /** Owner-private, per-session admission; never populated from a browser request. */
 export interface StandaloneOwnerAttachment {
@@ -130,6 +131,8 @@ async function assertStandaloneOwner(
     || options.profileId !== owner.profileId || options.generation !== owner.generation
     || options.permission?.profileId !== owner.profileId
     || options.permission.policies.some(policy => policy.key.profileId !== owner.profileId)
+    || options.permission.bridgeToken !== undefined
+      && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
     || activation?.recordKind !== 'active' || !Array.isArray(activation.plugins)
     || activation.profileId !== owner.profileId
     || activation.runtimeGeneration !== owner.generation

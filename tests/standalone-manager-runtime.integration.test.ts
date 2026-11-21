@@ -55,6 +55,10 @@ it('requires a live owner-scoped attachment before and after standalone assembly
     .rejects.toThrow('owner attachment is unavailable')
   await expect(buildRendererBundle(config, { ...options, generation: 'different' }))
     .rejects.toThrow('owner scope is invalid')
+  await expect(buildRendererBundle(config, {
+    ...options,
+    permission: { ...options.permission, bridgeToken: 'owner-private-token' },
+  })).rejects.toThrow('owner scope is invalid')
   const current = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false)
   await expect(buildRendererBundle(config, { ...options, standaloneOwner: { ...owner, isCurrent: current } }))
     .rejects.toThrow('owner attachment is unavailable')

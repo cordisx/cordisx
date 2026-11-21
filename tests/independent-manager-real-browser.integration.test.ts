@@ -54,6 +54,7 @@ it.skipIf(chrome === undefined)(
     let browser: ChildProcess | undefined
     let first: CdpClient | undefined
     let second: CdpClient | undefined
+    let third: CdpClient | undefined
     const run = async (...args: string[]) =>
       await exec(process.execPath, [cli!, ...args], { env, cwd: root, timeout: 30_000 })
     try {
@@ -110,14 +111,17 @@ it.skipIf(chrome === undefined)(
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
       const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }
       const port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
-      let secondSocket = ''
-      await vi.waitFor(async () => {
-        const response = await fetch(`http://127.0.0.1:${port}/json/list`)
-        const targets = await response.json() as Array<{ id: string; webSocketDebuggerUrl?: string }>
-        secondSocket = targets.find(item => item.id === created.targetId)?.webSocketDebuggerUrl ?? ''
-        expect(secondSocket).not.toBe('')
-      }, { timeout: 10_000 })
-      second = await CdpClient.connect(secondSocket)
+      const socketFor = async (targetId: string): Promise<string> => {
+        let socket = ''
+        await vi.waitFor(async () => {
+          const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+          const targets = await response.json() as Array<{ id: string; webSocketDebuggerUrl?: string }>
+          socket = targets.find(item => item.id === targetId)?.webSocketDebuggerUrl ?? ''
+          expect(socket).not.toBe('')
+        }, { timeout: 10_000 })
+        return socket
+      }
+      second = await CdpClient.connect(await socketFor(created.targetId))
       await second.send('Runtime.enable')
       await ready(second)
       const snapshot = async (page: CdpClient) =>
@@ -161,6 +165,8 @@ it.skipIf(chrome === undefined)(
         expect((await snapshot(second!)).active.plugins.map((item: { id: string }) => item.id).sort())
           .toEqual(['first-browser-plugin', 'second-browser-plugin'])
       }, { timeout: 20_000 })
+      // Keep one unrelated blank target alive while both Manager seats close.
+      const spare = await second.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
       await second.send('Target.closeTarget', { targetId: created.targetId }).catch(() => undefined)
       await second.close().catch(() => undefined)
       second = undefined
@@ -172,9 +178,22 @@ it.skipIf(chrome === undefined)(
       await install('headless-after-browser')
       const final = await requestPluginManagementRpc(rpcPaths, endpoint, { kind: 'query' }) as any
       expect(final.activationRevision).toBe(3)
+      // A new renderer must cold-boot all currently active package graphs,
+      // not just packages installed after it joins.
+      third = await CdpClient.connect(await socketFor(spare.targetId))
+      await third.send('Runtime.enable')
+      await third.send('Page.enable')
+      await third.send('Page.navigate', { url: await open() })
+      await ready(third)
+      expect((await snapshot(third)).active.plugins.map((item: { id: string }) => item.id).sort())
+        .toEqual(['first-browser-plugin', 'headless-after-browser', 'second-browser-plugin'])
+      for (const marker of ['first_browser_plugin', 'second_browser_plugin', 'headless_after_browser']) {
+        expect(await third.evaluate(`globalThis.__${marker} === true`)).toBe(true)
+      }
     } finally {
       await first?.close().catch(() => undefined)
       await second?.close().catch(() => undefined)
+      await third?.close().catch(() => undefined)
       if (browser) await stopChrome(browser)
       if (cli) {
         await run('manager', 'stop').catch(() => undefined)
