@@ -99,6 +99,13 @@ admit a configured Channel into the experimental Host page. Unverified direct
 entries, other adapters, connection deletion, and remaining Channel management
 features are unavailable.
 
+An owner-only experimental composition can project an exact configured
+Channel archive and its already-running service into isolated, read-only
+renderer sessions. It forwards only matching existing Manager UI policies and
+does not provide credential or configuration actions. The production service
+owner does not enable this composition. Its browser tests use a simulator and
+a test lifecycle handshake; they do not validate the current user's profile.
+
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and
 running service match again. A failure after an action begins may have changed

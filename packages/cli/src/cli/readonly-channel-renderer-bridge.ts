@@ -52,6 +52,12 @@ export class ReadonlyChannelRendererBridge {
     }
   }
 
+  /** Owner-only cleanup for a bootstrap that did not reach renderer admission. */
+  unbind(context: ManagerRendererChannelContext): void {
+    const entry = this.entries.get(context.rendererId)
+    if (entry?.signal === context.signal) this.retire(context.rendererId, entry)
+  }
+
   private retire(rendererId: string, entry: Entry): void {
     if (this.entries.get(rendererId) !== entry) return
     this.entries.delete(rendererId)

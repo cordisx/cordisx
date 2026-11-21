@@ -20,6 +20,9 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
+import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
+import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
+import type { LocalChannelService } from '../launcher/channel-service.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
 type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
@@ -38,6 +41,7 @@ type Entry = {
   releasePluginConfigFence?: () => Promise<void>
   retirement?: Promise<boolean>
   cleanupFailed?: boolean
+  configuredChannel?: ServiceRendererConfiguredChannel
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
 }
@@ -74,6 +78,12 @@ export class ServiceRendererBootstrap {
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
       /** Service owner only: fence cooperative Home policy and configured-plugin writers. */
       readonly protectProfileInputs?: boolean
+      /** Private experimental composition; production does not enable configured Channel admission yet. */
+      readonly experimentalConfiguredChannel?: {
+        readonly plugin: CordisXConfigPlugin
+        readonly service: LocalChannelService
+        readonly bridge: ReadonlyChannelRendererBridge
+      }
     },
   ) {
     this.permissionFence = input.protectProfileInputs
@@ -86,6 +96,7 @@ export class ServiceRendererBootstrap {
       for (const entry of this.entries.values()) {
         for (let index = entry.leases.length - 1; index >= 0; index--) {
           const lease = entry.leases[index]!
+          if (lease === entry.configuredChannel?.lease) continue
           const plugin = active.plugins.find(item => item.id === lease.pluginId)
           if (plugin?.enabled !== true || plugin.moduleGeneration !== lease.moduleGeneration) {
             lease.retire()
@@ -110,7 +121,10 @@ export class ServiceRendererBootstrap {
   /** Detect stale startup configuration without comparing the live package epoch. */
   private async configurationCurrent(rendererId: string, entry: Entry): Promise<boolean> {
     try {
-      if (!this.current(rendererId, entry) || !entry.config || !entry.policies) return false
+      if (
+        !this.current(rendererId, entry) || !entry.config || !entry.policies
+        || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+      ) return false
       const [config, policies] = await Promise.all([
         loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
         this.policies(),
@@ -124,7 +138,10 @@ export class ServiceRendererBootstrap {
 
   private async unchanged(rendererId: string, entry: Entry): Promise<boolean> {
     try {
-      if (!this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies) {
+      if (
+        !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
+        || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+      ) {
         return false
       }
       if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
@@ -168,6 +185,11 @@ export class ServiceRendererBootstrap {
     }
     try {
       if (entry.managedContext) this.input.managedServiceUI?.retire(entry.managedContext)
+    } catch {
+      entry.cleanupFailed = true
+    }
+    try {
+      entry.configuredChannel?.close()
     } catch {
       entry.cleanupFailed = true
     }
@@ -232,9 +254,16 @@ export class ServiceRendererBootstrap {
           loadPluginComposition(this.input.store, snapshot.active),
           this.policies(),
         ])
-        // Configured plugins and persistent plugin config need scoped
-        // capability/config projection before they can be admitted.
-        if (config.plugins.length !== 0 || plugins.some(plugin => !emptyConfig(plugin.config))) {
+        // Configured plugins stay closed unless the owner explicitly supplies
+        // the constrained read-only Channel composition used for integration.
+        if (
+          plugins.some(plugin => !emptyConfig(plugin.config))
+          || config.plugins.length !== 0 && (
+              !this.input.protectProfileInputs || !this.input.experimentalConfiguredChannel
+              || config.plugins.length !== 1
+              || config.plugins[0]?.id !== 'channel' || plugins.some(plugin => plugin.id === 'channel')
+            )
+        ) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
         // Disabled packages are also serialized as Manager metadata.
@@ -267,6 +296,25 @@ export class ServiceRendererBootstrap {
             leases.push(lease)
             if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
           }
+        }
+        if (config.plugins.length === 1) {
+          const channel = this.input.experimentalConfiguredChannel!
+          const configured = await ServiceRendererConfiguredChannel.prepare({
+            homeDir: this.input.homeDir,
+            configPath: this.input.configPath,
+            profileId: this.input.profileId,
+            plugin: config.plugins[0]!,
+            selectedPlugin: channel.plugin,
+            service: channel.service,
+            bridge: channel.bridge,
+            server: await this.input.lifecycle.artifactServer(),
+            current: () => this.current(rendererId, entry),
+            unchanged: async () => await this.unchanged(rendererId, entry),
+            retire: () => entry.peer.close(),
+          })
+          entry.configuredChannel = configured
+          entry.leases.push(configured.lease)
+          if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
         }
         entry.snapshot = snapshot
         entry.config = config
@@ -333,14 +381,22 @@ export class ServiceRendererBootstrap {
             )
           ) throw new Error('renderer-bootstrap-graphs-invalid')
         }
+        const configuredGraph = entry.configuredChannel && byPlugin.get('channel')
+        if (entry.configuredChannel && !configuredGraph) throw new Error('renderer-bootstrap-graphs-invalid')
+        const configured = entry.configuredChannel
+          ? await entry.configuredChannel.project(context, configuredGraph!, managerOrigin, entry.policies)
+          : undefined
         const config: CordisXConfig = {
           ...entry.config,
-          plugins: entry.plugins.map(plugin => {
-            if (!plugin.enabled) return plugin
-            const graph = byPlugin.get(plugin.id)
-            if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
-            return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }
-          }),
+          plugins: [
+            ...entry.plugins.map(plugin => {
+              if (!plugin.enabled) return plugin
+              const graph = byPlugin.get(plugin.id)
+              if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
+              return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }
+            }),
+            ...(configured === undefined ? [] : [configured.plugin]),
+          ],
         }
         const snapshot = entry.snapshot
         const managedServiceUICapabilities = entry.managedOwners.size === 0
@@ -367,10 +423,21 @@ export class ServiceRendererBootstrap {
           profileId: this.input.profileId,
           appId: this.input.appId,
           generation: this.input.generation,
-          permission: { profileId: this.input.profileId, policies: entry.policies },
+          permission: {
+            profileId: this.input.profileId,
+            policies: configured === undefined ? entry.policies : [
+              ...entry.policies.filter(policy => policy.key.identity.pluginId !== 'channel'),
+              ...configured.policies,
+            ],
+          },
           pluginActivation: snapshot.active,
           initialRegistryEpoch: snapshot.registryEpoch,
           pluginManagement: { profileId: this.input.profileId, token: 'renderer-binding-placeholder' },
+          ...(configured === undefined ? {} : {
+            channelManager: configured.projection,
+            serviceCapabilityOwners: [configured.serviceOwner],
+            channelActionsBridgeToken: 'renderer-binding-placeholder',
+          }),
           ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),
         })
         if (entry.managedContext) this.input.managedServiceUI?.assertBundleSafe(context, bundle)
@@ -393,6 +460,7 @@ export class ServiceRendererBootstrap {
           Buffer.byteLength(`${JSON.stringify(response)}\n`) > MANAGER_BUNDLE_RPC_LIMIT
           || !await this.unchanged(rendererId, entry)
         ) throw new Error('renderer-bootstrap-unavailable')
+        entry.configuredChannel?.bind(context)
         this.input.participants.confirmBootstrap(rendererId, snapshot)
         return result
       } catch (error) {

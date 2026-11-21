@@ -98,4 +98,20 @@ describe('readonly Channel renderer bridge', () => {
       expect(f.close).toHaveBeenCalledTimes(1)
     }
   })
+
+  it('removes only the owner-selected session when bootstrap cleanup unbinds a view', async () => {
+    const f = fixture()
+    const otherClose = vi.fn()
+    f.bridge.bind(f.one, f.view)
+    f.bridge.bind(f.two, { ...f.view, close: otherClose })
+    f.bridge.unbind({ ...f.one, signal: f.second.signal })
+    expect(f.close).not.toHaveBeenCalled()
+    f.bridge.unbind(f.one)
+    expect(f.close).toHaveBeenCalledOnce()
+    expect(() => f.bridge.channel.prepare(f.request('closed'), f.one)).toThrow()
+    await expect(f.bridge.channel.prepare(f.request('live'), f.two).dispatch()).resolves.toMatchObject({ ok: true })
+    expect(otherClose).not.toHaveBeenCalled()
+    f.bridge.close()
+    expect(otherClose).toHaveBeenCalledOnce()
+  })
 })

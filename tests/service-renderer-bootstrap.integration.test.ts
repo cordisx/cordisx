@@ -1,39 +1,22 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { transform } from 'esbuild'
 import { expect, it, vi } from 'vitest'
-import { ServiceRendererBootstrap } from '../packages/cli/src/cli/service-renderer-bootstrap.js'
-import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import { fenceManagerConsumers } from '../packages/cli/src/cli/manager-consumer-fence.js'
 import {
-  createServiceRendererProjector,
   loadServiceRendererPackage,
   type ServiceRendererPrivateGraph,
 } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
-import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
-import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
-import { createManagerManagedServiceUIBridge } from '../packages/cli/src/cli/manager-managed-service-ui.js'
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
-import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
-import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
-import {
-  type PluginGenerationGraphLease,
-  startPluginGenerationArtifactServer,
-} from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
-import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
-import {
-  attachmentHomeDigest,
-  RendererAttachmentRejected,
-} from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
-import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
-import { decision, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
-import { backend as fixtureBackendSource, stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
+import { RendererAttachmentRejected } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
+import { backend as fixtureBackendSource } from './fixtures/service-mode-plugin.js'
+import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 
 const secret = () => randomBytes(32).toString('hex')
 const origin = 'http://127.0.0.1:43123'
@@ -41,193 +24,6 @@ function defer<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => resolve = done)
   return { promise, resolve }
-}
-
-async function fixture(
-  options: {
-    delayLease?: boolean
-    managedBackend?: boolean
-    protectProfileInputs?: boolean
-    writeDispatch?: () => Promise<unknown>
-  } = {},
-) {
-  const root = await mkdtemp('/tmp/cx-service-bootstrap-')
-  const homeDir = path.join(root, 'home')
-  const configPath = path.join(homeDir, 'config.json')
-  await mkdir(homeDir, { recursive: true, mode: 0o700 })
-  await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
-  const profileId = 'default'
-  const generation = 'fixture-owner'
-  if (options.managedBackend) {
-    await stageServiceModePlugin(
-      root,
-      homeDir,
-      profileId,
-      true,
-      'https://example.test/fixtures',
-      `export const inject = ['managedServices'];
-       export async function apply(ctx) {
-         const result = await ctx.managedServices.get({ serviceId: 'gateway' });
-         globalThis.__fixtureManagedStatus = result.status;
-         if (result.status === 'available') globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status;
-       }`,
-    )
-  }
-  const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
-  const participants = new ServiceRendererParticipants(scope)
-  const leaseReady = defer<PluginGenerationGraphLease>()
-  const releaseLease = defer<void>()
-  const lifecycle = new ServiceRendererLifecycle({
-    scope,
-    projectMutation: createServiceRendererProjector({
-      homeDir,
-      profileId,
-      generation,
-      isLive: identity => participants.isLive(identity),
-    }),
-    async createArtifactServer() {
-      const server = await startPluginGenerationArtifactServer()
-      return {
-        origin: server.origin,
-        close: async () => await server.close(),
-        requestTrace: () => server.requestTrace(),
-        async lease(...args) {
-          const lease = await server.lease(...args)
-          if (options.delayLease) {
-            leaseReady.resolve(lease)
-            await releaseLease.promise
-          }
-          return lease
-        },
-      }
-    },
-  })
-  participants.bind(lifecycle)
-  const store = new PluginActivationStore(homeDir, profileId, generation)
-  const managed = createProductionManagedServiceLifecycle({
-    runtime: lifecycle,
-    homeDir,
-    profileId,
-    generation,
-    environment: { PATH: process.env.PATH, HOME: root },
-    store,
-    dryRun: false,
-    requireOwnedProcess: true,
-  })
-  const coordinator = new PluginLifecycleCoordinator({
-    homeDir,
-    profileId,
-    runtimeGeneration: generation,
-    permissionPolicies: [],
-    runtime: managed,
-    headless: true,
-  })
-  await coordinator.recover()
-  lifecycle.initialize(await store.bindRuntimeGeneration())
-  const startup = await managed.initialize(await store.loadActive())
-  await Promise.all([startup.coreReady, startup.adopted])
-  await vi.waitFor(() => expect(managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
-  const managedUI = createManagerManagedServiceUIBridge({
-    profileId,
-    runtimeGeneration: generation,
-    ownerGeneration: generation,
-    ownerCurrent: () => true,
-    readLifecycleFence: () => managed.readManagedServiceUIFence(),
-    runtime: managed,
-  })
-  const bootstrap = new ServiceRendererBootstrap({
-    homeDir,
-    configPath,
-    appId: 'codex',
-    profileId,
-    generation,
-    lifecycle,
-    participants,
-    store,
-    managedServiceUI: managedUI,
-    protectProfileInputs: options.protectProfileInputs === true,
-  })
-  const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
-  const sessions = new ManagerRendererSessions({
-    profileId,
-    ownerGeneration: generation,
-    ownerCurrent: () => true,
-    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
-    writeLifetimes: bootstrap.writeLifetimes,
-    ...(options.protectProfileInputs
-      ? { waitForRetirement: async (rendererId: string) => await bootstrap.waitForRetirement(rendererId) }
-      : {}),
-    participant: participants.participant,
-    channels: new Map([
-      ['manager-bootstrap', bootstrap.channel()],
-      ['managed-service-ui', managedUI.channel],
-      ...(options.writeDispatch === undefined ? [] : [
-        [
-          'fixture-write',
-          { prepare: () => ({ mode: 'write' as const, dispatch: options.writeDispatch! }) },
-        ] as const,
-      ]),
-    ]),
-  })
-  const browserSessionId = secret()
-  const handle = (await sessions.open(gateway, browserSessionId))!
-  const invocation = { gateway, browserSessionId, handle }
-  async function call(payload: unknown) {
-    return await sessions.call(invocation, 'manager-bootstrap', payload)
-  }
-  async function install(id: string, revision = 0, requiredCapability = false, code?: string) {
-    const sourceDirectory = await localPackage({ root, id, requiredCapability, code })
-    const plan = await coordinator.handle({
-      ...request({ kind: 'inspect-local', sourceDirectory }, revision, generation),
-      profileId,
-    })
-    expect(plan, JSON.stringify(plan)).toMatchObject({ outcome: 'planned', candidateId: expect.any(String) })
-    return await coordinator.handle(
-      {
-        ...request(
-          {
-            kind: plan.operation === 'update' ? 'update' : 'install',
-            candidateId: plan.candidateId!,
-            authorizationDecision: decision(plan.authorizationPlan!),
-          },
-          revision,
-          generation,
-        ),
-        profileId,
-      },
-    )
-  }
-  return {
-    root,
-    homeDir,
-    configPath,
-    profileId,
-    generation,
-    lifecycle,
-    managed,
-    managedUI,
-    gateway,
-    participants,
-    sessions,
-    invocation,
-    handle,
-    call,
-    install,
-    leaseReady,
-    releaseLease,
-    async close() {
-      releaseLease.resolve()
-      sessions.dispose()
-      bootstrap.close()
-      managedUI.dispose()
-      participants.close()
-      await lifecycle.close()
-      await managed.dispose()
-      const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
-      await Promise.all(digests.map(async digest => await removeStagedPluginPackage(homeDir, `sha256:${digest}`)))
-      await rm(root, { recursive: true, force: true })
-    },
-  }
 }
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
@@ -622,6 +418,150 @@ it('keeps configured plugins and their private configuration outside the bootstr
     await f.close()
   }
 }, 30_000)
+
+const configuredChannelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
+it.skipIf(
+  configuredChannelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
+)(
+  'refuses a configured Channel when the live owner identity differs',
+  async () => {
+    const f = await fixture({
+      channelArchive: configuredChannelArchive!,
+      channelOwnerMismatch: true,
+      protectProfileInputs: true,
+    })
+    try {
+      expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+      expect(f.configuredChannel!.service.generation()).toEqual(expect.any(String))
+    } finally {
+      await f.close()
+    }
+  },
+  30_000,
+)
+
+it.skipIf(
+  configuredChannelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
+)(
+  'projects the owner-selected Channel into isolated read-only renderer sessions',
+  async () => {
+    const f = await fixture({
+      channelArchive: configuredChannelArchive!,
+      channelUiGrant: true,
+      protectProfileInputs: true,
+    })
+    const secondId = secret()
+    let second: typeof f.invocation | undefined
+    let recovered: typeof f.invocation | undefined
+    const boot = async (invocation: typeof f.invocation) => {
+      const prepared = await f.sessions.call(invocation, 'manager-bootstrap', { action: 'prepare' }) as any
+      expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [expect.any(Object)] } })
+      const privateGraph: ServiceRendererPrivateGraph = prepared.value.privateGraphs[0]
+      const graph = project(privateGraph)
+      const completed = await f.sessions.call(invocation, 'manager-bootstrap', {
+        action: 'complete',
+        managerOrigin: origin,
+        graphs: [graph],
+      }) as any
+      expect(completed).toMatchObject({ status: 'ok', value: { status: 'ok', initialGraphs: [graph] } })
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      try {
+        const bundle = bytes.toString('utf8')
+        const alias = bundle.match(new RegExp('https://renderer[.]cordisx[.]invalid/plugin/[a-f0-9]{64}', 'u'))?.[0]
+        expect(alias).toBeDefined()
+        expect(bundle).not.toContain(f.configuredChannel!.plugin.source!)
+        expect(bundle).not.toContain(f.configuredChannel!.plugin.entry)
+        expect(bundle).not.toContain('fixture-private-reference')
+        expect(bundle).not.toContain(privateGraph.baseUrl)
+        expect(bundle).not.toContain(invocation.handle.grant)
+        return { alias, privateGraph }
+      } finally {
+        bytes.fill(0)
+      }
+    }
+    const admit = async (invocation: typeof f.invocation) => {
+      const polling = f.sessions.poll(invocation, 3000)
+      const admitting = f.sessions.admit(invocation)
+      const polled = await polling as any
+      expect(polled).toMatchObject({ status: 'ok', value: { command: { method: 'synchronize' } } })
+      const command = polled.value.command
+      const payload = command.payload
+      expect(
+        await f.sessions.acknowledge(invocation, {
+          id: command.id,
+          sequence: command.sequence,
+          ok: true,
+          value: { active: payload.active, registryEpoch: payload.registryEpoch },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      expect(await admitting).toEqual({ status: 'ok', value: { admitted: true } })
+    }
+    const snapshot = (id: string, action = 'snapshot') =>
+      JSON.stringify({
+        version: 1,
+        token: 'renderer-binding-placeholder',
+        requestId: id,
+        action,
+      })
+    try {
+      const secondHandle = (await f.sessions.open(f.gateway, secondId))!
+      second = { gateway: f.gateway, browserSessionId: secondId, handle: secondHandle }
+      const first = await boot(f.invocation)
+      const other = await boot(second)
+      expect(first.alias).not.toBe(other.alias)
+      expect(first.privateGraph.moduleGeneration).not.toBe(other.privateGraph.moduleGeneration)
+      await admit(f.invocation)
+      await admit(second)
+      const response = await f.sessions.call(f.invocation, 'channel-actions', snapshot('first'))
+      expect(response).toMatchObject({
+        status: 'ok',
+        value: {
+          ok: true,
+          value: { status: 'applied', projection: { accounts: expect.arrayContaining([expect.any(Object)]) } },
+        },
+      })
+      expect(JSON.stringify(response)).not.toContain('fixture-private-reference')
+      expect(await f.sessions.call(f.invocation, 'channel-actions', snapshot('write', 'enable')))
+        .toEqual({ status: 'unavailable' })
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: current.plugins.map(plugin => ({ ...plugin, enabled: false })),
+      }), f.configPath)).rejects.toThrow('plugin configuration is in use')
+      expect(await f.sessions.close(f.invocation)).toBe(true)
+      expect((await fetch(first.privateGraph.entryUrl)).status).toBe(404)
+      expect(await f.sessions.call(second, 'channel-actions', snapshot('second')))
+        .toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'applied' } } })
+      const service = f.configuredChannel!.service
+      const restart = await service.restart(f.configuredChannel!.configuration, service.generation())
+      await restart.finalize()
+      expect(await f.sessions.call(second, 'manager-bootstrap', { action: 'status' })).toEqual({
+        status: 'unavailable',
+      })
+      expect(await f.sessions.call(second, 'channel-actions', snapshot('stale'))).toEqual({ status: 'unavailable' })
+      expect(await f.sessions.revoke(f.gateway, second.browserSessionId)).toBe(true)
+      second = undefined
+      const recoveredId = secret()
+      const recoveredHandle = (await f.sessions.open(f.gateway, recoveredId))!
+      recovered = { gateway: f.gateway, browserSessionId: recoveredId, handle: recoveredHandle }
+      const renewed = await boot(recovered)
+      expect(renewed.alias).not.toBe(other.alias)
+      await admit(recovered)
+      expect(await f.sessions.call(recovered, 'channel-actions', snapshot('recovered')))
+        .toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'applied' } } })
+      expect(await f.sessions.close(recovered)).toBe(true)
+      recovered = undefined
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: current.plugins.map(plugin => ({ ...plugin, enabled: false })),
+      }), f.configPath)
+    } finally {
+      if (second) await f.sessions.close(second).catch(() => undefined)
+      if (recovered) await f.sessions.close(recovered).catch(() => undefined)
+      await f.close()
+    }
+  },
+  90_000,
+)
 
 it('retires a late graph lease when the session is revoked during prepare', async () => {
   const f = await fixture({ delayLease: true })
