@@ -138,6 +138,7 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   private readonly federation: RendererLifecycleFederation
   private readonly desktopId = `cdp-group-${randomUUID()}`
   private reservation: Reservation | undefined
+  private rollbackInProgress = false
   private failed = false
   private closed = false
   private managerRevision = 0
@@ -401,6 +402,10 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     }
   }
   async rollback(id: string) {
+    // The federation can confirm rollback just before this wrapper records
+    // pending adoption. Do not let a concurrent duplicate fence that window.
+    if (this.rollbackInProgress) throw new Error('Desktop shared rollback is already in progress')
+    this.rollbackInProgress = true
     try {
       const reservation = this.current(id)
       const result = await this.federation.rollback(id)
@@ -414,6 +419,8 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
         && this.federation.requiresReconciliation
       ) this.terminal(error)
       throw error
+    } finally {
+      this.rollbackInProgress = false
     }
   }
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {

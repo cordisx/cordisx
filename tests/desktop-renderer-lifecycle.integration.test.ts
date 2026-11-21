@@ -557,6 +557,68 @@ it('requires a proven rollback before allowing the desktop or manager to join ag
   }
 }, 60_000)
 
+it('does not fence a duplicate between federation confirmation and wrapper adoption', async () => {
+  const entered = deferred()
+  const release = deferred()
+  const f = await fixture({ rejectPublish: true })
+  try {
+    const manager = await f.attach()
+    // Hold the wrapper after the federation has confirmed rollback, before
+    // the wrapper has had a chance to record pendingAdoption.
+    const federation = (f.lifecycle as any).federation
+    const rollback = federation.rollback.bind(federation)
+    vi.spyOn(federation, 'rollback').mockImplementation(async (id: string) => {
+      const confirmed = await rollback(id)
+      entered.resolve()
+      await release.promise
+      return confirmed
+    })
+    const disabling = f.disable()
+    await entered.promise
+    const id = f.stageEpochs[0]!.split(':')[0]!
+    await expect(f.lifecycle.rollback(id)).rejects.toThrow()
+    expect(manager.peer.closed).toBe(false)
+    release.resolve()
+    expect(await disabling).toMatchObject({ outcome: 'rolled-back' })
+    expect(manager.peer.closed).toBe(false)
+    expect(f.lifecycle.requiresReconciliation).toBe(false)
+  } finally {
+    release.resolve()
+    await f.close()
+  }
+}, 60_000)
+
+it('still fences a failed first rollback when a duplicate races its in-flight receipt', async () => {
+  const entered = deferred()
+  const release = deferred()
+  const f = await fixture({ rejectPublish: true })
+  try {
+    const surviving = await f.attach('first')
+    const disconnected = await f.attach('second')
+    const request = disconnected.peer.request.bind(disconnected.peer)
+    vi.spyOn(disconnected.peer, 'request').mockImplementation(async (method, payload) => {
+      if (method === 'rollback') {
+        entered.resolve()
+        await release.promise
+      }
+      return await request(method, payload)
+    })
+    const disabling = f.disable()
+    await entered.promise
+    const id = f.stageEpochs[0]!.split(':')[0]!
+    await expect(f.lifecycle.rollback(id)).rejects.toThrow('already in progress')
+    expect(surviving.peer.closed).toBe(false)
+    disconnected.peer.close()
+    release.resolve()
+    expect(await disabling).toMatchObject({ outcome: 'rollback-failed' })
+    expect(surviving.peer.closed).toBe(true)
+    expect(f.lifecycle.requiresReconciliation).toBe(true)
+  } finally {
+    release.resolve()
+    await f.close()
+  }
+}, 60_000)
+
 it('keeps a confirmed rollback alive while its durable adoption is pending', async () => {
   const entered = deferred()
   const release = deferred()
