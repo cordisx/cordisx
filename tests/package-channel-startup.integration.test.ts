@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { appendFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -448,8 +448,39 @@ it(
       const state = (await loadHomeConfig(configPath)).plugins[0]!.services!.runtime!.profiles.default!
       expect(state).toMatchObject({ revision: 2, lastGoodRevision: 2 })
       expect(headless.snapshot()?.accounts.some(item => item.ref.adapterId === 'simulator')).toBe(true)
+      const originalArchive = await readFile(archive)
       await appendFile(archive, 'changed')
       expect(await post({ action: 'view' })).toMatchObject({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' })
+      await writeFile(archive, originalArchive)
+      const recovered = await post({ action: 'view' })
+      expect(recovered).toMatchObject({ status: 'available', revision: 2 })
+
+      const restart = selected.service.restart.bind(selected.service)
+      selected.service.restart = async (configuration, expectedGeneration) => {
+        const result = await restart(configuration, expectedGeneration)
+        await appendFile(archive, 'changed-during-write')
+        return result
+      }
+      expect(
+        await post({
+          action: 'set-enabled',
+          serviceGeneration: recovered.serviceGeneration,
+          expectedRevision: 2,
+          account,
+          enabled: false,
+        }),
+      ).toMatchObject({ status: 'unknown' })
+      await writeFile(archive, originalArchive)
+      expect(await post({ action: 'view' })).toMatchObject({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' })
+      expect(
+        await post({
+          action: 'set-enabled',
+          serviceGeneration: recovered.serviceGeneration,
+          expectedRevision: 2,
+          account,
+          enabled: false,
+        }),
+      ).toMatchObject({ status: 'unavailable', code: 'PROFILE_COORDINATION_UNAVAILABLE' })
     } finally {
       current = false
       await web?.close()

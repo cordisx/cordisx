@@ -91,7 +91,7 @@ export function createConfiguredChannelOwner(input: {
         try {
           await verify()
         } catch {
-          closed = true
+          // No action was dispatched, so a later exact owner readback may recover.
           return undefined
         }
         try {

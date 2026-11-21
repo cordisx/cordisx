@@ -99,6 +99,11 @@ admit a configured Channel into the experimental Host page. Unverified direct
 entries, other adapters, connection deletion, and remaining Channel management
 features are unavailable.
 
+If the configured owner check fails before an action is dispatched, the action
+is unavailable and can be retried after the exact archive, configuration and
+running service match again. A failure after an action begins may have changed
+state and requires reconciliation rather than an automatic retry.
+
 In service mode, a sidecar-originated Channel configuration commit, tenant
 resolution, or enablement is unavailable while any standalone Manager renderer
 is open, because its drafts and pending writes cannot yet be handed off safely.
