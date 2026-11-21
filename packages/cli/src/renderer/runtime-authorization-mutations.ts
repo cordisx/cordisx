@@ -318,7 +318,7 @@ export const createRuntimePermissionAuthorizationPlanV2 = (
     throw new Error(`unknown CordisX plugin: ${id}`)
   }
   return controller.manifest.schemaVersion === 4
-    ? runtimeScope.broker()!.authorizationPlanV2(controller.identity, 'enable', controller.generationView)
+    ? runtimeScope.broker()!.reviewAuthorizationPlanV2(controller.identity, controller.generationView)
     : undefined
 }
 
@@ -376,10 +376,9 @@ export const createRuntimeAuthorizePluginV2 = (
     if (controller.manifest.schemaVersion !== 4) {
       throw new Error(`plugin ${id} does not use permission v2`)
     }
-    await runtimeScope.broker()!.authorizeActivationV2(
+    await runtimeScope.broker()!.authorizeReviewedActivationV2(
       controller.identity,
       decision,
-      'enable',
       controller.generationView,
     )
   })

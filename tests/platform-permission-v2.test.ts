@@ -64,6 +64,135 @@ function decision(
 }
 
 describe('PermissionBroker permission-v2 integration', () => {
+  it('rejects a renderer review after a policy change, including an ABA change, and accepts a fresh review', async () => {
+    const broker = new PermissionBroker(
+      new MemoryPermissionPolicyStore(),
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-1',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
+    broker.register(identity, manifest('models.read', { providers: ['codex'] }))
+    try {
+      const stale = broker.reviewAuthorizationPlanV2(identity)
+      await broker.setPolicyV2(identity, 'models.read', 'deny-persistent')
+      await broker.setPolicyV2(identity, 'models.read', 'ask')
+      await expect(broker.authorizeReviewedActivationV2(identity, decision(stale, 'allow-once')))
+        .rejects.toThrow('permission review was invalidated')
+      await expect(broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+        ok: false,
+      })
+      const fresh = broker.reviewAuthorizationPlanV2(identity)
+      const concurrent = broker.reviewAuthorizationPlanV2(identity)
+      await broker.authorizeReviewedActivationV2(identity, decision(fresh, 'allow-once'))
+      await expect(broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+        ok: true,
+      })
+      await expect(broker.authorizeReviewedActivationV2(identity, decision(fresh, 'allow-once')))
+        .rejects.toThrow('permission review was invalidated')
+      await expect(broker.authorizeReviewedActivationV2(identity, decision(concurrent, 'allow-once')))
+        .rejects.toThrow('permission review was invalidated')
+    } finally {
+      broker.dispose()
+    }
+  })
+
+  it('requires the exact renderer review binding', async () => {
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), legacyPrompt, () => new Date(), 50)
+    broker.register(identity, manifest('models.read', { providers: ['codex'] }))
+    try {
+      const plan = broker.reviewAuthorizationPlanV2(identity)
+      const selected = decision(plan, 'allow-once')
+      await expect(broker.authorizeReviewedActivationV2(identity, {
+        ...selected,
+        binding: { ...selected.binding, runtimeGeneration: 'other-generation' },
+      })).rejects.toThrow('authorization decision does not match')
+    } finally {
+      broker.dispose()
+    }
+  })
+
+  it('does not issue a one-shot grant if a policy changes while review persistence is pending', async () => {
+    const backing = new MemoryPermissionPolicyStore()
+    let release!: () => void
+    let started!: () => void
+    const pending = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const writing = new Promise<void>(resolve => {
+      started = resolve
+    })
+    let first = true
+    const store = {
+      read: () => backing.read(),
+      write: (records: Parameters<typeof backing.write>[0]) => backing.write(records),
+      readV2: () => backing.readV2(),
+      writeV2: async (records: Parameters<typeof backing.writeV2>[0]) => {
+        if (first) {
+          first = false
+          started()
+          await pending
+        }
+        backing.writeV2(records)
+      },
+    }
+    const broker = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-1')
+    const models = manifest('models.read', { providers: ['codex'] })
+    const tasks = manifest('tasks.control', { sessions: [session] })
+    broker.register(identity, { ...models, capabilities: [...models.capabilities, ...tasks.capabilities] })
+    try {
+      const plan = broker.reviewAuthorizationPlanV2(identity)
+      const choices = decision(plan, 'allow-once')
+      const committing = broker.authorizeReviewedActivationV2(identity, {
+        ...choices,
+        decisions: choices.decisions.map(item =>
+          item.capability === 'models.read'
+            ? { ...item, decision: 'allow-persistent' as const }
+            : item
+        ),
+      })
+      await writing
+      await broker.setPolicyV2(identity, 'tasks.control', 'deny-persistent')
+      release()
+      await expect(committing).rejects.toThrow('permission review was invalidated')
+      await expect(broker.authorize(identity, 'tasks.control', { session })).resolves.toMatchObject({ ok: false })
+    } finally {
+      release()
+      broker.dispose()
+    }
+  })
+
+  it('rejects a review from a replaced registration even with the same identity and manifest', async () => {
+    const broker = new PermissionBroker(
+      new MemoryPermissionPolicyStore(),
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-1',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
+    const unregister = broker.register(identity, manifest('models.read', { providers: ['codex'] }))
+    try {
+      const stale = broker.reviewAuthorizationPlanV2(identity)
+      unregister()
+      broker.register(identity, manifest('models.read', { providers: ['codex'] }))
+      await expect(broker.authorizeReviewedActivationV2(identity, decision(stale, 'allow-once')))
+        .rejects.toThrow('permission review was invalidated')
+      await expect(broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+        ok: false,
+      })
+    } finally {
+      broker.dispose()
+    }
+  })
+
   it('binds lifecycle allow-once to one exact profile/identity/scope/fingerprint/generation grant', async () => {
     const store = new MemoryPermissionPolicyStore()
     const broker = new PermissionBroker(

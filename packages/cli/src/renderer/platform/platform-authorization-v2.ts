@@ -59,6 +59,59 @@ import {
 import { permissionPlanDeclarations, Registration } from './platform-permission-types.js'
 
 export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermissionBroker {
+  private readonly localV2Reviews = new Map<string, {
+    registration: Registration
+    revision: bigint
+    plan: CordisXPermissionAuthorizationPlanV2
+  }>()
+
+  /** Bind a renderer-owned review to its registration and process-local policy revision. */
+  reviewAuthorizationPlanV2(
+    identity: CordisXPluginIdentity,
+    view?: PluginGenerationView,
+  ): CordisXPermissionAuthorizationPlanV2 {
+    const registration = this.registration(identity, view)
+    if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
+    const random = globalThis.crypto.getRandomValues(new Uint8Array(16))
+    const operationId = `local-review:${Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('')}`
+    const plan = this.authorizationPlanV2(identity, 'enable', view, operationId)
+    if (this.localV2Reviews.size >= 1024) this.localV2Reviews.delete(this.localV2Reviews.keys().next().value!)
+    this.localV2Reviews.set(operationId, {
+      registration,
+      revision: this.policyRecords.revision,
+      plan: structuredClone(plan),
+    })
+    return plan
+  }
+
+  async authorizeReviewedActivationV2(
+    identity: CordisXPluginIdentity,
+    authorization: CordisXPermissionAuthorizationDecisionV2,
+    view?: PluginGenerationView,
+  ): Promise<void> {
+    const review = this.localV2Reviews.get(authorization.binding?.operationId)
+    this.localV2Reviews.delete(authorization.binding?.operationId)
+    const registration = this.registration(identity, view)
+    if (
+      review === undefined || registration !== review.registration
+      || !this.isAuthorizationCurrent(registration, review.revision)
+    ) {
+      throw new Error('permission review was invalidated')
+    }
+    this.assertDecisionV2(review.plan, authorization)
+    if (!this.isAuthorizationCurrent(registration, review.revision)) {
+      throw new Error('permission review was invalidated')
+    }
+    this.localV2Reviews.clear()
+    await this.commitDecisionV2(
+      review.plan,
+      authorization,
+      this.binding(registration, `${this.generation}:${identity.id}`),
+      revision => this.isAuthorizationCurrent(registration, revision),
+      review.revision,
+    )
+  }
+
   protected legacyAuthorizationKey(
     registration: Registration,
     declaration: CordisXCapabilityDeclaration,
@@ -388,6 +441,7 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       throw error
     }
     this.onceV2.clearOperation(plan.binding.operationId)
+    if (oneShotBinding.operationId !== plan.binding.operationId) this.onceV2.clearOperation(oneShotBinding.operationId)
     for (const selected of decisions) {
       if (selected.decision !== 'allow-once') continue
       this.onceV2.issue({
@@ -455,6 +509,8 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     plan: CordisXPermissionAuthorizationPlanV2,
     decision: CordisXPermissionAuthorizationDecisionV2,
     oneShotBinding: CordisXPermissionAuthorizationBindingV2 = plan.binding,
+    isCurrent?: (revision: bigint) => boolean,
+    revision?: bigint,
   ): Promise<void> {
     const persistent = decision.decisions.flatMap((item): CordisXPermissionPolicyRecordV2[] => {
       if (item.decision !== 'allow-persistent' && item.decision !== 'deny-persistent') return []
@@ -466,18 +522,29 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       })]
     })
     const previous = persistent.map(record => this.policyRecords.get(permissionRecordKeyV2(record)))
+    if (isCurrent && (revision === undefined || !isCurrent(revision))) {
+      throw new Error('permission review was invalidated')
+    }
     for (const record of persistent) this.policyRecords.set(permissionRecordKeyV2(record), record)
     try {
       if (persistent.length > 0) await this.persistV2(persistent)
     } catch (error) {
       persistent.forEach((record, index) => {
         const key = permissionRecordKeyV2(record)
+        if (this.policyRecords.get(key) !== record) return
         const prior = previous[index]
         if (prior === undefined) this.policyRecords.delete(key)
         else this.policyRecords.set(key, prior)
       })
       this.changed()
       throw error
+    }
+    if (isCurrent && (revision === undefined || !isCurrent(revision + BigInt(persistent.length)))) {
+      // Persistence may already have succeeded. Notify observers but never issue
+      // a one-shot grant from the invalidated decision. The profile owner must
+      // reconcile concurrent persistent writes separately.
+      this.changed()
+      throw new Error('permission review was invalidated')
     }
     this.onceV2.clearOperation(plan.binding.operationId)
     for (const item of decision.decisions) {
