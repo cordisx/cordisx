@@ -5,6 +5,7 @@ import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js
 import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
+import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
@@ -85,6 +86,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     channelCredentialsUsed: boolean
     rendererOpen?: Promise<ManagerRendererHandle | undefined>
     rendererCommands: boolean
+    graphs?: ReturnType<typeof createManagerRendererGraphSession>
   }
   const sessions = new Map<string, BrowserSession>()
   let authority = ''
@@ -114,6 +116,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     sessions.delete(token)
     clearTimeout(session.timer)
     session.controller.abort()
+    session.graphs?.close()
     const retireKinds = [
       ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
       ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
@@ -251,6 +254,39 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       })
     const scopedReply = (value: unknown) => activeSession() ? json(response, 200, value) : revoked()
     try {
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/api/renderer/graphs/')) {
+        if (!session.graphs) return json(response, 404, { error: 'NOT_FOUND' })
+        if (!activeSession() || !await owner.isCurrent().catch(() => false)) {
+          await retireSession(token)
+          return json(response, 401, { error: 'UNAUTHORIZED' })
+        }
+        const transfer = new AbortController()
+        const abortOnClose = () => {
+          if (!response.writableEnded) transfer.abort()
+        }
+        response.once('close', abortOnClose)
+        const timer = setTimeout(() => transfer.abort(), 20_000)
+        timer.unref()
+        let result: Awaited<ReturnType<typeof session.graphs.resolve>>
+        try {
+          result = await session.graphs.resolve({
+            method: request.method,
+            target,
+            signal: AbortSignal.any([session.controller.signal, transfer.signal]),
+          })
+        } finally {
+          clearTimeout(timer)
+          response.off('close', abortOnClose)
+        }
+        if (transfer.signal.aborted) return response.destroy()
+        if (!activeSession() || !await owner.isCurrent().catch(() => false)) {
+          await retireSession(token)
+          return json(response, 401, { error: 'UNAUTHORIZED' })
+        }
+        response.writeHead(result.status, result.headers)
+        response.end(request.method === 'HEAD' ? undefined : result.body)
+        return
+      }
       if (request.method === 'GET' && url.pathname === '/api/state') {
         const [management, services, rendererPlugins] = await Promise.allSettled([
           scopedRequest({ kind: 'query' }),
@@ -314,6 +350,16 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               return undefined
             }
             session.rendererCommands = result.commands === true
+            if (session.rendererCommands) {
+              session.graphs = createManagerRendererGraphSession({
+                managerOrigin: `http://${authority}`,
+                profileId: owner.profileId,
+                generation: owner.generation,
+                rendererId: privateHandle.rendererId,
+                isCurrent: activeSession,
+                forbiddenSecrets: [token, gateway.instanceToken, privateHandle.grant],
+              })
+            }
             return privateHandle
           } catch {
             return undefined
@@ -342,7 +388,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           action === 'admit' && Object.keys(input).length !== 0
           || action === 'poll' && (Object.keys(input).length !== 1
               || !Number.isSafeInteger(input.timeoutMs) || Number(input.timeoutMs) < 1
-              || Number(input.timeoutMs) > 10_000)
+              || Number(input.timeoutMs) > 30_000)
           || action === 'acknowledge' && (Object.keys(input).length !== 1
               || !Object.hasOwn(input, 'receipt') || Buffer.byteLength(JSON.stringify(input)) > 196 * 1024)
         ) return json(response, 400, { error: 'INVALID_REQUEST' })
@@ -362,10 +408,28 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           : { ...common, action: 'acknowledge', receipt: input.receipt }
         // Poll can hand out a command, and acknowledge can settle a mutation.
         // If either response is lost the caller must reconcile, not retry it.
-        const result = object(await scopedRequest(operation, true))
-        if (result?.status === 'unknown') return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
-        if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
-        return scopedReply(result.value)
+        try {
+          const result = object(await scopedRequest(operation, true))
+          if (result?.status === 'unknown') {
+            await retireSession(token)
+            return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+          }
+          if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
+          if (action === 'poll') {
+            const value = object(result.value)
+            if (!value || Object.keys(value).length !== 1 || !Object.hasOwn(value, 'command')) {
+              throw new Error('invalid')
+            }
+            return scopedReply({
+              command: value.command === null ? null : session.graphs!.projectCommand(value.command),
+            })
+          }
+          if (action === 'acknowledge') session.graphs!.acknowledge(input.receipt)
+          return scopedReply(result.value)
+        } catch {
+          await retireSession(token)
+          return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+        }
       }
       if (url.pathname === '/api/renderer/binding') {
         if (

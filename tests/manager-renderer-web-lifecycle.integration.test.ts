@@ -81,7 +81,8 @@ it('binds lifecycle commands and receipts to one authenticated browser session',
     expect(firstOpen.body).not.toHaveProperty('gateway')
     expect(await post(first, 'poll', { timeoutMs: 10, gateway })).toMatchObject({ status: 400 })
 
-    const firstPoll = post(first, 'poll', { timeoutMs: 2_000 })
+    // Matches the production lifecycle pump's poll interval.
+    const firstPoll = post(first, 'poll', { timeoutMs: 15_000 })
     const secondPoll = post(second, 'poll', { timeoutMs: 2_000 })
     const firstAdmit = post(first, 'admit', {})
     const secondAdmit = post(second, 'admit', {})
@@ -110,10 +111,14 @@ it('binds lifecycle commands and receipts to one authenticated browser session',
     expect(await secondAdmit).toMatchObject({ status: 200, body: { admitted: true } })
     expect(await post(first, 'acknowledge', { receipt: firstReceipt })).toMatchObject({ status: 503 })
 
-    const pending = peers[0]!.request('publish', { transactionId: 'fixture-tx' })
+    const pending = peers[0]!.request('prepare', {
+      transactionId: 'fixture-tx',
+      transactionEpoch: 'fixture-epoch',
+      expectedRegistryEpoch: 0,
+    })
     const rejected = expect(pending).rejects.toThrow('renderer-command-result-unknown')
     const command = (await post(first, 'poll', { timeoutMs: 2_000 })).body.command
-    expect(command).toMatchObject({ method: 'publish', sequence: 2 })
+    expect(command).toMatchObject({ method: 'prepare', sequence: 2 })
     await web.close()
     await rejected
     expect(peers[0]!.closed).toBe(true)
