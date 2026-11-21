@@ -8,13 +8,20 @@ import {
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
 import { LifecycleFailure } from './plugin-lifecycle-model.js'
 import { PermissionReviewBusyError } from './permission-review-gate.js'
+import type { DeferredPermissionDecision } from '../permission-deferral.js'
+
+const DEFERRED_DECISION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json'
 
 /** Host-private envelope; the reviewer must explicitly submit every required decision. */
 export interface PermissionReviewOperation {
   readonly kind: 'permission-review-apply'
   readonly expectedRevision: number
   readonly userConfirmed: true
-  readonly decision: CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+  readonly decision:
+    | CordisXPermissionAuthorizationDecisionV2
+    | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -33,7 +40,7 @@ export function parsePermissionReviewOperation(value: unknown, profileId: string
   }
   const decision = record(operation.decision)
   const allowed = ['$schema', 'schemaVersion', 'planId', 'operation', 'profileId', 'identity', 'binding', 'decisions']
-  if (decision.schemaVersion === 4) allowed.push('origin')
+  if (decision.schemaVersion === 4 || decision.schemaVersion === 7) allowed.push('origin')
   if (
     Object.keys(decision).some(key => !allowed.includes(key))
     || decision.profileId !== profileId
@@ -43,7 +50,9 @@ export function parsePermissionReviewOperation(value: unknown, profileId: string
     || (decision.schemaVersion === 2 && decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2)
     || (decision.schemaVersion === 4 && (decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
       || decision.origin !== 'explicit-user'))
-    || (decision.schemaVersion !== 2 && decision.schemaVersion !== 4)
+    || (decision.schemaVersion === 7 && (decision.$schema !== DEFERRED_DECISION_SCHEMA
+      || decision.origin !== 'explicit-user'))
+    || (decision.schemaVersion !== 2 && decision.schemaVersion !== 4 && decision.schemaVersion !== 7)
   ) {
     throw new Error('invalid permission review')
   }
@@ -73,7 +82,9 @@ export async function applyManagementPermissionReview(input: {
     expectedRevision,
   }
   try {
-    const result = decision.schemaVersion === 4
+    const result = decision.schemaVersion === 7
+      ? await input.coordinator.applyPermissionReviewV7({ ...request, decision })
+      : decision.schemaVersion === 4
       ? await input.coordinator.applyPermissionReviewV4({ ...request, decision })
       : await input.coordinator.applyPermissionReviewV2({ ...request, decision })
     return { status: 'ok' as const, result }

@@ -228,7 +228,7 @@ function permissionText(value) {
 }
 function reviewPermissions(result) {
   const plan = result.permissionPlan
-  if (!plan || ![2, 4].includes(plan.schemaVersion) || !Array.isArray(plan.declarations)) {
+  if (!plan || ![2, 4, 7].includes(plan.schemaVersion) || !Array.isArray(plan.declarations)) {
     return message('此权限计划的版本当前不可在独立管理台审核，操作未执行。')
   }
   const dialog = node('dialog')
@@ -281,7 +281,13 @@ function reviewPermissions(result) {
       field.append(label('权限决定', select))
       inputs.push({ declaration, select })
     } else {
-      field.append(node('p', '该项不需要新的决定，Host 将沿用当前策略。', 'muted'))
+      field.append(node(
+        'p',
+        declaration.authorizationMode === 'deferred'
+          ? '实际使用此权限时再询问。'
+          : '该项不需要新的决定，Host 将沿用当前策略。',
+        'muted',
+      ))
     }
     dialog.append(field)
   }
@@ -302,7 +308,7 @@ function reviewPermissions(result) {
       $schema:
         `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v${plan.schemaVersion}.schema.json`,
       schemaVersion: plan.schemaVersion,
-      ...(plan.schemaVersion === 4 ? { origin: 'explicit-user' } : {}),
+      ...([4, 7].includes(plan.schemaVersion) ? { origin: 'explicit-user' } : {}),
       planId: plan.planId,
       operation: plan.operation,
       profileId: plan.profileId,

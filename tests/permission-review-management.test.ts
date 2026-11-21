@@ -85,6 +85,22 @@ describe('private permission review management', () => {
 
   it('rejects absent confirmation, unsupported versions, wrong profiles and extra envelope fields', () => {
     expect(parsePermissionReviewOperation(input, 'work')).toEqual(input)
+    const deferred = {
+      ...input,
+      decision: {
+        ...input.decision,
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+        schemaVersion: 7,
+      },
+    }
+    expect(parsePermissionReviewOperation(deferred, 'work')).toEqual(deferred)
+    expect(() =>
+      parsePermissionReviewOperation({
+        ...deferred,
+        decision: { ...deferred.decision, origin: 'host-no-decision' },
+      }, 'work')
+    ).toThrow('invalid permission review')
     for (
       const invalid of [
         { ...input, userConfirmed: false },

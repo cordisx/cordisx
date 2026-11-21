@@ -8,7 +8,6 @@ import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.
 import { managerChildEnvironment } from '../packages/cli/src/cli/manager-supervisor.js'
 import { installIndependentHostBindings } from '../packages/cli/src/independent-manager/host-bindings.js'
 import { BrowserPluginManagementBinding } from '../packages/cli/src/renderer/management-binding.js'
-import { CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
 import {
   pluginManagementRpcPaths,
@@ -253,10 +252,11 @@ it('connects the independent manager to a real service owner without Channel or 
     })
     expect(review.status).toBe('permission-review-required')
     const plan = review.permissionPlan
-    expect(plan.schemaVersion).toBe(4)
+    expect(plan.schemaVersion).toBe(7)
     const decision = {
-      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-      schemaVersion: 4,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+      schemaVersion: 7,
       origin: 'explicit-user',
       planId: plan.planId,
       operation: plan.operation,
