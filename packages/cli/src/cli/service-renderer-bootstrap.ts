@@ -9,7 +9,7 @@ import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../launcher/latest-runtime-m
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
-import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
@@ -19,7 +19,7 @@ import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
-type Snapshot = ReturnType<ServiceRendererLifecycle['snapshot']>
+type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
 type Entry = {
   readonly peer: ManagerRendererCommandPeer
   readonly leases: PluginGenerationGraphLease[]
@@ -56,7 +56,7 @@ export class ServiceRendererBootstrap {
       readonly appId: string
       readonly profileId: string
       readonly generation: string
-      readonly lifecycle: ServiceRendererLifecycle
+      readonly lifecycle: OwnerRendererLifecycle
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>

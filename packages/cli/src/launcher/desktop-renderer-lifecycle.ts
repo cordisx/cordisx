@@ -9,6 +9,7 @@ import type {
 import { CdpPluginLifecycleRuntime, type CdpSharedAdmission } from './cdp-plugin-lifecycle-runtime.js'
 import { sameUniquePluginIds } from './cdp-shared-admission.js'
 import { RendererLifecycleFederation } from './renderer-lifecycle-federation.js'
+import type { RendererConfigOperation, RendererConfigResult } from './renderer-config-management.js'
 import {
   type AttachedRendererPeer,
   attachmentEqual,
@@ -130,15 +131,24 @@ type Reservation = {
 /**
  * Experimental shared Desktop/Manager barrier. The existing owner must supply
  * its CDP runtime and its per-manager mutation projector. It creates neither a
- * package coordinator nor a managed-service fleet. Production wiring, CDP
- * recovery, zero-CDP-seat operation and additional capabilities are separate.
+ * package coordinator nor a managed-service fleet. Callers must separately
+ * gate configuration, capabilities, recovery and zero-CDP-seat operation.
  */
 export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   private readonly federation: RendererLifecycleFederation
   private readonly desktopId = `cdp-group-${randomUUID()}`
   private reservation: Reservation | undefined
   private failed = false
+  private closed = false
   private managerRevision = 0
+  private readonly managers = new Set<AttachedRendererPeer>()
+  private readonly joiningPeers = new Set<AttachedRendererPeer>()
+  private readonly activationListeners = new Set<(active: CordisXPluginActivationRecordV1) => void>()
+  private joiningManagers = 0
+  private joinTail: Promise<void> = Promise.resolve()
+  private joinSnapshot:
+    | { admission: CdpSharedAdmission; value: ReturnType<RendererLifecycleFederation['snapshot']> }
+    | undefined
 
   constructor(
     private readonly input: {
@@ -171,9 +181,29 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     return this.failed || this.federation.requiresReconciliation
   }
 
+  get hasManagerParticipants(): boolean {
+    return this.managers.size > 0 || this.joiningManagers > 0
+  }
+
   snapshot(): Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }> {
     if (this.reservation || this.failed) throw new Error('Desktop shared snapshot is unavailable')
-    return this.federation.snapshot()
+    if (this.joinSnapshot && !this.joinSnapshot.admission.closed) return structuredClone(this.joinSnapshot.value)
+    // A temporary owner lock ensures at least one CDP seat is ready and no
+    // join, reload, configuration or generation transaction is in flight.
+    const admission = this.input.cdp.beginSharedAdmission(`snapshot-${randomUUID()}`)
+    try {
+      const snapshot = this.federation.snapshot()
+      if (admission.registryEpoch !== snapshot.registryEpoch) throw new Error('Desktop shared snapshot is stale')
+      return snapshot
+    } finally {
+      admission.release()
+    }
+  }
+
+  onActivationFinalized(listener: (active: CordisXPluginActivationRecordV1) => void): () => void {
+    if (this.failed) throw new Error('Desktop shared lifecycle is unavailable')
+    this.activationListeners.add(listener)
+    return () => this.activationListeners.delete(listener)
   }
 
   async attach(peer: AttachedRendererPeer): Promise<void> {
@@ -181,13 +211,47 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
       peer.close()
       throw new Error('Desktop renderer attachment is unavailable')
     }
-    await this.federation.attach(peer)
-    this.managerRevision += 1
-    peer.onDisconnect(() => this.managerRevision += 1)
+    this.joiningManagers += 1
+    this.joiningPeers.add(peer)
+    const joining = this.joinTail.then(async () => {
+      let admission: CdpSharedAdmission | undefined
+      try {
+        if (this.failed || this.reservation || peer.closed) {
+          throw new Error('Desktop renderer attachment is unavailable')
+        }
+        admission = this.input.cdp.beginSharedAdmission(`join-${randomUUID()}`)
+        const snapshot = this.federation.snapshot()
+        this.joinSnapshot = { admission, value: snapshot }
+        const observed = await admission.readSnapshot()
+        if (!attachmentEqual(snapshot, observed)) throw new Error('Desktop shared snapshot is stale')
+        if (this.failed || peer.closed) throw new Error('Desktop renderer attachment is unavailable')
+        await this.federation.attach(peer)
+        if (this.failed || admission.closed || peer.closed) throw new Error('Desktop shared attachment became stale')
+        this.managers.add(peer)
+        this.managerRevision += 1
+        peer.onDisconnect(() => {
+          this.managers.delete(peer)
+          this.managerRevision += 1
+        })
+      } catch (error) {
+        peer.close()
+        throw error
+      } finally {
+        if (this.joinSnapshot?.admission === admission) this.joinSnapshot = undefined
+        admission?.release()
+      }
+    })
+    this.joinTail = joining.then(() => undefined, () => undefined)
+    try {
+      await joining
+    } finally {
+      this.joiningManagers -= 1
+      this.joiningPeers.delete(peer)
+    }
   }
 
   async preflight(input: PluginRuntimePreflight): Promise<void> {
-    if (this.failed || this.reservation || this.federation.requiresReconciliation) {
+    if (this.failed || this.reservation || this.joiningManagers > 0 || this.federation.requiresReconciliation) {
       throw new Error('Desktop shared preflight is unavailable')
     }
     const admission = this.input.cdp.beginSharedAdmission(input.transactionId)
@@ -326,6 +390,8 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     const reservation = this.current(id)
     try {
       await this.federation.finalize(id)
+      const active = this.federation.snapshot().active
+      for (const listener of this.activationListeners) listener(active)
       reservation.admission.release()
       reservation.group.close()
       this.reservation = undefined
@@ -375,7 +441,35 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   async commit(): Promise<void> {
     throw new Error('Desktop shared lifecycle requires the package authority')
   }
-  async reload(): Promise<void> {
-    throw new Error('Desktop shared reload is unavailable')
+  async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
+    if (this.failed || this.reservation || this.managers.size > 0) {
+      throw new Error('Desktop shared reload is unavailable')
+    }
+    await this.input.cdp.reload(input)
+  }
+
+  async pluginConfiguration(operation: RendererConfigOperation): Promise<RendererConfigResult> {
+    if (this.failed || this.reservation || this.joiningManagers > 0 || this.managers.size > 0) {
+      return { status: 'unavailable', reason: 'renderer-busy' }
+    }
+    return await this.input.cdp.pluginConfiguration(operation)
+  }
+
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    this.failed = true
+    for (const peer of this.joiningPeers) peer.close()
+    this.joiningPeers.clear()
+    for (const peer of this.managers) peer.close()
+    this.managers.clear()
+    this.activationListeners.clear()
+    const reservation = this.reservation
+    if (reservation && !reservation.prepared && !reservation.preparingGraph) {
+      this.releaseUnprepared(reservation)
+    } else if (reservation) {
+      reservation.group.close()
+      this.federation.terminal()
+    }
   }
 }

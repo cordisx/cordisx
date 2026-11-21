@@ -6,7 +6,7 @@ import {
   type RendererAttachmentIdentity,
   type RendererAttachmentScope,
 } from '../launcher/renderer-lifecycle-peer.js'
-import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
@@ -18,12 +18,12 @@ type Entry = { readonly peer: ManagerRendererCommandPeer; bootstrap?: Snapshot }
  */
 export class ServiceRendererParticipants {
   private readonly entries = new Map<string, Entry>()
-  private lifecycle: ServiceRendererLifecycle | undefined
+  private lifecycle: Pick<OwnerRendererLifecycle, 'snapshot' | 'attach'> | undefined
   private closed = false
 
   constructor(private readonly scope: RendererAttachmentScope) {}
 
-  bind(lifecycle: ServiceRendererLifecycle): void {
+  bind(lifecycle: Pick<OwnerRendererLifecycle, 'snapshot' | 'attach'>): void {
     if (this.closed || this.lifecycle !== undefined) throw new Error('renderer-participants-unavailable')
     this.lifecycle = lifecycle
   }

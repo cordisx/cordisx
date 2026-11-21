@@ -11,6 +11,7 @@ import { DesktopRendererLifecycle } from '../packages/cli/src/launcher/desktop-r
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { PlatformProviderPluginLifecycleRuntime } from '../packages/cli/src/launcher/platform-provider-plugin-lifecycle.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
   type AttachedRendererPeer,
@@ -181,7 +182,7 @@ async function fixture(
     },
   })
   const managed = createProductionManagedServiceLifecycle({
-    runtime: lifecycle,
+    runtime: new PlatformProviderPluginLifecycleRuntime(lifecycle),
     homeDir: home,
     profileId: 'work',
     generation,
@@ -440,13 +441,101 @@ it('rejects preflight while an earlier manager join is awaiting its actual snaps
         targetId: 'fixture-plugin',
       }),
     )
-      .rejects.toThrow('snapshot is unavailable')
+      .rejects.toThrow('shared preflight is unavailable')
     release.resolve()
     await joining
     const join = f.cdp.beginJoin({ send: async () => ({}) } as never)
     join.abort()
   } finally {
     release.resolve()
+    await f.close()
+  }
+}, 60_000)
+
+it('admits concurrent managers against one verified Desktop snapshot', async () => {
+  const entered = deferred()
+  const release = deferred()
+  const f = await fixture({
+    blockSynchronize: async () => {
+      entered.resolve()
+      await release.promise
+    },
+  })
+  try {
+    const first = f.attach('first')
+    await entered.promise
+    const second = f.attach('second')
+    release.resolve()
+    const managers = await Promise.all([first, second])
+    expect(await f.disable()).toMatchObject({ outcome: 'applied', revision: 2 })
+    for (const manager of managers) {
+      expect(manager.methods).toEqual(['synchronize', 'prepare', 'stage', 'publish', 'complete', 'finalize'])
+    }
+  } finally {
+    release.resolve()
+    await f.close()
+  }
+}, 60_000)
+
+it('closes an in-flight Manager join and releases its unstarted Desktop reservation on shutdown', async () => {
+  const entered = deferred()
+  const release = deferred()
+  const f = await fixture({
+    blockSynchronize: async () => {
+      entered.resolve()
+      await release.promise
+    },
+  })
+  try {
+    const joining = f.attach()
+    await entered.promise
+    f.lifecycle.close()
+    await expect(joining).rejects.toThrow()
+    release.resolve()
+    expect(() => f.lifecycle.snapshot()).toThrow('unavailable')
+    const next = f.cdp.beginJoin({ send: async () => ({}) } as never)
+    next.abort()
+  } finally {
+    release.resolve()
+    await f.close()
+  }
+}, 60_000)
+
+it('keeps Manager bootstrap and mutation unavailable while no CDP seat is ready', async () => {
+  const f = await fixture()
+  try {
+    f.unregister()
+    expect(() => f.lifecycle.snapshot()).toThrow('CDP shared admission is unavailable')
+    await expect(f.attach()).rejects.toThrow('CDP shared admission is unavailable')
+    expect(await f.disable()).toMatchObject({ outcome: 'rejected', error: { code: 'operation-unavailable' } })
+    expect(f.desktop.activePluginGeneration().revision).toBe(f.active.revision)
+  } finally {
+    await f.close()
+  }
+}, 60_000)
+
+it('keeps ordinary Desktop package mutation available with no Manager participants', async () => {
+  const f = await fixture()
+  try {
+    expect(await f.disable()).toMatchObject({ outcome: 'applied', revision: 2 })
+    expect(f.desktop.activePluginGeneration().plugins[0].enabled).toBe(false)
+    expect(f.calls.some(call => call.startsWith('manager:'))).toBe(false)
+    expect(f.lifecycle.requiresReconciliation).toBe(false)
+  } finally {
+    await f.close()
+  }
+}, 60_000)
+
+it('does not let an attached Manager bypass the shared barrier via Desktop configuration', async () => {
+  const f = await fixture()
+  try {
+    const operation = { kind: 'plugin-configuration' as const, action: 'list' as const }
+    expect((await f.lifecycle.pluginConfiguration(operation)).status).toBe('ok')
+    const manager = await f.attach()
+    expect(await f.lifecycle.pluginConfiguration(operation)).toEqual({ status: 'unavailable', reason: 'renderer-busy' })
+    manager.peer.close()
+    expect((await f.lifecycle.pluginConfiguration(operation)).status).toBe('ok')
+  } finally {
     await f.close()
   }
 }, 60_000)
@@ -520,26 +609,26 @@ it('keeps the shared reservation while first-browser-graph admission is pending'
       lastGoodRevision: f.active.revision,
       plugins: f.active.plugins.map(item => ({ ...item, enabled: false })),
     }
-    await f.lifecycle.preflight({
+    await f.managed.preflight!({
       transactionId: 'graph-reservation',
       operation: 'disable',
       previous: f.active,
       candidate,
       targetId: 'fixture-plugin',
     })
-    const pending = f.lifecycle.prepareBrowserGraph('graph-reservation', f.active)
+    const pending = f.managed.prepareBrowserGraph('graph-reservation', f.active)
     await entered.promise
-    expect(() => f.lifecycle.prepare('graph-reservation')).toThrow('already in progress')
-    await expect(f.lifecycle.prepareBrowserGraph('graph-reservation', { ...f.active, revision: 9 })).rejects.toThrow(
+    expect(() => f.managed.prepare('graph-reservation')).toThrow('already in progress')
+    await expect(f.managed.prepareBrowserGraph('graph-reservation', { ...f.active, revision: 9 })).rejects.toThrow(
       'already in progress',
     )
-    await expect(f.lifecycle.abort('graph-reservation')).rejects.toThrow('already in progress')
+    await expect(f.managed.abort('graph-reservation')).rejects.toThrow('already in progress')
     expect(() => f.cdp.beginJoin({ send: async () => ({}) } as never)).toThrow('cannot join')
     release.resolve()
     const fence = await pending
     expect(fence.expectedRegistryEpoch).toBe(0)
     expect(fence.transactionEpoch.startsWith('graph-reservation:')).toBe(true)
-    await f.lifecycle.abort('graph-reservation')
+    await f.managed.abort('graph-reservation')
     expect(f.lifecycle.requiresReconciliation).toBe(false)
   } finally {
     release.resolve()
