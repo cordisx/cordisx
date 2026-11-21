@@ -171,6 +171,57 @@ describe('Manager shared model services', () => {
     }
   })
 
+  it('warns before unloading a changed standalone model-service draft', async () => {
+    const fixture = reactManagerFixture()
+    fixture.document.getElementById('root')!.setAttribute('data-manager-surface', 'standalone')
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={client().value} locale="en" />)
+      await fixture.click('[data-shared-model-service="sub2tok"] [aria-label^="Edit"]')
+      const unchanged = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(unchanged)
+      expect(unchanged.defaultPrevented).toBe(false)
+      await fixture.type('.cxmc-editor [data-config-path="displayName"] input', 'My unsaved edit')
+      const changed = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(changed)
+      expect(changed.defaultPrevented).toBe(true)
+      await fixture.type('.cxmc-editor [data-config-path="displayName"] input', 'sub2tok')
+      const restored = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(restored)
+      expect(restored.defaultPrevented).toBe(false)
+      await fixture.type('.cxmc-editor [data-config-path="apiKey"] input', 'fixture-secret')
+      const credential = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(credential)
+      expect(credential.defaultPrevented).toBe(true)
+      expect(JSON.stringify(fixture.dom.window.sessionStorage)).not.toContain('fixture-secret')
+      await fixture.click('.cxmc-editor-actions button:first-child')
+      const closed = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(closed)
+      expect(closed.defaultPrevented).toBe(false)
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('does not add the standalone unload warning to an embedded Manager', async () => {
+    const fixture = reactManagerFixture()
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={client().value} locale="en" />)
+      await fixture.click('[data-shared-model-service="sub2tok"] [aria-label^="Edit"]')
+      await fixture.type('.cxmc-editor [data-config-path="displayName"] input', 'Changed')
+      const event = new fixture.dom.window.Event('beforeunload', { cancelable: true })
+      fixture.dom.window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
   it('does not replace an existing service when a new service uses its id', async () => {
     const fixture = reactManagerFixture()
     const { value, modelServicesSave } = client()

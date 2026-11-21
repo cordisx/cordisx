@@ -307,6 +307,54 @@ it.skipIf(
         () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-created]"))'),
         { timeout: 20_000 },
       ).toBe(true)
+      await first.evaluate(
+        'document.querySelector("[data-shared-model-service=fixture-created] .cxms-shared-actions button:first-child").click()',
+      )
+      await expect.poll(
+        () => first.evaluate('Boolean(document.querySelector(".cxmc-editor [data-config-path=displayName] input"))'),
+        { timeout: 10_000 },
+      ).toBe(true)
+      const inputPoint = await first.evaluate<{ x: number; y: number }>(
+        '(() => { const rect = document.querySelector(".cxmc-editor [data-config-path=displayName] input").getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } })()',
+      )
+      await first.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        ...inputPoint,
+        button: 'left',
+        clickCount: 1,
+      })
+      await first.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        ...inputPoint,
+        button: 'left',
+        clickCount: 1,
+      })
+      await first.evaluate(
+        '(() => { const input = document.querySelector(".cxmc-editor [data-config-path=displayName] input"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "Unsaved fixture"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })) })()',
+      )
+      await expect.poll(
+        () =>
+          first.evaluate(
+            '(() => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented })()',
+          ),
+        { timeout: 10_000 },
+      ).toBe(true)
+      const dialogs = () =>
+        first.diagnostics.filter(item => (item as { method?: string }).method === 'Page.javascriptDialogOpening').length
+      const previousDialogs = dialogs()
+      const attemptedReload = first.send('Page.reload', {}, 20_000)
+      try {
+        await expect.poll(dialogs, { timeout: 10_000 }).toBe(previousDialogs + 1)
+        await first.send('Page.handleJavaScriptDialog', { accept: false })
+        await attemptedReload
+      } catch (error) {
+        await first.send('Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined)
+        await attemptedReload.catch(() => undefined)
+        throw error
+      }
+      expect(await first.evaluate('document.querySelector(".cxmc-editor [data-config-path=displayName] input").value'))
+        .toBe('Unsaved fixture')
+      await first.evaluate('document.querySelector(".cxmc-editor-actions button:first-child").click()')
       await first.evaluate('globalThis.__modelServicesBeforeReload = true')
       await first.send('Page.reload')
       await expect.poll(

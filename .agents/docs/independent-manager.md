@@ -62,7 +62,8 @@ memory. On a normal refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
 The Host page also restores supported navigation destinations within that tab.
 Route parameters and unsaved form inputs are not stored; a transient edit page
-returns to its main section after refresh.
+returns to a main section after refresh. A changed shared model-service form
+asks the browser to warn before the page is refreshed or closed.
 If a write or lifecycle transaction is in progress, retirement is uncertain, or
 browser storage is unavailable, open a new manager entry and check any uncertain
 operation before retrying. When its resource worker loses its in-memory binding,

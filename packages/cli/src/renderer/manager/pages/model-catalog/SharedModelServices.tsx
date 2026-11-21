@@ -157,8 +157,21 @@ function ServiceEditor({ service, locale, save, close, canSave }: {
   const creating = service === undefined
   const [draft, setDraft] = useState<Draft>(() => draftOf(service))
   const [advanced, setAdvanced] = useState(() => sharedServiceAdvancedDraft(service))
+  const editor = useRef<HTMLElement>(null)
+  const initial = useRef({ draft: JSON.stringify(draft), advanced: JSON.stringify(advanced) })
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>()
+  const dirty = initial.current.draft !== JSON.stringify(draft) || initial.current.advanced !== JSON.stringify(advanced)
+  useEffect(() => {
+    const view = editor.current?.closest('[data-manager-surface="standalone"]')?.ownerDocument.defaultView
+    if (!dirty || !view) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    view.addEventListener('beforeunload', warn)
+    return () => view.removeEventListener('beforeunload', warn)
+  }, [dirty])
   const schema = useMemo(() => serviceSchema(locale, draft, creating), [
     locale,
     creating,
@@ -183,6 +196,7 @@ function ServiceEditor({ service, locale, save, close, canSave }: {
   }
   return (
     <section
+      ref={editor}
       className="cxmc-editor"
       aria-label={t(creating ? 'catalog.sharedServiceAdd' : 'catalog.sharedServiceEdit')}
     >
