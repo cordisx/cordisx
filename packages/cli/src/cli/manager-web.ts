@@ -51,7 +51,7 @@ const managementKinds = new Set([
   'plugin-uninstall',
   'plugin-execute-plan',
 ])
-const rendererChannelAllowlist = new Set(['plugin-management', 'managed-service-ui'])
+const rendererChannelAllowlist = new Set(['plugin-management', 'managed-service-ui', 'channel-actions'])
 
 function json(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })

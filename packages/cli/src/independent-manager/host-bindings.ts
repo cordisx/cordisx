@@ -8,6 +8,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'permission-policy': ['__cordisxPermissionPolicyRequestV1', '__cordisxPermissionPolicyReceiveV1'],
   'service-config': ['__cordisxServiceConfigRequestV1', '__cordisxServiceConfigReceiveV1'],
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
+  'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
 } as const

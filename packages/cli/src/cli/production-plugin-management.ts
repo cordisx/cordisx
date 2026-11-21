@@ -54,6 +54,8 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererBootstrap?: ManagerRendererChannel
   /** Owner-issued, per-renderer read-only managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
+  /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
+  readonly rendererReadonlyChannel?: ManagerRendererChannel
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
@@ -92,6 +94,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererManagedServiceUI === undefined
         ? []
         : [['managed-service-ui', input.rendererManagedServiceUI] as const]),
+      ...(input.rendererReadonlyChannel === undefined
+        ? []
+        : [['channel-actions', input.rendererReadonlyChannel] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
   })
