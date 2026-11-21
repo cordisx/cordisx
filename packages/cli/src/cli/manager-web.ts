@@ -6,6 +6,7 @@ import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
+import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
@@ -17,6 +18,8 @@ const files: Readonly<Record<string, string>> = {
   '/manager-schema.js': 'manager-schema.js',
   '/manager-channel-ui.js': 'manager-channel-ui.js',
   '/manager.css': 'manager.css',
+  '/manager-resource-worker.js': 'manager-resource-worker.js',
+  '/manager-standalone.js': 'manager-standalone.js',
 }
 // Serve the same Host-owned styles used by the embedded Manager, never a copy.
 const sharedStyles: Readonly<Record<string, URL>> = {
@@ -87,8 +90,12 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     rendererOpen?: Promise<ManagerRendererHandle | undefined>
     rendererCommands: boolean
     graphs?: ReturnType<typeof createManagerRendererGraphSession>
+    rendererBootstrap?: ReturnType<typeof createManagerRendererBootstrap>
+    rendererBundle?: Promise<Awaited<ReturnType<ReturnType<typeof createManagerRendererBootstrap>['prepare']>>>
+    resources?: Set<ServerResponse>
   }
   const sessions = new Map<string, BrowserSession>()
+  const closedSessions = new Map<string, number>()
   let authority = ''
   const retire = async (key: string) => {
     const entry = bootstraps.get(key)
@@ -114,9 +121,13 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     const session = sessions.get(token)
     if (!session) return
     sessions.delete(token)
+    closedSessions.set(token, Date.now() + 60_000)
+    while (closedSessions.size > 128) closedSessions.delete(closedSessions.keys().next().value!)
     clearTimeout(session.timer)
     session.controller.abort()
     session.graphs?.close()
+    for (const response of session.resources ?? []) response.destroy()
+    void session.rendererBundle?.then(result => result.bundle.fill(0)).catch(() => undefined)
     const retireKinds = [
       ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
       ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
@@ -165,7 +176,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     response.setHeader('x-frame-options', 'DENY')
     response.setHeader(
       'content-security-policy',
-      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     )
     if (request.headers.host !== authority) return json(response, 403, { error: 'INVALID_HOST' })
     const origin = request.headers.origin
@@ -183,14 +194,18 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     } catch {
       return json(response, 400, { error: 'INVALID_REQUEST' })
     }
-    const file = files[url.pathname]
+    const file = url.pathname === '/' && url.search === '?host=1'
+      ? 'manager-standalone.html'
+      : files[url.pathname]
     const shared = sharedStyles[url.pathname]
     if (request.method === 'GET' && (file !== undefined || shared !== undefined)) {
       try {
         const contents = await readFile(shared ?? new URL(file!, assets)).catch(async error => {
           // Generated assets live in dist during source-mode development;
           // packaged execution resolves them from the normal assets directory.
-          if (file !== 'manager-shell.js' && file !== 'manager-host.css') throw error
+          if (file !== 'manager-shell.js' && file !== 'manager-host.css' && file !== 'manager-standalone.js') {
+            throw error
+          }
           return await readFile(new URL(`../../dist/assets/manager/${file}`, import.meta.url))
         })
         const extension = url.pathname === '/' ? '.html' : url.pathname.slice(url.pathname.lastIndexOf('.'))
@@ -230,6 +245,14 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       : ''
     const previousSession = sessions.get(token)
     if (previousSession === undefined || previousSession.deadline <= Date.now()) {
+      if (
+        previousSession === undefined && request.method === 'POST' && url.pathname === '/api/renderer/close'
+        && origin === `http://${authority}` && (closedSessions.get(token) ?? 0) > Date.now()
+        && request.headers['content-type']?.startsWith('application/json')
+      ) {
+        const input = object(await body(request).catch(() => undefined))
+        if (input && Object.keys(input).length === 0) return json(response, 200, { closed: true })
+      }
       await retireSession(token)
       return json(response, 401, { error: 'UNAUTHORIZED' })
     }
@@ -254,6 +277,25 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       })
     const scopedReply = (value: unknown) => activeSession() ? json(response, 200, value) : revoked()
     try {
+      if ((request.method === 'GET' || request.method === 'HEAD') && target === '/api/renderer/bundle.js') {
+        if (!session.rendererBootstrap || !session.rendererBundle) return json(response, 404, { error: 'NOT_FOUND' })
+        const built = await session.rendererBundle
+        if (!activeSession() || !await session.rendererBootstrap.isSessionCurrent() || !activeSession()) {
+          await retireSession(token)
+          return json(response, 401, { error: 'UNAUTHORIZED' })
+        }
+        session.resources ??= new Set()
+        session.resources.add(response)
+        response.once('close', () => session.resources?.delete(response))
+        response.writeHead(200, {
+          'content-type': 'text/javascript; charset=utf-8',
+          'content-length': built.bundle.byteLength,
+          'cache-control': 'private, no-store, max-age=0',
+          'cross-origin-resource-policy': 'same-origin',
+        })
+        response.end(request.method === 'HEAD' ? undefined : built.bundle)
+        return
+      }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/api/renderer/graphs/')) {
         if (!session.graphs) return json(response, 404, { error: 'NOT_FOUND' })
         if (!activeSession() || !await owner.isCurrent().catch(() => false)) {
@@ -359,6 +401,15 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
                 isCurrent: activeSession,
                 forbiddenSecrets: [token, gateway.instanceToken, privateHandle.grant],
               })
+              session.rendererBootstrap = createManagerRendererBootstrap({
+                owner,
+                invocation: { gateway, browserSessionId: session.id, handle: privateHandle },
+                managerOrigin: `http://${authority}`,
+                projection: session.graphs,
+                isCurrent: async () => activeSession() && await owner.isCurrent().catch(() => false) && activeSession(),
+                signal: session.controller.signal,
+                forbiddenSecrets: [token, gateway.instanceToken, privateHandle.grant],
+              })
             }
             return privateHandle
           } catch {
@@ -378,6 +429,44 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               ? { commands: true, rendererId: handle.rendererId, generation: handle.ownerGeneration }
               : {}),
           })
+      }
+      if (['/api/renderer/session', '/api/renderer/bootstrap', '/api/renderer/close'].includes(url.pathname)) {
+        if (Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
+        if (url.pathname === '/api/renderer/close') {
+          await retireSession(token)
+          return json(response, 200, { closed: true })
+        }
+        if (!session.rendererBootstrap || !session.rendererOpen) {
+          return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        }
+        const handle = await session.rendererOpen
+        if (!handle || !activeSession()) return revoked()
+        if (url.pathname === '/api/renderer/session') {
+          if (!await session.rendererBootstrap.isSessionCurrent() || !activeSession()) {
+            await retireSession(token)
+            return json(response, 401, { error: 'UNAUTHORIZED' })
+          }
+          return json(response, 200, {
+            current: true,
+            rendererId: handle.rendererId,
+            generation: handle.ownerGeneration,
+          })
+        }
+        session.rendererBundle ??= session.rendererBootstrap.prepare()
+        try {
+          const built = await session.rendererBundle
+          if (!activeSession() || !await session.rendererBootstrap.isSessionCurrent() || !activeSession()) {
+            throw new Error('renderer-session-unavailable')
+          }
+          return json(response, 200, {
+            status: 'ok',
+            bundleUrl: '/api/renderer/bundle.js',
+            initialGraphs: built.initialGraphs,
+          })
+        } catch {
+          await retireSession(token)
+          return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        }
       }
       if (['/api/renderer/admit', '/api/renderer/poll', '/api/renderer/acknowledge'].includes(url.pathname)) {
         if (!session.rendererCommands || session.rendererOpen === undefined || options.rendererGateway === undefined) {
