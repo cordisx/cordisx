@@ -47,9 +47,10 @@ not be shared. Closing the tab clears its browser storage but does not itself st
 the sidecar; use `manager stop` to stop it.
 
 The preview offers shared model-service editing, plugin/source lifecycle actions,
-and Marketplace search. Permission plans v2 and v4 require the user to choose
-each requested decision and explicitly confirm; the existing Host rechecks the
-plan and applies it. Other permission plan versions remain unavailable. Busy,
+and Marketplace search. Permission plans v2, v4 and v7 require the user to choose
+each required decision and explicitly confirm; v7 may defer optional decisions
+until use. The existing Host rechecks the plan and applies it. Other permission
+plan versions remain unavailable. Busy,
 stale or uncertain reviews are not automatically retried. Plugin-owned custom
 pages, specialized credential entry, and service configuration without an
 active renderer are not yet equivalent to the existing Manager; their absence is
