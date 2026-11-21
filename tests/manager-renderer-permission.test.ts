@@ -316,9 +316,10 @@ it('aborts before commit when the user session is revoked during authorization',
     fake.snapshots.set(first.handle.rendererId, [])
     const pending = test.sessions.call(first, 'permission-policy', payload('one', 'allow'))
     await started.promise
-    await test.sessions.close(first)
+    const closing = test.sessions.close(first)
     authorized.resolve(true)
     expect((await pending).status).toBe('unknown')
+    expect(await closing).toBe(false)
     expect(fake.fenced).not.toHaveBeenCalled()
     expect((await loadHomeConfig(test.configPath)).permissions).toEqual([])
   } finally {
@@ -385,9 +386,10 @@ it('reports unknown and fences consumers if the session ends after the durable c
     const pending = test.sessions.call(first, 'permission-policy', payload('one', 'allow'))
     await entered.promise
     expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('allow')])
-    await test.sessions.close(first)
+    const closing = test.sessions.close(first)
     finish.resolve()
     expect((await pending).status).toBe('unknown')
+    expect(await closing).toBe(false)
     expect(fake.fenced).toHaveBeenCalledOnce()
   } finally {
     finish.resolve()
