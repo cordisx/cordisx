@@ -9,6 +9,8 @@ await build({
   format: 'iife',
   platform: 'browser',
   jsx: 'automatic',
+  // Name linked dependencies by their installed path, not the build machine's source path.
+  preserveSymlinks: true,
   loader: { '.svg': 'text' },
   define: { 'process.env.NODE_ENV': '"production"' },
 })
