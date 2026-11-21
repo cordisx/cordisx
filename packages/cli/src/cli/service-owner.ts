@@ -14,6 +14,9 @@ import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-cat
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
+import { ServiceRendererParticipants } from './service-renderer-participant.js'
+import { createServiceRendererProjector } from './service-renderer-projection.js'
+import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
@@ -60,6 +63,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let rendererLifecycle: ServiceRendererLifecycle | undefined
+      let rendererParticipants: ServiceRendererParticipants | undefined
+      let rendererBootstrap: ServiceRendererBootstrap | undefined
       let failure: unknown
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
@@ -73,8 +78,27 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             policy => policy.key.profileId === profileId,
           )
         const config = await loadHomeConfig(configPath)
+        const rendererScope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation }
+        rendererParticipants = new ServiceRendererParticipants(rendererScope)
         rendererLifecycle = new ServiceRendererLifecycle({
-          scope: { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation },
+          scope: rendererScope,
+          projectMutation: createServiceRendererProjector({
+            homeDir,
+            profileId,
+            generation,
+            isLive: identity => rendererParticipants!.isLive(identity),
+          }),
+        })
+        rendererParticipants.bind(rendererLifecycle)
+        rendererBootstrap = new ServiceRendererBootstrap({
+          homeDir,
+          configPath,
+          appId,
+          profileId,
+          generation,
+          lifecycle: rendererLifecycle,
+          participants: rendererParticipants,
+          store,
         })
         services = createProductionManagedServiceLifecycle({
           runtime: rendererLifecycle,
@@ -166,6 +190,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           runtimeGeneration: generation,
           token: randomUUID(),
           coordinator,
+          rendererParticipant: rendererParticipants.participant,
+          rendererBootstrap: rendererBootstrap.channel(),
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
           ...(managerChannel === undefined
@@ -194,6 +220,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         for (
           const close of [
             () => api?.close(),
+            () => rendererBootstrap?.close(),
+            () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),
             () => managerChannel?.close(),

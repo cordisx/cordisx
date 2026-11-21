@@ -40,6 +40,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   private readonly members = new Map<string, { peer: AttachedRendererPeer; unsubscribe: () => void }>()
   private readonly joiningPeers = new Set<AttachedRendererPeer>()
   private readonly activeLeases = new Map<string, PluginGenerationGraphLease>()
+  private readonly activationListeners = new Set<(active: CordisXPluginActivationRecordV1) => void>()
   private readonly createArtifactServer: () => Promise<PluginGenerationArtifactServer>
   private artifactServerPromise: Promise<PluginGenerationArtifactServer> | undefined
   private federation: RendererLifecycleFederation | undefined
@@ -105,6 +106,13 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   snapshot(): Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }> {
     this.assertIdle()
     return { active: structuredClone(this.active!), registryEpoch: this.registryEpoch }
+  }
+
+  /** Trusted owner cleanup hook, called only after every renderer has finalized. */
+  onActivationFinalized(listener: (active: CordisXPluginActivationRecordV1) => void): () => void {
+    if (this.closed) throw new Error('service renderer lifecycle is unavailable')
+    this.activationListeners.add(listener)
+    return () => this.activationListeners.delete(listener)
   }
 
   private releaseUnusedFederation(): void {
@@ -324,6 +332,12 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     this.active = this.validateActive({ ...candidate, recordKind: 'active', lastGoodRevision: candidate.revision })
     this.registryEpoch = tx.epoch
     this.transaction = undefined
+    try {
+      for (const listener of this.activationListeners) listener(this.active)
+    } catch (error) {
+      this.terminalFailure = true
+      throw error
+    }
     this.releaseUnusedFederation()
   }
 
@@ -403,6 +417,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     for (const lease of this.activeLeases.values()) lease.retire()
     this.activeLeases.clear()
     for (const lease of this.transaction?.leases ?? []) lease.retire()
+    this.activationListeners.clear()
     const server = await this.artifactServerPromise?.catch(() => undefined)
     await server?.close()
   }

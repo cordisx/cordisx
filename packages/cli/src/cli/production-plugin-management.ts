@@ -17,7 +17,7 @@ import { processStartIdentity } from './supervisor-state.js'
 import { createManagerRendererGatewayAuthenticator } from './manager-renderer-gateway.js'
 import { createManagerRendererManagementChannel } from './manager-renderer-management.js'
 import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
-import { ManagerRendererSessions } from './manager-renderer-sessions.js'
+import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -39,6 +39,10 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
   readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  /** Owner-created participant; never supplied by the browser or plugin. */
+  readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
+  /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
+  readonly rendererBootstrap?: ManagerRendererChannel
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -63,7 +67,13 @@ export async function openProductionPluginManagementComposition(input: {
       ownerAppId: input.appId,
       ownerGeneration: input.runtimeGeneration,
     }),
-    channels: new Map([['plugin-management', createManagerRendererManagementChannel(service)]]),
+    channels: new Map([
+      ['plugin-management', createManagerRendererManagementChannel(service)],
+      ...(input.rendererBootstrap === undefined
+        ? []
+        : [['manager-bootstrap', input.rendererBootstrap] as const]),
+    ]),
+    ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
   })
   let server: PluginManagementRpcServer
   try {
