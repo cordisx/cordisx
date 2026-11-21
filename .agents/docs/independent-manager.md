@@ -46,12 +46,13 @@ configuration writes. Other configured plugins, adapters, concurrent permission
 changes and recovery after an uncertain result are not yet supported. The
 isolated browser tests do not constitute real Codex App validation.
 
-The experimental Host page in service mode can also read and save shared
-model-service declarations through the existing Manager form when the owner
-advertises the safe-write contract. Its edits use the owner's revision and
-credential protection; they retain the app-restart apply semantics described
-below. An edit started against an older revision is rejected if another client
-changes the declarations first.
+The experimental Host page in service mode and the eligible empty-profile
+Desktop mode can read and save shared model-service declarations through the
+existing Manager form when the owner advertises the safe-write contract. The
+Desktop path depends on its native settings authority being ready. Edits use the
+owner's revision and credential protection; they retain the app-restart apply
+semantics described below. An edit started against an older revision is rejected
+if another client changes the declarations first.
 
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use

@@ -19,6 +19,8 @@ import {
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
+import { dispatchCodexSettings } from '../packages/cli/src/launcher/codex-settings-dispatch.js'
+import { nativeCodexSettings } from '../packages/cli/src/launcher/native-codex-settings-composition.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { PlatformProviderPluginLifecycleRuntime } from '../packages/cli/src/launcher/platform-provider-plugin-lifecycle.js'
@@ -50,8 +52,8 @@ it.skipIf(chrome === undefined)(
     const homeDir = path.join(root, 'home')
     const configPath = path.join(homeDir, 'config.json')
     const chromeProfile = path.join(root, 'chrome-profile')
-    await mkdir(homeDir)
-    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
+    await mkdir(homeDir, { mode: 0o700 })
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
     const profileId = 'default'
     const generation = 'desktop-owner-browser-fixture'
     const processStartedAt = (await processStartIdentity(process.pid))!
@@ -78,6 +80,15 @@ it.skipIf(chrome === undefined)(
     const artifactServer = await startPluginGenerationArtifactServer()
     const cdp = new CdpPluginLifecycleRuntime()
     const store = new PluginActivationStore(homeDir, profileId, generation)
+    const settings = nativeCodexSettings({
+      configPath,
+      options: { nativeDiscoveryEnvironment: {} },
+      control: {
+        nativeRequest: async () => {
+          throw new Error('unexpected native request')
+        },
+      },
+    })
     const owner = await createDesktopManagerOwnerIfEligible({
       homeDir,
       configPath,
@@ -90,6 +101,7 @@ it.skipIf(chrome === undefined)(
       ownerVerified: true,
       attach: false,
       configuredPluginCount: 0,
+      codex: async (operation, request) => await dispatchCodexSettings(settings, operation, request),
     })
     if (!owner) throw new Error('fixture Desktop owner is unavailable')
     const managed = createProductionManagedServiceLifecycle({
@@ -161,7 +173,7 @@ it.skipIf(chrome === undefined)(
         result.searchParams.set('host', '1')
         return result.href
       }
-      const firstTarget = await desktop.send('Target.createTarget', { url: url(web.url) }) as { targetId: string }
+      const firstTarget = await desktop.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
       const port = Number((await readFile(path.join(chromeProfile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
       const connect = async (targetId: string): Promise<CdpClient> => {
         let socket = ''
@@ -173,23 +185,38 @@ it.skipIf(chrome === undefined)(
         }, { timeout: 10_000 })
         const client = await CdpClient.connect(socket)
         await client.send('Runtime.enable')
+        await client.send('Page.enable')
         return client
       }
-      const ready = async (page: CdpClient) =>
-        await vi.waitFor(async () => {
-          const state = await page.evaluate<{ ready: boolean; status: string }>(`({
+      const ready = async (page: CdpClient) => {
+        try {
+          const deadline = Date.now() + 45_000
+          while (Date.now() < deadline) {
+            const state = await page.evaluate<{ ready: boolean; status: string }>(`({
           ready: document.documentElement.dataset.cordisxReady === 'true' && !!globalThis.__cordisxRuntime
             && document.querySelector('p[role=status]')?.hidden === true,
           status: document.querySelector('p[role=status]')?.textContent ?? ''
         })`)
-          expect(state.ready, state.status).toBe(true)
-        }, { timeout: 45_000 })
+            if (state.ready) return
+            if (state.status.includes('连接不可用')) throw new Error(state.status)
+            await new Promise(resolve => setTimeout(resolve, 100))
+          }
+          throw new Error('Manager readiness timed out')
+        } catch (error) {
+          const resources = await page.evaluate(`performance.getEntriesByType('resource')
+            .filter(item => new URL(item.name).pathname.startsWith('/api/'))
+            .map(item => ({ path: new URL(item.name).pathname, status: item.responseStatus, duration: item.duration }))`)
+          throw new Error('Manager did not start: ' + JSON.stringify(resources), { cause: error })
+        }
+      }
       first = await connect(firstTarget.targetId)
+      await first.send('Page.navigate', { url: url(web.url) })
       await ready(first)
-      const secondTarget = await desktop.send('Target.createTarget', { url: url(web.issueUrl()) }) as {
+      const secondTarget = await desktop.send('Target.createTarget', { url: 'about:blank' }) as {
         targetId: string
       }
       second = await connect(secondTarget.targetId)
+      await second.send('Page.navigate', { url: url(web.issueUrl()) })
       await ready(second)
       const snapshot = async (page: CdpClient) =>
         await page.evaluate(`({
@@ -198,6 +225,68 @@ it.skipIf(chrome === undefined)(
       })`)
       expect(await snapshot(first)).toEqual(await snapshot(second))
       expect(await snapshot(first)).toEqual(await snapshot(desktop))
+      for (const page of [first, second]) {
+        await page.evaluate(`(() => {
+          const button = [...document.querySelectorAll('button')].find(item =>
+            ['Model services', '模型服务'].includes(item.textContent.trim()))
+          if (!button) throw new Error('Model services navigation is unavailable')
+          button.click()
+        })()`)
+        await vi.waitFor(async () => {
+          expect(await page.evaluate('Boolean(document.querySelector(".cxms-shared-header"))')).toBe(true)
+        }, { timeout: 15_000 })
+      }
+      await first.evaluate(`(() => {
+        const add = [...document.querySelectorAll('.cxms-shared-header button')].find(button =>
+          ['Add shared service', '添加跨应用服务'].includes(button.textContent.trim()))
+        if (!add) throw new Error('Model service add action is unavailable')
+        add.click()
+      })()`)
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('Boolean(document.querySelector(".cxmc-editor [data-config-path=id] input"))'))
+          .toBe(true)
+      }, { timeout: 10_000 })
+      for (
+        const [field, value] of [
+          ['id', 'desktop-fixture'],
+          ['displayName', 'Desktop fixture'],
+          ['baseUrl', 'https://example.test'],
+          ['codexModels', 'fixture-model'],
+          ['apiKey', 'desktop-fixture-secret'],
+        ]
+      ) {
+        await first.evaluate(`(() => {
+          const input = document.querySelector(${JSON.stringify(`.cxmc-editor [data-config-path="${field}"] input`)})
+          if (!input) throw new Error('Model service field is unavailable')
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)})
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        })()`)
+      }
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('!document.querySelector(".cxmc-editor-actions button:last-child").disabled'))
+          .toBe(true)
+      }, { timeout: 10_000 })
+      await first.evaluate('document.querySelector(".cxmc-editor-actions button:last-child").click()')
+      for (const page of [first, second]) {
+        await vi.waitFor(async () => {
+          expect(await page.evaluate('Boolean(document.querySelector("[data-shared-model-service=desktop-fixture]"))'))
+            .toBe(true)
+        }, { timeout: 20_000 })
+        expect(await page.evaluate('document.body.textContent.includes("desktop-fixture-secret")')).toBe(false)
+      }
+      const stored = JSON.parse(await readFile(configPath, 'utf8')) as { providers: Array<{ id: string }> }
+      expect(stored.providers.some(provider => provider.id === 'desktop-fixture')).toBe(true)
+      await first.evaluate('globalThis.__desktopBeforeReload = true')
+      await first.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('globalThis.__desktopBeforeReload === undefined')).toBe(true)
+      }, { timeout: 15_000 })
+      await ready(first)
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('Boolean(document.querySelector("[data-shared-model-service=desktop-fixture]"))'))
+          .toBe(true)
+      }, { timeout: 15_000 })
       const list = { kind: 'plugin-configuration' as const, action: 'list' as const }
       expect(await owner.lifecycle.pluginConfiguration(list)).toEqual({
         status: 'unavailable',

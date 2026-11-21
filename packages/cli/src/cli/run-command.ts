@@ -261,6 +261,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       ownerVerified: releaseRuntimeOwner !== undefined,
       attach: invocation.options.attach,
       configuredPluginCount: configuredComposition.plugins.length,
+      codex: nativeCodexOperations(() => nativeSubmission),
     })
     const platformRuntime = new PlatformProviderPluginLifecycleRuntime(desktopManager?.lifecycle ?? lifecycleRuntime)
     managedServiceLifecycleRuntime = createProductionManagedServiceLifecycle({

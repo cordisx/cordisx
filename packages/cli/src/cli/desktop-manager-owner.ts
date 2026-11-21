@@ -7,6 +7,7 @@ import { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycl
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { createServiceRendererProjector } from './service-renderer-projection.js'
+import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
 
 /** Compose the optional Manager inside an already-authorized Desktop owner. */
 export function createDesktopManagerOwner(input: {
@@ -18,6 +19,8 @@ export function createDesktopManagerOwner(input: {
   readonly cdp: CdpPluginLifecycleRuntime
   readonly artifactServer: PluginGenerationArtifactServer
   readonly store: PluginActivationStore
+  /** The Desktop owner's current, revision-checked model-service authority. */
+  readonly codex?: (operation: string, request: unknown) => Promise<unknown>
 }) {
   const scope = {
     homeDigest: attachmentHomeDigest(input.homeDir),
@@ -58,9 +61,23 @@ export function createDesktopManagerOwner(input: {
     store: input.store,
   })
   let closed = false
+  const rendererModelServices = input.codex === undefined
+    ? undefined
+    : createManagerRendererModelServicesChannel({
+      profileId: input.profileId,
+      generation: input.generation,
+      isCurrent: context => !closed && participants.peer(context.rendererId) !== undefined,
+      call: input.codex,
+    })
   return {
     lifecycle,
-    managementOptions: { rendererParticipant: participant, rendererBootstrap: bootstrap.channel() },
+    managementOptions: {
+      rendererParticipant: participant,
+      rendererBootstrap: bootstrap.channel(),
+      rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
+      rendererWriteLifetimes: bootstrap.writeLifetimes,
+      ...(rendererModelServices === undefined ? {} : { rendererModelServices }),
+    },
     initialize(active: CordisXPluginActivationRecordV1, recoveryPending: boolean) {
       lifecycle.initialize(active, recoveryPending)
     },
