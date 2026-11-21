@@ -33,11 +33,16 @@ self.addEventListener('message', event => {
   event.waitUntil((async () => {
     const client = event.source && await self.clients.get(event.source.id)
     const port = event.ports[0]
-    if (!port || !client || client.type !== 'window' || client.frameType !== 'top-level') return
+    if (!client || client.type !== 'window' || client.frameType !== 'top-level') return
     const location = new URL(client.url)
     if (location.origin !== self.location.origin || location.pathname !== '/') return
     const value = event.data
     if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1) return
+    if (value.kind === 'claim' && Object.keys(value).length === 2) {
+      await self.clients.claim()
+      return
+    }
+    if (!port) return
     if (value.kind === 'check' && Object.keys(value).length === 2) {
       // A health check never touches the sequence or aborts active reads.
       port.postMessage({ version: 1, ok: typeof clientsState.get(client.id)?.token === 'string' })

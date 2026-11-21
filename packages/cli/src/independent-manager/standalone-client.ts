@@ -281,7 +281,10 @@ export function startStandaloneManager(input: {
   }
   const canPreserveResume = () =>
     resumeId !== undefined
-    && lifecycle?.canResume() === true && removeBindings?.canResume() === true
+    // Before the lifecycle pump exists, no lifecycle command can have been
+    // delivered. The owner still has to confirm retirement before resuming.
+    && (lifecycle === undefined || lifecycle.canResume())
+    && (removeBindings === undefined || removeBindings.canResume())
   const onBeforeUnload = (event: BeforeUnloadEvent) => {
     if (!event.isTrusted) return
     navigating = true

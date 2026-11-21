@@ -71,6 +71,61 @@ it('does not bind when server authority is unavailable or returns after local re
   expect(other.messages).toEqual([])
 })
 
+it('asks the fixed active worker to claim a hard-reloaded document before binding', async () => {
+  const messages: Array<Record<string, unknown>> = []
+  const worker = {
+    scriptURL: 'http://127.0.0.1:43124/manager-resource-worker.js',
+    postMessage(message: Record<string, unknown>, ports?: MessagePort[]) {
+      messages.push(message)
+      if (message.kind === 'claim') container.controller = worker
+      else {
+        ports![0]!.postMessage({ version: 1, ok: true })
+        ports![0]!.close()
+      }
+    },
+  }
+  const registration = { active: worker, scope: 'http://127.0.0.1:43124/' }
+  const container = {
+    controller: undefined as typeof worker | undefined,
+    register: vi.fn(async () => registration),
+    ready: Promise.resolve(registration),
+  }
+  const target = {
+    location: { href: 'http://127.0.0.1:43124/' },
+    navigator: { serviceWorker: container },
+  } as unknown as Window
+  const client = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'd'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  expect(await client.start()).toBe(true)
+  expect(messages[0]).toEqual({ version: 1, kind: 'claim' })
+  expect(messages[1]).toMatchObject({ kind: 'bind', sequence: 1 })
+  expect(await client.revokeLocal()).toBe(true)
+})
+
+it('does not ask an unrelated active worker to claim the page', async () => {
+  const postMessage = vi.fn()
+  const registration = {
+    active: { scriptURL: 'http://127.0.0.1:43124/unrelated-worker.js', postMessage },
+    scope: 'http://127.0.0.1:43124/',
+  }
+  const target = {
+    location: { href: 'http://127.0.0.1:43124/' },
+    navigator: {
+      serviceWorker: { controller: null, register: async () => registration, ready: Promise.resolve(registration) },
+    },
+  } as unknown as Window
+  const client = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'e'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  expect(await client.start()).toBe(false)
+  expect(postMessage).not.toHaveBeenCalled()
+})
+
 it('rejects invalid session tokens without registering a worker', () => {
   const { target, register } = fixture()
   expect(() =>

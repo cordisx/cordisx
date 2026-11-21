@@ -193,5 +193,9 @@ export function installIndependentHostBindings(input: {
     host[name] = binding
     installed.set(name, binding)
   }
-  return Object.assign(dispose, { canResume: () => !closed && [...pending.values()].every(item => item.readOnly) })
+  // A queued request has not crossed the transport boundary and dispose()
+  // cancels it synchronously; only a dispatched write can have an unknown result.
+  return Object.assign(dispose, {
+    canResume: () => !closed && [...pending.values()].every(item => item.readOnly || !item.dispatched),
+  })
 }

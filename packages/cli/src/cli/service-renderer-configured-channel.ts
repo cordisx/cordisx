@@ -7,6 +7,7 @@ import type {
   PluginGenerationGraphLease,
 } from '../launcher/plugin-generation-artifact-server.js'
 import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import { isLegacyChannelRelease } from '../launcher/legacy-channel-styles.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
@@ -89,7 +90,29 @@ export class ServiceRendererConfiguredChannel {
       lease.retire()
       throw new Error('renderer-configured-channel-unavailable')
     }
-    return new ServiceRendererConfiguredChannel(input, lease, owner, serviceGeneration)
+    const legacy = isLegacyChannelRelease({
+      packageManifest: {
+        pluginId: staged.manifest.id,
+        version: staged.manifest.version,
+        ...(staged.manifest.canonicalSource === undefined ? {} : { canonicalSource: staged.manifest.canonicalSource }),
+      },
+      ...(staged.artifactIntegrity === undefined ? {} : { artifactIntegrity: staged.artifactIntegrity }),
+    })
+    // This published version does not negotiate the configuration-only facade.
+    return new ServiceRendererConfiguredChannel(
+      { ...input, allowConfiguration: input.allowConfiguration && !legacy },
+      lease,
+      owner,
+      serviceGeneration,
+    )
+  }
+
+  private configurationCapability() {
+    return this.input.allowConfiguration
+      ? this.owner.capabilities.find(capability =>
+        capability.name === 'channel.accounts.connect' && Object.keys(capability.scope).length === 0
+      )
+      : undefined
   }
 
   isCurrent(): boolean {
@@ -138,11 +161,7 @@ export class ServiceRendererConfiguredChannel {
       }
       this.view = view
       this.sourceAlias = source
-      const connect = this.input.allowConfiguration
-        ? this.owner.capabilities.find(capability =>
-          capability.name === 'channel.accounts.connect' && Object.keys(capability.scope).length === 0
-        )
-        : undefined
+      const connect = this.configurationCapability()
       const configurationAvailable = connect !== undefined
       return {
         plugin: {
@@ -191,7 +210,8 @@ export class ServiceRendererConfiguredChannel {
   } {
     const alias = this.sourceAlias
     if (
-      !this.bound || !this.identity || !alias || !this.isCurrent() || context.admitted !== true
+      !this.configurationCapability() || !this.bound || !this.identity || !alias || !this.isCurrent()
+      || context.admitted !== true
       || context.signal !== this.bound.signal || requestedAlias !== undefined && requestedAlias !== alias
     ) throw new Error('renderer-configured-channel-unavailable')
     const identity = this.identity.resolve(context, alias, 'channel')
@@ -206,10 +226,7 @@ export class ServiceRendererConfiguredChannel {
     this.serviceIdentity(context)
     if (!this.view) throw new Error('renderer-configured-channel-unavailable')
     const projection = this.view.initial.projection
-    const writable = this.input.allowConfiguration
-      && this.owner.capabilities.some(capability =>
-        capability.name === 'channel.accounts.connect' && Object.keys(capability.scope).length === 0
-      )
+    const writable = this.configurationCapability() !== undefined
     return writable ? { ...projection, service: { ...projection.service, writable: true } } : projection
   }
 

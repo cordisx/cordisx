@@ -28,7 +28,7 @@ it('forwards only owner-granted bindings with a session header and correlates ex
     expect(target.__cordisxProviderRequestV1).toBeUndefined()
     target.__cordisxConfigRequestV1(JSON.stringify({ requestId: 'config-1', operation: 'read' }))
     target.__cordisxPluginLifecycleRequestV1(JSON.stringify({ request: { requestId: 'lifecycle-1' } }))
-    expect(dispose.canResume()).toBe(false)
+    expect(dispose.canResume()).toBe(true)
     await vi.waitFor(() => expect(receiveLifecycle).toHaveBeenCalledOnce())
     expect(dispose.canResume()).toBe(true)
     expect(JSON.parse(receiveConfig.mock.calls[0]![0])).toEqual({ requestId: 'config-1', ok: true, value: 'config' })
@@ -93,6 +93,8 @@ it('permits refresh with an owner-declared read pending but not with a write pen
     target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'read', operation: { kind: 'query' } }))
     expect(dispose.canResume()).toBe(true)
     target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'write', operation: { kind: 'execute' } }))
+    expect(dispose.canResume()).toBe(true)
+    await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledTimes(2))
     expect(dispose.canResume()).toBe(false)
   } finally {
     dispose()
@@ -114,11 +116,12 @@ it('waits for admission and preserves refresh only for Channel configuration rea
     target.__cordisxServiceConfigRequestV1(JSON.stringify({ requestId: 'read', operation: 'list' }))
     expect(dispose.canResume()).toBe(true)
     target.__cordisxServiceConfigRequestV1(JSON.stringify({ requestId: 'write', operation: 'mutate' }))
-    expect(dispose.canResume()).toBe(false)
+    expect(dispose.canResume()).toBe(true)
     await Promise.resolve()
     expect(fetch).not.toHaveBeenCalled()
     admit(true)
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(dispose.canResume()).toBe(false)
   } finally {
     dispose()
   }
@@ -137,15 +140,39 @@ it('admits the private credential channel before dispatch and blocks refresh whi
   })
   try {
     target.__cordisxChannelCredentialRequestV1(JSON.stringify({ requestId: 'capture', operation: 'capture' }))
-    expect(dispose.canResume()).toBe(false)
+    expect(dispose.canResume()).toBe(true)
     await Promise.resolve()
     expect(fetch).not.toHaveBeenCalled()
     admit(true)
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(false)
     expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body)).channel).toBe('channel-credentials')
   } finally {
     dispose()
   }
+})
+
+it('cancels a queued write before retaining refresh and never dispatches it later', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const fetch = vi.fn()
+  const receiver = vi.fn()
+  const target = { fetch, __cordisxServiceConfigReceiveV1: receiver } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['service-config'],
+    rendererAdmission: admission,
+  })
+  target.__cordisxServiceConfigRequestV1(JSON.stringify({ requestId: 'queued', operation: 'mutate' }))
+  await Promise.resolve()
+  expect(dispose.canResume()).toBe(true)
+  dispose()
+  admit(true)
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(fetch).not.toHaveBeenCalled()
+  expect(JSON.parse(receiver.mock.calls[0]![0])).toMatchObject({ code: 'INDEPENDENT_HOST_SESSION_REVOKED' })
 })
 
 it('retires the browser binding and reports an unknown result after a failed credential write', async () => {

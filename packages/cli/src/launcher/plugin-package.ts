@@ -60,6 +60,7 @@ import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/p
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
+import { restoreLegacyChannelStyle } from './legacy-channel-styles.js'
 import { normalizeLatestRuntimeManifest, runtimeManifestHasServices } from './latest-runtime-manifest.js'
 import {
   readOptionalFile,
@@ -629,6 +630,12 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
+  const browserArtifact = await restoreLegacyChannelStyle({
+    packageManifest: resolved.packageManifest,
+    ...(options.artifactIntegrity === undefined ? {} : { artifactIntegrity: options.artifactIntegrity }),
+    entry,
+    artifact: built.browserArtifact,
+  })
   const serviceModules = runtimeManifestHasServices(runtimeManifest)
     ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
     : []
@@ -671,7 +678,7 @@ export async function stageResolvedPluginPackage(
     serviceModules,
     managedServiceResources,
     entityTemplatesText,
-    built.browserArtifact,
+    browserArtifact,
     documentsText,
   )
   await publishPackage(
@@ -685,7 +692,7 @@ export async function stageResolvedPluginPackage(
     serviceModules,
     managedServiceResources,
     entityTemplatesText,
-    built.browserArtifact,
+    browserArtifact,
     documentsText,
   )
   return await loadStagedPluginPackage(homeDir, digest)

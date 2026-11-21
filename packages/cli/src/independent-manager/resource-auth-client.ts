@@ -126,7 +126,17 @@ export function createManagerResourceAuthClient(input: {
       if (disposed || !container) return false
       try {
         await withTimeout(container.register(workerScript, { scope: '/', updateViaCache: 'none' }), 5_000)
-        await withTimeout(container.ready, 5_000)
+        const registration = await withTimeout(container.ready, 5_000)
+        // A hard reload may deliberately bypass the active worker for this
+        // document. Ask only the fixed same-origin worker to claim its scope;
+        // binding below still requires a current authenticated server session.
+        if (!container.controller) {
+          const active = registration.active
+          if (!active || active.scriptURL !== expectedUrl || registration.scope !== new URL('/', origin).href) {
+            return false
+          }
+          active.postMessage({ version: 1, kind: 'claim' })
+        }
         return await bind()
       } catch {
         return false

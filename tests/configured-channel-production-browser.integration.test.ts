@@ -16,6 +16,7 @@ import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 const exec = promisify(execFile)
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 const managerPackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+const legacyReadOnly = process.env.CORDISX_LEGACY_CHANNEL_READONLY === '1'
 const executable = (candidate: string | undefined): candidate is string => {
   if (!candidate || !path.isAbsolute(candidate)) return false
   try {
@@ -39,7 +40,9 @@ const codex = (process.env.PATH ?? '').split(path.delimiter).map(directory => pa
 it.skipIf(
   !archive || !managerPackage || !chrome || !codex || process.platform !== 'darwin' && process.platform !== 'linux',
 )(
-  'connects the configured Channel through the actual service-owner process and manager sidecar',
+  legacyReadOnly
+    ? 'renders the legacy configured Channel read-only through the actual service owner'
+    : 'connects the configured Channel through the actual service-owner process and manager sidecar',
   async () => {
     const root = await mkdtemp('/tmp/cx-production-channel-')
     const homeDir = path.join(root, 'h')
@@ -208,14 +211,6 @@ it.skipIf(
       await first.send('Page.navigate', { url: firstUrl })
       await showChannel(first)
 
-      const debugOrigin = 'http://' + new URL(socket).host
-      const secondUrl = await open()
-      const response = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(secondUrl), { method: 'PUT' })
-      const target = await response.json() as { webSocketDebuggerUrl: string }
-      const second = await CdpClient.connect(target.webSocketDebuggerUrl)
-      pages.push(second)
-      await showChannel(second)
-      expect(await first.evaluate('typeof globalThis.__cordisxChannelCredentialRequestV1')).toBe('function')
       const openRow = (labels: string[]) =>
         `(() => {
         const row = [...document.querySelectorAll('[data-manager-collection-item]')].find(item =>
@@ -225,11 +220,44 @@ it.skipIf(
         button.click()
         return true
       })()`
+      if (legacyReadOnly) {
+        await expect.poll(() => first.evaluate(openRow(['Feishu', '飞书', 'cli_fixture']))).toBe(true)
+        await expect.poll(() =>
+          first.evaluate(`(() => {
+          const shell = document.querySelector('.cxc-channel-react')
+          return shell ? getComputedStyle(shell).display : null
+        })()`)
+        ).toBe('flex')
+        expect(await first.evaluate('Boolean(document.querySelector("#channel-credential-secret input"))')).toBe(false)
+        await first.evaluate('globalThis.__legacyBeforeReload = true')
+        await first.send('Page.reload', { ignoreCache: true })
+        await expect.poll(
+          async () => await first.evaluate('globalThis.__legacyBeforeReload === undefined').catch(() => false),
+          { timeout: 15_000 },
+        ).toBe(true)
+        await showChannel(first)
+        return
+      }
+
+      const debugOrigin = 'http://' + new URL(socket).host
+      const secondUrl = await open()
+      const response = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(secondUrl), { method: 'PUT' })
+      const target = await response.json() as { webSocketDebuggerUrl: string }
+      const second = await CdpClient.connect(target.webSocketDebuggerUrl)
+      pages.push(second)
+      await showChannel(second)
+      expect(await first.evaluate('typeof globalThis.__cordisxChannelCredentialRequestV1')).toBe('function')
       await expect.poll(() => first.evaluate(openRow(['Feishu', '飞书', 'cli_fixture']))).toBe(true)
       await expect.poll(() =>
         first.evaluate(
           'Boolean(document.querySelector("#channel-credential-secret input"))',
         ), { timeout: 15_000 }).toBe(true)
+      await expect.poll(() =>
+        first.evaluate(`(() => {
+        const shell = document.querySelector('.cxc-channel-react')
+        return shell ? getComputedStyle(shell).display : null
+      })()`)
+      ).toBe('flex')
       expect(await first.evaluate('document.querySelector("#channel-credential-secret input").value')).toBe('')
       expect(await first.evaluate('document.body.textContent.includes("FIXTURE_CHANNEL_KEY")')).toBe(false)
       await showChannel(first)

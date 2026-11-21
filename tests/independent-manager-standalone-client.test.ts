@@ -56,10 +56,12 @@ function fixture(input: {
   })
   const win = dom.window
   let beforeUnload: ((event: BeforeUnloadEvent) => void) | undefined
+  let pageHide: ((event: PageTransitionEvent) => void) | undefined
   const addListener = win.addEventListener.bind(win)
   Object.defineProperty(win, 'addEventListener', {
     value: (type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
       if (type === 'beforeunload') beforeUnload = listener as (event: BeforeUnloadEvent) => void
+      if (type === 'pagehide') pageHide = listener as (event: PageTransitionEvent) => void
       addListener(type, listener, options)
     },
   })
@@ -207,6 +209,7 @@ function fixture(input: {
     runtime,
     registry,
     beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
+    pageHide: () => pageHide?.({ isTrusted: true } as PageTransitionEvent),
     failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
     deliverPoll: (value: unknown) => resolvePoll?.(response({ command: value })),
     pollStarted: () => rejectPoll !== undefined,
@@ -269,6 +272,48 @@ it('recovers a refreshed tab only after the old renderer is confirmed retired', 
   }
 })
 
+it('preserves refresh during bootstrap before bindings or lifecycle exist', async () => {
+  const gate = deferred<void>()
+  const test = fixture({ issueResume: true, bootstrapGate: gate.promise })
+  try {
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/bootstrap')).toBe(true))
+    test.beforeUnload()
+    test.pageHide()
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/close')).toBe(true))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    expect(await test.manager.ready).toBe(false)
+  } finally {
+    gate.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('preserves refresh while a startup write is queued behind admission', async () => {
+  const gate = deferred<void>()
+  const test = fixture({ issueResume: true, startGate: gate.promise, modelServices: true })
+  try {
+    await vi.waitFor(() => expect(test.start).toHaveBeenCalledOnce())
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxModelServicesReceiveV1 = vi.fn()
+    target.__cordisxModelServicesRequestV1(JSON.stringify({ requestId: 'queued', operation: 'write' }))
+    await Promise.resolve()
+    test.beforeUnload()
+    test.pageHide()
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/close')).toBe(true))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(false)
+    expect(await test.manager.ready).toBe(false)
+  } finally {
+    gate.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
 it('preserves refresh authority if navigation aborts an idle poll before pagehide', async () => {
   const test = fixture({ issueResume: true, controlledPoll: true })
   try {
@@ -297,6 +342,7 @@ it('does not preserve refresh authority while a possible write is in flight', as
     ;(test.win as unknown as { __cordisxConfigRequestV1(value: string): void }).__cordisxConfigRequestV1(
       JSON.stringify({ requestId: 'pending-write' }),
     )
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
     test.beforeUnload()
     test.failPoll()
     await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
@@ -346,6 +392,7 @@ it('refuses a positive quiescence receipt while a possible write is in flight', 
     ;(test.win as unknown as { __cordisxConfigRequestV1(value: string): void }).__cordisxConfigRequestV1(
       JSON.stringify({ requestId: 'pending-write' }),
     )
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
     test.deliverPoll({ id: 'e'.repeat(64), sequence: 2, method: 'quiesce', payload: { fenceId: 'f'.repeat(64) } })
     await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledOnce())
     const acknowledgements = test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')

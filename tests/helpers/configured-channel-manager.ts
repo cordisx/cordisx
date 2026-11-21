@@ -8,7 +8,12 @@ type Fixture = Awaited<ReturnType<typeof fixture>>
 const origin = 'http://127.0.0.1:43123'
 const secret = () => randomBytes(32).toString('hex')
 
-export async function bootConfiguredChannelManager(f: Fixture, invocation = f.invocation): Promise<string> {
+export async function bootConfiguredChannelManager(
+  f: Fixture,
+  invocation = f.invocation,
+  expectCredentialBridge = f.channelCredentialsEnabled,
+  expectServiceConfigBridge?: boolean,
+): Promise<string> {
   const prepared = await f.sessions.call(invocation, 'manager-bootstrap', { action: 'prepare' }) as any
   expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok' } })
   const privateGraph: ServiceRendererPrivateGraph = prepared.value.privateGraphs[0]
@@ -35,7 +40,13 @@ export async function bootConfiguredChannelManager(f: Fixture, invocation = f.in
     expect(alias).toBeDefined()
     expect(bundle).not.toContain(f.configuredChannel!.plugin.source!)
     expect(bundle).not.toContain('fixture-private-reference')
-    if (f.channelCredentialsEnabled) expect(bundle).toContain('channelCredentialBridgeToken')
+    expect(/channelCredentialBridgeToken\s*:\s*"renderer-binding-placeholder"/u.test(bundle))
+      .toBe(expectCredentialBridge)
+    if (expectServiceConfigBridge !== undefined) {
+      expect(/serviceConfigBridgeToken\s*:\s*"renderer-binding-placeholder"/u.test(bundle)).toBe(
+        expectServiceConfigBridge,
+      )
+    }
   } finally {
     bytes.fill(0)
   }

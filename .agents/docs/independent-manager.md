@@ -40,9 +40,12 @@ and have no installed plugin packages. It can admit an empty profile or one
 configured Channel archive. On macOS or Linux, either owner can project that
 Channel when its staged browser graph has an initial
 stylesheet and its live service owner matches. An existing source-specific
-Manager UI permission or a separate one-tab review is required. Legacy Channel
-graphs without a standalone stylesheet are not admitted. The service owner can
-also expose the existing connection form for a resolved Channel account's display
+Manager UI permission or a separate one-tab review is required. The exact
+published Channel 0.1.7 archive is supported as a read-only legacy view: its
+static stylesheet is recovered into the verified same-origin graph, but that
+version cannot negotiate the configuration facade. Other legacy graphs without
+an initial stylesheet are not admitted. A compatible service owner and Channel
+version can also expose the existing connection form for a resolved account's display
 name and reception selectors, and can rotate a Feishu/Lark credential within
 that Host-owned form. The eligible Desktop owner remains read-only. Connection
 creation, connection controls, policies, logs and sessions are not available
@@ -64,8 +67,11 @@ private management socket. Each browser opening obtains a 60-second, single-use
 bootstrap in the URL fragment; it is exchanged for a separate session token and
 removed from the address bar. The default page stores its session token in that
 tab's session storage. The experimental Host page keeps its session token in
-memory. On a normal refresh, a tab-local handle and an HttpOnly cookie can
+memory. On refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
+This includes a hard reload, where the fixed resource worker reclaims the page
+before the new authenticated session binds. Requests still queued before owner
+admission are cancelled rather than treated as dispatched writes.
 The Host page also restores supported navigation destinations within that tab.
 Route parameters and unsaved form inputs are not stored; a transient edit page
 returns to a main section after refresh. Changed shared model-service and Channel
@@ -134,9 +140,11 @@ refresh, profile write fences and owner restart with an isolated simulator.
 An additional browser test exercises the credential form and owner handoff with
 a synthetic validator and an in-memory credential store. These do not validate
 real Channel credentials, the current user's profile,
-the native Desktop renderer or another adapter. Archives without a staged
-browser graph and an initial Channel stylesheet are unavailable, and
-permissions from another source are not reused.
+the native Desktop renderer or another adapter. The exact published Channel
+0.1.7 archive remains read-only; its connection form and credential rotation are
+unavailable until a compatible Channel version is installed. Other archives
+without an initial Channel stylesheet are unavailable, and permissions from
+another source are not reused.
 
 The originating Manager reserves its own session and the owner lifecycle before
 a connection settings or credential write. It drains old reads and waits for the new service

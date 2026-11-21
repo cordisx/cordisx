@@ -53,6 +53,20 @@ it.skipIf(chrome === undefined)(
       await expect.poll(() => fixture.events.some(event => event.path.endsWith('/font.woff2') && event.accepted))
         .toBe(true)
       expect(await first.evaluate('window.fixture.bundle()')).toBe('bundle:A')
+      await first.evaluate(`(() => {
+        globalThis.__beforeHardReload = true
+        window.addEventListener('pagehide', () => { void window.fixture.revoke() }, { once: true })
+      })()`)
+      await first.send('Page.reload', { ignoreCache: true })
+      await expect.poll(() =>
+        first.evaluate(
+          'globalThis.__beforeHardReload === undefined && typeof window.fixture === "object"',
+        )
+      ).toBe(true)
+      expect(await first.evaluate("window.fixture.bind('a'.repeat(64))")).toBe(true)
+      expect(await first.evaluate('window.fixture.bundle()')).toBe('bundle:A')
+      expect(await first.evaluate(`import(${JSON.stringify(fixture.graphA.entryUrl)}).then(value => value.result)`))
+        .toBe('module:nested')
       expect(await first.evaluate("window.fixture.read('/api/renderer/bundle.js?unexpected=1')"))
         .toMatchObject({ status: 403 })
       const malformed = JSON.stringify(fixture.graphA.baseUrl + '%2e%2e%2fmodule.js')

@@ -578,7 +578,7 @@ export class ServiceRendererBootstrap {
             channelManager: configured.projection,
             serviceCapabilityOwners: [configured.serviceOwner],
             channelActionsBridgeToken: 'renderer-binding-placeholder',
-            ...(this.input.experimentalChannelServiceConfig
+            ...(this.input.experimentalChannelServiceConfig && configured.projection.service.writable
               ? { serviceConfigBridgeToken: 'renderer-binding-placeholder' }
               : {}),
             ...(this.input.experimentalChannelCredentials && configured.projection.service.writable

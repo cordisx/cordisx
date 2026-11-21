@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { c as createTar } from 'tar'
+import { c as createTar, x as extractTar } from 'tar'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import { restoreLegacyChannelStyle } from '../packages/cli/src/launcher/legacy-channel-styles.js'
 import {
   loadServiceConfiguredArchive,
   loadServiceConfiguredChannelArchive,
@@ -15,6 +16,7 @@ import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/servi
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const temporary: string[] = []
+const legacyChannelArchive = process.env.CORDISX_LEGACY_CHANNEL_ARCHIVE_FIXTURE
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
 async function fixture(id = 'demo') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'configured-plugin-manifest-'))
@@ -69,6 +71,51 @@ afterEach(async () => {
 })
 
 describe('direct configured package provenance', () => {
+  it.skipIf(!legacyChannelArchive)('restores only the exact published legacy Channel stylesheet', async () => {
+    if (!path.isAbsolute(legacyChannelArchive!)) throw new Error('legacy archive fixture must be absolute')
+    const f = await fixture('channel')
+    const archive = path.join(f.root, 'legacy.tgz')
+    await copyFile(legacyChannelArchive!, archive)
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './legacy.tgz' }] }))
+    const plugin = (await loadConfig(f.config)).plugins[0]!
+    const staged = await loadServiceConfiguredChannelArchive(f.root, plugin)
+    const stylePath = './assets/channel-legacy-v017.css'
+    expect(staged.browserArtifact?.manifest.initialStyles).toEqual([stylePath])
+    const style = staged.browserArtifact?.files.get(stylePath)
+    expect(style).toBeDefined()
+    expect(createHash('sha256').update(style!).digest('hex')).toBe(
+      '0227cf822adc38b51358bf641c38dfd78a8bf70d3f54d6d92215a4a483bf42a3',
+    )
+    expect(staged.artifactIntegrity).toBe(
+      'sha256:0cc75afbf84d117835863b00a57e0412c621b8ec4e2c387327a6dd2e4f123856',
+    )
+
+    const unpacked = path.join(f.root, 'repacked')
+    await mkdir(unpacked)
+    await extractTar({ cwd: unpacked, file: archive })
+    await writeFile(path.join(unpacked, 'package', 'fixture-marker.txt'), 'changed archive')
+    await createTar({ cwd: unpacked, file: path.join(f.root, 'changed.tgz'), gzip: true }, ['package'])
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './changed.tgz' }] }))
+    const changed = (await loadConfig(f.config)).plugins[0]!
+    const changedStaged = await loadServiceConfiguredArchive(f.root, changed)
+    expect(changedStaged.browserArtifact?.manifest.initialStyles).toEqual([])
+    await expect(loadServiceConfiguredChannelArchive(f.root, changed)).rejects.toThrow(
+      'renderer-configured-channel-style-unavailable',
+    )
+    const alteredEntry = path.join(f.root, 'altered.js')
+    await writeFile(alteredEntry, 'const channel_default = "changed"')
+    await expect(restoreLegacyChannelStyle({
+      packageManifest: {
+        pluginId: 'channel',
+        version: '0.1.7',
+        canonicalSource: 'https://github.com/cordisx/plugin-channel',
+      },
+      artifactIntegrity: staged.artifactIntegrity,
+      entry: alteredEntry,
+      artifact: changedStaged.browserArtifact!,
+    })).rejects.toThrow('legacy-channel-entry-integrity-failed')
+  }, 60_000)
+
   it('rejects a configured Channel graph that cannot supply a standalone stylesheet', async () => {
     const f = await fixture('channel')
     const archive = path.join(f.root, 'channel.tgz')
