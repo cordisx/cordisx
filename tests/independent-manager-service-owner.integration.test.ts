@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -12,8 +13,12 @@ import { localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
   usesNamespacedManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
+import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
+import { readSupervisorState } from '../packages/cli/src/cli/supervisor-state.js'
+import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 
 const exec = promisify(execFile)
 
@@ -123,7 +128,67 @@ it('connects the independent manager to a real service owner without Channel or 
         body: JSON.stringify(input),
       })).json()
     const renderer = await post('/api/renderer/open', {})
-    expect(renderer).toEqual({ status: 'ok', profileId: 'default', channels: ['plugin-management'] })
+    expect(renderer).toEqual({
+      status: 'ok',
+      profileId: 'default',
+      channels: ['plugin-management'],
+      commands: true,
+      generation: expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u),
+      rendererId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    })
+    // A separate, authenticated temporary sidecar session exercises the real
+    // packaged owner's private bootstrap over its bounded Unix socket.
+    const managerState = (await readSupervisorState(managerRendererGatewayPaths(home, 'default')))!
+    const gateway = {
+      pid: managerState.pid,
+      processStartedAt: managerState.processStartedAt,
+      instanceToken: managerState.instanceToken,
+    }
+    const rpcPaths = pluginManagementRpcPaths(home, 'codex', 'default')
+    const browserSessionId = randomBytes(32).toString('hex')
+    const opened = await requestPluginManagementRpc(rpcPaths, endpoint!, {
+      kind: 'manager-renderer',
+      action: 'open',
+      gateway,
+      browserSessionId,
+    }) as { status: string; handle: { rendererId: string; ownerGeneration: string; grant: string } }
+    expect(opened.status).toBe('ok')
+    const callBootstrap = async (payload: unknown) =>
+      await requestPluginManagementRpc(rpcPaths, endpoint!, {
+        kind: 'manager-renderer',
+        action: 'call',
+        gateway,
+        browserSessionId,
+        handle: opened.handle,
+        channel: 'manager-bootstrap',
+        payload,
+      }) as any
+    expect(await callBootstrap({ action: 'status' })).toEqual({ status: 'ok', value: { status: 'ok', current: true } })
+    expect(await callBootstrap({ action: 'prepare' })).toMatchObject({
+      status: 'ok',
+      value: { status: 'ok', privateGraphs: [] },
+    })
+    const boot = await callBootstrap({ action: 'complete', managerOrigin: url.origin, graphs: [] })
+    expect(boot.status).toBe('ok')
+    expect(boot.value.status).toBe('ok')
+    expect(boot.value.bundle.encoding).toBe('brotli-base64')
+    const bundle = await decodeManagerRendererBundle(boot.value.bundle)
+    try {
+      // The uncompressed production bundle exceeds the complete RPC limit.
+      expect(bundle.byteLength).toBeGreaterThan(8 * 1024 * 1024)
+      expect(bundle.includes(Buffer.from('renderer-binding-placeholder'))).toBe(true)
+    } finally {
+      bundle.fill(0)
+    }
+    expect(
+      await requestPluginManagementRpc(rpcPaths, endpoint!, {
+        kind: 'manager-renderer',
+        action: 'close',
+        gateway,
+        browserSessionId,
+        handle: opened.handle,
+      }),
+    ).toEqual({ status: 'ok' })
     const query = JSON.stringify({
       version: 1,
       requestId: 'test-real-owner-query',
