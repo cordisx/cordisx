@@ -1,4 +1,10 @@
 import { randomBytes } from 'node:crypto'
+import {
+  type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV3,
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionRecordKey,
+} from '../permission-persistence.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
@@ -62,6 +68,38 @@ export class ServiceRendererIdentityProjection {
     const value = this.current(context) ? this.aliases.get(alias) : undefined
     if (!value || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
     return { ...value }
+  }
+
+  /** Project only existing owner-approved Manager UI policies; this never creates a grant. */
+  projectManagerPolicies(
+    context: ManagerRendererChannelContext,
+    alias: string,
+    pluginId: string,
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+  ): readonly CordisXPersistedPermissionPolicyRecord[] {
+    const original = this.resolve(context, alias, pluginId)
+    if (records.length > 4096) throw new Error('renderer-identity-unavailable')
+    const projected: CordisXPersistedPermissionPolicyRecord[] = []
+    const keys = new Set<string>()
+    for (const raw of records) {
+      const record = normalizePersistedPermissionPolicyRecord(raw)
+      if (
+        !isPermissionPolicyRecordV3(record) || record.key.profileId !== context.profileId
+        || record.key.identity.pluginId !== pluginId || record.key.identity.source !== original.source
+        || record.key.capability !== 'ui.extension-points.render' || record.key.scope.extensionPoints?.length !== 1
+        || !['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+      ) continue
+      const value = normalizePersistedPermissionPolicyRecord({
+        ...record,
+        key: { ...record.key, identity: { ...record.key.identity, source: alias } },
+      })
+      const key = persistedPermissionRecordKey(value)
+      if (keys.has(key)) throw new Error('renderer-identity-unavailable')
+      keys.add(key)
+      projected.push(value)
+    }
+    if (!this.current(context)) throw new Error('renderer-identity-unavailable')
+    return projected
   }
 
   close(): void {

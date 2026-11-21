@@ -9,6 +9,7 @@ import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bun
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { loadServiceConfiguredArchive } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const temporary: string[] = []
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
@@ -128,6 +129,24 @@ describe('direct configured package provenance', () => {
       expect(alias).not.toBe(other)
       expect(alias).not.toContain(source)
       expect(firstProjection.resolve(firstContext, alias, 'demo')).toMatchObject({ source, digest: staged.digest })
+      const policies = exactDomPermissionPolicies('default', [{
+        id: 'demo',
+        entry: plugin.entry,
+        pointIds: ['manager.settings.navigation-items', 'manager.content', 'other.point'],
+      }]).map(record => ({ ...record, key: { ...record.key, identity: { ...record.key.identity, source } } }))
+      const projected = firstProjection.projectManagerPolicies(firstContext, alias, 'demo', policies)
+      expect(projected).toHaveLength(2)
+      expect(projected.every(record => record.key.identity.source === alias)).toBe(true)
+      expect(JSON.stringify(projected)).not.toContain(source)
+      const unrelated = policies.map(record => ({ ...record, key: { ...record.key, profileId: 'other' } }))
+      expect(firstProjection.projectManagerPolicies(firstContext, alias, 'demo', unrelated)).toEqual([])
+      const wrongSource = policies.map(record => ({
+        ...record,
+        key: { ...record.key, identity: { ...record.key.identity, source: 'https://example.test/other' } },
+      }))
+      expect(firstProjection.projectManagerPolicies(firstContext, alias, 'demo', wrongSource)).toEqual([])
+      expect(() => firstProjection.projectManagerPolicies(firstContext, alias, 'demo', [policies[0]!, policies[0]!]))
+        .toThrow('renderer-identity-unavailable')
       expect(() => secondProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
       expect(() => firstProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
       expect(() => firstProjection.resolve(firstContext, alias, 'other')).toThrow('renderer-identity-unavailable')
