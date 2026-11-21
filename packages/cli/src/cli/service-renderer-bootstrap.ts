@@ -78,7 +78,7 @@ export class ServiceRendererBootstrap {
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
       /** Service owner only: fence cooperative Home policy and configured-plugin writers. */
       readonly protectProfileInputs?: boolean
-      /** Private experimental composition; production does not enable configured Channel admission yet. */
+      /** Owner-selected experimental, read-only configured Channel composition. */
       readonly experimentalConfiguredChannel?: {
         readonly plugin: CordisXConfigPlugin
         readonly service: LocalChannelService
@@ -255,7 +255,7 @@ export class ServiceRendererBootstrap {
           this.policies(),
         ])
         // Configured plugins stay closed unless the owner explicitly supplies
-        // the constrained read-only Channel composition used for integration.
+        // the constrained read-only Channel composition.
         if (
           plugins.some(plugin => !emptyConfig(plugin.config))
           || config.plugins.length !== 0 && (

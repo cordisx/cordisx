@@ -39,6 +39,7 @@ function fixture(input: {
   readonly bundlePath?: string
   readonly graphs?: readonly unknown[]
   readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
+  readonly bootstrapGate?: Promise<void>
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
   readonly loseAck?: boolean
@@ -113,13 +114,14 @@ function fixture(input: {
       )
     }
     if (path === '/api/renderer/bootstrap') {
-      return Promise.resolve(
-        response({
-          status: 'ok',
-          bundleUrl: input.bundlePath ?? '/api/renderer/bundle.js',
-          initialGraphs: input.graphs ?? [],
-        }),
-      )
+      const result = response({
+        status: 'ok',
+        bundleUrl: input.bundlePath ?? '/api/renderer/bundle.js',
+        initialGraphs: input.graphs ?? [],
+      })
+      return input.bootstrapGate
+        ? Promise.race([input.bootstrapGate.then(() => result), abortResponse(options.signal!)])
+        : Promise.resolve(result)
     }
     if (path === '/api/renderer/poll') {
       if (polls++ === 0) {
@@ -204,6 +206,26 @@ function fixture(input: {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+it('keeps a slow owner bootstrap alive while it builds the initial bundle', async () => {
+  vi.useFakeTimers()
+  const gate = deferred<void>()
+  const test = fixture({ bootstrapGate: gate.promise })
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    const request = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/bootstrap')
+    expect(request).toBeDefined()
+    await vi.advanceTimersByTimeAsync(21_000)
+    expect(request![1].signal!.aborted).toBe(false)
+    expect(test.unavailable).not.toHaveBeenCalled()
+    gate.resolve()
+    expect(await test.manager.ready).toBe(true)
+  } finally {
+    gate.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
 })
 
 it('recovers a refreshed tab only after the old renderer is confirmed retired', async () => {

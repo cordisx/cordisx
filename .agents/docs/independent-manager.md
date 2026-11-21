@@ -38,9 +38,13 @@ changes to those managed packages remain unavailable. With a Desktop owner, the
 experiment currently admits only an empty profile that has no configured or
 installed plugins, already has a ready Desktop renderer, and owns the profile
 exclusively. Package and configuration mutations are unavailable while a
-Manager renderer is attached. Configured Channel, other adapters, concurrent
-permission changes and recovery after an uncertain result are not yet supported.
-The isolated browser tests do not constitute real Codex App validation.
+Manager renderer is attached. With a service owner on macOS or Linux, one
+configured Channel archive may also appear as a read-only page when its staged
+browser graph, live service owner and existing source-specific Manager UI
+permissions match. The Host page does not yet support Channel credential or
+configuration writes. Other configured plugins, adapters, concurrent permission
+changes and recovery after an uncertain result are not yet supported. The
+isolated browser tests do not constitute real Codex App validation.
 
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second, single-use
@@ -94,19 +98,21 @@ The user enters and confirms credentials; the Host validates and stores them
 without reading them back into the page. The configured archive path has been
 exercised with a real isolated Channel service and a simulator; separate
 synthetic credentials exercise the write and recovery transactions. Real
-Feishu/Lark credentials have not been used in validation. This API does not
-admit a configured Channel into the experimental Host page. Unverified direct
-entries, other adapters, connection deletion, and remaining Channel management
-features are unavailable.
+Feishu/Lark credentials have not been used in validation. This API is separate
+from the read-only Channel page and does not enable writes in that page.
+Unverified direct entries, other adapters, connection deletion, and remaining
+Channel management features are unavailable.
 
-An owner-only experimental composition can project an exact configured
-Channel archive and its already-running service into isolated, read-only
-renderer sessions. It forwards only matching existing Manager UI policies and
-does not provide credential or configuration actions. The production service
-owner does not enable this composition. Its browser tests use a simulator and
-a test lifecycle handshake. A separate two-page test uses the real sidecar,
-authenticated owner socket and lifecycle handshake with the owner composition
-hosted in the test process. Neither validates the current user's profile.
+The experimental service-owner composition projects an exact configured
+Channel archive and its already-running service into read-only renderer
+sessions. It forwards only matching existing Manager UI policies and does not
+provide credential or configuration actions. A two-page test exercises the
+compiled service owner, actual isolated Codex app-server, authenticated sidecar,
+refresh, profile write fences and owner restart with an isolated simulator.
+This does not validate real Channel credentials, the current user's profile,
+the native Desktop renderer or another adapter. Archives without a staged
+browser graph are unavailable, and permissions from another source are not
+reused.
 
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and

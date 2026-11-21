@@ -147,7 +147,10 @@ export function startStandaloneManager(input: {
   ): Promise<Record<string, unknown>> => {
     if (closed) throw new Error('manager-session-revoked')
     const timeout = new AbortController()
-    const timer = setTimeout(() => timeout.abort(), requestMilliseconds)
+    // The owner builds and compresses the initial renderer bundle on demand.
+    // Give that one operation the same bounded startup budget as bundle import.
+    const deadline = path === '/api/renderer/bootstrap' ? bootMilliseconds : requestMilliseconds
+    const timer = setTimeout(() => timeout.abort(), deadline)
     try {
       const response = await browser.fetch(path, {
         method: 'POST',

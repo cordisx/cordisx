@@ -64,6 +64,32 @@ function decision(
 }
 
 describe('PermissionBroker permission-v2 integration', () => {
+  it('renders permission snapshots for a real-length owner and configured plugin generation', () => {
+    const broker = new PermissionBroker(
+      new MemoryPermissionPolicyStore(),
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      '123e4567-e89b-12d3-a456-426614174000',
+    )
+    const moduleGeneration = 'configured_' + 'a'.repeat(64)
+    broker.register(identity, manifest('models.read', { providers: ['codex'] }), {
+      pluginId: identity.id,
+      moduleGeneration,
+    })
+    try {
+      expect(broker.snapshots()).toContainEqual(expect.objectContaining({
+        identity,
+        capability: 'models.read',
+        policy: 'ask',
+      }))
+      expect(broker.reviewAuthorizationPlanV2(identity).binding.moduleGeneration).toBe(moduleGeneration)
+    } finally {
+      broker.dispose()
+    }
+  })
+
   it('rejects a renderer review after a policy change, including an ABA change, and accepts a fresh review', async () => {
     const broker = new PermissionBroker(
       new MemoryPermissionPolicyStore(),

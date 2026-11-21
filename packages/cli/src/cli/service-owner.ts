@@ -17,6 +17,7 @@ import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { createServiceRendererProjector } from './service-renderer-projection.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
@@ -66,6 +67,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererLifecycle: ServiceRendererLifecycle | undefined
       let rendererParticipants: ServiceRendererParticipants | undefined
       let rendererBootstrap: ServiceRendererBootstrap | undefined
+      let rendererReadonlyChannel: ReadonlyChannelRendererBridge | undefined
       let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
       let ownerOpen = true
       let failure: unknown
@@ -111,18 +113,6 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
           readLifecycleFence: () => services!.readManagedServiceUIFence(),
           runtime: services,
-        })
-        rendererBootstrap = new ServiceRendererBootstrap({
-          homeDir,
-          configPath,
-          appId,
-          profileId,
-          generation,
-          lifecycle: rendererLifecycle,
-          participants: rendererParticipants,
-          store,
-          managedServiceUI: rendererManagedServiceUI,
-          protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)
@@ -196,6 +186,36 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           generation,
           ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
         }, releaseRuntimeOwner !== undefined)
+        const protectProfileInputs = process.platform === 'darwin' || process.platform === 'linux'
+        const channelOwner = channel?.managerChannelOwner
+        if (
+          protectProfileInputs && releaseRuntimeOwner !== undefined && channelOwner
+          && channelOwner.plugin.configuredArchiveDigest !== undefined
+          && channelOwner.plugin.package === undefined && channelOwner.plugin.development === undefined
+        ) {
+          rendererReadonlyChannel = new ReadonlyChannelRendererBridge({
+            profileId,
+            generation,
+            isCurrent: context =>
+              ownerOpen && !lifetime.signal.aborted
+              && rendererParticipants?.peer(context.rendererId) !== undefined,
+          })
+        }
+        rendererBootstrap = new ServiceRendererBootstrap({
+          homeDir,
+          configPath,
+          appId,
+          profileId,
+          generation,
+          lifecycle: rendererLifecycle,
+          participants: rendererParticipants,
+          store,
+          managedServiceUI: rendererManagedServiceUI,
+          protectProfileInputs,
+          ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {
+            experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },
+          }),
+        })
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -211,6 +231,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
+          ...(rendererReadonlyChannel === undefined
+            ? {}
+            : { rendererReadonlyChannel: rendererReadonlyChannel.channel }),
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
           ...(managerChannel === undefined
@@ -241,6 +264,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => rendererBootstrap?.close(),
+            () => rendererReadonlyChannel?.close(),
             () => rendererManagedServiceUI?.dispose(),
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
