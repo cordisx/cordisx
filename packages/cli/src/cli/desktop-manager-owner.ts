@@ -74,7 +74,8 @@ export function createDesktopManagerOwner(input: {
     lifecycle,
     participants,
     store: input.store,
-    protectProfileInputs: channelBridge !== undefined,
+    // Empty profiles also project permission and plugin-configuration snapshots.
+    protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
   })
   const rendererModelServices = input.codex === undefined
     ? undefined

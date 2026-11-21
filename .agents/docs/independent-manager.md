@@ -149,7 +149,7 @@ Other permission writers and native or external consumers are not yet covered
 by a profile-wide barrier.
 
 On macOS and Linux, an experimental service-mode renderer or an eligible
-configured-Channel Desktop renderer holds profile-scoped fences while its
+Desktop renderer holds profile-scoped fences while its
 startup snapshot is in use. Current Home
 configuration writers reject changes to that profile's persisted permissions
 and selected configured-plugin or service configuration until its Manager

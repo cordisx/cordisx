@@ -16,7 +16,7 @@ import {
   type SupervisorState,
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
-import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
@@ -30,6 +30,8 @@ import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-
 import { PlatformProviderPluginLifecycleRuntime } from '../packages/cli/src/launcher/platform-provider-plugin-lifecycle.js'
 import { startPluginGenerationArtifactServer } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { decision, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
 
 const secret = () => randomBytes(32).toString('hex')
@@ -180,6 +182,46 @@ it('attaches the real management composition to one existing Desktop owner and r
     expect(owner.lifecycle.snapshot()).toEqual({ active, registryEpoch: 0 })
     const prepared = await call({ action: 'prepare' })
     expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [] } })
+    const updatePlugins = async () =>
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), configPath)
+    const policy = createPermissionPolicyRecord({
+      profileId,
+      identity: { source: 'https://example.test/fixture', id: 'fixture' },
+      capability: 'models.read',
+      scope: { providers: ['codex'] },
+      policy: 'deny',
+    })
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      await expect(updatePlugins()).rejects.toThrow('plugin configuration is in use')
+      await expect(persistPermissionPolicies({ configPath }, [policy])).rejects.toThrow('permission policy is in use')
+      await persistPermissionPolicies({ configPath }, [{ ...policy, key: { ...policy.key, profileId: 'other' } }])
+      const secondId = secret()
+      const second = await open(secondId)
+      expect(second).toMatchObject({ status: 'ok' })
+      expect(
+        await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'manager-renderer',
+          action: 'call',
+          gateway,
+          browserSessionId: secondId,
+          handle: second.handle,
+          channel: 'manager-bootstrap',
+          payload: { action: 'prepare' },
+        }),
+      ).toMatchObject({ status: 'ok', value: { status: 'ok' } })
+      expect(
+        await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'manager-renderer',
+          action: 'revoke',
+          gateway,
+          browserSessionId: secondId,
+        }),
+      ).toEqual({ status: 'ok' })
+      await expect(updatePlugins()).rejects.toThrow('plugin configuration is in use')
+    }
     const completed = await call({ action: 'complete', managerOrigin: 'http://127.0.0.1:43123', graphs: [] })
     expect(completed.status).toBe('ok')
     const bytes = await decodeManagerRendererBundle(completed.value.bundle)
@@ -234,6 +276,18 @@ it('attaches the real management composition to one existing Desktop owner and r
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'poll', timeoutMs: 100 }))
       .toEqual({ status: 'unavailable' })
     expect(await open(secret())).toEqual({ status: 'unavailable' })
+    expect(
+      await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'manager-renderer',
+        action: 'revoke',
+        gateway,
+        browserSessionId,
+      }),
+    ).toEqual({ status: 'ok' })
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      await updatePlugins()
+      await persistPermissionPolicies({ configPath }, [policy])
+    }
     unregister = cdp.register(session as never)
     expect(await open(secret())).toMatchObject({ status: 'ok', commands: true })
     await composition.close()
