@@ -51,7 +51,7 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function graph(value: unknown, origin: string): ManagerRendererGraph {
+export function parseManagerRendererGraph(value: unknown, origin: string): ManagerRendererGraph {
   const item = record(value)
   const keys = ['leaseId', 'pluginId', 'moduleGeneration', 'baseUrl', 'entryUrl', 'initialStyleUrls']
   if (
@@ -148,7 +148,7 @@ export function createManagerRendererGraphLoader(input: {
   const issued = new Set<string>()
   if (input.initialGraphs.length > MAX_GENERATIONS) throw new Error('renderer-graph-limit')
   for (const raw of input.initialGraphs) {
-    const item = graph(raw, input.origin)
+    const item = parseManagerRendererGraph(raw, input.origin)
     if (active.has(item.pluginId) || issued.has(item.leaseId)) throw new Error('renderer-graph-invalid')
     active.set(item.pluginId, item)
     issued.add(item.leaseId)
@@ -182,7 +182,7 @@ export function createManagerRendererGraphLoader(input: {
       const affected = new Set(item.affectedPluginIds as string[])
       const projected = new Map<string, ManagerRendererGraph>()
       for (const raw of item.graphs) {
-        const next = graph(raw, input.origin)
+        const next = parseManagerRendererGraph(raw, input.origin)
         const activation = candidate.get(next.pluginId)
         if (
           !affected.has(next.pluginId) || projected.has(next.pluginId) || issued.has(next.leaseId)

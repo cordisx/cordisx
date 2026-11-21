@@ -873,7 +873,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     const pluginManagement = runtimeScope.pluginManagementBinding()
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
-      nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
+      ...(runtimeScope.metadata()!.hostKind === 'standalone'
+        ? { standaloneStyleHref: '/manager-host.css' as const }
+        : { nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!) }),
       presentationMode: runtimeScope.metadata()!.managerPresentationMode ?? 'overlay',
       ...(runtimeScope.metadata()!.nativeAppVersion === undefined
         ? {}
@@ -886,7 +888,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
         }
         : {}),
     })
-    if (runtimeScope.metadata()!.hostKind !== 'playground') {
+    if (runtimeScope.metadata()!.hostKind !== 'playground' && runtimeScope.metadata()!.hostKind !== 'standalone') {
       const native = globalThis as typeof globalThis & {
         __cordisxNativeProviderOwner?: NativeProviderSelectionOwner
         __cordisxNativeProviderCommandChannel?: NativeProviderSelectionCommandChannel

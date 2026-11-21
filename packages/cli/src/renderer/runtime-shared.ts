@@ -298,8 +298,10 @@ export interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
-  /** Development-only host with explicit semantic seats and no Codex DOM probes. */
-  readonly hostKind?: 'codex' | 'playground'
+  /** Host-selected runtime; standalone has no Codex DOM seats or Playground simulator. */
+  readonly hostKind?: 'codex' | 'playground' | 'standalone'
+  /** Non-authoritative identifier for this owner-attached renderer. */
+  readonly standaloneRendererId?: string
   /** Host-only presentation preview; never exposed through plugin Contexts. */
   readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */

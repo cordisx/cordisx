@@ -278,14 +278,18 @@ export const createRuntimeDisconnectPluginConsoleVisibility = (runtimeScope: Run
 export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) =>
   new PermissionBroker(
     runtimeScope.permissionStore()!,
-    new BrowserPermissionPrompt(),
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? { request: async () => 'deny' as const }
+      : new BrowserPermissionPrompt(),
     () => new Date(),
     30000,
     runtimeScope.metadata()!.profileId,
     runtimeScope.generation()!,
     runtimeScope.generationVisibility()!,
     runtimeScope.pluginConsole()!,
-    new BrowserPermissionAuthorizationPromptV2(document),
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? undefined
+      : new BrowserPermissionAuthorizationPromptV2(document),
     runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
   )
 

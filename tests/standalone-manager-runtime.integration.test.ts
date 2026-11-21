@@ -5,6 +5,7 @@ import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
+import { ownerSnapshotPermissionStore } from '../packages/cli/src/renderer/platform/owner-snapshot-permission-store.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -17,6 +18,120 @@ it('does not expose the isolated presentation as a production attachment', async
   await expect(buildRendererBundle({ ...config, plugins: [] }, { managerPresentationMode: 'standalone' }))
     .rejects.toThrow('not yet available outside the isolated UI Playground')
 })
+
+it('requires a live owner-scoped attachment before and after standalone assembly', async () => {
+  const loaded = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
+  const { agentLoopBackend: _mock, ...codex } = loaded.codex
+  const config = { ...loaded, codex, providers: [], plugins: [] }
+  const activation = {
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1 as const,
+    recordKind: 'active' as const,
+    profileId: 'work',
+    revision: 0,
+    lastGoodRevision: 0,
+    runtimeGeneration: 'owner-test',
+    plugins: [],
+  }
+  const owner = {
+    rendererId: 'a'.repeat(64),
+    profileId: 'work',
+    generation: 'owner-test',
+    managerOrigin: 'http://127.0.0.1:43123',
+    isCurrent: vi.fn(() => true),
+  }
+  const options = {
+    managerPresentationMode: 'standalone' as const,
+    standaloneOwner: owner,
+    profileId: 'work',
+    generation: 'owner-test',
+    pluginActivation: activation,
+    initialRegistryEpoch: 0,
+    permission: { profileId: 'work', policies: [] },
+  }
+  await expect(buildRendererBundle(config, { ...options, standaloneOwner: { ...owner, isCurrent: () => false } }))
+    .rejects.toThrow('owner attachment is unavailable')
+  await expect(buildRendererBundle(config, { ...options, generation: 'different' }))
+    .rejects.toThrow('owner scope is invalid')
+  const current = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false)
+  await expect(buildRendererBundle(config, { ...options, standaloneOwner: { ...owner, isCurrent: current } }))
+    .rejects.toThrow('owner attachment is unavailable')
+  expect(current).toHaveBeenCalledTimes(3)
+}, 30_000)
+
+it('mounts the original Manager and registered plugin in an owner-scoped standalone composition', async () => {
+  const loaded = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
+  const { agentLoopBackend: _mock, ...codex } = loaded.codex
+  const plugin = loaded.plugins.find(item => item.id === 'settings-tab-demo')!
+  const permissionPolicies = exactDomPermissionPolicies('work', [{
+    id: plugin.id,
+    entry: plugin.entry,
+    pointIds: ['manager.settings.navigation-items', 'manager.content'],
+  }])
+  const config = { ...loaded, codex, providers: [], plugins: [plugin] }
+  const generation = 'owner-test'
+  const activation = {
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1 as const,
+    recordKind: 'active' as const,
+    profileId: 'work',
+    revision: 0,
+    lastGoodRevision: 0,
+    runtimeGeneration: generation,
+    plugins: [],
+  }
+  const owner = {
+    rendererId: 'a'.repeat(64),
+    profileId: 'work',
+    generation,
+    managerOrigin: 'http://127.0.0.1:43123',
+    isCurrent: () => true,
+  }
+  const bundle = await buildRendererBundle(config, {
+    managerPresentationMode: 'standalone',
+    standaloneOwner: owner,
+    profileId: 'work',
+    generation,
+    pluginActivation: activation,
+    initialRegistryEpoch: 0,
+    permission: { profileId: 'work', policies: permissionPolicies },
+  })
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1/',
+  })
+  try {
+    Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+    Object.assign(dom.window, { TextEncoder, TextDecoder })
+    dom.window.eval(bundle)
+    const doc = dom.window.document
+    await vi.waitFor(() => expect(doc.documentElement.dataset.cordisxReady).toBe('true'), { timeout: 10_000 })
+    const root = doc.querySelector<HTMLElement>('[data-manager-surface="standalone"]')!
+    expect(root.querySelector('[data-unified-plugins-page="true"]')).not.toBeNull()
+    expect(doc.querySelector('link[href="/manager-host.css"]')).not.toBeNull()
+    const navigation = root.querySelector<HTMLButtonElement>(
+      '[data-settings-navigation-item="settings-tab-demo:navigation"]',
+    )!
+    expect(navigation.disabled).toBe(false)
+    navigation.click()
+    await vi.waitFor(() =>
+      expect(root.querySelector('[data-settings-navigation-demo-content="mounted"]')).not.toBeNull()
+    )
+    expect(
+      (dom.window as unknown as { __cordisxPluginGenerationResourcesV1?: unknown })
+        .__cordisxPluginGenerationResourcesV1,
+    )
+      .toBeDefined()
+    const runtime = (dom.window as unknown as { __cordisxRuntime: { dispose(): Promise<void> } }).__cordisxRuntime
+    await runtime.dispose()
+  } finally {
+    dom.window.close()
+  }
+  const policies = ownerSnapshotPermissionStore(permissionPolicies)
+  expect(policies.readV4?.()).toEqual(permissionPolicies.filter(item => item.schemaVersion === 4))
+  expect(() => policies.write([])).toThrow('Owner permission writes are unavailable')
+  expect(() => policies.writeAll?.([])).toThrow('Owner permission writes are unavailable')
+}, 30_000)
 
 it('mounts the existing Manager and an actual registered plugin page without a native application seat', async () => {
   const config = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
