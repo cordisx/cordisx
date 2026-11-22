@@ -1,9 +1,6 @@
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
-import path from 'node:path'
-import { ChannelMemoryStore } from './channel-memory-store.js'
-import { ChannelMemoryAuthority } from './channel-memory-authority.js'
-import { ChannelMemoryPersonas } from './channel-memory-personas.js'
+import { createChannelMemory } from './channel-memory-composition.js'
 import { createChannelFeedback } from './channel-feedback-composition.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
@@ -65,9 +62,9 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
-  memory?: ChannelMemoryStore
-  memoryAuthority?: ChannelMemoryAuthority
-  personas?: ChannelMemoryPersonas
+  readonly memory
+  readonly memoryAuthority
+  readonly personas
   private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
@@ -75,6 +72,10 @@ export class ChannelConversationConsumer {
     private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
+    const memory = createChannelMemory(input.file)
+    this.memory = memory.memory
+    this.memoryAuthority = memory.memoryAuthority
+    this.personas = memory.personas
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
@@ -113,11 +114,7 @@ export class ChannelConversationConsumer {
     this.timer.unref()
   }
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
-    const consumer = new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
-    consumer.memory = new ChannelMemoryStore(path.join(path.dirname(input.file), 'memory'))
-    consumer.memoryAuthority = new ChannelMemoryAuthority(path.join(path.dirname(input.file), 'memory-authority'))
-    consumer.personas = new ChannelMemoryPersonas(path.join(path.dirname(input.file), 'personas'))
-    return consumer
+    return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
   }
   bindings(): readonly ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)

@@ -18,6 +18,9 @@ export async function channelMemoryCommand(
     throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
   }
   const source = caller.source
+  if (source.kind !== 'direct' && source.kind !== 'group' || !source.messageId) {
+    throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+  }
   const ownTopic = ownMemoryTopic(access.requestText(metadata))
   const authority: MemoryAuthority = {
     actor: {
