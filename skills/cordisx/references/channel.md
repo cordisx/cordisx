@@ -52,8 +52,14 @@ The Host form configures default reply mode and scoped overrides; bindings can
 set `replyMode` and `replyFallbackMode`. For an automatic-final task, choose its final
 route with `channel_reply_mode` using the prompt's exact operationId: main
 stream `conversation`, quoted `reply`, topic `thread`, or no delivery `none`.
-This tool does not send or enable forwarding. Select `none` before a manual
-reply when automatic forwarding is enabled. Explicit sends select `target.replyMode` per destination; reply/thread
+This tool does not send or enable forwarding. Prefer meaningful explicit progress
+and completion sends; multiple sends are allowed. Progress must not select `none`.
+After a manual terminal result has a confirmed `sent` receipt, select `none` for
+that incoming turn to avoid duplicate final forwarding. Failed or uncertain sends
+retain fallback; inspect the same operationId receipt rather than blindly resend.
+Distinct intended messages need distinct stable operationIds. This is agent
+guidance, not atomic receipt-linked suppression or a background wakeup guarantee.
+Explicit sends select `target.replyMode` per destination; reply/thread
 require `replyTo`, while a main-stream send omits it.
 `channel_listen` waits briefly; it is not a persistent binding.
 

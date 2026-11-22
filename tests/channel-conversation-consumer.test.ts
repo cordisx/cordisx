@@ -91,6 +91,78 @@ async function settle(consumer: ChannelConversationConsumer) {
 }
 
 describe('persistent Channel chat consumer', () => {
+  it.each(['progress-final', 'manual-terminal', 'failed', 'unknown'])(
+    'keeps progress independent from completion using existing receipts and per-turn routing: %s',
+    async scenario => {
+      const f = await fixture()
+      await f.consumer.policySet({ enabled: true, autoReply: true }, 0)
+      await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
+      f.native.completion.mockResolvedValue({ state: 'running' } as never)
+      await f.consumer.receive('inbox:proactive', message('om_proactive'), true)
+      await settle(f.consumer)
+      const incoming = f.consumer.status(a).jobs[0]!.id
+      const tools = new ChannelConversationTools(() => f.access, f.consumer)
+      const metadata = { 'x-codex-turn-metadata': { thread_id: a, turn_id: 'turn-1' } }
+      const send = (operationId: string, text: string) =>
+        tools.call('send', {
+          account,
+          target: { id: 'oc_one', kind: 'direct', replyMode: 'conversation' },
+          operationId,
+          text,
+        }, metadata)
+      try {
+        expect(await send('progress-1', 'Useful progress')).toMatchObject({ deliveryState: 'sent' })
+        expect(await send('progress-2', 'Next milestone')).toMatchObject({ deliveryState: 'sent' })
+        const progressId = f.runtime.notifyOnce.mock.calls[0]![2]
+        expect(await tools.call('receipt', { account, operationId: 'progress-1' }, metadata))
+          .toMatchObject({ deliveryState: 'sent' })
+        expect(f.runtime.notifyOnce).toHaveBeenCalledTimes(2)
+        if (scenario === 'manual-terminal') {
+          expect(await send('terminal-1', 'Completed result')).toMatchObject({ deliveryState: 'sent' })
+          expect(f.runtime.notifyOnce.mock.calls[2]![2]).not.toBe(progressId)
+          expect(await tools.call('reply-mode', { operationId: incoming, mode: 'none' }, metadata))
+            .toMatchObject({ status: 'ok', sendsMessage: false })
+        } else if (scenario === 'failed' || scenario === 'unknown') {
+          if (scenario === 'failed') {
+            f.runtime.notifyOnce.mockImplementationOnce(async () => {
+              throw new Error('CHANNEL_EFFECT_UNCERTAIN')
+            })
+          } else {
+            f.runtime.notifyOnce.mockImplementationOnce(async () => ({ deliveryId: 'uncertain' }))
+          }
+          expect(await send('terminal-uncertain', 'Completed result')).toMatchObject({
+            deliveryState: scenario === 'failed' ? 'unknown' : 'not-found',
+          })
+          expect(await tools.call('receipt', { account, operationId: 'terminal-uncertain' }, metadata))
+            .toMatchObject({ deliveryState: 'not-found' })
+          expect(f.runtime.notifyOnce).toHaveBeenCalledTimes(3)
+        }
+        f.native.completion.mockResolvedValue({ state: 'completed', text: 'Final result' })
+        await settle(f.consumer)
+        const texts = f.runtime.notifyOnce.mock.calls.map(([input]) => input.text)
+        expect(texts).toEqual(
+          scenario === 'manual-terminal'
+            ? ['Useful progress', 'Next milestone', 'Completed result']
+            : scenario === 'progress-final'
+            ? ['Useful progress', 'Next milestone', 'Final result']
+            : ['Useful progress', 'Next milestone', 'Completed result', 'Final result'],
+        )
+        expect(f.native.completion).toHaveBeenLastCalledWith(a, 'turn-1', scenario !== 'manual-terminal')
+        expect(f.consumer.status(a).jobs[0]!.state).toBe('completed')
+        if (scenario === 'manual-terminal') {
+          f.native.completion.mockResolvedValue({ state: 'running' } as never)
+          await f.consumer.receive('inbox:next', message('om_next'), true)
+          await settle(f.consumer)
+          f.native.completion.mockResolvedValue({ state: 'completed', text: 'Next turn final' })
+          await settle(f.consumer)
+          expect(f.runtime.notifyOnce.mock.calls.map(([input]) => input.text))
+            .toEqual(['Useful progress', 'Next milestone', 'Completed result', 'Next turn final'])
+        }
+      } finally {
+        tools.dispose()
+      }
+    },
+  )
   it('does not let a conversation-scoped command grant mutate global policy', async () => {
     const f = await fixture(), source = channel('oc_scoped', 'group')
     const grant = { ...commandGrant, conversationId: source.conversationId, userIds: ['alice'] }
