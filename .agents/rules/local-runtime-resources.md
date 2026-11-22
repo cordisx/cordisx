@@ -46,6 +46,28 @@ installed runner's documented behavior and the user's current instructions.
   consumers in a copied test instance unless their use is explicitly part of
   the authorized test. Preserve the original instance and its configuration.
 
+## Reuse native test dependencies
+
+- Reuse the installed native App executable and an authorized, configured
+  preview for ordinary UI checks. A new empty `HOME` or `CODEX_HOME` can cause
+  the native App to expand document, browser, and computer-use dependencies
+  again. Do not create a fresh full environment for every parallel task or retry.
+- Keep read-only runtime dependencies separate from writable account and test
+  state. Reuse only verified compatible, immutable, account-independent inputs
+  through a supported runtime mechanism. Do not guess cache environment
+  variables or share an entire writable home, cookie store, or account database
+  by symlink. The absence of supported cache redirection is not permission to
+  bypass state isolation.
+- Give a reused interactive preview one owner at a time. Independent unit,
+  Mock, and read-only protocol checks should not launch full Apps as a side
+  effect. Account/security isolation and destructive or cold-start checks can
+  require a separate environment; record that need and its resource lifecycle.
+- Check existing runtimes and prepared artifacts before downloading or expanding
+  large dependencies. Use the selected evaluation volume when another copy is
+  necessary. After an owned run finishes, remove unused downloaded runtimes,
+  browser caches, compilation output, and candidate dependencies; preserve
+  authentication, configuration, transcripts, logs, evidence, and shared inputs.
+
 ## Bound rebuildable caches
 
 - Distinguish compilation output from logs, history keys, credentials, account
