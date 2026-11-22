@@ -40,11 +40,7 @@ import {
   channelWakePrefix,
   parseChannelConversationPolicy,
 } from './channel-conversation-policy.js'
-import type {
-  ChannelChatBinding,
-  ChannelConversationInput,
-  ChannelConversationJob,
-} from './channel-conversation-store.js'
+import type * as Conversation from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
 
 export class ChannelConversationConsumer {
@@ -61,16 +57,19 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
-  private readonly memoryComposition = createChannelMemory(this.input.file)
-  readonly memory = this.memoryComposition.memory
-  readonly memoryAuthority = this.memoryComposition.memoryAuthority
-  readonly personas = this.memoryComposition.personas
+  readonly memory
+  readonly memoryAuthority
+  readonly personas
   private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
+    const memory = createChannelMemory(input.file)
+    this.memory = memory.memory
+    this.memoryAuthority = memory.memoryAuthority
+    this.personas = memory.personas
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
@@ -112,7 +111,7 @@ export class ChannelConversationConsumer {
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
     return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
   }
-  bindings(): readonly ChannelChatBinding[] {
+  bindings(): readonly Conversation.ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)
   }
   commandAllowed(event: ChannelEventRef, command: string): boolean {
@@ -208,7 +207,7 @@ export class ChannelConversationConsumer {
       return true
     })
   }
-  async bind(value: unknown, sessionId: string): Promise<ChannelChatBinding> {
+  async bind(value: unknown, sessionId: string): Promise<Conversation.ChannelChatBinding> {
     const args = channelRecord(value)
     channelExact(args, ['channel', 'mode', 'autoReply', 'replyMode', 'replyFallbackMode'])
     const channel = thread(args.channel)
@@ -258,7 +257,7 @@ export class ChannelConversationConsumer {
         state.bindings[id] = updated
         return updated
       }
-      const binding: ChannelChatBinding = {
+      const binding: Conversation.ChannelChatBinding = {
         id,
         channel,
         sessionId,
@@ -472,7 +471,7 @@ export class ChannelConversationConsumer {
     })
     return this.pumping
   }
-  private async route(record: ChannelConversationInput): Promise<void> {
+  private async route(record: Conversation.ChannelConversationInput): Promise<void> {
     if (this.lifetime.signal.aborted) return
     const state = this.store.snapshot(), event = record.input.source.event, policy = state.policy
     const text = record.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
@@ -550,7 +549,11 @@ export class ChannelConversationConsumer {
       state.inputs[record.recordId]!.routed = true
     })
   }
-  private async command(record: ChannelConversationInput, command: string, argument: string): Promise<void> {
+  private async command(
+    record: Conversation.ChannelConversationInput,
+    command: string,
+    argument: string,
+  ): Promise<void> {
     const event = record.input.source.event
     if (
       ![
@@ -705,7 +708,7 @@ export class ChannelConversationConsumer {
         : `/${command}: completed`,
     )
   }
-  private async advance(job: ChannelConversationJob): Promise<void> {
+  private async advance(job: Conversation.ChannelConversationJob): Promise<void> {
     const state = this.store.snapshot(), record = state.inputs[job.recordId], native = this.input.native()
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
@@ -922,8 +925,8 @@ export class ChannelConversationConsumer {
   }
   private attachCreatedBinding(
     state: import('./channel-conversation-store.js').ChannelConversationState,
-    job: ChannelConversationJob,
-    record: ChannelConversationInput,
+    job: Conversation.ChannelConversationJob,
+    record: Conversation.ChannelConversationInput,
     sessionId: string,
   ): void {
     // A removed binding must not be resurrected by later native reconciliation.
