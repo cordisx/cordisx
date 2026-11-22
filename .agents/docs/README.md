@@ -137,6 +137,10 @@ implementation of those contracts, not a second public specification.
 
 ## Maintainer and artifact entry points
 
+- [Local runtime resource maintenance](../rules/local-runtime-resources.md):
+  installation roots, configured previews, bounded compilation caches, and
+  cleanup after validation; operator rules rather than automatic Host behavior.
+
 - [CI validation and diagnosis](ci-validation.md): scope selection, Skill package checks, and slow-phase diagnosis.
 
 - [Release recovery](release-recovery.md): registry propagation, idempotent reruns, prepared artifact reuse, and conflict diagnosis.

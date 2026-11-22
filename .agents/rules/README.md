@@ -25,6 +25,9 @@
 - Follow [functional-delivery.md](functional-delivery.md) for user-visible Manager,
   launcher, bridge, and preview work. It defines the requirement ledger,
   Host/plugin ownership checks, intermediate previews, production-path proof, and formal delivery gates.
+- Follow [local-runtime-resources.md](local-runtime-resources.md) for a shared
+  installation root, preview configuration/login checks, bounded build caches,
+  and cleanup after validation. Keep device-specific paths and limits local.
 - Follow [showcase-capture-integration.md](../docs/showcase-capture-integration.md)
   before changing Manager localization, Slot Showcase capture behavior, CDP
   injection timing, or the real Codex Desktop homepage capture workflow.
