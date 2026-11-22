@@ -6,6 +6,8 @@ import { type EventMap, normalize, normalizeCardAction } from '@larksuiteoapi/no
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { createConfiguredChannelConsumer } from '../packages/cli/src/cli/channel-consumer-composition.js'
 import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
+import type { LogicalContinuationRequest } from '../packages/cli/src/launcher/logical-continuation-control.js'
+import { desktopLogicalMigration } from '../packages/cli/src/launcher/desktop-logical-migration.js'
 
 const { sdkFactory } = vi.hoisted(() => ({ sdkFactory: vi.fn() }))
 vi.mock('@larksuiteoapi/node-sdk', async original => ({
@@ -14,6 +16,357 @@ vi.mock('@larksuiteoapi/node-sdk', async original => ({
 }))
 
 describe('production Channel command composition with SDK transport fixtures', () => {
+  it('routes an authorized continuation command from the SDK into the committed binding', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-logical-composition-'))
+    const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
+    const handlers: Partial<EventMap> = {}
+    const send = vi.fn(async () => ({ messageId: 'om_reply' }))
+    sdkFactory.mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      send,
+      on: (name: keyof EventMap, handler: EventMap[keyof EventMap]) => {
+        Object.assign(handlers, { [name]: handler })
+        return () => {
+          delete handlers[name]
+        }
+      },
+    })
+    const service = createLocalChannelService({
+      artifactDirectory: path.dirname(bundledPluginEntry('channel')),
+      dataDir: path.join(root, 'transport'),
+      source: 'fixture:channel',
+      environment: { CHANNEL_LOGICAL_FIXTURE: 'fixture-only' },
+    })
+    let owner: Awaited<ReturnType<typeof createConfiguredChannelConsumer>> | undefined
+    try {
+      await service.start({
+        contract: 'cordisx.channel-service-config/v1',
+        schemaVersion: 1,
+        connections: [{
+          ref,
+          adapterKind: 'feishu',
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: 'host-secret:env/CHANNEL_LOGICAL_FIXTURE',
+        }],
+      })
+      const config = {
+        providerId: 'old',
+        model: 'old',
+        cwd: '/workspace',
+        serviceTier: null,
+        approvalsReviewer: 'user',
+        execution: { workMode: 'default', execution: 'read-only', approval: 'on-request', effort: 'low' },
+        sandbox: { type: 'readOnly' },
+        permissionProfile: null,
+      }
+      const native = {
+        contextObservations: () => undefined,
+        exists: vi.fn(async () => true),
+        hasPreparation: () => false,
+        isPreparing: () => false,
+        modelOperation: async () => ({ providers: [{ providerId: 'new', models: [{ id: 'model' }] }] }),
+        taskSelection: async () => ({ providerId: 'old', model: 'old', effort: 'low' }),
+        continuationConfiguration: async () => config,
+        logicalSourceVersion: async () => 'sha256:fixture',
+        createLogicalDestination: vi.fn(async (request: LogicalContinuationRequest) => ({
+          state: 'created',
+          confirmed: true,
+          destination: { ...request.source, sessionId: '01a10000-0000-7000-8000-000000000002' },
+        })),
+      }
+      owner = await createConfiguredChannelConsumer({
+        service,
+        homeDir: root,
+        appId: 'codex',
+        profileId: 'fixture',
+        logicalRuntime: true,
+        native: () => native as never,
+        report: vi.fn(),
+      })
+      const consumer = owner.consumer!
+      const release = owner.logicalOwner!.fence.beginMigration('fixture-source')!
+      expect(() => consumer.enterNativeSourceOperation('turn/start', { threadId: 'fixture-source' }))
+        .toThrow('CONTINUATION_PENDING')
+      release()
+      await consumer.policySet({
+        enabled: true,
+        rules: [{ id: 'commands', action: 'command', effect: 'allow', userIds: ['ou_actor'] }, {
+          id: 'dispatch',
+          action: 'dispatch',
+          effect: 'allow',
+          userIds: ['ou_actor'],
+        }],
+      }, 0)
+      await consumer.taskSettings.call('task-config-set', {
+        config: {
+          permissions: [{ id: 'grant', effect: 'allow', userIds: ['ou_actor'], fields: ['providerId', 'model'] }],
+        },
+        expectedRevision: 0,
+      })
+      await consumer.bind({
+        channel: {
+          ...ref,
+          conversationId: 'oc_direct',
+          threadId: 'oc_direct',
+          kind: 'direct',
+          semantics: 'conversation',
+        },
+        mode: 'deliver',
+        autoReply: false,
+      }, '01a10000-0000-7000-8000-000000000001')
+      const messageFor = (user: string, messageId: string) =>
+        normalize({
+          sender: { sender_id: { open_id: user }, sender_type: 'user', tenant_key: 'fixture' },
+          message: {
+            message_id: messageId,
+            chat_id: 'oc_direct',
+            chat_type: 'p2p',
+            create_time: String(Date.now()),
+            message_type: 'text',
+            content: JSON.stringify({
+              text: '/continue-provider linked new model --history=user,assistant --no-checkpoint',
+            }),
+          },
+        } as never, { includeRaw: true })
+      await handlers.message!(await messageFor('ou_other', 'om_denied'))
+      await consumer.pump()
+      expect(native.createLogicalDestination).not.toHaveBeenCalled()
+      expect(consumer.bindings()).toEqual([expect.objectContaining({
+        sessionId: '01a10000-0000-7000-8000-000000000001',
+        state: 'active',
+      })])
+      await handlers.message!(await messageFor('ou_actor', 'om_migrate'))
+      await consumer.pump()
+      await consumer.pump()
+      expect(native.createLogicalDestination).toHaveBeenCalledOnce()
+      expect(consumer.bindings()).toEqual([expect.objectContaining({
+        sessionId: '01a10000-0000-7000-8000-000000000002',
+        state: 'active',
+      })])
+      expect(send).toHaveBeenCalled()
+    } finally {
+      await owner?.dispose()
+      await service.dispose()
+      await rm(root, { recursive: true, force: true })
+      sdkFactory.mockReset()
+    }
+  })
+  it.each(['linked'] as const)(
+    'routes a direct actor grant into a Desktop %s migration through the shared owner',
+    async mode => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'channel-desktop-composition-'))
+      const sourceId = '01a10000-0000-7000-8000-000000000001'
+      const destinationId = '01a10000-0000-7000-8000-000000000002'
+      const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
+      const handlers: Partial<EventMap> = {}
+      const replies: string[] = []
+      sdkFactory.mockReturnValue({
+        connect: async () => {},
+        disconnect: async () => {},
+        send: async (_target: unknown, value: { text?: string }) => {
+          replies.push(value.text ?? '')
+          return { messageId: 'reply' }
+        },
+        on: (name: keyof EventMap, handler: EventMap[keyof EventMap]) => {
+          Object.assign(handlers, { [name]: handler })
+          return () => {
+            delete handlers[name]
+          }
+        },
+      })
+      const service = createLocalChannelService({
+        artifactDirectory: path.dirname(bundledPluginEntry('channel')),
+        dataDir: path.join(root, 'transport'),
+        source: 'fixture:channel',
+        environment: { CHANNEL_GRANT_FIXTURE: 'fixture' },
+      })
+      let configured: Awaited<ReturnType<typeof createConfiguredChannelConsumer>> | undefined
+      try {
+        await service.start({
+          contract: 'cordisx.channel-service-config/v1',
+          schemaVersion: 1,
+          connections: [{
+            ref,
+            adapterKind: 'feishu',
+            enabled: true,
+            transport: { mode: 'websocket' },
+            secretRef: 'host-secret:env/CHANNEL_GRANT_FIXTURE',
+          }],
+        })
+        const config = {
+          providerId: 'old',
+          model: 'old',
+          cwd: '/workspace',
+          serviceTier: null,
+          approvalsReviewer: 'user',
+          sandbox: { type: 'readOnly' },
+          permissionProfile: null,
+          execution: { workMode: 'default', approval: 'on-request', effort: 'low', execution: 'read-only' },
+        }
+        const native = {
+          exists: async () => true,
+          contextObservations: () => undefined,
+          hasPreparation: () => false,
+          isPreparing: () => false,
+          taskSelection: async () => ({ providerId: 'old', model: 'old', effort: 'low' }),
+          continuationConfiguration: async () => config,
+          logicalSourceVersion: async () => 'version',
+          logicalOwnerIdentity: async () => 'desktop:fixture',
+          logicalJointSourceRoot: async () => true,
+          logicalTurnActive: async () => true,
+          logicalContextTokens: () => [],
+          logicalHistoryPage: async () => ({ items: [{ type: 'agentMessage', text: 'fixture-source' }] }),
+          sourceFor: () => ({
+            ...ref,
+            conversationId: 'oc_direct',
+            threadId: 'oc_direct',
+            kind: 'direct',
+            semantics: 'conversation',
+            eventId: 'turn-event',
+            actor: { ...ref, userId: 'ou_actor' },
+          }),
+          sourceForLogicalTurn: async () => ({
+            ...ref,
+            conversationId: 'oc_direct',
+            threadId: 'oc_direct',
+            kind: 'direct',
+            semantics: 'conversation',
+            eventId: 'turn-event',
+            actor: { ...ref, userId: 'ou_actor' },
+          }),
+          supportsLogicalFork: () => true,
+          createLogicalDestination: vi.fn(
+            async (
+              request: LogicalContinuationRequest,
+              _evidence: unknown,
+              fence: any,
+              _available: unknown,
+              send: (method: 'thread/start', params: {}) => Promise<unknown>,
+            ) => {
+              await send('thread/start', {})
+              return {
+                state: 'created' as const,
+                confirmed: true,
+                destination: { ...request.source, sessionId: destinationId },
+                releaseTarget: fence.beginMigration(destinationId),
+              }
+            },
+          ),
+        }
+        configured = await createConfiguredChannelConsumer({
+          service,
+          homeDir: root,
+          appId: 'codex',
+          profileId: 'fixture',
+          logicalOwnerOnly: true,
+          native: () => native as never,
+          report: vi.fn(),
+        })
+        const owner = configured.logicalOwner!, consumer = configured.consumer!
+        await owner.store.bindCommitBarrier(async () => {})
+        await consumer.policySet({
+          enabled: true,
+          rules: [
+            { id: 'command', action: 'command', effect: 'allow', userIds: ['ou_actor'] },
+            { id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['ou_actor'] },
+          ],
+        }, 0)
+        await consumer.taskSettings.call('task-config-set', {
+          config: {
+            permissions: [
+              { id: 'grant', effect: 'allow', userIds: ['ou_actor'], fields: ['providerId', 'model'] },
+            ],
+          },
+          expectedRevision: 0,
+        })
+        await consumer.bind({
+          channel: {
+            ...ref,
+            conversationId: 'oc_direct',
+            threadId: 'oc_direct',
+            kind: 'direct',
+            semantics: 'conversation',
+          },
+          mode: 'deliver',
+          autoReply: false,
+        }, sourceId)
+        const code = owner.desktopChannelGrants.begin(sourceId, { providerId: 'new', model: 'model' })
+        const message = async (userId: string, id: string) =>
+          await normalize({
+            sender: { sender_id: { open_id: userId }, sender_type: 'user', tenant_key: 'fixture' },
+            message: {
+              message_id: id,
+              chat_id: 'oc_direct',
+              chat_type: 'p2p',
+              create_time: String(Date.now()),
+              message_type: 'text',
+              content: JSON.stringify({
+                text:
+                  '/continue-provider authorize-desktop linked new model --history=user-assistant --no-checkpoint --challenge='
+                  + code,
+              }),
+            },
+          } as never, { includeRaw: true })
+        await handlers.message!(await message('ou_other', 'denied'))
+        await consumer.pump()
+        expect(replies.some(text => text.includes('已授权'))).toBe(false)
+        await handlers.message!(await message('ou_actor', 'allowed'))
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          expect(replies.some(text => text.includes('已授权'))).toBe(true)
+        })
+        expect(replies.every(text => !text.includes(code))).toBe(true)
+        const control = {
+          acquireLogicalFence: async () => 'source-lease',
+          releaseLogicalFence: async () => true,
+          createFencedLogicalDestination: async () => ({
+            result: { thread: { id: destinationId } },
+            destinationLease: 'target-lease',
+          }),
+          nativeRequest: async () => ({}),
+        }
+        const migration = desktopLogicalMigration({
+          owner,
+          control: control as never,
+          native: () => native as never,
+          profileId: 'fixture',
+          identity: async () => 'desktop:fixture',
+          targetAllowed: async () => true,
+          historyReady: () => true,
+        })
+        const result = await migration.continue({
+          scope: { targetId: 'window', rendererGeneration: 'renderer', navigationGeneration: 1, threadId: sourceId },
+          operationId: 'desktop-operation',
+          target: { providerId: 'new', model: 'model' },
+          mode,
+          channelCode: code,
+          current: () => true,
+          configOverrides: {},
+        })
+        expect(result).toMatchObject({ state: 'applied', destination: { sessionId: destinationId } })
+        expect(consumer.bindings()).toEqual([expect.objectContaining({ sessionId: destinationId })])
+        if (mode === 'linked') {
+          const history = await consumer.logicalHistoryCall({
+            threadId: destinationId,
+            turnId: 'turn',
+            callId: 'call',
+            tool: 'cordisx_continuation_history',
+            arguments: {},
+          })
+          expect(JSON.stringify(history)).toContain('fixture-source')
+        }
+        expect(JSON.stringify(owner.store.snapshot().logicalContinuations)).not.toContain(code)
+      } finally {
+        await configured?.dispose()
+        await service.dispose()
+        await rm(root, { recursive: true, force: true })
+        sdkFactory.mockReset()
+      }
+    },
+  )
+
   it('keeps pairing codes out of the inbox and requires explicit local confirmation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-pair-composition-'))
     const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }

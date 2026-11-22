@@ -31,6 +31,9 @@ export function continuationConfiguration(
   const serviceTier = live ? live.serviceTier : effective.serviceTier
   const cwd = effective.cwd
   const profile = effective.activePermissionProfile
+  if (profile === undefined || profile !== null && (typeof profile !== 'object' || Array.isArray(profile))) {
+    return undefined
+  }
   const permissions = profile === null || profile === undefined ? undefined : object(profile).id
   const sandbox = object(effective.sandbox)
   const settings = observedExecutionSettings(effective)
@@ -42,7 +45,7 @@ export function continuationConfiguration(
     || !['readOnly', 'workspaceWrite', 'dangerFullAccess'].includes(String(sandbox.type))
     || (serviceTier !== null && serviceTier !== 'priority' && serviceTier !== 'default')
     || !['user', 'auto_review', 'guardian_subagent'].includes(String(effective.approvalsReviewer))
-    || (permissions !== undefined && (typeof permissions !== 'string' || !permissions))
+    || (profile !== null && (typeof permissions !== 'string' || !permissions))
     || settings.approval === undefined || workMode === undefined
     || (permissions === undefined && settings.execution === undefined)
   ) return undefined
@@ -67,7 +70,10 @@ export function continuationConfiguration(
       approval: settings.approval,
       workMode,
       effort,
-      ...(permissions === undefined ? { execution: settings.execution, networkAccess: settings.networkAccess } : {}),
+      ...(permissions === undefined && settings.execution !== undefined ? { execution: settings.execution } : {}),
+      ...(permissions === undefined && settings.networkAccess !== undefined
+        ? { networkAccess: settings.networkAccess }
+        : {}),
     },
   }
 }

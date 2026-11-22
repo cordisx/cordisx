@@ -25,7 +25,7 @@
   },
   "license": "AGPL-3.0-or-later",
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#265eaeaf82232a62065314f523385628285cabc2",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#90a633a80fa833030b2d5691fabd2138b2b3f577",
     "@deepseek-ai/cordis": "4.0.1"
   },
   "devDependencies": {

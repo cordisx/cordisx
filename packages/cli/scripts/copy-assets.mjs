@@ -19,6 +19,7 @@ const preservedRendererStyles = [
   'renderer/host-ui/account-identity.css',
   'renderer/model-providers.css',
   'renderer/page-header-actions.css',
+  'renderer/native-logical-continuation-dialog.css',
   'renderer/manager/manager-navigation.css',
   'renderer/manager/manager-content.css',
   'renderer/manager/manager-record-summary.css',

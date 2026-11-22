@@ -9,6 +9,8 @@ type Route = {
   model: string
   reasoningEffort?: import('../model-reasoning-capabilities.js').ModelReasoningEffort
   serviceTier?: 'priority' | null
+  reasoningExplicit?: boolean
+  fastExplicit?: boolean
   transient?: boolean
   resumeToken?: string
   configOverrides: Readonly<Record<string, unknown>>
@@ -39,8 +41,14 @@ export class NativeAgentTaskRouting {
   }
   constructor(
     private readonly controller: NativeSubmissionController,
-    private readonly validate: (selection: { providerId: string; model: string }) => Promise<boolean> = async () =>
-      true,
+    private readonly validate: (selection: {
+      providerId: string
+      model: string
+      reasoningEffort?: import('../model-reasoning-capabilities.js').ModelReasoningEffort
+      serviceTier?: 'priority' | null
+      reasoningExplicit?: boolean
+      fastExplicit?: boolean
+    }) => Promise<boolean> = async () => true,
   ) {}
 
   async prepare(
@@ -51,6 +59,8 @@ export class NativeAgentTaskRouting {
       model: string
       reasoningEffort?: import('../model-reasoning-capabilities.js').ModelReasoningEffort
       serviceTier?: 'priority' | null
+      reasoningExplicit?: boolean
+      fastExplicit?: boolean
       transient?: boolean
     },
   ) {

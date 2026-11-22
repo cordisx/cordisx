@@ -188,6 +188,7 @@ export class ChannelMemoryPersonas {
       ) {
         throw new Error('PERSONA_TASK_ACCOUNT_MISMATCH')
       }
+      if (existing && existing.bindingRevision === pinned.bindingRevision) return
       state.tasks[alias] = { ...pinned, taskId: alias }
       await this.save(state)
     })

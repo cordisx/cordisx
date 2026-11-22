@@ -138,6 +138,11 @@ export function selectAdapterModules(
       if (
         !input.resources.some(r => r.url === account.module) || !account.exportName
         || (account.readerProperty !== undefined && !['accessInputs', 'accountInfo'].includes(account.readerProperty))
+        || account.rspack !== undefined && (
+            !account.rspack || account.exportName !== '__webpack_require__' || account.readerProperty !== 'accountInfo'
+            || typeof account.rspack.moduleId !== 'string' || !/^[A-Za-z0-9_$-]{1,64}$/u.test(account.rspack.moduleId)
+            || !input.resources.some(r => r.url === account.rspack!.definitionModule)
+          )
       ) {
         throw new Error('Adapter account capability invalid')
       }

@@ -39,7 +39,6 @@ import {
   acquireCodexProfileLaunchLease,
   type IsolatedCodexProfile,
   prepareIsolatedCodexProfile,
-  readCodexAppVersion,
   resolveCodexExecutable,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
@@ -133,13 +132,17 @@ import { createChannelLaunchBridges, createRendererChannelComposition } from './
 import { createManagerChannelCredentials, managerUserAuthorities } from './manager-channel-credentials-composition.js'
 import {
   configuredChannelManagementToolHandler,
-  configuredChannelToolHandler,
   configuredLaunchCleanup,
-  createConfiguredChannelConsumer,
+  createDesktopChannelConsumer,
+  desktopChannelCatalogOptions,
 } from './channel-consumer-composition.js'
 import { chatExecutionOperation } from '../launcher/chat-execution-operation.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
-import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
+import {
+  managerNativeAppVersion,
+  prepareProductionHostBootstrap,
+  type ProductionHostBootstrap,
+} from './production-host-bootstrap.js'
 import {
   nativeCatalogExport,
   nativeCodexOperations,
@@ -187,7 +190,10 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     ) {
       releaseRuntimeOwner = await acquireProfileRuntimeOwner(rootFromConfigPath(configPath), selection.profileId)
     }
+    const logicalFenceRecovery = environment.CORDISX_EXPERIMENTAL_LOGICAL_CONTINUATION === '1'
+      && releaseRuntimeOwner !== undefined
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
+      logicalFenceRecovery,
       prelaunch: runHost === runInjectedHost && supervisorRuntime.mainInspector
         && (selection.profile.providerBindings?.length ?? 0) === 0
         && environment.CORDISX_SUPERVISOR_HOME !== undefined,
@@ -351,10 +357,12 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     }, { runtimeGeneration: lifecycleGeneration, profileOwnerVerified: releaseRuntimeOwner !== undefined })
     if (channel.plugin && channel.service) desktopManager?.bindConfiguredChannel(channel.plugin, channel.service)
     const channelService = channel.service
-    const { consumer: channelConsumer, tools: channelTools, dispose: disposeChannel } =
-      await createConfiguredChannelConsumer({
+    const { consumer: channelConsumer, tools: channelTools, logicalOwner, dispose: disposeChannel } =
+      await createDesktopChannelConsumer({
         documents: input => configuredPluginDocuments(composition.plugins, input),
         service: channelService,
+        logicalRecovery: logicalFenceRecovery,
+        ...(nativeSubmissionBootstrap ? { nativeBootstrap: nativeSubmissionBootstrap } : {}),
         homeDir: rootFromConfigPath(configPath),
         appId,
         profileId: selection.profileId,
@@ -383,13 +391,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const managedServiceUI = startupBridge
     const nativeCatalogOptions = {
       contextObserver: agentContext.observer,
-      channelName: (event: import('@cordisx/channel-runtime').ChannelEventRef) =>
-        channelService?.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
-      channelSectionName: () =>
-        channelConsumer?.policy().policy.sidebarGroup === null
-          ? undefined
-          : channelConsumer?.policy().policy.sidebarGroup ?? '外部连接',
-      ...configuredChannelToolHandler(channelTools),
+      ...desktopChannelCatalogOptions(channelService, channelConsumer, channelTools, logicalOwner),
       ...(runtime.internalRemoteTerminalProvider === undefined
         ? {}
         : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
@@ -426,9 +428,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       })
       void nativeSubmissionCompletion.catch(() => undefined)
     }
-    const nativeAppVersion = environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
-      ? await readCodexAppVersion(plan?.executable)
-      : undefined
+    const nativeAppVersion = await managerNativeAppVersion(environment, plan?.executable)
     rendererComposition = await buildRendererComposition(composition, stdout, {
       ...(environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
         ? { managerPresentationMode: 'workspace' as const }

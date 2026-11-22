@@ -16,6 +16,7 @@ export async function harness(options: Readonly<{
   realController?: boolean
   taskExecutionUrl?: string
   evaluate?: (expression: string) => unknown
+  nativeAccount?: () => string | null
   submissionAvailable?: boolean
   documentTimeOrigin?: () => number
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
@@ -59,10 +60,18 @@ export async function harness(options: Readonly<{
     },
     send: vi.fn(async (method: string, params: Record<string, any>) => {
       if (method === 'Runtime.addBinding') {
-        world[params.name] = (payload: string) => receive({ name: params.name, payload })
+        world[params.name] = (payload: string) =>
+          receive({
+            name: params.name,
+            payload,
+            ...(options.nativeAccount ? { executionContextId: 7 } : {}),
+          })
       }
       if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' }
       if (method === 'Runtime.evaluate') {
+        if (params.expression.includes('native-pin-read-exception')) {
+          return { result: { value: options.nativeAccount?.() ?? null } }
+        }
         if (params.expression === 'performance.timeOrigin') {
           return { result: { value: options.documentTimeOrigin?.() ?? 1_000 } }
         }
@@ -81,6 +90,13 @@ export async function harness(options: Readonly<{
     }),
   }
   const controller = {
+    logicalSourceNavigation: vi.fn<NativeSubmissionController['logicalSourceNavigation']>(async () => true),
+    logicalPrevious: vi.fn<NativeSubmissionController['logicalPrevious']>(async () => 'source'),
+    logicalNext: vi.fn<NativeSubmissionController['logicalNext']>(async () => 'destination'),
+    confirmLogicalSubmission: vi.fn<NativeSubmissionController['confirmLogicalSubmission']>(async () => ({
+      kind: 'reject',
+      reason: 'provider-switch-reconciliation-required',
+    })),
     prepareSubmission: vi.fn<NativeSubmissionController['prepareSubmission']>(async () => ({
       kind: 'reject',
       reason: 'unsupported-submission-intent',

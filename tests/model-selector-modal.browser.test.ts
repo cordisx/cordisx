@@ -95,6 +95,60 @@ it.skipIf(!executable)(
       await run(
         'window.disposeFixture = await Fixture.start(); window.seat = document.querySelector("[data-cordisx-model-provider-selector]")',
       )
+      // The native renderer resets input appearance globally. The confirmation is
+      // a portal, so interaction must also remain available while its seat is inert.
+      await run(`window.nativeReset=document.createElement('style');
+        nativeReset.textContent='input,textarea,select,optgroup{appearance:none;margin:0;padding:0;border:0}';
+        document.head.append(nativeReset);await Fixture.showContinuation()`)
+      const controlState = `(() => {
+        const d=document.querySelector('.cxmp-confirm');
+        const radios=[...d.querySelectorAll('input[type=radio]')], checkbox=d.querySelector('input[type=checkbox]');
+        const sized=e=>e.getBoundingClientRect().width>=14&&e.getBoundingClientRect().height>=14;
+        return {radiosVisible:radios.every(sized),checkboxVisible:sized(checkbox),
+          linked:radios[1].checked,consent:checkbox.checked,
+          continueEnabled:[...d.querySelectorAll('button')].find(b=>b.textContent==='Continue').disabled===false};
+      })()`
+      expect(await evaluate(controlState)).toEqual({
+        radiosVisible: true,
+        checkboxVisible: true,
+        linked: true,
+        consent: false,
+        continueEnabled: false,
+      })
+      await run(`window.foreignDialog=document.createElement('dialog');
+        foreignDialog.textContent='Other confirmation';document.body.append(foreignDialog);foreignDialog.showModal();
+        document.querySelector('.cxmp-confirm input[type=checkbox]').click();await Fixture.settle()`)
+      expect(await evaluate('document.querySelector(".cxmp-confirm input[type=checkbox]").checked')).toBe(false)
+      await run('foreignDialog.close();foreignDialog.remove();await Fixture.settle()')
+      const clickControl = async (selector: string) => {
+        const rect = await evaluate(
+          `(() => {const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+          return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+        ) as { x: number; y: number }
+        await cdp!.send('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          ...rect,
+          button: 'left',
+          buttons: 1,
+          clickCount: 1,
+        })
+        await cdp!.send('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          ...rect,
+          button: 'left',
+          buttons: 0,
+          clickCount: 1,
+        })
+        await run('await Fixture.settle()')
+      }
+      await clickControl('.cxmp-confirm input[type=checkbox]')
+      expect(await evaluate('document.querySelector(".cxmp-confirm input[type=checkbox]").checked')).toBe(true)
+      await clickControl('.cxmp-confirm input[type=radio]:first-of-type')
+      expect(await evaluate('document.querySelector(".cxmp-confirm input[type=checkbox]").checked')).toBe(false)
+      await clickControl('.cxmp-confirm input[type=checkbox]')
+      await clickControl('.cxmp-confirm .cxhd-button[data-variant=primary]')
+      expect(await evaluate('Fixture.confirmedContinuation()')).toBe('fork')
+      await run('nativeReset.remove()')
       const projection = `(() => {
       const root=document.querySelector('[data-cordisx-model-provider-selector]');
       const buttons=[...root.querySelectorAll('button')];

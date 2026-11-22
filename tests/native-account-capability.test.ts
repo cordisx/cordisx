@@ -14,6 +14,72 @@ function environment(names = ['app://-/assets/app-initial-future.js']) {
   vi.stubGlobal('performance', { getEntriesByType: () => names.map(name => ({ name })) })
 }
 describe('native account structural capability', () => {
+  it('discovers a query-owned Rspack account service and reads only its already-loaded module', async () => {
+    const query = {
+      url: 'app://-/assets/async/111.abcdef1234.js',
+      source: `export const __webpack_modules__={query:function(module,exports,load){
+        var services=load('account1');
+        async function read(){let account=services.appServices?.accountInfo;return account.readAccountInfo()}
+      }};`,
+    }
+    const definition = {
+      url: 'app://-/assets/async/222.abcdef1234.js',
+      source: `export const __webpack_modules__={account1:function(module,exports,load){
+        let value;load.d(exports,{appServices:()=>value},{setAppServices:function(next){value=next}})
+      }};`,
+    }
+    const runtime = {
+      url: 'app://-/assets/333.abcdef1234.js',
+      source: 'let runtime;export {runtime as __webpack_require__};',
+    }
+    const resources = [query, definition, runtime]
+    const descriptor = discoverNativeAccountCapabilityFromSyntax(query, parseNativeSource(query.source), resources)
+    expect(descriptor).toEqual({
+      module: runtime.url,
+      exportName: '__webpack_require__',
+      readerProperty: 'accountInfo',
+      rspack: { moduleId: 'account1', definitionModule: definition.url },
+    })
+    expect(() => discoverNativeAccountCapabilityFromSyntax(query, parseNativeSource(query.source), [query, runtime]))
+      .toThrow('native-account-service')
+    expect(discoverNativeAccountCapabilityFromSyntax(query, parseNativeSource(query.source), [
+      ...resources,
+      { ...definition, url: 'app://-/assets/async/444.abcdef1234.js' },
+    ])).toEqual(descriptor)
+    expect(() =>
+      discoverNativeAccountCapabilityFromSyntax(query, parseNativeSource(query.source), [
+        ...resources,
+        {
+          ...definition,
+          url: 'app://-/assets/async/444.abcdef1234.js',
+          source: definition.source.replace('value=next', 'other=next'),
+        },
+      ])
+    ).toThrow('native-account-service')
+    environment([runtime.url])
+    const readAccountInfo = vi.fn(), executeModule = vi.fn(), unrelated = vi.fn()
+    const exports = {
+      get appServices() {
+        return { accountInfo: { readAccountInfo } }
+      },
+    }
+    Object.defineProperty(exports, 'unrelated', { get: unrelated })
+    Object.assign(executeModule, { c: { account1: { exports } } })
+    const load = vi.fn(async () => ({ __webpack_require__: executeModule }))
+    const result = await nativeAccountCapability(load, descriptor)
+    expect(result.native.TW.accessInputs.readAccountInfo).toBe(readAccountInfo)
+    expect(executeModule).not.toHaveBeenCalled()
+    expect(readAccountInfo).not.toHaveBeenCalled()
+    expect(unrelated).not.toHaveBeenCalled()
+    await expect(
+      nativeAccountCapability(async () => ({ __webpack_require__: Object.assign(vi.fn(), { c: {} }) }), descriptor),
+    )
+      .rejects.toThrow('typed reader missing')
+    await expect(nativeAccountCapability(load, {
+      ...descriptor,
+      rspack: { ...descriptor.rspack!, definitionModule: 'https://foreign.example/222.abcdef1234.js' },
+    })).rejects.toThrow('invalid resource')
+  })
   it('follows a query-owned named import to the local shared service export', async () => {
     const query = {
       url: 'app://-/assets/app-initial-future.js',

@@ -16,7 +16,7 @@ import {
   parseChannelTaskConfig,
   parseChannelTaskPatch,
 } from './channel-task-config.js'
-import type { ChannelConversationStore, ChannelTaskRequest } from './channel-conversation-store.js'
+import { ChannelConversationStore, type ChannelTaskRequest } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { ChannelAgentAccess } from './channel-agent-access.js'
@@ -187,6 +187,7 @@ export class ChannelTaskSettings {
       : undefined
     if (request?.state === 'queued') request.approvedBy = structuredClone(event!)
     await this.input.store.mutate(state => {
+      if (ChannelConversationStore.logicalSourceFenced(state, threadId)) throw new Error('CONTINUATION_PENDING')
       if ((state.taskSettings[threadId]?.revision ?? 0) !== current.revision) throw new Error('REVISION_CONFLICT')
       if (state.taskSettings[threadId]?.pending || state.taskSettings[threadId]?.application === 'applying') {
         throw new Error('TASK_CHANGE_PENDING')
@@ -241,6 +242,7 @@ export class ChannelTaskSettings {
     }
     await this.input.store.mutate(state => {
       const pending = state.taskRequests[request.id]!
+      if (ChannelConversationStore.logicalSourceFenced(state, request.threadId)) throw new Error('CONTINUATION_PENDING')
       if (pending.state !== 'pending') throw new Error('TASK_REQUEST_ALREADY_HANDLED')
       if (!this.bound(request.source, request.threadId) || pending.expiresAt <= Date.now()) {
         throw new Error('TASK_REQUEST_EXPIRED')

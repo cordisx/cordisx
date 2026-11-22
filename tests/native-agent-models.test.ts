@@ -261,6 +261,10 @@ describe('Agent model-provider tools', () => {
       expect(initialized.instructions).toContain('cordisx manager')
       expect(initialized.instructions).toContain('bundled cordisx Skill')
       const advertised = (await request(2, 'tools/list', {})).tools
+      expect(
+        advertised.find((tool: any) => tool.name === 'create_thread_with_provider')
+          .inputSchema.properties.thinking.enum,
+      ).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
       expect(advertised.map((tool: any) => tool.name)).toEqual([
         'list_model_providers',
         'select_thread_model_provider',

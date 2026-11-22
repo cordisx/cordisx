@@ -1,5 +1,5 @@
 type WorkMode = 'default' | 'plan'
-type Evidence = { readonly mode?: WorkMode; readonly revision: number }
+type Evidence = { readonly mode?: WorkMode; readonly pendingObservation?: WorkMode; readonly revision: number }
 
 /**
  * Evidence for an exclusively owned app-server, separate from native readback.
@@ -9,11 +9,16 @@ type Evidence = { readonly mode?: WorkMode; readonly revision: number }
 export class HeadlessWorkMode {
   private readonly threads = new Map<string, Evidence>()
   private readonly pending = new Map<string, number>()
+  private readonly concurrent = new Set<string>()
   private revision = 0
   constructor(private readonly knownNewThreadDefault: boolean) {}
 
-  private put(threadId: string, mode?: WorkMode): Evidence {
-    const entry = { ...(mode === undefined ? {} : { mode }), revision: ++this.revision }
+  private put(threadId: string, mode?: WorkMode, pendingObservation?: WorkMode): Evidence {
+    const entry = {
+      ...(mode === undefined ? {} : { mode }),
+      ...(pendingObservation === undefined ? {} : { pendingObservation }),
+      revision: ++this.revision,
+    }
     this.threads.set(threadId, entry)
     if (this.threads.size > 512) this.threads.delete(this.threads.keys().next().value!)
     return entry
@@ -24,11 +29,14 @@ export class HeadlessWorkMode {
   }
 
   observe(threadId: string, value: unknown): void {
-    this.put(threadId, !this.pending.get(threadId) && (value === 'default' || value === 'plan') ? value : undefined)
+    const mode = value === 'default' || value === 'plan' ? value : undefined
+    if (this.pending.get(threadId)) this.put(threadId, undefined, mode)
+    else this.put(threadId, mode)
   }
 
   begin(threadId: string) {
     const previous = this.threads.get(threadId)?.mode
+    if (this.pending.get(threadId)) this.concurrent.add(threadId)
     this.pending.set(threadId, (this.pending.get(threadId) ?? 0) + 1)
     const pending = this.put(threadId)
     let settled = false
@@ -38,8 +46,15 @@ export class HeadlessWorkMode {
       const remaining = (this.pending.get(threadId) ?? 1) - 1
       if (remaining) this.pending.set(threadId, remaining)
       else this.pending.delete(threadId)
-      if (remaining || this.threads.get(threadId)?.revision !== pending.revision) return
       const mode = requested === 'default' || requested === 'plan' ? requested : undefined
+      if (remaining) return
+      const concurrent = this.concurrent.delete(threadId)
+      const latest = this.threads.get(threadId)
+      if (concurrent) return
+      if (latest?.revision !== pending.revision) {
+        if (accepted && mode && latest?.pendingObservation === mode) this.put(threadId, mode)
+        return
+      }
       this.put(threadId, accepted ? mode ?? (unchanged ? previous : undefined) : undefined)
     }
   }
@@ -52,6 +67,8 @@ export class HeadlessWorkMode {
   }
   clear(): void {
     this.threads.clear()
+    this.pending.clear()
+    this.concurrent.clear()
     this.pending.clear()
   }
 }

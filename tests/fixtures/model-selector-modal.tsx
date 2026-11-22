@@ -5,6 +5,7 @@ import { installModelProviderSelector } from '../../packages/cli/src/renderer/in
 import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import { CodexDesktopNativeModelProviderTransport } from '../../packages/cli/src/renderer/native-model-provider-transport.js'
 import { installNotificationHost } from '../../packages/cli/src/renderer/notifications/host.js'
+import type { ProviderSelectionSnapshot } from '../../packages/cli/src/renderer/model-provider-selector.js'
 
 let openModal: (value: boolean) => void
 let replaceAnchor: () => void
@@ -16,9 +17,10 @@ let snapshotReads = 0
 let labelPreview = false
 let reasoningDelay = 0
 let fastDelay = 0
+let continuationResult: string | undefined
 const fastBusyHistory: boolean[] = []
 const snapshotListeners = new Set<() => void>()
-let state = Object.freeze({
+let state: ProviderSelectionSnapshot = Object.freeze({
   available: true,
   busy: false,
   modelProvider: 'fixture',
@@ -163,6 +165,11 @@ export async function start() {
         return () => snapshotListeners.delete(listener)
       },
       hasActiveSubmission: () => false,
+      confirmLogicalSubmission: (mode: string | undefined) => {
+        continuationResult = mode
+        state = Object.freeze({ ...state, confirmation: undefined })
+        for (const listener of snapshotListeners) listener()
+      },
       select: async () => {
         calls++
         return 'accepted'
@@ -208,6 +215,24 @@ export async function start() {
 
 export async function settle() {
   await new Promise(resolve => setTimeout(resolve, 30))
+}
+export async function showContinuation() {
+  continuationResult = undefined
+  state = Object.freeze({
+    ...state,
+    confirmation: {
+      confirmationId: 'browser-confirmation',
+      expectedSelectionRevision: 1,
+      target: { providerId: 'target', model: 'target-model', generation: 1 },
+      threadId: 'source',
+      logical: { recommended: 'linked', forkAvailable: true, linkedAvailable: true },
+    },
+  })
+  for (const listener of snapshotListeners) listener()
+  await settle()
+}
+export function confirmedContinuation() {
+  return continuationResult
 }
 export async function modal(value: boolean) {
   openModal(value)

@@ -36,6 +36,16 @@ const f = vi.hoisted(() => ({
   packageReadCount: 0,
   transportEnvironment: undefined as NodeJS.ProcessEnv | undefined,
   backendEnvironment: undefined as NodeJS.ProcessEnv | undefined,
+  sourceGuard: undefined as undefined | ((method: string, params: Record<string, unknown>) => () => void),
+  rejectHandoff: false,
+  backendOptions: undefined as undefined | {
+    onRequest: (method: string, params: unknown) => unknown
+    nativeRequest: (
+      method: string,
+      params: Record<string, unknown>,
+      next: (value: Record<string, unknown>) => Promise<unknown>,
+    ) => Promise<unknown>
+  },
   reviewSettings: undefined as undefined | { providerId: string },
   backendReview: undefined as undefined | { modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
   providers: [] as import('../packages/cli/src/config/home-config.js').HomeConfigProvider[],
@@ -150,6 +160,7 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
   ) => {
     f.declaredProviders = input.declaredProviders
     f.backendEnvironment = input.environment
+    f.backendOptions = input as unknown as NonNullable<typeof f.backendOptions>
     f.backendReview = input
     f.events.push('backend-start')
     return {
@@ -161,7 +172,13 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
     }
   },
 }))
-vi.mock('../packages/cli/src/launcher/channel-native-sessions.js', () => ({ ChannelNativeSessions: class {} }))
+vi.mock('../packages/cli/src/launcher/channel-native-sessions.js', () => ({
+  ChannelNativeSessions: class {
+    isPreparing() {
+      return false
+    }
+  },
+}))
 vi.mock('../packages/cli/src/launcher/channel-cli-context.js', () => ({ configuredChannelCliContext: () => ({}) }))
 vi.mock('../packages/cli/src/launcher/plugin-documents.js', () => ({ configuredPluginDocuments: async () => ({}) }))
 vi.mock(
@@ -170,6 +187,22 @@ vi.mock(
     createConfiguredChannelConsumer: async () => {
       f.events.push('consumer-attached')
       return {
+        consumer: {
+          logicalHistoryCall: async () => ({ success: true, contentItems: [] }),
+          enterNativeSourceOperation: (method: string, params: Record<string, unknown>) => {
+            f.events.push('source-enter')
+            const release = f.sourceGuard?.(method, params)
+            return () => {
+              release?.()
+              f.events.push('source-release')
+            }
+          },
+          assertNativeHandoff: () => {
+            f.events.push('handoff-check')
+            if (f.rejectHandoff) throw new Error('handoff rejected')
+          },
+          agentAccess: { preparation: () => false },
+        },
         tools: { call: async () => ({ status: 'ok' }) },
         dispose: async () => {
           f.events.push('consumer-close')
@@ -196,6 +229,7 @@ vi.mock('../packages/cli/src/launcher/headless-native-authority.js', () => ({
   }),
 }))
 import { startHeadlessService } from '../packages/cli/src/cli/headless-service.js'
+import { ChannelNativeSourceFence } from '../packages/cli/src/launcher/channel-native-source-fence.js'
 
 const input = {
   configPath: '/state/config.json',
@@ -217,6 +251,9 @@ describe('headless service lifecycle', () => {
     f.enabled = true
     f.packageMode = false
     f.packageReadCount = 0
+    f.backendOptions = undefined
+    f.sourceGuard = undefined
+    f.rejectHandoff = false
     f.reviewSettings = undefined
     f.backendReview = undefined
     f.providers = []
@@ -241,6 +278,38 @@ describe('headless service lifecycle', () => {
     expect(f.events).toEqual(['backend-start', 'consumer-attached', 'service-start'])
     await Promise.all([service!.close(), service!.close()])
     expect(f.events.slice(3)).toEqual(['consumer-close', 'service-close', 'backend-close', 'authority-close'])
+  })
+  it('routes native history requests and guards the final owned turn dispatch', async () => {
+    const service = await startHeadlessService(input)
+    expect(await f.backendOptions!.onRequest('item/tool/call', { threadId: 'target' })).toMatchObject({ success: true })
+    await f.backendOptions!.nativeRequest('turn/start', { threadId: 'target' }, async () => {
+      f.events.push('native-write')
+      return {}
+    })
+    expect(f.events.slice(-4)).toEqual(['source-enter', 'handoff-check', 'native-write', 'source-release'])
+    await service.close()
+  })
+  it('keeps the native writer fence after an uncertain transport failure', async () => {
+    const fence = new ChannelNativeSourceFence(() => false)
+    f.sourceGuard = (method, params) => fence.enterNative(method, params)
+    const service = await startHeadlessService(input)
+    try {
+      await expect(f.backendOptions!.nativeRequest('turn/start', { threadId: 'source' }, async () => {
+        throw new Error('transport timeout')
+      })).rejects.toThrow('transport timeout')
+      expect(f.events.slice(-2)).toEqual(['source-enter', 'handoff-check'])
+      expect(fence.beginMigration('source')).toBeUndefined()
+      await expect(f.backendOptions!.nativeRequest('turn/start', { threadId: 'other' }, async () => {
+        throw Object.assign(new Error('native rejection'), { rpcCode: -32600 })
+      })).rejects.toThrow('native rejection')
+      expect(fence.beginMigration('other')).toBeUndefined()
+      f.rejectHandoff = true
+      await expect(f.backendOptions!.nativeRequest('turn/start', { threadId: 'before-send' }, async () => ({})))
+        .rejects.toThrow('handoff rejected')
+      expect(fence.beginMigration('before-send')).toBeTypeOf('function')
+    } finally {
+      await service.close()
+    }
   })
   it('loads lifecycle-installed Channel service configuration from its package store', async () => {
     f.packageMode = true

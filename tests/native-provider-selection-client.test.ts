@@ -58,6 +58,7 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
       operationToken: token,
       projection: { available: true, revision: 97, effective: { providerId: 'b', model: 'b-model' } },
     })),
+    submissionConfirmLogical: vi.fn<NonNullable<NativeProviderSelectionCommandChannel['submissionConfirmLogical']>>(),
     submissionCancel: vi.fn(async () => undefined),
   }
   const notice = vi.fn()
@@ -86,6 +87,115 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
 }
 
 describe('native provider selection client', () => {
+  it('forwards only the challenge attached to this bound confirmation', async () => {
+    const h = await harness(true, true)
+    const challenge = 'A'.repeat(32)
+    h.channel.submissionPrepare.mockResolvedValueOnce({
+      status: 'confirm-logical',
+      confirmationId: 'confirmation-token',
+      expectedSelectionRevision: 2,
+      recommended: 'linked',
+      forkAvailable: false,
+      linkedAvailable: true,
+      channelBound: true,
+      channelChallenge: challenge,
+    })
+    h.channel.submissionConfirmLogical.mockResolvedValueOnce({
+      status: 'allow-logical-continuation',
+      operationToken: token,
+      continuation: { sourceThreadId: 'thread-1', threadId: 'destination' },
+    })
+    const send = h.client.submitHook({
+      ...descriptor,
+      target: 'local',
+      thread: 'thread-1',
+      followUp: 'local',
+      followUpThread: 'thread-1',
+    })
+    await vi.waitFor(() => expect(h.client.confirmation()?.logical?.channelChallenge).toBe(challenge))
+    h.client.confirmLogicalSubmission('fresh' as never, undefined, challenge)
+    h.client.confirmLogicalSubmission('linked', undefined, 'B'.repeat(32))
+    expect(h.channel.submissionConfirmLogical).not.toHaveBeenCalled()
+    h.client.confirmLogicalSubmission('linked', undefined, challenge)
+    expect(await send).toMatchObject({ allow: true })
+    expect(h.channel.submissionConfirmLogical).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'linked',
+      historyConsent: 'on-demand',
+      channelCode: challenge,
+    }))
+    h.client.dispose()
+  })
+  it('waits for a logical mode and sends its matching explicit history grant', async () => {
+    const h = await harness(true, true)
+    h.channel.submissionPrepare.mockResolvedValueOnce({
+      status: 'confirm-logical',
+      confirmationId: 'confirmation-token',
+      expectedSelectionRevision: 2,
+      recommended: 'linked',
+      forkAvailable: false,
+      linkedAvailable: true,
+      chain: { links: [{ source: 'earlier', destination: 'thread-1', mode: 'linked' }], truncated: false },
+    })
+    h.channel.submissionConfirmLogical.mockResolvedValueOnce({
+      status: 'allow-logical-continuation',
+      operationToken: token,
+      continuation: { sourceThreadId: 'thread-1', threadId: 'destination' },
+    })
+    const send = h.client.submitHook({
+      ...descriptor,
+      target: 'local',
+      thread: 'thread-1',
+      followUp: 'local',
+      followUpThread: 'thread-1',
+    })
+    await vi.waitFor(() => expect(h.client.confirmation()?.logical?.recommended).toBe('linked'))
+    expect(h.client.confirmation()?.logical?.chain?.links[0]?.source).toBe('earlier')
+    h.client.confirmSubmission(true)
+    expect(h.channel.submissionConfirmLogical).not.toHaveBeenCalled()
+    h.client.confirmLogicalSubmission('linked', 'profile')
+    expect(await send).toEqual({
+      allow: true,
+      operationToken: token,
+      continuation: { sourceThreadId: 'thread-1', threadId: 'destination' },
+    })
+    expect(h.channel.submissionConfirmLogical).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'linked',
+      historyConsent: 'on-demand',
+      remember: 'profile',
+    }))
+    h.client.dispose()
+  })
+  it('carries a scoped logical turn ticket on an unchanged ordinary send', async () => {
+    const h = await harness(false, true)
+    h.channel.submissionPrepare.mockResolvedValueOnce({ status: 'allow-logical-turn', operationToken: token })
+    const send = { ...descriptor, target: 'local', thread: 'thread-1', followUp: 'local', followUpThread: 'thread-1' }
+    expect(await h.client.submitHook(send)).toEqual({ allow: true, operationToken: token })
+    expect(h.channel.submissionCancel).not.toHaveBeenCalled()
+    h.client.dispose()
+  })
+  it('fences another send when logical confirmation loses its response', async () => {
+    const h = await harness(true, true)
+    h.channel.submissionPrepare.mockResolvedValueOnce({
+      status: 'confirm-logical',
+      confirmationId: 'confirmation-token',
+      expectedSelectionRevision: 2,
+      recommended: 'linked',
+      forkAvailable: false,
+      linkedAvailable: true,
+    })
+    h.channel.submissionConfirmLogical.mockRejectedValueOnce(new Error('connection lost'))
+    const action = { ...descriptor, target: 'local', thread: 'thread-1', followUp: 'local', followUpThread: 'thread-1' }
+    const send = h.client.submitHook(action)
+    await vi.waitFor(() => expect(h.client.confirmation()?.logical).toBeDefined())
+    h.client.confirmLogicalSubmission('linked')
+    expect(await send).toEqual({ allow: false })
+    expect(h.client.snapshot().pending?.blockedReason).toBe('provider-switch-reconciliation-required')
+    expect(await h.client.submitHook(action)).toEqual({ allow: false })
+    expect(h.channel.submissionConfirmLogical).toHaveBeenCalledOnce()
+    expect(h.channel.submissionPrepare).toHaveBeenCalledOnce()
+    expect(h.notice).toHaveBeenLastCalledWith('provider-switch-reconciliation-required')
+    h.client.dispose()
+  })
   it('retains a native rejection of the next Send when an older channel returns no projection', async () => {
     const h = await harness(false, true)
     const target = { providerId: 'b', model: 'b-model', reasoningEffort: 'high' as const }

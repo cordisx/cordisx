@@ -31,6 +31,7 @@ export interface NativeAccountCapabilityDescriptor {
   readonly module: string
   readonly exportName: string
   readonly readerProperty?: 'accessInputs' | 'accountInfo'
+  readonly rspack?: { readonly moduleId: string; readonly definitionModule: string }
 }
 
 export interface NativeScriptResource {

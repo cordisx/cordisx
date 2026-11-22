@@ -10,6 +10,9 @@ import { ChannelAdminPairing } from '../launcher/channel-admin-pairing.js'
 import { receiveAdminPairing } from '../launcher/channel-admin-pairing-rpc.js'
 import { ChannelGroupGuidance } from '../launcher/channel-group-guidance.js'
 import { channelGroupGuidanceReply } from '../launcher/channel-group-guidance-reply.js'
+import { ChannelConversationStore } from '../launcher/channel-conversation-store.js'
+import { profileLogicalConversationOwner } from '../launcher/profile-logical-conversation-owner.js'
+import { logicalContinuationManagement } from '../launcher/logical-continuation-management.js'
 
 /** Finish every owned boundary even when an earlier cleanup reports a failure. */
 export function configuredLaunchCleanup(input: {
@@ -48,6 +51,8 @@ export async function createConfiguredChannelConsumer(input: {
   readonly service: LocalChannelService | undefined
   readonly homeDir: string
   readonly appId: string
+  readonly logicalRuntime?: boolean
+  readonly logicalOwnerOnly?: boolean
   readonly profileId: string
   readonly native: () => ChannelNativeSessions | undefined
   readonly report: (code: string) => void
@@ -57,10 +62,49 @@ export async function createConfiguredChannelConsumer(input: {
   const execution = (operation: string, args: Record<string, unknown>) =>
     chatExecutionOperation(input.native(), operation, args)
   if (!service) {
-    const tools = new ChannelConversationTools(() => undefined, undefined, input.documents, execution)
-    return { consumer: undefined, tools, dispose: async () => tools.dispose() }
+    const logicalOwner = input.logicalRuntime || input.logicalOwnerOnly
+      ? profileLogicalConversationOwner(
+        await ChannelConversationStore.open(
+          path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-conversations.json'),
+        ),
+      )
+      : undefined
+    const tools = new ChannelConversationTools(
+      () => undefined,
+      undefined,
+      input.documents,
+      execution,
+      undefined,
+      logicalOwner
+        ? async (operation, value) =>
+          await logicalContinuationManagement(
+            {
+              owner: logicalOwner,
+              appId: input.appId,
+              profileId: input.profileId,
+              available: true,
+              recoveryRequired: !!input.logicalOwnerOnly,
+            },
+            operation,
+            value,
+          )
+        : undefined,
+    )
+    return {
+      consumer: undefined,
+      tools,
+      logicalOwner,
+      dispose: async () => {
+        tools.dispose()
+        logicalOwner?.desktopChannelGrants.clear()
+        await logicalOwner?.store.close()
+      },
+    }
   }
   const consumer = await ChannelConversationConsumer.open({
+    appId: input.appId,
+    ...(input.logicalRuntime ? { logicalRuntime: true } : {}),
+    ...(input.logicalOwnerOnly ? { logicalRecoveryRequired: true } : {}),
     profileId: input.profileId,
     file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-conversations.json'),
     access: () => service.conversationAccess(),
@@ -117,6 +161,7 @@ export async function createConfiguredChannelConsumer(input: {
   return {
     consumer,
     tools,
+    logicalOwner: input.logicalRuntime || input.logicalOwnerOnly ? consumer.profileLogicalOwner() : undefined,
     dispose: () =>
       disposal ??= (async () => {
         disposeInputs()
@@ -140,9 +185,32 @@ export async function createConfiguredChannelConsumer(input: {
   }
 }
 
+/** Attach the optional Desktop recovery owner before its native peer admits input. */
+export async function createDesktopChannelConsumer(
+  input: Parameters<typeof createConfiguredChannelConsumer>[0] & {
+    logicalRecovery: boolean
+    nativeBootstrap?: import('../launcher/native-submission-composition.js').NativeSubmissionBootstrap
+  },
+) {
+  const configured = await createConfiguredChannelConsumer({
+    ...input,
+    ...(input.logicalRecovery && input.nativeBootstrap ? { logicalOwnerOnly: true } : {}),
+  })
+  try {
+    if (configured.logicalOwner && input.nativeBootstrap) {
+      input.nativeBootstrap.bindLogicalFenceOwner(configured.logicalOwner)
+    }
+    return configured
+  } catch (error) {
+    await configured.dispose()
+    throw error
+  }
+}
+
 /** All native and management Channel callers retain their real incoming metadata. */
 export function configuredChannelToolHandler(
   tools: import('../launcher/channel-conversation-tools.js').ChannelConversationTools | undefined,
+  consumer?: ChannelConversationConsumer,
 ) {
   return tools === undefined
     ? {}
@@ -150,7 +218,26 @@ export function configuredChannelToolHandler(
       channel: (operation: string, input: unknown, metadata?: unknown) => tools.call(operation, input, metadata),
       chatSettingsGuard: (operation: string, args: Record<string, unknown>, metadata?: unknown) =>
         tools.executionGuard(operation, args, metadata),
+      ...(consumer ? { logicalHistory: (params: unknown) => consumer.logicalHistoryCall(params) } : {}),
     }
+}
+
+export function desktopChannelCatalogOptions(
+  service: LocalChannelService | undefined,
+  consumer: ChannelConversationConsumer | undefined,
+  tools: ChannelConversationTools,
+  logicalOwner?: import('../launcher/profile-logical-conversation-owner.js').ProfileLogicalConversationOwner,
+) {
+  return {
+    ...(logicalOwner ? { logicalOwner } : {}),
+    channelName: (event: import('@cordisx/channel-runtime').ChannelEventRef) =>
+      service?.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
+    channelSectionName: () =>
+      consumer?.policy().policy.sidebarGroup === null
+        ? undefined
+        : consumer?.policy().policy.sidebarGroup ?? '外部连接',
+    ...configuredChannelToolHandler(tools, consumer),
+  }
 }
 
 /** Local management calls retain source context while allowing local-only inventory. */

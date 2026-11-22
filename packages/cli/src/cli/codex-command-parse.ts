@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { parseChatExecutionSettings } from '../chat-execution-settings.js'
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { isProjectlessDirectoryName } from '../agent-task-target.js'
 
 export interface CodexCommand {
   readonly operation: string
@@ -29,6 +31,11 @@ export async function parseCodexCommand(args: readonly string[], models = false)
     '--provider',
     '--model',
     '--project',
+    '--directory-name',
+    '--environment',
+    '--starting-state',
+    '--branch',
+    '--on-missing',
     '--message',
     '--title',
     '--operation',
@@ -194,19 +201,67 @@ export async function parseCodexCommand(args: readonly string[], models = false)
     input = await readInput(options['--input-file']!)
   } else if (!models && route === 'chats create') {
     operation = 'create'
-    accepted = ['--provider', '--model', '--fast', '--project', '--message', '--title', '--operation']
+    accepted = [
+      '--provider',
+      '--model',
+      '--fast',
+      '--effort',
+      '--project',
+      '--directory-name',
+      '--environment',
+      '--starting-state',
+      '--branch',
+      '--on-missing',
+      '--message',
+      '--title',
+      '--operation',
+    ]
     if (!options['--message'] || !options['--operation']) failure()
+    if (
+      ['--provider', '--model', '--project', '--directory-name', '--title', '--branch'].some(key =>
+        options[key] !== undefined && !options[key]
+      )
+    ) failure()
     if (options['--fast'] !== undefined && !['true', 'false'].includes(options['--fast'])) failure()
+    if (options['--directory-name'] !== undefined && !isProjectlessDirectoryName(options['--directory-name'])) failure()
+    if (options['--effort'] !== undefined && !isModelReasoningEffort(options['--effort'])) {
+      throw new Error('INVALID_REASONING_EFFORT')
+    }
+    const project = options['--project'], environment = options['--environment'] ?? 'local'
+    const starting = options['--starting-state'], branch = options['--branch'], onMissing = options['--on-missing']
+    if (
+      !['local', 'worktree'].includes(environment)
+      || options['--environment'] !== undefined && !project
+      || project && options['--directory-name'] !== undefined
+      || starting !== undefined && (environment !== 'worktree' || !['working-tree', 'branch'].includes(starting))
+      || branch !== undefined && starting !== 'branch' || starting === 'branch' && !branch
+      || onMissing !== undefined && (starting !== 'branch' || !['error', 'create-branch'].includes(onMissing))
+    ) failure()
+    const target = project
+      ? {
+        type: 'project',
+        projectId: project,
+        environment: environment === 'local' ? { type: 'local' } : {
+          type: 'worktree',
+          ...(starting === undefined ? {} : {
+            startingState: starting === 'working-tree' ? { type: 'working-tree' } : {
+              type: 'branch',
+              branchName: branch!,
+              ...(onMissing ? { onMissing } : {}),
+            },
+          }),
+        },
+      }
+      : { type: 'projectless', ...(options['--directory-name'] ? { directoryName: options['--directory-name'] } : {}) }
     input = {
       ...(options['--provider'] ? { providerId: options['--provider'] } : {}),
       ...(options['--model'] ? { model: options['--model'] } : {}),
       ...(options['--fast'] === undefined ? {} : { fast: options['--fast'] === 'true' }),
+      ...(options['--effort'] === undefined ? {} : { thinking: options['--effort'] }),
       prompt: options['--message'],
       operationId: options['--operation'],
       ...(options['--title'] ? { title: options['--title'] } : {}),
-      target: options['--project']
-        ? { type: 'project', projectId: options['--project'], environment: { type: 'local' } }
-        : { type: 'projectless' },
+      target,
     }
   } else throw new Error('INVALID_CODEX_COMMAND')
   if (Object.keys(options).some(key => !scopes.includes(key) && !accepted.includes(key))) failure()
