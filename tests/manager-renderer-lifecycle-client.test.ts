@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import type { RendererPluginMutation } from '../packages/cli/src/renderer/runtime-shared.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const rendererId = 'a'.repeat(64)
 const scope = { profileId: 'work', generation: 'owner-1', rendererId }
@@ -46,6 +47,63 @@ const rollback = {
   active: base,
   disposedAfter: candidate,
 }
+
+it('acknowledges only an adopted, renderer-scoped Channel permission snapshot', async () => {
+  const { runtime } = fixture()
+  const adopt = vi.fn(async () => true)
+  const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, onPermissionPolicy: adopt })
+  const identity = { id: 'channel', source: `https://renderer.cordisx.invalid/plugin/${'b'.repeat(64)}` }
+  const [record] = exactDomPermissionPolicies(scope.profileId, [{
+    id: identity.id,
+    entry: '/fixture.js',
+    pointIds: ['manager.content'],
+  }])
+  const candidate = [{
+    ...record!,
+    key: { ...record!.key, identity: { ...record!.key.identity, source: identity.source } },
+  }]
+  const payload = {
+    rendererId,
+    ownerGeneration: scope.generation,
+    handoffId: 'c'.repeat(64),
+    requestId: 'request-1',
+    origin: false,
+    identity,
+    moduleGeneration: 'channel-1',
+    expected: [],
+    updates: candidate,
+    candidate,
+  }
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(await client.handle(command(2, 'permission-policy', payload))).toMatchObject({
+      ok: true,
+      value: {
+        rendererId,
+        ownerGeneration: scope.generation,
+        handoffId: payload.handoffId,
+        requestId: payload.requestId,
+        moduleGeneration: 'channel-1',
+        adopted: true,
+      },
+    })
+    expect(adopt).toHaveBeenCalledExactlyOnceWith({
+      requestId: payload.requestId,
+      origin: false,
+      identity,
+      moduleGeneration: 'channel-1',
+      expected: [],
+      updates: candidate,
+      candidate,
+    })
+    expect(await client.handle(command(3, 'permission-policy', { ...payload, rendererId: 'd'.repeat(64) })))
+      .toMatchObject({ ok: false })
+    expect(client.closed).toBe(true)
+    expect(adopt).toHaveBeenCalledOnce()
+  } finally {
+    await client.close()
+  }
+})
 
 it('acknowledges only the scoped pending Desktop configuration adoption', async () => {
   const { runtime } = fixture()

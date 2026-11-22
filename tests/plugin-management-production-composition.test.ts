@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run-command.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
 import type { DesktopOwnerRendererLifecycle } from '../packages/cli/src/cli/desktop-owner-renderer-lifecycle.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -89,6 +90,25 @@ describe('production plugin management composition', () => {
     await expect(openProductionPluginManagementComposition({ ...input, mode: 'service' })).rejects.toThrow(
       'manager-consumer-fence-scope-invalid',
     )
+    const proof = new ManagerPermissionProofAuthority({
+      profileId,
+      generation: runtimeGeneration,
+      isCurrent: () => true,
+    })
+    try {
+      await expect(openProductionPluginManagementComposition({
+        ...input,
+        rendererPermissionPolicy: {
+          bootstrap: {} as never,
+          proof,
+          reserveOtherConsumers: async () => {
+            throw new Error('unexpected reservation')
+          },
+        },
+      })).rejects.toThrow('manager-consumer-fence-scope-invalid')
+    } finally {
+      proof.close()
+    }
   })
 
   it('shares the active lifecycle coordinator across renderer and RPC access', async () => {

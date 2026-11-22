@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { createManagerRendererGraphSession } from '../packages/cli/src/cli/manager-renderer-graph-session.js'
 import { managerFixtureActivation, managerRendererGraphFixture } from './fixtures/manager-renderer-graph.js'
 import { EMPTY_PROJECTION } from '../packages/cli/src/renderer/channel-manager-projection.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const forbidden = ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)]
 const rendererId = '4'.repeat(64)
@@ -58,6 +59,62 @@ it('forwards only a bounded owner quiescence fence', () => {
   expect(() => invalid.projectCommand(command('quiesce', 1, { fenceId: 'invalid' })))
     .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
   expect(invalid.closed).toBe(true)
+})
+
+it('projects a Channel permission handoff only for its active graph and session alias', async () => {
+  const fixture = await managerRendererGraphFixture()
+  try {
+    const lease = await fixture.lease('channel-generation')
+    const graph = { ...descriptor(lease), pluginId: 'channel' }
+    const identity = { id: 'channel', source: `https://renderer.cordisx.invalid/plugin/${'a'.repeat(64)}` }
+    const [record] = exactDomPermissionPolicies(baseInput.profileId, [{
+      id: identity.id,
+      entry: '/fixture.js',
+      pointIds: ['manager.content'],
+    }])
+    const candidate = [{
+      ...record!,
+      key: { ...record!.key, identity: { ...record!.key.identity, source: identity.source } },
+    }]
+    const payload = {
+      rendererId,
+      ownerGeneration: baseInput.generation,
+      handoffId: 'b'.repeat(64),
+      requestId: 'request-1',
+      origin: false,
+      identity,
+      moduleGeneration: 'channel-generation',
+      expected: [],
+      updates: candidate,
+      candidate,
+    }
+    const session = createManagerRendererGraphSession(baseInput)
+    session.projectInitial([graph])
+    expect(session.projectCommand(command('permission-policy', 1, payload))).toEqual(
+      command('permission-policy', 1, payload),
+    )
+    session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+    session.close()
+    for (
+      const bad of [
+        { ...payload, rendererId: '5'.repeat(64) },
+        { ...payload, moduleGeneration: 'other' },
+        { ...payload, requestId: 'wrong request' },
+        { ...payload, identity: { ...identity, source: 'https://example.test/private' } },
+        { ...payload, candidate: [candidate[0]!, candidate[0]!] },
+        { ...payload, updates: [] },
+        { ...payload, candidate: [] },
+      ]
+    ) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([graph])
+      expect(() => target.projectCommand(command('permission-policy', 1, bad)))
+        .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+      expect(target.closed).toBe(true)
+    }
+  } finally {
+    await fixture.close()
+  }
 })
 
 it('forwards only the redacted Channel view for this exact renderer and revision', () => {

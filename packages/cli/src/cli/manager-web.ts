@@ -62,6 +62,7 @@ const rendererChannelAllowlist = new Set([
   'model-services',
   'service-config',
   'marketplace',
+  'permission-policy',
 ])
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -119,6 +120,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     graphs?: ReturnType<typeof createManagerRendererGraphSession>
     rendererBootstrap?: ReturnType<typeof createManagerRendererBootstrap>
     rendererBundle?: Promise<Awaited<ReturnType<ReturnType<typeof createManagerRendererBootstrap>['prepare']>>>
+    rendererPermissionKey?: string
     resources?: Set<ServerResponse>
     observations?: ManagerObservationPolls
   }
@@ -537,7 +539,13 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             ? json(response, 200, { closed: true })
             : json(response, 503, { error: 'RENDERER_CLOSE_UNAVAILABLE' })
         }
-        if (Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
+        const needsPermissionKey = url.pathname === '/api/renderer/bootstrap'
+          && session.rendererChannels.includes('permission-policy')
+        if (
+          needsPermissionKey
+            ? Object.keys(input).length !== 1 || !object(input.permissionPublicKey)
+            : Object.keys(input).length !== 0
+        ) return json(response, 400, { error: 'INVALID_REQUEST' })
         if (!session.rendererBootstrap || !session.rendererOpen) {
           return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         }
@@ -554,7 +562,14 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             generation: handle.ownerGeneration,
           })
         }
-        session.rendererBundle ??= session.rendererBootstrap.prepare()
+        const permissionKey = needsPermissionKey ? JSON.stringify(input.permissionPublicKey) : undefined
+        if (session.rendererBundle && session.rendererPermissionKey !== permissionKey) {
+          return json(response, 400, { error: 'INVALID_REQUEST' })
+        }
+        if (!session.rendererBundle) {
+          if (permissionKey !== undefined) session.rendererPermissionKey = permissionKey
+          session.rendererBundle = session.rendererBootstrap.prepare(input.permissionPublicKey)
+        }
         try {
           const built = await session.rendererBundle
           if (!activeSession() || !await session.rendererBootstrap.isSessionCurrent() || !activeSession()) {

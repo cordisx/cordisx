@@ -1,4 +1,5 @@
 import type { CordisXPluginManifestV16 } from '../channel-exact-request-permissions.js'
+import type { StandaloneDomPolicyAdopter } from '../standalone-permission-contract.js'
 import type { DeferredPermissionDecision } from '../permission-deferral.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
@@ -309,6 +310,11 @@ export interface CordisXRuntimeMetadata {
   /** Host-private owner and resource check supplied by the standalone session. */
   readonly standaloneReviewSession?: () => Promise<boolean>
   readonly standaloneWriteUncertain?: () => void
+  /** One-shot Host registration; removed before metadata reaches runtime or plugins. */
+  readonly standalonePolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void
+  /** Session-private signer; removed before metadata reaches runtime or plugins. */
+  readonly standalonePermissionSigner?:
+    import('../independent-manager/standalone-permission-signer.js').StandalonePermissionSigner
   /** Host-only presentation preview; never exposed through plugin Contexts. */
   readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */

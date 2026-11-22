@@ -20,6 +20,7 @@ import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-gra
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
@@ -31,16 +32,19 @@ import { ServiceRendererConfiguredChannel } from './service-renderer-configured-
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import { allowsManagementWrite, projectManagementRequest } from './service-renderer-management-projection.js'
 import { serviceRendererManagementEntry } from './service-renderer-management-entry.js'
-import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
-import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
+import type { ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
+import { ServiceRendererPermissionAccess } from './service-renderer-permission-access.js'
+import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
+import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
+import { mutateServiceRendererConfiguredChannel } from './service-renderer-channel-handoff.js'
 import {
   type DesktopConfigProjector,
   desktopPackageConfigBundleOptions,
@@ -70,6 +74,7 @@ export class ServiceRendererBootstrap {
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
   private readonly ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>
   private readonly lifecycleHandoff: ServiceRendererLifecycleHandoff
+  private readonly permissionAccess: ServiceRendererPermissionAccess
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
   private closed = false
@@ -96,6 +101,8 @@ export class ServiceRendererBootstrap {
       readonly experimentalChannelServiceConfig?: boolean
       /** The owner also supplied the private, coordinated credential bridge. */
       readonly experimentalChannelCredentials?: boolean
+      /** Owner-created verifier, enabled only with an independently coordinated policy channel. */
+      readonly permissionProof?: Pick<ManagerPermissionProofAuthority, 'register'>
       /** Service owner only: the full lifecycle federation and owner plan cleanup are available. */
       readonly restrictedManagement?: {
         readonly available: () => boolean
@@ -120,6 +127,18 @@ export class ServiceRendererBootstrap {
     this.pluginConfigFence = input.protectProfileInputs
       ? new SharedProfilePluginConfigFence(input.configPath, input.profileId)
       : undefined
+    this.permissionAccess = new ServiceRendererPermissionAccess({
+      profileId: input.profileId,
+      generation: input.generation,
+      channel: () => this.configuredChannel,
+      permissionFence: this.permissionFence,
+      entries: this.entries,
+      participants: input.participants,
+      lifecycle: input.lifecycle,
+      readLifetimes: this.readLifetimes,
+      policies: async () => await this.policies(),
+      current: (rendererId, entry) => this.current(rendererId, entry),
+    })
     this.lifecycleHandoff = new ServiceRendererLifecycleHandoff({
       homeDir: input.homeDir,
       configPath: input.configPath,
@@ -172,6 +191,11 @@ export class ServiceRendererBootstrap {
     }
     this.managedServiceUI = bridge
     return true
+  }
+
+  /** Match the exact verifier shared by bootstrap and the owner policy channel. */
+  usesPermissionProof(proof: ManagerPermissionProofAuthority): boolean {
+    return !this.closed && this.input.permissionProof === proof
   }
 
   private current(rendererId: string, entry: Entry): boolean {
@@ -377,102 +401,53 @@ export class ServiceRendererBootstrap {
     origin: ManagerOriginFence,
     action: () => Promise<HostServiceConfigMutationResult>,
   ): Promise<HostServiceConfigMutationResult> {
-    const rendererId = origin.rendererId
-    const channel = this.configuredChannel
-    const pluginFence = this.pluginConfigFence
-    const ownerLive = () => {
-      try {
-        return isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
-      } catch {
-        return false
-      }
-    }
-    if (!channel || !pluginFence || !ownerLive()) throw new Error('renderer-configured-channel-unavailable')
-    const cohort = this.input.participants.ownerPeers().map(peer => {
-      const id = peer.identity.rendererId
-      const entry = this.entries.get(id)
-      const configured = entry?.configuredChannel
-      if (
-        !entry || entry.peer !== peer || !configured || entry.channelTransition || entry.lifecycleTransition
-        || !this.current(id, entry) || !configured.isCurrent()
-      ) throw new Error('renderer-configured-channel-unavailable')
-      return { id, entry, configured, peer }
-    })
-    if (!cohort.some(item => item.id === rendererId) || !ownerLive()) {
-      throw new Error('renderer-configured-channel-unavailable')
-    }
-    for (const { entry } of cohort) entry.channelTransition = { isCurrent: ownerLive }
-    let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspendAll']>> | undefined
-    try {
-      await Promise.allSettled(cohort.flatMap(({ entry }) => [...entry.checks]))
-      if (
-        !ownerLive() || cohort.some(({ id, entry, configured }) => !this.current(id, entry) || !configured.isCurrent())
-      ) {
-        throw new Error('renderer-configured-channel-unavailable')
-      }
-      reservation = await channel.bridge.suspendAll(cohort.map(item => item.id))
-      const drained = await Promise.all(cohort.map(async item => await this.readLifetimes.drainCurrent(item.id)))
-      if (drained.some(value => !value) || !reservation.isCurrent() || !ownerLive()) {
-        throw new Error('renderer-configured-channel-unavailable')
-      }
-      const result = await pluginFence.runServiceMutation({
-        pluginId: 'channel',
-        serviceId: 'runtime',
-        isCurrent: () =>
-          ownerLive() && reservation!.isCurrent()
-          && cohort.every(({ id, entry }) => this.current(id, entry)),
-      }, async () => {
-        const value = await action()
-        if (value.status === 'applied') {
-          for (const { id, configured } of cohort) {
-            await configured.handoff(reservation!.forRenderer(id), {
-              generation: value.serviceGeneration,
-              revision: value.revision,
-            })
-          }
-        } else if (value.status === 'conflict' || value.status === 'rejected') {
-          for (const { id, configured } of cohort) await configured.handoff(reservation!.forRenderer(id))
-        } else {
-          throw new Error('renderer-configured-channel-result-uncertain')
-        }
-        return value
-      })
-      if (!ownerLive() || !reservation.release()) {
-        throw new Error('renderer-configured-channel-result-uncertain')
-      }
-      for (const { entry } of cohort) delete entry.channelTransition
-      if (result.status === 'applied') {
-        // The writer adopts its own receipt; other pages confirm the new view
-        // before the write fence is released, without unmounting their drafts.
-        await Promise.all(
-          cohort.filter(item => item.id !== rendererId).map(async item => {
-            const receipt = await item.peer.request('channel-configuration', {
-              rendererId: item.id,
-              ownerGeneration: this.input.generation,
-              revision: result.revision,
-              projection: item.configured.handoffProjection(),
-            })
-            if (
-              !attachmentEqual(receipt, {
-                rendererId: item.id,
-                ownerGeneration: this.input.generation,
-                revision: result.revision,
-                adopted: true,
-              })
-            ) throw new Error('renderer-configured-channel-result-uncertain')
-          }),
-        )
-      }
-      if (!ownerLive()) throw new Error('renderer-configured-channel-result-uncertain')
-      return result
-    } catch (error) {
-      reservation?.fence()
-      for (const { entry } of cohort) {
-        delete entry.channelTransition
-        entry.peer.close()
-      }
-      throw error
-    }
+    return await mutateServiceRendererConfiguredChannel(
+      {
+        generation: this.input.generation,
+        channel: this.configuredChannel,
+        pluginFence: this.pluginConfigFence,
+        entries: this.entries,
+        participants: this.input.participants,
+        lifecycle: this.input.lifecycle,
+        readLifetimes: this.readLifetimes,
+        current: (rendererId, entry) => this.current(rendererId, entry),
+      },
+      origin,
+      action,
+    )
+  }
+
+  permissionSnapshot(context: ManagerRendererChannelContext): readonly CordisXPersistedPermissionPolicyRecord[] {
+    return this.permissionAccess.snapshot(context)
+  }
+
+  resolvePermissionPolicies(
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+    context: ManagerRendererChannelContext,
+  ): readonly CordisXPersistedPermissionPolicyRecord[] {
+    return this.permissionAccess.resolve(records, context)
+  }
+
+  projectPermissionPolicies(
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+    context: ManagerRendererChannelContext,
+  ): readonly CordisXPersistedPermissionPolicyRecord[] {
+    return this.permissionAccess.project(records, context)
+  }
+
+  permissionEvidence(context: ManagerRendererChannelContext) {
+    return this.permissionAccess.evidence(context)
+  }
+
+  async reservePermissionPolicy(
+    origin: ManagerOriginFence,
+    context: ManagerRendererChannelContext,
+    requestId: string,
+    expected: readonly CordisXPersistedPermissionPolicyRecord[],
+    updates: readonly CordisXPersistedPermissionPolicyRecord[],
+    consumers: ServiceRendererPermissionConsumerFence,
+  ) {
+    return await this.permissionAccess.reserve(origin, context, requestId, expected, updates, consumers)
   }
 
   async prepare(rendererId: string): Promise<unknown> {
@@ -671,18 +646,31 @@ export class ServiceRendererBootstrap {
     context: ManagerRendererChannelContext,
     managerOrigin: string,
     rawGraphs: unknown,
+    permissionPublicKey?: unknown,
   ): Promise<unknown> {
     const rendererId = context.rendererId
     const entry = this.entries.get(rendererId)
     if (!entry || !entry.preparing || entry.channelTransition || entry.lifecycleTransition) {
       throw new Error('renderer-bootstrap-unavailable')
     }
+    if (
+      this.input.permissionProof === undefined
+        ? permissionPublicKey !== undefined
+        : !permissionPublicKey || typeof permissionPublicKey !== 'object' || Array.isArray(permissionPublicKey)
+          || context.admitted === true
+    ) throw new Error('renderer-bootstrap-unavailable')
+    const permissionKey = permissionPublicKey === undefined ? undefined : JSON.stringify(permissionPublicKey)
+    if (permissionKey !== undefined && (typeof permissionKey !== 'string' || permissionKey.length > 1024)) {
+      throw new Error('renderer-bootstrap-unavailable')
+    }
     await entry.preparing
     if (entry.completing) {
+      if (entry.permissionKey !== permissionKey) throw new Error('renderer-bootstrap-unavailable')
       const result = await entry.completing
       if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
       return result
     }
+    if (permissionKey !== undefined) entry.permissionKey = permissionKey
     entry.completing = (async () => {
       try {
         if (
@@ -803,6 +791,7 @@ export class ServiceRendererBootstrap {
           generation: this.input.generation,
           permission: {
             profileId: this.input.profileId,
+            ...(this.input.permissionProof === undefined ? {} : { bridgeToken: STANDALONE_PERMISSION_BINDING_MARKER }),
             policies: configured === undefined ? projectedPolicies : [
               ...projectedPolicies.filter(policy => policy.key.identity.pluginId !== 'channel'),
               ...configured.policies,
@@ -861,6 +850,7 @@ export class ServiceRendererBootstrap {
             : (alias, pluginId) => entry.identity!.resolveLifecycle(context, alias, pluginId),
         )
         entry.bootstrapConfirmed = true
+        this.input.permissionProof?.register(context, permissionPublicKey)
         return result
       } catch (error) {
         this.retire(rendererId, entry)
@@ -948,13 +938,15 @@ export class ServiceRendererBootstrap {
           }
         }
         if (
-          item.action === 'complete' && Object.keys(item).length === 3
+          item.action === 'complete' && Object.keys(item).length === (this.input.permissionProof ? 4 : 3)
           && typeof item.managerOrigin === 'string' && Array.isArray(item.graphs)
-          && Object.keys(item).every(key => ['action', 'managerOrigin', 'graphs'].includes(key))
+          && Object.keys(item).every(key => ['action', 'managerOrigin', 'graphs', 'permissionPublicKey'].includes(key))
+          && (this.input.permissionProof === undefined || Object.hasOwn(item, 'permissionPublicKey'))
         ) {
           return {
             mode: 'read',
-            dispatch: async () => await this.complete(context, item.managerOrigin as string, item.graphs),
+            dispatch: async () =>
+              await this.complete(context, item.managerOrigin as string, item.graphs, item.permissionPublicKey),
           }
         }
         throw new Error('renderer-bootstrap-unavailable')

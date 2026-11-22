@@ -9,9 +9,21 @@ import { BrowserPermissionPolicyStore, MemoryPermissionPolicyStore } from './pla
 import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 
 /** Select policy persistence according to the actual Host, not page origin. */
-export function createRuntimePermissionStore(metadata: CordisXRuntimeMetadata) {
+export function createRuntimePermissionStore(
+  metadata: CordisXRuntimeMetadata,
+  sign?: import('../independent-manager/standalone-permission-signer.js').StandalonePermissionSigner['sign'],
+) {
   if (metadata.permissionBridgeToken !== undefined) {
-    return BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
+    return BindingPermissionPolicyStore.connect(
+      metadata.permissionBridgeToken,
+      metadata.permissionPolicies ?? [],
+      metadata.hostKind !== 'standalone'
+        ? undefined
+        : {
+          ...(metadata.standaloneWriteUncertain === undefined ? {} : { onUnknown: metadata.standaloneWriteUncertain }),
+          ...(sign === undefined ? {} : { sign }),
+        },
+    )
   }
   if (metadata.hostKind === 'standalone') return ownerSnapshotPermissionStore(metadata.permissionPolicies ?? [])
   if (metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined) {

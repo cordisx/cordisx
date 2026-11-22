@@ -14,7 +14,10 @@ import { channelConfigurationApi } from '../../packages/cli/src/cli/renderer-cha
 import { ReadonlyChannelRendererBridge } from '../../packages/cli/src/cli/readonly-channel-renderer-bridge.js'
 import { ServiceRendererParticipants } from '../../packages/cli/src/cli/service-renderer-participant.js'
 import { createServiceRendererProjector } from '../../packages/cli/src/cli/service-renderer-projection.js'
-import { ManagerRendererSessions } from '../../packages/cli/src/cli/manager-renderer-sessions.js'
+import {
+  type ManagerRendererChannelContext,
+  ManagerRendererSessions,
+} from '../../packages/cli/src/cli/manager-renderer-sessions.js'
 import { createProductionManagedServiceLifecycle } from '../../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../../packages/cli/src/cli/manager-managed-service-ui.js'
 import { reserveServiceOwnerLifecycle } from '../../packages/cli/src/cli/service-owner-lifecycle-fence.js'
@@ -58,7 +61,7 @@ export async function fixture(
     managedUiGrant?: boolean
     managedStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
     protectProfileInputs?: boolean
-    writeDispatch?: () => Promise<unknown>
+    writeDispatch?: (context: ManagerRendererChannelContext, payload: unknown) => Promise<unknown>
     readDispatch?: () => Promise<unknown>
     channelArchive?: string
     channelUiGrant?: boolean
@@ -69,6 +72,7 @@ export async function fixture(
     channelCredentialValidate?: () => Promise<void>
     channelCredentialCleanupFails?: boolean
     channelCredentialCommitUnknown?: boolean
+    permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
     browserManagement?: boolean
     coordinateLifecycle?: boolean
     projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
@@ -328,6 +332,7 @@ export async function fixture(
       : {}),
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
     experimentalChannelCredentials: options.channelCredentials === true,
+    ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {
         plugin: options.channelOwnerMismatch
@@ -462,7 +467,12 @@ export async function fixture(
       ...(options.writeDispatch === undefined ? [] : [
         [
           'fixture-write',
-          { prepare: () => ({ mode: 'write' as const, dispatch: options.writeDispatch! }) },
+          {
+            prepare: (payload: unknown, context: ManagerRendererChannelContext) => ({
+              mode: 'write' as const,
+              dispatch: async () => await options.writeDispatch!(context, payload),
+            }),
+          },
         ] as const,
       ]),
       ...(options.readDispatch === undefined ? [] : [

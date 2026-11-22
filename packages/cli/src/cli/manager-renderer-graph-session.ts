@@ -4,6 +4,7 @@ import { normalizePluginActivation } from '../launcher/plugin-activation.js'
 import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import { normalizeProjection as normalizeChannelProjection } from '../renderer/channel-manager-projection.js'
 import { isStandaloneConfigOperations } from '../renderer/standalone-desktop-package-config-binding.js'
+import { parseStandalonePolicyHandoff } from '../independent-manager/standalone-policy-handoff.js'
 import {
   createSessionPluginGraphProjection,
   type ProjectedGraphResponse,
@@ -283,6 +284,7 @@ export function createManagerRendererGraphSession(input: {
             'channel-configuration',
             'managed-service-state',
             'desktop-package-configuration',
+            'permission-policy',
           ].includes(
             command.method,
           )
@@ -354,6 +356,15 @@ export function createManagerRendererGraphSession(input: {
             ...Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'privateGraphs')),
             graphs: staged.map(entry => entry.publicGraph),
           }
+        } else if (command.method === 'permission-policy') {
+          if (transaction !== undefined) throw invalid()
+          const handoff = parseStandalonePolicyHandoff(payload, {
+            profileId: input.profileId,
+            generation: input.generation,
+            rendererId: input.rendererId,
+          })
+          if (active.get('channel')?.descriptor.moduleGeneration !== handoff.moduleGeneration) throw invalid()
+          payload = handoff as unknown as Record<string, unknown>
         } else if (command.method === 'desktop-package-configuration') {
           if (
             transaction !== undefined || Object.keys(payload).length !== 9

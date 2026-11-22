@@ -226,13 +226,14 @@ export interface ManagerModel {
   readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
   /** False when the active owner only supplies a permission snapshot. */
   readonly permissionPolicyWritable?: boolean
-  /** Host-private, one-tab review of an owner-selected configured Channel page. */
+  /** Host-private review of an owner-selected configured Channel page. */
   readonly standaloneDomReview?: {
     describe(identity: CordisXPluginIdentity, pointId: string):
       | Readonly<{
         version: string
         integrity: string
         authorized: boolean
+        persistentAvailable?: boolean
       }>
       | undefined
     request(identity: CordisXPluginIdentity, pointId: string): Promise<boolean>

@@ -69,6 +69,7 @@ import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { createStandaloneDesktopPackageConfigBridge } from './standalone-desktop-package-config-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { prepareAgentContextBootstrap } from './agent-context-binding.js'
+import { prepareStandalonePolicyRuntime } from './standalone-policy-runtime.js'
 import { createRuntimePermissionStore } from './runtime-permission-store.js'
 import { createRuntimeManagementBindings } from './runtime-management-bindings.js'
 import { PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
@@ -90,7 +91,7 @@ import {
 import { createBrowserHostDomWorkerEnvironment, type HostDomWorkerEnvironment } from './host-dom-worker.js'
 import { TransientCanvasCoordinator } from './transient-canvas.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
-import { type EntityPrincipalBinding } from './entities.js'
+import { createEntityPrincipalBindings } from './entity-principal-bindings.js'
 import {
   CordisXInternalRendererBootstrap,
   CordisXRuntimeHandle,
@@ -122,7 +123,8 @@ export async function start(
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
   options.signal?.throwIfAborted()
 
-  const { metadata: safeMetadata, bridge: agentContextBridge } = prepareAgentContextBootstrap(metadata)
+  const policyRuntime = prepareStandalonePolicyRuntime(metadata)
+  const { metadata: safeMetadata, bridge: agentContextBridge } = prepareAgentContextBootstrap(policyRuntime.metadata)
   metadata = safeMetadata
 
   let ctx = new Context()
@@ -164,7 +166,7 @@ export async function start(
         metadata.iconThemePreference,
       )
   let disposeIconThemePreferenceSubscription: (() => void) | undefined
-  const permissionStore = createRuntimePermissionStore(metadata)
+  const permissionStore = createRuntimePermissionStore(metadata, policyRuntime.sign)
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
@@ -173,18 +175,9 @@ export async function start(
     ? undefined
     : new BrowserOwnerDocumentBridge()
   const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
-  const entityPrincipalBindings = new Map<string, EntityPrincipalBinding>()
-  const registerEntityBindings = (bindings: CordisXRuntimeMetadata['ownerDocumentBindings']): void => {
-    for (const binding of bindings ?? []) {
-      if (binding.installationId !== undefined && binding.pluginGeneration !== undefined) {
-        entityPrincipalBindings.set(
-          JSON.stringify([binding.source, binding.pluginId, binding.moduleGeneration]),
-          binding as EntityPrincipalBinding,
-        )
-      }
-    }
-  }
-  registerEntityBindings(metadata.ownerDocumentBindings)
+  const { bindings: entityPrincipalBindings, register: registerEntityBindings } = createEntityPrincipalBindings(
+    metadata.ownerDocumentBindings,
+  )
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
@@ -503,6 +496,7 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
+    policyRuntime.register(broker, options.signal, metadata.standaloneWriteUncertain)
     if (certifiedPermissionChannel !== undefined) {
       certifiedPermissionChannel.replaceSink(broker)
     } else if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {

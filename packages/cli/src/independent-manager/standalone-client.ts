@@ -1,4 +1,5 @@
 import type { CordisXRuntimeHandle } from '../renderer/runtime-shared.js'
+import type { StandaloneDomPolicyAdopter } from '../standalone-permission-contract.js'
 import {
   createManagerRendererGraphLoader,
   type ManagerRendererGraph,
@@ -13,6 +14,7 @@ import {
 import { createManagerRendererLifecycleClient, type ManagerRendererStageLoader } from './lifecycle-client.js'
 import { startManagerRendererLifecyclePump } from './lifecycle-pump.js'
 import { createManagerResourceAuthClient, type ManagerResourceAuthClient } from './resource-auth-client.js'
+import { createStandalonePermissionSigner, type StandalonePermissionSigner } from './standalone-permission-signer.js'
 
 const tokenPattern = /^[a-f0-9]{64}$/u
 const scopePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -30,6 +32,8 @@ type Composition = {
     signal: AbortSignal,
     verifySession: () => Promise<boolean>,
     onResultUnknown: () => void,
+    registerPolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void,
+    permissionSigner?: StandalonePermissionSigner,
   ): Promise<CordisXRuntimeHandle>
 }
 type Browser = Window & {
@@ -138,6 +142,8 @@ export function startStandaloneManager(input: {
   let resourceAuth: ManagerResourceAuthClient | undefined
   let removeBindings: ReturnType<typeof installIndependentHostBindings> | undefined
   let runtime: Runtime | undefined
+  let policyAdopter: StandaloneDomPolicyAdopter | undefined
+  let permissionSigner: StandalonePermissionSigner | undefined
   let graphLoader: ManagerRendererStageLoader | undefined
   let lifecycle: ReturnType<typeof createManagerRendererLifecycleClient> | undefined
   let pump: ReturnType<typeof startManagerRendererLifecyclePump> | undefined
@@ -265,6 +271,9 @@ export function startStandaloneManager(input: {
     closed = true
     settleRendererAdmission(false)
     lifetime.abort()
+    policyAdopter = undefined
+    permissionSigner?.close()
+    permissionSigner = undefined
     if (heartbeat !== undefined) clearInterval(heartbeat)
     if (navigationTimer !== undefined) clearTimeout(navigationTimer)
     browser.removeEventListener('beforeunload', onBeforeUnload)
@@ -430,11 +439,25 @@ export function startStandaloneManager(input: {
           heartbeatRunning = false
         })
       }, heartbeatMilliseconds)
-      const bootstrap = record(await post('/api/renderer/bootstrap', {}, token), [
-        'status',
-        'bundleUrl',
-        'initialGraphs',
-      ])
+      if (opened.channels.includes('permission-policy')) {
+        const creating = createStandalonePermissionSigner(scope, { crypto: browser.crypto })
+        void creating.then(signer => {
+          if (closed) signer.close()
+        }, () => undefined)
+        permissionSigner = await bounded(creating, lifetime.signal, bootMilliseconds)
+      }
+      const bootstrap = record(
+        await post(
+          '/api/renderer/bootstrap',
+          permissionSigner === undefined ? {} : { permissionPublicKey: permissionSigner.publicKey },
+          token,
+        ),
+        [
+          'status',
+          'bundleUrl',
+          'initialGraphs',
+        ],
+      )
       if (bootstrap.status !== 'ok' || bootstrap.bundleUrl !== bundleUrl || !Array.isArray(bootstrap.initialGraphs)) {
         throw new Error('manager-bootstrap-unavailable')
       }
@@ -460,6 +483,13 @@ export function startStandaloneManager(input: {
           lifetime.signal,
           verifyReviewSession,
           () => fail('result-unknown'),
+          (adopt: StandaloneDomPolicyAdopter) => {
+            if (closed || policyAdopter !== undefined || typeof adopt !== 'function') {
+              throw new Error('manager-policy-adoption-unavailable')
+            }
+            policyAdopter = adopt
+          },
+          permissionSigner,
         )
       )
       void starting.then(started => {
@@ -496,6 +526,10 @@ export function startStandaloneManager(input: {
           await (startedRuntime.confirmStandaloneManagedServiceState?.(value) ?? Promise.resolve(false)),
         onDesktopPackageConfiguration: async value =>
           await (startedRuntime.adoptStandaloneDesktopPackageConfig?.(value) ?? Promise.resolve(false)),
+        onPermissionPolicy: async value => {
+          const adopt = policyAdopter
+          return !closed && adopt !== undefined && await adopt(value) && !closed
+        },
         onQuiesce: async () => {
           // Do not acknowledge a fence while an operation may have written or
           // while resource recovery has an unresolved result.

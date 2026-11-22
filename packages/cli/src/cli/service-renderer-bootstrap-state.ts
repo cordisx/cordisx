@@ -58,4 +58,5 @@ export type ServiceRendererBootstrapEntry = {
   lifecycleTransition?: { readonly isCurrent: () => boolean }
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
+  permissionKey?: string
 }

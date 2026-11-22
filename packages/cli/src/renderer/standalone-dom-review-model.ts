@@ -13,7 +13,7 @@ export function createStandaloneDomReviewModel(
   const gate = standaloneDomReview(broker)
   if (metadata.hostKind !== 'standalone' || verifySession === undefined || gate === undefined) return undefined
 
-  const select = (identity: CordisXPluginIdentity, pointId: string) => {
+  const select = (identity: CordisXPluginIdentity, pointId: string, requireReview = true) => {
     if (runtime.disposed || !isStandaloneDomReviewTarget(identity, pointId)) return undefined
     const controller = runtime.activeController()!(identity.id, identity.source)
     const artifact = controller?.item.distributionArtifact
@@ -21,7 +21,7 @@ export function createStandaloneDomReviewModel(
       controller === undefined || controller.status !== 'active' || !controller.principalLive
       || !runtime.activeControllers()!().includes(controller)
       || controller.item.standaloneConfiguredGraph !== true || controller.item.package !== undefined
-      || artifact === undefined || broker.domPolicy(identity, pointId) !== 'inherit'
+      || artifact === undefined || requireReview && broker.domPolicy(identity, pointId) !== 'inherit'
     ) return undefined
     return { controller, artifact, moduleGeneration: runtime.moduleGenerationOf()!(controller) }
   }
@@ -33,6 +33,7 @@ export function createStandaloneDomReviewModel(
         version: selected.artifact.version,
         integrity: selected.artifact.integrity,
         authorized: broker.hasDomLease(identity, pointId, selected.controller.generationView),
+        persistentAvailable: gate.supportsPersistentDecision(),
       })
     },
     async request(identity, pointId) {
@@ -42,7 +43,7 @@ export function createStandaloneDomReviewModel(
       const { controller, moduleGeneration } = selected
       const artifact = Object.freeze({ ...selected.artifact })
       const isCurrent = () => {
-        const current = select(target, pointId)
+        const current = select(target, pointId, false)
         return current?.controller === controller && current.moduleGeneration === moduleGeneration
           && current.artifact.version === artifact.version && current.artifact.integrity === artifact.integrity
       }

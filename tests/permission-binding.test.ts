@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BindingPermissionPolicyStore } from '../packages/cli/src/renderer/permission-binding.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const globals = globalThis as typeof globalThis & {
   __cordisxPermissionPolicyRequestV1?: (payload: string) => void
@@ -67,6 +68,33 @@ describe('renderer permission persistence binding', () => {
     try {
       await expect(store.write([allow])).rejects.toThrow('mismatched records')
       expect(store.read()).toEqual([])
+    } finally {
+      store.dispose()
+    }
+  })
+
+  it('rejects standalone success without the writer adoption receipt', async () => {
+    const [record] = exactDomPermissionPolicies('work', [{
+      id: 'channel',
+      entry: '/fixture.js',
+      pointIds: ['manager.content'],
+    }])
+    const onUnknown = vi.fn()
+    globals.__cordisxPermissionPolicyRequestV1 = (text) => {
+      const request = JSON.parse(text) as { requestId: string }
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: true,
+          value: [record],
+        }))
+      )
+    }
+    const store = BindingPermissionPolicyStore.connect('standalone-fixture', [], { onUnknown })
+    try {
+      await expect(store.writeV3([record!])).rejects.toThrow('adoption was not confirmed')
+      expect(store.readV3()).toEqual([])
+      expect(onUnknown).toHaveBeenCalledOnce()
     } finally {
       store.dispose()
     }

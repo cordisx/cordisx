@@ -28,9 +28,19 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
   const chinese = productLocale(locale) === 'zh-CN'
   return (
     <section className="cxr-section" data-standalone-dom-review={pointId}>
-      <h3>{chinese ? '当前标签页的页面授权' : 'Page access in this tab'}</h3>
+      <h3>
+        {artifact.persistentAvailable
+          ? chinese ? '页面授权' : 'Page access'
+          : chinese
+          ? '当前标签页的页面授权'
+          : 'Page access in this tab'}
+      </h3>
       <p>
-        {chinese
+        {artifact.persistentAvailable
+          ? chinese
+            ? '可以选择仅在此标签页允许，或持续授权并同步到其他管理页。'
+            : 'Choose access for this tab or a persistent decision shared with other Manager pages.'
+          : chinese
           ? '仅对此标签页有效；刷新或与后台失联后需要重新审核。'
           : 'Only this tab is covered; review again after refresh or disconnection.'}
       </p>
@@ -60,7 +70,11 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
                 ).finally(() => setBusy(false))
               }}
             >
-              {chinese ? '审核此标签页权限' : 'Review access for this tab'}
+              {artifact.persistentAvailable
+                ? chinese ? '审核页面权限' : 'Review page access'
+                : chinese
+                ? '审核此标签页权限'
+                : 'Review access for this tab'}
             </Button>
             {declined ? <p role="status">{chinese ? '本次未允许。' : 'Access was not allowed.'}</p> : null}
           </>

@@ -1,4 +1,6 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
+import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+export { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
   CordisXPermissionAuthorizationDecisionV3,
@@ -9,14 +11,8 @@ import {
   type PermissionAuthorizationPromptV2,
 } from './platform/platform-permission-store.js'
 
-const REVIEWABLE_POINTS = new Set(['manager.settings.navigation-items', 'manager.content'])
-const ALIAS = new RegExp('^https://renderer[.]cordisx[.]invalid/plugin/[a-f0-9]{64}$', 'u')
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const reviews = new WeakMap<object, StandaloneDomReview>()
-
-export function isStandaloneDomReviewTarget(identity: CordisXPluginIdentity, pointId: string): boolean {
-  return identity.id === 'channel' && ALIAS.test(identity.source) && REVIEWABLE_POINTS.has(pointId)
-}
 
 export function bindStandaloneDomReview(broker: object, review: StandaloneDomReview): void {
   if (reviews.has(broker)) throw new Error('standalone review already bound')
@@ -53,10 +49,28 @@ type ActiveReview = {
 export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
   private active: ActiveReview | undefined
   private closed = false
+  private persistentDecision:
+    | ((
+      context: StandaloneDomReviewContext,
+      plan: CordisXPermissionAuthorizationPlanV3,
+      decision: CordisXPermissionAuthorizationDecisionV3,
+    ) => boolean)
+    | undefined
 
   constructor(
     private readonly createPrompt: (context: StandaloneDomReviewContext) => PermissionAuthorizationPromptV2,
   ) {}
+
+  /** Installed once by the standalone Host before any plugin is mounted. */
+  bindPersistentDecision(callback: NonNullable<StandaloneDomReview['persistentDecision']>): boolean {
+    if (this.closed || this.active || this.persistentDecision || typeof callback !== 'function') return false
+    this.persistentDecision = callback
+    return true
+  }
+
+  supportsPersistentDecision(): boolean {
+    return !this.closed && this.persistentDecision !== undefined
+  }
 
   private current(active: ActiveReview): boolean {
     try {
@@ -157,23 +171,36 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
       || !item.allowedDecisions.includes('allow-once') || !item.allowedDecisions.includes('deny-once')
     ) return undefined
     active.used = true
+    const persistent = this.persistentDecision !== undefined
+    const allowedDecisions = [
+      'deny-once' as const,
+      'allow-once' as const,
+      ...(persistent
+        ? item.allowedDecisions.filter(value => value === 'deny-persistent' || value === 'allow-persistent')
+        : []),
+    ]
     const restricted: CordisXPermissionAuthorizationPlanV3 = {
       ...plan,
       declarations: [{
         ...item,
-        persistentAllow: false,
-        persistentDeny: false,
-        allowedDecisions: ['deny-once', 'allow-once'],
+        persistentAllow: persistent && item.persistentAllow,
+        persistentDeny: persistent && item.persistentDeny,
+        allowedDecisions,
         defaultDecision: 'deny-once',
       }],
     }
     const decision = await active.prompt.requestV3(restricted, identity)
     if (
       !decision || decision.decisions.length !== 1
-      || !['allow-once', 'deny-once'].includes(decision.decisions[0]!.decision)
+      || !allowedDecisions.includes(decision.decisions[0]!.decision)
       || !await this.verified(active)
     ) return undefined
-    active.allowed = decision.decisions[0]!.decision === 'allow-once'
+    const selected = decision.decisions[0]!.decision
+    if (
+      (selected === 'allow-persistent' || selected === 'deny-persistent')
+      && this.persistentDecision?.(active.context, plan, decision) !== true
+    ) return undefined
+    active.allowed = selected === 'allow-once' || selected === 'allow-persistent'
     return decision
   }
 
@@ -188,6 +215,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
       this.active?.prompt.dispose?.()
     } catch { /* closing still invalidates the review */ }
     this.active = undefined
+    this.persistentDecision = undefined
   }
 }
 

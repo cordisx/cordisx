@@ -22,6 +22,8 @@ import {
 } from '../../permission-model-v3.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
 import { isPermissionPolicyRecordV3 } from '../../permission-persistence.js'
+import { prepareStandaloneDomPolicyHandoff } from '../standalone-dom-policy-adoption.js'
+import type { StandaloneDomPolicyAdoption } from '../../standalone-permission-contract.js'
 
 import { certifiedArtifactKey, object, platformIdentityKey } from './platform-manifest.js'
 import {
@@ -335,6 +337,67 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
   /** Re-project a lease after a Host review has passed its final fence. */
   refreshDomAccess(): void {
     this.changed()
+  }
+
+  /** Adopt an owner-confirmed Channel Manager policy after comparing this renderer's snapshot. */
+  async adoptStandaloneDomPolicies(
+    input: StandaloneDomPolicyAdoption & {
+      readonly signal?: AbortSignal
+      readonly onUnknown?: () => void
+    },
+  ): Promise<boolean> {
+    const prepared = await prepareStandaloneDomPolicyHandoff(input, {
+      profileId: this.profileId,
+      catalogVersion: this.catalog.version,
+      registration: identity => this.registration(identity),
+      isRegistered: registration => this.isRegistered(registration),
+      waitForWrite: async () => await this.domPolicyCommitTail,
+      policies: () => [...this.policyRecords.values()],
+    })
+    if (!prepared) return false
+    const { captured, registration, changes, updates } = prepared
+    if (
+      input.signal?.aborted || this.registration(captured.identity)?.token !== registration.token
+      || !this.isRegistered(registration)
+    ) return false
+    const clearChangedLeases = () => {
+      for (const change of changes) {
+        this.clearExactDomLease(registration, change.pointId)
+        const pointKey = this.domPointKey(captured.identity, change.pointId, captured.moduleGeneration)
+        const plan = this.domPromptPlans.get(pointKey)
+        this.domPromptPlans.delete(pointKey)
+        this.domRequests.delete(pointKey)
+        const pendingKey = this.domPendingReviewKey(captured.identity, captured.moduleGeneration)
+        if (this.pendingDomReviews.get(pendingKey)?.pointId === change.pointId) {
+          this.pendingDomReviews.delete(pendingKey)
+        }
+        if (plan) {
+          try {
+            this.promptV2?.cancelV3?.(plan.planId, plan.binding)
+          } catch { /* the policy remains authoritative */ }
+        }
+      }
+    }
+    if (captured.origin) {
+      if (!input.onUnknown) return false
+      try {
+        return this.adoptPendingStandaloneDomPolicy(
+          captured.requestId,
+          updates,
+          clearChangedLeases,
+          input.onUnknown,
+        )
+      } catch {
+        return false
+      }
+    }
+    if (changes.length === 0) return true
+    this.batchChanges(() => {
+      for (const change of changes) this.policyRecords.set(change.key, change.record)
+      clearChangedLeases()
+      this.changed()
+    })
+    return true
   }
 
   private domLeaseVisible(registration: Registration, pointId: string): boolean {

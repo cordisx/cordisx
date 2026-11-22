@@ -1,6 +1,7 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
+import { parseStandalonePolicyHandoff, type StandalonePolicyHandoff } from './standalone-policy-handoff.js'
 import {
   isStandaloneConfigOperations,
   type StandaloneDesktopConfigAdoption,
@@ -18,6 +19,7 @@ type Method =
   | 'channel-configuration'
   | 'managed-service-state'
   | 'desktop-package-configuration'
+  | 'permission-policy'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
 
 export interface ManagerRendererLifecycleCommand {
@@ -92,6 +94,7 @@ const methods = new Set<Method>([
   'channel-configuration',
   'managed-service-state',
   'desktop-package-configuration',
+  'permission-policy',
 ])
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const epochPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -173,6 +176,13 @@ export function createManagerRendererLifecycleClient(input: {
   readonly onManagedServiceState?: (value: ManagedServiceStateConfirmation) => boolean | Promise<boolean>
   /** Adopt only the pending write and exact redacted value confirmed by this owner. */
   readonly onDesktopPackageConfiguration?: (value: StandaloneDesktopConfigAdoption) => boolean | Promise<boolean>
+  /** Apply only the exact owner-projected Channel Manager policy snapshot. */
+  readonly onPermissionPolicy?: (
+    value: Pick<
+      StandalonePolicyHandoff,
+      'requestId' | 'origin' | 'identity' | 'moduleGeneration' | 'expected' | 'updates' | 'candidate'
+    >,
+  ) => boolean | Promise<boolean>
 }): {
   readonly closed: boolean
   readonly quiesced: boolean
@@ -238,6 +248,32 @@ export function createManagerRendererLifecycleClient(input: {
   }
   const execute = async (method: Method, payload: unknown): Promise<unknown> => {
     assertLive()
+    if (method === 'permission-policy') {
+      const handoff = parseStandalonePolicyHandoff(payload, scope)
+      if (!synchronized || transaction !== undefined || awaitingAdoption !== undefined || !input.onPermissionPolicy) {
+        throw new Error('renderer-permission-policy-unavailable')
+      }
+      if (
+        !await input.onPermissionPolicy({
+          requestId: handoff.requestId,
+          origin: handoff.origin,
+          identity: handoff.identity,
+          moduleGeneration: handoff.moduleGeneration,
+          expected: handoff.expected,
+          updates: handoff.updates,
+          candidate: handoff.candidate,
+        })
+      ) throw new Error('renderer-permission-policy-unavailable')
+      assertLive()
+      return {
+        rendererId: scope.rendererId,
+        ownerGeneration: scope.generation,
+        handoffId: handoff.handoffId,
+        requestId: handoff.requestId,
+        moduleGeneration: handoff.moduleGeneration,
+        adopted: true,
+      }
+    }
     if (method === 'desktop-package-configuration') {
       const item = record(payload)
       exact(item, [

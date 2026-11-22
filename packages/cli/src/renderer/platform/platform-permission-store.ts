@@ -62,6 +62,9 @@ export interface PermissionPolicyStore {
   writeV2?(records: readonly CordisXPermissionPolicyRecordV2[]): void | Promise<void>
   readV3?(): readonly CordisXPermissionPolicyRecordV3[]
   writeV3?(records: readonly CordisXPermissionPolicyRecordV3[]): void | Promise<void>
+  /** Standalone only: bind the writer's adoption to its exact in-flight request. */
+  canAdoptStandaloneV3?(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean
+  markAdoptedStandaloneV3?(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean
   readV4?(): readonly CordisXPermissionPolicyRecordV4[]
   writeV4?(records: readonly CordisXPermissionPolicyRecordV4[]): void | Promise<void>
   /** One atomic write for mixed-version records in the single profile ledger. */

@@ -57,7 +57,9 @@ export function createManagerRendererBootstrap(input: {
         return false
       }
     },
-    async prepare(): Promise<{ readonly initialGraphs: readonly ManagerRendererGraph[]; readonly bundle: Buffer }> {
+    async prepare(
+      permissionPublicKey?: unknown,
+    ): Promise<{ readonly initialGraphs: readonly ManagerRendererGraph[]; readonly bundle: Buffer }> {
       if (started) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
       started = true
       let bundle: Buffer | undefined
@@ -80,7 +82,12 @@ export function createManagerRendererBootstrap(input: {
             )).size !== graphs.length
           || new Set(graphs.map(graph => graph.pluginId)).size !== graphs.length
         ) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
-        const completed = await call({ action: 'complete', managerOrigin: input.managerOrigin, graphs })
+        const completed = await call({
+          action: 'complete',
+          managerOrigin: input.managerOrigin,
+          graphs,
+          ...(permissionPublicKey === undefined ? {} : { permissionPublicKey }),
+        })
         if (!Array.isArray(completed.initialGraphs) || completed.initialGraphs.length !== graphs.length) {
           throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
         }

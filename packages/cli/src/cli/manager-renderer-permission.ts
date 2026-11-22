@@ -36,13 +36,14 @@ export interface ManagerPermissionPolicyAuthority {
     | undefined
   /**
    * Verify a single-use user action bound to this exact renderer, record batch,
-   * and observed snapshot. The browser binding carries no such proof today;
-   * an owner-held review/decision mechanism must supply it.
+   * and observed snapshot. The supplied browser proof is untrusted until the
+   * owner verifies it against its registered review authority.
    */
   authorize(
     context: ManagerRendererChannelContext,
     request: PermissionBindingRequest,
     expected: readonly CordisXPersistedPermissionPolicyRecord[],
+    proof: unknown,
   ): boolean | Promise<boolean>
   /** Enter the shared barrier before comparing and writing. */
   acquire(
@@ -83,13 +84,19 @@ export function createManagerRendererPermissionChannel(input: {
 }): ManagerRendererChannel {
   let fenced = false
   const requests = new Set<string>()
-  const parse = (item: unknown, context: ManagerRendererChannelContext) =>
-    parsePermissionBindingRequest(item, {
-      profileId: context.profileId,
-      token: STANDALONE_PERMISSION_BINDING_MARKER,
-      identities: [],
-      identityAllowed: identity => input.identityAllowed(identity, context),
-    })
+  const parse = (item: unknown, context: ManagerRendererChannelContext) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+    const { proof, ...binding } = item as Record<string, unknown>
+    return {
+      request: parsePermissionBindingRequest(binding, {
+        profileId: context.profileId,
+        token: STANDALONE_PERMISSION_BINDING_MARKER,
+        identities: [],
+        identityAllowed: identity => input.identityAllowed(identity, context),
+      }),
+      proof,
+    }
+  }
   const normalize = (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
     Object.freeze(records.map(item => normalizePersistedPermissionPolicyRecord(item)))
   const resolve = (
@@ -107,7 +114,7 @@ export function createManagerRendererPermissionChannel(input: {
         || typeof payload !== 'string' || Buffer.byteLength(payload) > MAX_PERMISSION_REQUEST_BYTES
       ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
       const parsedValue: unknown = JSON.parse(payload)
-      const request = parse(parsedValue, context)
+      const { request, proof } = parse(parsedValue, context)
       const requested = normalize(request.records)
       const resolved = resolve(requested, context)
       if (
@@ -141,6 +148,7 @@ export function createManagerRendererPermissionChannel(input: {
               context,
               authorized,
               expected.map(item => normalizePersistedPermissionPolicyRecord(item)),
+              proof,
             )
           ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
           await assertAdmission()
@@ -165,7 +173,7 @@ export function createManagerRendererPermissionChannel(input: {
                   }
                   // Package identity can change while waiting for the config lock.
                   const current = parse(parsedValue, context)
-                  if (JSON.stringify(resolve(current.records, context)) !== JSON.stringify(resolved)) {
+                  if (JSON.stringify(resolve(current.request.records, context)) !== JSON.stringify(resolved)) {
                     throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
                   }
                 },

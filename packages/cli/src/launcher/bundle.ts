@@ -623,7 +623,7 @@ export async function buildRendererCompositionSource(
   const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
   const standaloneSignal = attachedStandalone ? ', undefined, signal' : ''
   const bootMetadata = attachedStandalone
-    ? `{ ...${metadata}, standaloneReviewSession: verifySession, standaloneWriteUncertain: onResultUnknown }`
+    ? `{ ...${metadata}, standaloneReviewSession: verifySession, standaloneWriteUncertain: onResultUnknown, standalonePolicyAdopter: registerPolicyAdopter, standalonePermissionSigner: permissionSigner }`
     : metadata
   const boot = runtimeGraphs.length === 0
     ? `installCordisX(${composition}, ${bootMetadata}${standaloneSignal})`
@@ -639,7 +639,7 @@ ${graphRetireSource}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
   const registryBootstrap = attachedStandalone ? resourceRegistryInstallSource() : ''
   const hostGraphLaunchSource =
-    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal, verifySession, onResultUnknown) {
+    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal, verifySession, onResultUnknown, registerPolicyAdopter, permissionSigner) {
 ${registryBootstrap}
 return await ${boot}
 }
@@ -668,7 +668,7 @@ return await ${boot}
   const source = attachedStandalone
     ? `${imports.join('\n')}
 let __cordisxStandaloneStarted = false;
-export function startStandaloneManagerComposition(signal, verifySession, onResultUnknown) {
+export function startStandaloneManagerComposition(signal, verifySession, onResultUnknown, registerPolicyAdopter, permissionSigner) {
   if (__cordisxStandaloneStarted || !signal || signal.aborted || typeof signal.addEventListener !== 'function') {
     throw new Error('Standalone Manager session is unavailable');
   }

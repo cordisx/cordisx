@@ -39,6 +39,7 @@ import type { RuntimeServiceCapabilityOwner } from '../../service-capability-own
 import { ServiceCapabilityOwnership } from './service-capability-ownership.js'
 import { PermissionOnceGrantLedger } from '../../permission-model-v2.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
+import { normalizePermissionPolicyRecordV3 } from '../../permission-model-v3.js'
 import {
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV4,
@@ -196,6 +197,16 @@ export abstract class PlatformPermissionBrokerBase {
   protected readonly migrationTasks: Promise<void>[] = []
 
   protected domPolicyCommitTail: Promise<void> = Promise.resolve()
+
+  private pendingDomPolicyCommit: {
+    readonly records: readonly CordisXPermissionPolicyRecordV3[]
+    readonly publish: () => void
+    readonly assertPublish: () => void
+    adopted: boolean
+    adopting: boolean
+    failed: boolean
+    onUnknown?: () => void
+  } | undefined
 
   protected changeBatchDepth = 0
 
@@ -464,13 +475,72 @@ export abstract class PlatformPermissionBrokerBase {
   ): Promise<void> {
     const task = this.domPolicyCommitTail.then(async () => {
       assertCurrent()
-      await this.persistV3(records)
-      assertPublish()
-      publish()
-      this.changed()
+      const pending = {
+        records: records.map(record => normalizePermissionPolicyRecordV3(record)),
+        publish,
+        assertPublish,
+        adopted: false,
+        adopting: false,
+        failed: false,
+      }
+      this.pendingDomPolicyCommit = pending
+      try {
+        await this.persistV3(pending.records)
+        if (pending.failed) throw new Error('Standalone permission adoption is uncertain')
+        if (!pending.adopted) {
+          assertPublish()
+          publish()
+          this.changed()
+        }
+      } catch (error) {
+        if (pending.adopted || pending.failed) {
+          try {
+            this.pendingDomPolicyCommit?.onUnknown?.()
+          } catch { /* the write remains uncertain */ }
+        }
+        throw error
+      } finally {
+        if (this.pendingDomPolicyCommit === pending) this.pendingDomPolicyCommit = undefined
+      }
     })
     this.domPolicyCommitTail = task.catch(() => undefined)
     return task
+  }
+
+  /** Adopt only the exact standalone request currently waiting on its owner. */
+  protected adoptPendingStandaloneDomPolicy(
+    requestId: string,
+    records: readonly CordisXPermissionPolicyRecordV3[],
+    afterPublish: () => void,
+    onUnknown: () => void,
+  ): boolean {
+    const pending = this.pendingDomPolicyCommit
+    if (
+      !pending || pending.adopted || pending.adopting || pending.failed
+      || JSON.stringify(pending.records) !== JSON.stringify(records)
+      || this.store.canAdoptStandaloneV3?.(requestId, records) !== true
+    ) return false
+    pending.adopting = true
+    pending.onUnknown = onUnknown
+    try {
+      pending.assertPublish()
+      pending.publish()
+      afterPublish()
+      if (this.store.markAdoptedStandaloneV3?.(requestId, records) !== true) {
+        throw new Error('Standalone permission adoption is uncertain')
+      }
+      pending.adopted = true
+      this.changed()
+      return true
+    } catch {
+      pending.failed = true
+      try {
+        onUnknown()
+      } catch { /* the write remains uncertain */ }
+      return false
+    } finally {
+      pending.adopting = false
+    }
   }
 
   protected persistV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {

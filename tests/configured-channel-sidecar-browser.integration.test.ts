@@ -9,6 +9,9 @@ import { expect, it } from 'vitest'
 import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
 import { startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import { createConfiguredChannelOwner } from '../packages/cli/src/cli/configured-channel-owner.js'
+import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
+import { loadHomeConfig } from '../packages/cli/src/config/home-config.js'
 import {
   effectiveConfigFingerprint,
   processStartIdentity,
@@ -20,7 +23,7 @@ import {
   requestPluginManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
-import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
+import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
@@ -43,15 +46,29 @@ const chrome = [
   }
 })
 
-it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux')(
-  'connects two real Manager pages to the owner-selected read-only Channel through the sidecar',
-  async () => {
-    const f = await fixture({
-      channelArchive: archive!,
-      channelUiGrant: true,
-      protectProfileInputs: true,
-    })
+it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux').each(
+  [
+    false,
+    true,
+  ],
+)(
+  'connects two Manager pages to Channel through the sidecar (signed review: %s)',
+  async signedReview => {
     let live = true
+    let f!: Awaited<ReturnType<typeof fixture>>
+    const proof = signedReview
+      ? new ManagerPermissionProofAuthority({
+        profileId: 'default',
+        generation: 'fixture-owner',
+        isCurrent: context => live && f.participants.peer(context.rendererId) !== undefined,
+      })
+      : undefined
+    f = await fixture({
+      channelArchive: archive!,
+      channelUiGrant: !signedReview,
+      protectProfileInputs: true,
+      ...(proof === undefined ? {} : { permissionProof: proof }),
+    })
     const events: Array<{ action: string; channel?: string; step?: string; status?: string }> = []
     const profile = await mkdtemp(path.join(os.tmpdir(), 'cx-channel-sidecar-browser-'))
     let browser: ChildProcess | undefined
@@ -64,12 +81,22 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       url.searchParams.set('host', '1')
       return url.href
     }
-    const openPage = async (page: CdpClient) => {
+    const readyPage = async (page: CdpClient) => {
       try {
-        await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 25_000 })
+        // The production bootstrap itself allows 60 seconds for its bundle; a
+        // cold browser must not be declared failed before that deadline.
+        await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 70_000 })
           .toBe('true')
       } catch {
-        const state = await page.evaluate('({ text: document.body.innerText.slice(0, 300), path: location.pathname })')
+        const state = await page.evaluate(`({
+          text: document.body.innerText.slice(0, 300),
+          path: location.pathname,
+          readyState: document.readyState,
+          controlled: Boolean(navigator.serviceWorker?.controller),
+          resources: performance.getEntriesByType('resource').slice(-12).map(item => ({
+            path: new URL(item.name).pathname, duration: Math.round(item.duration),
+          })),
+        })`)
         throw new Error(
           'Manager did not start: '
             + JSON.stringify({
@@ -83,6 +110,9 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
         page.evaluate('Boolean(document.querySelector("[data-settings-navigation-item^=channel]"))')
       )
         .toBe(true)
+    }
+    const openPage = async (page: CdpClient) => {
+      await readyPage(page)
       await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
       await expect.poll(() => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
         .toBe(true)
@@ -115,6 +145,17 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
         token: gateway.instanceToken,
         stop: () => {},
       })
+      const configuredOwner = signedReview
+        ? createConfiguredChannelOwner({
+          homeDir: f.homeDir,
+          configPath: f.configPath,
+          profileId: f.profileId,
+          plugin: f.configuredChannel!.plugin,
+          service: f.configuredChannel!.service,
+          ownerCurrent: () => live,
+        })
+        : undefined
+      if (signedReview && !configuredOwner) throw new Error('test Channel authority unavailable')
       composition = await openProductionPluginManagementComposition({
         homeDir: f.homeDir,
         configPath: f.configPath,
@@ -132,6 +173,33 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
         rendererReadLifetimes: f.bootstrap.readLifetimes,
         rendererReadonlyChannel: f.channelBridge!.channel,
         rendererManagedServiceUI: f.managedUI.channel,
+        ...(proof === undefined || configuredOwner === undefined ? {} : {
+          rendererConfiguredChannelService: {
+            bootstrap: f.bootstrap,
+            plugin: f.configuredChannel!.plugin,
+            service: f.configuredChannel!.service,
+            authority: configuredOwner,
+          },
+          rendererPermissionPolicy: {
+            bootstrap: f.bootstrap,
+            proof,
+            // This test models non-Manager consumers; it does not enable the production gate.
+            reserveOtherConsumers: async () => {
+              let current = true
+              return {
+                isCurrent: () => current && live,
+                release: () => {
+                  if (!current || !live) return false
+                  current = false
+                  return true
+                },
+                fence: () => {
+                  current = false
+                },
+              }
+            },
+          },
+        }),
         mode: 'service',
         processStartedAt: startedAt,
       })
@@ -171,14 +239,101 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       const first = await CdpClient.connect(socketUrl)
       pages.push(first)
       await first.send('Page.enable')
+      await first.send('Runtime.enable')
+      await first.send('Network.enable')
       await first.send('Page.navigate', { url: entry(web.url) })
-      await openPage(first)
+      await readyPage(first)
       const debugOrigin = 'http://' + new URL(socketUrl).host
       const secondUrl = entry(web.issueUrl())
       const response = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(secondUrl), { method: 'PUT' })
       const target = await response.json() as { webSocketDebuggerUrl: string }
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
+      await second.send('Runtime.enable')
+      await second.send('Network.enable')
+      await readyPage(second)
+      if (signedReview) {
+        for (const page of [first, second]) {
+          await expect.poll(() =>
+            page.evaluate(
+              'document.querySelector("[data-settings-navigation-item^=channel]")?.dataset.permissionReview',
+            )
+          ).toBe('pending')
+        }
+        const reviewed = new Set<string>()
+        for (let index = 0; index < 2; index++) {
+          await first.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
+          try {
+            await expect.poll(
+              () =>
+                first.evaluate('document.querySelector("[data-standalone-dom-review]")?.dataset.standaloneDomReview'),
+              { timeout: 15_000 },
+            ).toBeTruthy()
+          } catch (error) {
+            const state = await first.evaluate(
+              '({ text: document.body.innerText.slice(0, 350),'
+                + ' nav: document.querySelector("[data-settings-navigation-item^=channel]")?.getAttribute("data-permission-review"),'
+                + ' connected: !document.body.textContent.includes("CordisX 连接不可用") })',
+            )
+            throw new Error(
+              'Signed review unavailable: '
+                + JSON.stringify({ index, reviewed: [...reviewed], state, events: events.slice(-15) }),
+              { cause: error },
+            )
+          }
+          const point = await first.evaluate<string>(
+            'document.querySelector("[data-standalone-dom-review]").dataset.standaloneDomReview',
+          )
+          expect(reviewed.has(point)).toBe(false)
+          reviewed.add(point)
+          await expect.poll(
+            () =>
+              first.evaluate('Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))'),
+            { timeout: 15_000 },
+          ).toBe(true)
+          await first.evaluate('document.querySelector("[data-standalone-dom-review] button").click()')
+          expect(await first.evaluate('Boolean(document.querySelector("[data-permission-authorization]"))')).toBe(false)
+          await trustedClick(first, '[data-standalone-dom-review] button')
+          await expect.poll(
+            () => first.evaluate('Boolean(document.querySelector("[data-permission-decision=allow-persistent]"))'),
+            { timeout: 15_000 },
+          ).toBe(true)
+          await first.evaluate('document.querySelector("[data-permission-decision=allow-persistent]").click()')
+          expect(
+            await first.evaluate(
+              'document.querySelector("[data-permission-decision=allow-persistent]")?.getAttribute("aria-checked")',
+            ),
+          ).toBe('false')
+          await trustedClick(first, '[data-permission-decision=allow-persistent]')
+          await expect.poll(() =>
+            first.evaluate(
+              'document.querySelector("[data-permission-decision=allow-persistent]")?.getAttribute("aria-checked")',
+            )
+          ).toBe('true')
+          await trustedClick(first, '[data-permission-action=confirm]')
+          await expect.poll(
+            async () =>
+              (await loadHomeConfig(f.configPath)).permissions.filter(policy =>
+                policy.key.identity.pluginId === 'channel'
+              ).length,
+            { timeout: 60_000 },
+          ).toBe(index + 1)
+          await expect.poll(
+            () =>
+              events.filter(event =>
+                event.action === 'call' && event.channel === 'permission-policy' && event.status === 'ok'
+              ).length,
+            { timeout: 60_000 },
+          ).toBe(index + 1)
+        }
+        expect([...reviewed].sort()).toEqual(['manager.content', 'manager.settings.navigation-items'])
+        await expect.poll(() =>
+          second.evaluate(
+            'document.querySelector("[data-settings-navigation-item^=channel]")?.getAttribute("data-permission-review")',
+          )
+        ).toBe(null)
+      }
+      await openPage(first)
       await openPage(second)
       await first.evaluate('globalThis.__fixtureBeforeReload = true')
       await first.send('Page.reload')
@@ -219,6 +374,8 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       const renewedTarget = await renewedResponse.json() as { webSocketDebuggerUrl: string }
       const renewed = await CdpClient.connect(renewedTarget.webSocketDebuggerUrl)
       pages.push(renewed)
+      await renewed.send('Runtime.enable')
+      await renewed.send('Network.enable')
       await openPage(renewed)
     } finally {
       live = false
@@ -226,10 +383,11 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       if (browser) await stopChrome(browser)
       await closeWeb?.()
       await composition?.close()
+      proof?.close()
       await supervisor?.close()
       await f.close()
       await rm(profile, { recursive: true, force: true })
     }
   },
-  120_000,
+  240_000,
 )

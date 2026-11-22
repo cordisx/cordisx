@@ -3,6 +3,7 @@ import { expect } from 'vitest'
 import { decodeManagerRendererBundle } from '../../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import type { ServiceRendererPrivateGraph } from '../../packages/cli/src/cli/service-renderer-projection.js'
 import type { fixture } from '../fixtures/service-renderer-bootstrap-fixture.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../../packages/cli/src/standalone-permission-contract.js'
 
 type Fixture = Awaited<ReturnType<typeof fixture>>
 const origin = 'http://127.0.0.1:43123'
@@ -13,6 +14,7 @@ export async function bootConfiguredChannelManager(
   invocation = f.invocation,
   expectCredentialBridge = f.channelCredentialsEnabled,
   expectServiceConfigBridge?: boolean,
+  permissionPublicKey?: unknown,
 ): Promise<string> {
   const prepared = await f.sessions.call(invocation, 'manager-bootstrap', { action: 'prepare' }) as any
   expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok' } })
@@ -30,6 +32,7 @@ export async function bootConfiguredChannelManager(
     action: 'complete',
     managerOrigin: origin,
     graphs: [graph],
+    ...(permissionPublicKey === undefined ? {} : { permissionPublicKey }),
   }) as any
   expect(completed).toMatchObject({ status: 'ok', value: { status: 'ok' } })
   const bytes = await decodeManagerRendererBundle(completed.value.bundle)
@@ -40,6 +43,8 @@ export async function bootConfiguredChannelManager(
     expect(alias).toBeDefined()
     expect(bundle).not.toContain(f.configuredChannel!.plugin.source!)
     expect(bundle).not.toContain('fixture-private-reference')
+    expect(new RegExp(`permissionBridgeToken\\s*:\\s*"${STANDALONE_PERMISSION_BINDING_MARKER}"`, 'u').test(bundle))
+      .toBe(permissionPublicKey !== undefined)
     expect(/channelCredentialBridgeToken\s*:\s*"renderer-binding-placeholder"/u.test(bundle))
       .toBe(expectCredentialBridge)
     if (expectServiceConfigBridge !== undefined) {

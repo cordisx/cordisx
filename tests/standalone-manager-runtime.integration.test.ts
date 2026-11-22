@@ -10,6 +10,7 @@ import { createManagerRendererLifecycleClient } from '../packages/cli/src/indepe
 import { ownerSnapshotPermissionStore } from '../packages/cli/src/renderer/platform/owner-snapshot-permission-store.js'
 import { createRuntimeAgentLoopHost } from '../packages/cli/src/renderer/runtime-foundation.js'
 import { BindingAgentLoopHost, UnavailableAgentLoopHost } from '../packages/cli/src/renderer/agent-loop.js'
+import type { StandaloneDomPolicyAdopter } from '../packages/cli/src/standalone-permission-contract.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -137,7 +138,24 @@ it('mounts the original Manager and registered plugin in an owner-scoped standal
       }
     }).__testStandaloneModule
     expect((dom.window as unknown as { __cordisxRuntime?: unknown }).__cordisxRuntime).toBeUndefined()
-    await module.startStandaloneManagerComposition(new AbortController().signal)
+    let adoptPolicy: StandaloneDomPolicyAdopter | undefined
+    await (module.startStandaloneManagerComposition as (
+      signal: AbortSignal,
+      verify: undefined,
+      uncertain: undefined,
+      register: (adopt: StandaloneDomPolicyAdopter) => void,
+    ) => Promise<unknown>)(new AbortController().signal, undefined, undefined, adopt => {
+      adoptPolicy = adopt
+    })
+    expect(typeof adoptPolicy).toBe('function')
+    expect(
+      await adoptPolicy!({
+        identity: { id: 'other', source: 'https://example.test/other' },
+        moduleGeneration: 'other',
+        expected: [],
+        candidate: [],
+      }),
+    ).toBe(false)
     expect(() => module.startStandaloneManagerComposition(new AbortController().signal))
       .toThrow('Standalone Manager session is unavailable')
     const doc = dom.window.document

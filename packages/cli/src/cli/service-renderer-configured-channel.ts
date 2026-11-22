@@ -216,6 +216,58 @@ export class ServiceRendererConfiguredChannel {
     this.bound = context
   }
 
+  private permissionIdentity(context: ManagerRendererChannelContext) {
+    const alias = this.sourceAlias
+    const identity = this.identity
+    if (
+      !this.bound || !identity || !alias || !this.isCurrent() || context.signal !== this.bound.signal
+      || context.rendererId !== this.bound.rendererId || context.profileId !== this.bound.profileId
+      || context.ownerGeneration !== this.bound.ownerGeneration
+    ) throw new Error('renderer-configured-channel-unavailable')
+    const original = identity.resolve(context, alias, 'channel')
+    if (original.source !== this.input.plugin.source || original.digest !== this.input.plugin.configuredArchiveDigest) {
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    return { alias, identity }
+  }
+
+  isPermissionContextCurrent(context: ManagerRendererChannelContext): boolean {
+    try {
+      if (context.admitted !== true) return false
+      this.permissionIdentity(context)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Project the owner ledger to this Manager's exact Channel alias and graph. */
+  projectPermissionPolicies(records: readonly CordisXPersistedPermissionPolicyRecord[]) {
+    if (!this.bound) throw new Error('renderer-configured-channel-unavailable')
+    const context = { ...this.bound, admitted: true }
+    const { alias, identity } = this.permissionIdentity(context)
+    return {
+      identity: { id: 'channel', source: alias },
+      moduleGeneration: this.lease.moduleGeneration,
+      policies: identity.projectManagerPolicies(context, alias, 'channel', records),
+    }
+  }
+
+  /** The owner verified this exact artifact before projecting it to the Manager. */
+  permissionArtifact(context: ManagerRendererChannelContext) {
+    this.permissionIdentity(context)
+    const artifact = this.input.plugin.distributionArtifact
+    if (!artifact || context.admitted !== true) throw new Error('renderer-configured-channel-unavailable')
+    return { ...artifact }
+  }
+
+  /** Reverse only the admitted Manager's policies to the verified owner identity. */
+  resolvePermissionPolicies(context: ManagerRendererChannelContext, records: readonly unknown[]) {
+    if (context.admitted !== true) throw new Error('renderer-configured-channel-unavailable')
+    const { alias, identity } = this.permissionIdentity(context)
+    return identity.resolveManagerPolicies(context, alias, 'channel', records)
+  }
+
   /** Reverse only this renderer's owner-issued alias to the verified Channel source. */
   serviceIdentity(context: ManagerRendererChannelContext, requestedAlias?: string): {
     readonly alias: string

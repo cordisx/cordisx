@@ -34,6 +34,9 @@ import type { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lif
 import type { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 import { coordinateManagerManagedServiceMutations } from './manager-managed-service-mutation.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import { createServiceRendererPermissionChannel } from './service-renderer-permission-channel.js'
+import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
+import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { createConfiguredChannelOwner } from './configured-channel-owner.js'
@@ -110,6 +113,12 @@ export async function openProductionPluginManagementComposition(input: {
     readonly service: LocalChannelService
     readonly authority: NonNullable<ReturnType<typeof createConfiguredChannelOwner>>
   }
+  /** Owner-only opt-in; requires a fence for policy consumers outside the Manager cohort. */
+  readonly rendererPermissionPolicy?: {
+    readonly bootstrap: ServiceRendererBootstrap
+    readonly proof: ManagerPermissionProofAuthority
+    readonly reserveOtherConsumers: () => Promise<ServiceRendererPermissionConsumerFence>
+  }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
@@ -127,6 +136,14 @@ export async function openProductionPluginManagementComposition(input: {
     input.rendererConfiguredChannelService && (
       input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
       || !input.rendererReadonlyChannel
+    )
+  ) throw new Error('manager-consumer-fence-scope-invalid')
+  if (
+    input.rendererPermissionPolicy && (
+      input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
+      || !input.rendererConfiguredChannelService || !input.rendererBootstrap
+      || input.rendererPermissionPolicy.bootstrap !== input.rendererConfiguredChannelService.bootstrap
+      || !input.rendererPermissionPolicy.bootstrap.usesPermissionProof(input.rendererPermissionPolicy.proof)
     )
   ) throw new Error('manager-consumer-fence-scope-invalid')
   if (
@@ -204,6 +221,16 @@ export async function openProductionPluginManagementComposition(input: {
       handle: credentialHandler,
     })
     : undefined
+  const rendererPermission = input.rendererPermissionPolicy === undefined
+    ? undefined
+    : createServiceRendererPermissionChannel({
+      profileId: input.profileId,
+      configPath: input.configPath,
+      ...input.rendererPermissionPolicy,
+      participants: input.rendererParticipants!,
+      lifecycle: input.rendererLifecycle!,
+      sessions: () => rendererSessions,
+    })
   rendererSessions = new ManagerRendererSessions({
     profileId: input.profileId,
     ownerGeneration: input.runtimeGeneration,
@@ -244,6 +271,7 @@ export async function openProductionPluginManagementComposition(input: {
         : [['channel-actions', input.rendererReadonlyChannel] as const]),
       ...(rendererServiceConfig === undefined ? [] : [['service-config', rendererServiceConfig] as const]),
       ...(rendererCredentials === undefined ? [] : [['channel-credentials', rendererCredentials.channel] as const]),
+      ...(rendererPermission === undefined ? [] : [['permission-policy', rendererPermission] as const]),
       ...(rendererMarketplace === undefined ? [] : [['marketplace', rendererMarketplace] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
@@ -301,6 +329,7 @@ export async function openProductionPluginManagementComposition(input: {
     })
   } catch (error) {
     rendererSessions.dispose()
+    input.rendererPermissionPolicy?.proof.close()
     service.close()
     throw error
   }
@@ -339,6 +368,7 @@ export async function openProductionPluginManagementComposition(input: {
       if (closed) return
       closed = true
       rendererSessions.dispose()
+      input.rendererPermissionPolicy?.proof.close()
       try {
         await server.close()
       } finally {

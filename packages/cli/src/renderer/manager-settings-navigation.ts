@@ -29,6 +29,7 @@ interface PermissionReviewRecord {
   readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
   readonly fingerprint: string
   readonly scope: CordisXPermissionScopeV4
+  readonly policy: 'ask' | 'allow' | 'deny'
 }
 
 /** Only an active scoped Host review request can make a protected destination discoverable. */
@@ -48,6 +49,7 @@ export function resolveManagerSettingsNavigationPermissionReview(
   const permission = permissions.find(item =>
     item.identity.id === registration.owner
     && item.capability === 'ui.extension-points.render'
+    && item.policy === 'ask'
     && pointIds.some(pointId => item.scope.extensionPoints?.includes(pointId) === true)
   )
   return permission === undefined
