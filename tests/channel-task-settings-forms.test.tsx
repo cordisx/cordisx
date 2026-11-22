@@ -23,6 +23,73 @@ const providers = [{
 }]
 
 describe('Host Channel model settings forms', () => {
+  it('shows unavailable project authority as a disabled control', async () => {
+    const initial = {
+      revision: 0,
+      settings: { providerId: 'one', model: 'model-one' },
+      providers,
+      projects: [],
+      projectAvailability: 'unavailable' as const,
+    }
+    await act(async () =>
+      root.render(
+        <ChannelTaskSettingsForm
+          initial={initial}
+          locale="zh-CN"
+          signal={new AbortController().signal}
+          read={async () => initial}
+          save={async () => initial}
+          onResult={() => {}}
+        />,
+      )
+    )
+    const project = dom.window.document.querySelector('[data-config-path="projectId"]')!
+    expect(project.textContent).toContain('不可用')
+    expect(project.querySelector('input')?.disabled).toBe(true)
+  })
+  it('saves Fast false and a real project from the same filled-radio/schema form', async () => {
+    const initial = {
+      revision: 0,
+      settings: { providerId: 'one', model: 'model-one', fast: true, projectId: 'repo-a' },
+      projects: [{ projectId: 'repo-a', name: 'Repository A' }, { projectId: 'repo-b', name: 'Repository B' }],
+      providers,
+    }
+    const draft = new ChannelSettingsDraft()
+    const save = vi.fn(async (settings, revision) => ({ ...initial, settings, revision: revision + 1 }))
+    await act(async () =>
+      root.render(
+        <ChannelTaskSettingsForm
+          initial={initial}
+          locale="zh-CN"
+          signal={new AbortController().signal}
+          draft={draft}
+          read={async () => initial}
+          save={save}
+          onResult={() => {}}
+        />,
+      )
+    )
+    const fast = dom.window.document.querySelector('[data-config-path="fast"] .t-radio-group')!
+    expect(fast.className).toContain('filled')
+    const off = [...fast.querySelectorAll<HTMLElement>('.t-radio-button')].find(item =>
+      item.textContent?.trim() === '关闭'
+    )!
+    await act(async () => off.click())
+    expect(draft.snapshot().value.fast).toBe(false)
+    expect(dom.window.document.querySelector('[data-config-path="projectId"] .t-select')).not.toBeNull()
+    await act(async () => draft.change({ ...draft.snapshot().value, projectId: 'repo-b' }))
+    await act(async () =>
+      dom.window.document.querySelector('form')!.dispatchEvent(
+        new dom.window.Event('submit', { bubbles: true, cancelable: true }),
+      )
+    )
+    expect(save).toHaveBeenCalledExactlyOnceWith({
+      providerId: 'one',
+      model: 'model-one',
+      fast: false,
+      projectId: 'repo-b',
+    }, 0)
+  })
   it('presents admitted choices and saves a changed effort through the real filled radio control', async () => {
     const initial = { revision: 4, settings: { providerId: 'one', model: 'model-one', effort: 'low' }, providers }
     const save = vi.fn(async (settings, revision) => ({ ...initial, settings, revision: revision + 1 }))

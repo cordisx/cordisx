@@ -293,7 +293,12 @@ export async function processIdentityStatus(pid: number, startedAt: string): Pro
   try {
     process.kill(pid, 0)
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown'
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ESRCH') return 'dead'
+    // Sandboxed callers may read the process start time while signal probes
+    // are denied. Continue to the independent identity check, never treat
+    // permission denial itself as proof that the recorded owner is alive.
+    if (code !== 'EPERM' && code !== 'EACCES') return 'unknown'
   }
   const current = await processStartIdentity(pid)
   if (current === undefined) {

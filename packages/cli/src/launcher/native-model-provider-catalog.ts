@@ -26,6 +26,7 @@ export interface NativeModelProviderCatalogEntry {
       readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
     readonly notListed?: boolean
     readonly reasoningCapabilities?: ModelReasoningCapabilities
+    readonly supportsFastMode?: boolean
   }[]
   readonly defaultModelId?: string
 }

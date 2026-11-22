@@ -1,4 +1,5 @@
 import { channelQuestionCard } from './channel-question-card.js'
+import { renderFeishuMarkdown } from './feishu-markdown.js'
 import { createHash } from 'node:crypto'
 import {
   type CardActionEvent,
@@ -63,6 +64,10 @@ export interface FeishuAdapterOptions {
     addressing: ChannelCommandAddressing,
   ) => Promise<void>
   readonly onCardAction?: (ref: ChannelTenantRef, event: CardActionEvent) => Promise<void>
+  readonly onPairingInput?: (
+    ref: ChannelTenantRef,
+    message: NormalizedMessage,
+  ) => Promise<{ accepted: boolean; reply: boolean }>
 }
 
 class FeishuAdapterError extends Error {
@@ -79,7 +84,7 @@ function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
 // The official SDK preserves empty root_id/thread_id fields for ordinary messages.
 // Only a nonblank identifier establishes a reply chain, including receive selectors.
 const replyThreadId = (message: NormalizedMessage): string | undefined =>
-  message.rootId?.trim() || message.threadId?.trim() || undefined
+  message.rootId?.trim() || message.threadId?.trim() || message.replyToMessageId?.trim() || undefined
 
 function inboundEnvelope(
   message: NormalizedMessage,
@@ -141,6 +146,10 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       // The SDK drops form_value unless raw events are enabled. The queue extracts
       // only the bounded answer and discards the raw body before retaining it.
       includeRawEvent: true,
+      // A pairing code must never be merged into a neighbouring ordinary
+      // message, and each actor/event needs its own authorization boundary.
+      // Keep the SDK's per-chat queue and deduplication, but flush each event.
+      safety: { batch: { text: { delayMs: 0, longDelayMs: 0, maxMessages: 1 } } },
       policy: { dmMode: 'open', requireMention: options.requireMention },
       httpInstance: feishuProfileHttp(options.onProfile),
     }))
@@ -177,6 +186,28 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       )
       const unsubscribe = channel.on('message', async message => {
         if (stopped) return
+        // Pairing codes are capabilities: consume these control messages before
+        // ordinary ingress, so neither their text nor raw event enters the inbox.
+        if (/(?:^|\s)\/pair(?:\s|$)/iu.test(message.content)) {
+          const selectors = (input.readConnection?.() ?? input.connection).selectors
+          if (
+            input.acceptMessage?.(message) === false || selectors !== undefined
+              && !selectors.includes(message.chatType === 'p2p' ? 'direct' : 'group')
+              && !(selectors.includes('mentions') && message.mentionedBot)
+              && !(selectors.includes('replies') && replyThreadId(message) !== undefined)
+          ) return
+          const result = await input.onPairingInput?.(input.connection.ref, message)
+          if (!stopped && result?.reply) {
+            await channel.send(message.chatId, {
+              text: message.chatType === 'group'
+                ? '请私聊机器人，并由本机用户发起和确认配对。配对不会自动授予任务权限。'
+                : result.accepted
+                ? '配对请求已收到，请在本机确认。'
+                : '配对请求无效或已过期，请在本机重新发起。',
+            }).catch(() => undefined)
+          }
+          return
+        }
         observation.message('normalized', message.messageId, {
           reason: message.chatType,
           outcome: message.mentionedBot ? 'mentioned' : 'unaddressed',
@@ -254,10 +285,11 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
-            const content = JSON.stringify(
-              delivery.questionCard ? channelQuestionCard(delivery.questionCard) : { text: delivery.text },
-            )
-            const msg_type = delivery.questionCard ? 'interactive' as const : 'text' as const
+            const rendered = delivery.questionCard
+              ? { msg_type: 'interactive' as const, content: channelQuestionCard(delivery.questionCard) }
+              : renderFeishuMarkdown(delivery.text)
+            const content = JSON.stringify(rendered.content)
+            const msg_type = rendered.msg_type
             const response = delivery.target.semantics !== 'conversation'
               ? await channel.rawClient.im.v1.message.reply({
                 path: { message_id: delivery.target.threadId },
@@ -308,6 +340,7 @@ export function feishuDefinitionsForConfig(
     readonly channelConnected?: FeishuAdapterOptions['channelConnected']
     readonly onNormalizedInput?: FeishuAdapterOptions['onNormalizedInput']
     readonly onCardAction?: FeishuAdapterOptions['onCardAction']
+    readonly onPairingInput?: FeishuAdapterOptions['onPairingInput']
     readonly readConnection?: (ref: ChannelTenantRef) => ChannelServiceConnectionConfigV2 | undefined
   },
 ): readonly ChannelAdapterDefinition[] {
@@ -324,6 +357,7 @@ export function feishuDefinitionsForConfig(
         ...(input.channelConnected === undefined ? {} : { channelConnected: input.channelConnected }),
         ...(input.onNormalizedInput === undefined ? {} : { onNormalizedInput: input.onNormalizedInput }),
         ...(input.onCardAction === undefined ? {} : { onCardAction: input.onCardAction }),
+        ...(input.onPairingInput === undefined ? {} : { onPairingInput: input.onPairingInput }),
         ...(input.readConnection === undefined ? {} : { readConnection: () => input.readConnection!(connection.ref) }),
         ...(input.secretResolver === undefined ? {} : {
           resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),

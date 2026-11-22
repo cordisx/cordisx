@@ -94,33 +94,51 @@ describe('native submission document authority', () => {
     }
   })
 
-  it('requires native task markers and imports only the Host-discovered execution module', async () => {
+  it('loads only the discovered task module before checking lazy registration, with bounded reasons', async () => {
     const url = 'app://-/assets/renamed-execution.js'
     const native: Record<string, any> = {}
     const imported: string[] = []
+    let installMarkers = false
+    let failImport = false
     const h = await harness({
       taskExecutionUrl: url,
-      evaluate: expression =>
-        vm.runInNewContext(expression.replace('await import(url)', 'await load(url)'), {
-          ...native,
-          load: async (loaded: string) => {
-            imported.push(loaded)
-          },
-        }),
+      evaluate: expression => {
+        const context: Record<string, any> = { ...native }
+        context.load = async (loaded: string) => {
+          imported.push(loaded)
+          if (failImport) throw new Error('private failure must not escape')
+          if (installMarkers) {
+            Object.assign(context, {
+              __cordisxNativeAgentTask_initial: true,
+              __cordisxNativeAgentTask_execution: true,
+              __cordisxNativeAgentTaskExecutionUrl: url,
+            })
+          }
+        }
+        return vm.runInNewContext(expression.replace('await import(url)', 'await load(url)'), context)
+      },
     })
     try {
-      expect(await h.authority.taskCreationAvailable()).toBe(false)
-      native.__cordisxNativeAgentTask_initial = true
-      expect(await h.authority.taskCreationAvailable()).toBe(false)
-      native.__cordisxNativeAgentTaskAdapter = {}
-      native.__cordisxNativeAgentTaskExecutionUrl = 'app://-/assets/unrelated.js'
-      expect(await h.authority.taskCreationAvailable()).toBe(false)
+      expect(await h.authority.taskCreationStatus()).toEqual({ available: false, reason: 'adapter-unavailable' })
       expect(imported).toEqual([])
+      native.__cordisxNativeAgentTaskAdapter = {}
+      failImport = true
+      expect(await h.authority.taskCreationStatus()).toEqual({ available: false, reason: 'execution-import-failed' })
+      failImport = false
+      expect(await h.authority.taskCreationStatus()).toEqual({ available: false, reason: 'initial-marker-unavailable' })
+      native.__cordisxNativeAgentTask_initial = true
+      native.__cordisxNativeAgentTaskExecutionUrl = 'app://-/assets/unrelated.js'
+      expect(await h.authority.taskCreationStatus()).toEqual({ available: false, reason: 'execution-url-mismatch' })
       native.__cordisxNativeAgentTaskExecutionUrl = url
-      expect(await h.authority.taskCreationAvailable()).toBe(false)
-      native.__cordisxNativeAgentTask_execution = true
+      expect(await h.authority.taskCreationStatus()).toEqual({
+        available: false,
+        reason: 'execution-marker-unavailable',
+      })
+      installMarkers = true
+      delete native.__cordisxNativeAgentTask_initial
+      delete native.__cordisxNativeAgentTaskExecutionUrl
       expect(await h.authority.taskCreationAvailable()).toBe(true)
-      expect(imported).toEqual([url, url])
+      expect(imported.every(value => value === url)).toBe(true)
     } finally {
       await h.installed.dispose()
     }

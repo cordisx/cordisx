@@ -579,6 +579,7 @@ export function analyzeNativeSubmissionTransforms(
       url: plan.resource.url,
       sha256,
       requiredForDocumentReady: plan.capabilities.includes('submit-guard') && plan.owners.size === 0,
+      taskFirstTurnCarrier: plan.capabilities.includes('first-turn'),
       transform: (observed: string) => {
         if (hash(observed) !== sha256) {
           throw new Error(`Native resource changed after capability discovery: ${plan.resource.url}`)

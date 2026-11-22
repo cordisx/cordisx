@@ -32,6 +32,10 @@ export class ChannelTaskSettingsWorkflow {
         ? { settings: object(value.pending ?? value.settings) as ChannelTaskPatch }
         : { config: value.config as ChannelTaskConfig }),
       providers: (Array.isArray(models.providers) ? models.providers : []) as ChannelTaskFormReadback['providers'],
+      projects: (Array.isArray(models.projects) ? models.projects : []) as NonNullable<
+        ChannelTaskFormReadback['projects']
+      >,
+      ...(models.projectAvailability === 'unavailable' ? { projectAvailability: 'unavailable' as const } : {}),
     }
   }
   async mount(

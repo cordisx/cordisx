@@ -69,6 +69,18 @@ export const CHANNEL_COMMAND_DEFINITIONS = [
   { name: 'approvals', usage: '/approvals', summary: '查看当前频道会话的待处理请求。', readOnly: true },
   { name: 'models', usage: '/models', summary: '查看当前已认证的服务商、模型目录。', readOnly: true },
   {
+    name: 'fast',
+    usage: '/fast [on | off] [--target ID | --all]',
+    summary: '读取或设置 Fast；按字段权限审批，空闲后应用。',
+    readOnly: false,
+  },
+  {
+    name: 'project',
+    usage: '/project [list | 项目 ID] [--target ID | --all]',
+    summary: '读取或切换项目；首个后续 turn 使用目标仓库的写入范围。',
+    readOnly: false,
+  },
+  {
     name: 'model',
     usage: '/model [模型] [--provider 服务商] [--effort 强度] [--target ID | --all]',
     summary: '查看或设置任务模型；无权限时申请具体变更，空闲后应用。',
@@ -82,7 +94,8 @@ export const CHANNEL_COMMAND_DEFINITIONS = [
   },
   {
     name: 'task-settings',
-    usage: '/task-settings [--provider 服务商] [--model 模型] [--effort 强度] [--target ID | --all]',
+    usage:
+      '/task-settings [--provider 服务商] [--model 模型] [--effort 强度] [--fast true|false] [--project 项目] [--target ID | --all]',
     summary: '查看或设置任务参数；按字段、服务商、模型权限判断。',
     readOnly: false,
   },

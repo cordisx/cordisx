@@ -111,6 +111,11 @@ export async function prepareCliCommand(
   argv: readonly string[],
   runtime: CordisXCliRuntime,
 ): Promise<PreparedRunCommand | undefined> {
+  if (argv[0] === 'skills') {
+    const { runSkillsCommand } = await import('./skills-command.js')
+    await runSkillsCommand(argv.slice(1), runtime)
+    return
+  }
   if (argv[0] === 'service-owner') {
     const { runServiceOwner } = await import('./service-owner.js')
     await runServiceOwner(runtime)

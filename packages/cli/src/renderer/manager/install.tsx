@@ -32,6 +32,7 @@ import { nativeRouteIdentity, type NativeRouteSource } from './native-route-tran
 import { WorkspaceRailProjection } from './workspace-rail-projection.js'
 import { ManagerPaneRecapture } from './manager-pane-recapture.js'
 import { hasManagerSplitLayout } from '../adapter/manager-split-titlebar.js'
+import { ManagerSidebarSizeLease } from '../adapter/manager-sidebar-size-lease.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
 
@@ -131,11 +132,9 @@ export function installReactCordisXManager(
     titlebarStyle: string
     mainPosition: string
     sidebarPosition: string
-    sidebarWidth: string
-    sidebarFlexBasis: string
+    sidebarSizeLease: ManagerSidebarSizeLease
     sidebarLayout: HTMLElement | undefined
-    sidebarLayoutWidth: string
-    sidebarLayoutFlexBasis: string
+    sidebarLayoutSizeLease: ManagerSidebarSizeLease | undefined
     width: number
     minimumWidth: number
     maximumWidth: number
@@ -146,6 +145,8 @@ export function installReactCordisXManager(
     navigationOverflow: string
     rootLeft: string
     rootWidth: string
+    rootTop: string
+    rootHeight: string
     native: NativeState[]
     nativeTitle: NativeState[]
     selected: Array<{ button: HTMLButtonElement; current: string | null; dataSelected: string | null }>
@@ -189,12 +190,10 @@ export function installReactCordisXManager(
       navigationSeat.style.width = `${next}px`
       rootSeat.style.left = '0'
       rootSeat.style.width = '100%'
-      current.sidebarContainer.style.width = `${next}px`
-      current.sidebarContainer.style.flexBasis = `${next}px`
+      current.sidebarSizeLease.apply(next)
       if (current.sidebarLayout !== undefined) {
         const railWidth = current.sidebarContainer.getBoundingClientRect().left
-        current.sidebarLayout.style.width = `${railWidth + next}px`
-        current.sidebarLayout.style.flexBasis = `${railWidth + next}px`
+        current.sidebarLayoutSizeLease?.apply(railWidth + next)
         navigationSeat.style.left = `${railWidth}px`
         navigationSeat.style.right = 'auto'
       }
@@ -204,8 +203,13 @@ export function installReactCordisXManager(
       ? anchorRect.left
       : current.sidebarContainer.getBoundingClientRect().left
     resizeHandle.style.left = `${sidebarLeft + next}px`
-    resizeHandle.style.top = `${anchorRect.top}px`
-    resizeHandle.style.height = `${anchorRect.height}px`
+    const sidebarRect = current.sidebarContainer.getBoundingClientRect()
+    resizeHandle.style.top = `${
+      current.provenance === 'codex-26.924-native-two-pane' ? sidebarRect.top : anchorRect.top
+    }px`
+    resizeHandle.style.height = `${
+      current.provenance === 'codex-26.924-native-two-pane' ? sidebarRect.height : anchorRect.height
+    }px`
     if (current.titlebarProvenance === 'rail-only') {
       const titleRect = current.titlebarSlot.getBoundingClientRect()
       const desiredLeft = Math.max(current.titlebarSafeLeft, anchorRect.left + next)
@@ -413,12 +417,8 @@ export function installReactCordisXManager(
     stopResize()
     pane = undefined
     if (current.titlebarLease !== undefined) releaseManagerTitlebarLease(current.titlebarLease)
-    current.sidebarContainer.style.width = current.sidebarWidth
-    current.sidebarContainer.style.flexBasis = current.sidebarFlexBasis
-    if (current.sidebarLayout !== undefined) {
-      current.sidebarLayout.style.width = current.sidebarLayoutWidth
-      current.sidebarLayout.style.flexBasis = current.sidebarLayoutFlexBasis
-    }
+    current.sidebarSizeLease.release()
+    current.sidebarLayoutSizeLease?.release()
     for (const state of current.native) restoreNativeState(state)
     for (const { node, ariaHidden, inert, visibility } of current.nativeTitle) {
       node.inert = inert
@@ -437,6 +437,8 @@ export function installReactCordisXManager(
     navigationSeat.style.overflow = current.navigationOverflow
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
+    rootSeat.style.top = current.rootTop
+    rootSeat.style.height = current.rootHeight
     if (presentationMode === 'workspace') {
       if (!retainRail) railProjection.leave()
     } else {
@@ -625,11 +627,9 @@ export function installReactCordisXManager(
       titlebarStyle: titlebarSeat.getAttribute('style') ?? '',
       mainPosition: seat.main.anchor.style.position,
       sidebarPosition: seat.sidebar.container.style.position,
-      sidebarWidth: seat.sidebar.container.style.width,
-      sidebarFlexBasis: seat.sidebar.container.style.flexBasis,
+      sidebarSizeLease: new ManagerSidebarSizeLease(seat.sidebar.container),
       sidebarLayout,
-      sidebarLayoutWidth: sidebarLayout?.style.width ?? '',
-      sidebarLayoutFlexBasis: sidebarLayout?.style.flexBasis ?? '',
+      sidebarLayoutSizeLease: sidebarLayout === undefined ? undefined : new ManagerSidebarSizeLease(sidebarLayout),
       width: initialWidth,
       minimumWidth,
       maximumWidth,
@@ -640,6 +640,8 @@ export function installReactCordisXManager(
       navigationOverflow: navigationSeat.style.overflow,
       rootLeft: rootSeat.style.left,
       rootWidth: rootSeat.style.width,
+      rootTop: rootSeat.style.top,
+      rootHeight: rootSeat.style.height,
       native,
       nativeTitle,
       selected,
@@ -681,6 +683,11 @@ export function installReactCordisXManager(
       button.removeAttribute('data-selected')
     }
     rootSeat.dataset.managerSurface = 'pane'
+    if (seat.provenance === 'codex-26.924-native-two-pane') {
+      const inset = Math.max(0, seat.geometry.top - mainRect.top)
+      rootSeat.style.top = `${inset}px`
+      rootSeat.style.height = `calc(100% - ${inset}px)`
+    }
     titlebarSeat.dataset.cordisxManagerTitleDivider = 'true'
     if (seat.provenance === 'codex-26.924-native-two-pane') {
       navigationSeat.style.borderTopLeftRadius = nativeSidebarRadius
@@ -839,6 +846,11 @@ export function installReactCordisXManager(
       'data-app-shell-titlebar-slot',
       'data-app-shell-header-slot',
       'data-app-shell-header-layout',
+      'data-app-shell-header-placement',
+      'data-app-shell-unified-tab-strip',
+      'data-app-shell-compact-page-gutter',
+      'data-app-shell-active-page',
+      'data-app-shell-shared-local-frame',
       'data-app-shell-workspace-layout',
       'data-app-shell-tab-controller',
       'data-app-shell-tab-panel-controller',

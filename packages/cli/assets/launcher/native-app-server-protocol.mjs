@@ -3,6 +3,7 @@ import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
+import { createNativeManagedModelListRecovery } from './native-managed-model-list-recovery.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
 import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
 import { withStableComputerUseCli } from './native-computer-use-config.mjs'
@@ -16,11 +17,13 @@ import { readNativeLines } from './native-json-lines.mjs'
 import { createNativeChatControl } from './native-chat-control.mjs'
 import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
 import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
+import { dispatchNativeTaskTool, normalizeNativeTaskFirstTurn } from './native-task-dispatch.mjs'
 
-const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
-  process.env,
-  process.argv.slice(2),
-)
+const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs, reviewRouting } =
+  nativeLaunchConfiguration(
+    process.env,
+    process.argv.slice(2),
+  )
 const marker = 'cordisx.operation_token'
 const maxControlLineBytes = 8 * 1024 * 1024
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
@@ -28,6 +31,7 @@ const nativeTransport = createNativeProviderTransport(child, {
   executable,
   args: nativeArgs,
   env: process.env,
+  reviewRouting,
   diagnostic: details => nativeLifecycle(details.phase, details),
 })
 const control = net.connect(socketPath)
@@ -35,6 +39,12 @@ const controlCalls = new Map()
 const privateCalls = new Map()
 const desktopCalls = new Map()
 const resumeCalls = new NativeRequestTracker()
+const managedModelLists = createNativeManagedModelListRecovery({
+  controlCall,
+  writeDesktop: value => write(process.stdout, value),
+  emitDiagnostic: event => emitDiagnostic(event),
+  stop,
+})
 const preparedResumes = new Map()
 const unmarkedTurns = new NativeRequestTracker()
 // An unacknowledged lifecycle mutation stays uncertain; retain its fence, not its payload.
@@ -188,6 +198,7 @@ function stop(reason = 'transport-closed') {
   rejectAll(privateCalls)
   desktopCalls.clear()
   resumeCalls.clear()
+  managedModelLists.clear()
   preparedResumes.clear()
   unmarkedTurns.clear()
   recoveringTurns.clear()
@@ -484,6 +495,7 @@ async function forward(line) {
       message?.method === 'turn/start' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
     ) unmarkedTurns.track(message.id, params)
+    managedModelLists.issued(message)
     if (
       ['thread/resume', 'thread/unsubscribe'].includes(message?.method)
       && typeof params?.threadId === 'string' && ['string', 'number'].includes(typeof message.id)
@@ -604,6 +616,9 @@ async function forward(line) {
     }
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
+    if (message.method === 'turn/start' && dispatch.agentTask && dispatch.providerId !== 'openai') {
+      normalizeNativeTaskFirstTurn(params)
+    }
     desktopCalls.set(message.id, { token, method: message.method, agentTask: dispatch.agentTask === true })
     if (message.method === 'turn/start') {
       firstTurns.delete(params.threadId)
@@ -811,6 +826,7 @@ readLines(nativeTransport.stdout, line => {
   if (settle(privateCalls, message, false)) return
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return
+  if (managedModelLists.received(message, line)) return
   if (message.method === undefined) lifecycleCalls.delete(message.id)
   const reconciliation = message.method === undefined ? switchReconciliations.take(message.id) : undefined
   const turnParams = message.method === undefined ? unmarkedTurns.take(message.id) : undefined
@@ -880,6 +896,8 @@ const continuation = createNativeProviderContinuation({
   current: threadId => !closed && !cancelledRecovery.has(threadId) && !lifecyclePending(threadId),
 })
 const BRIDGE_NATIVE_METHODS = new Set([
+  'model/list',
+  'thread/settings/update',
   'thread/list',
   'thread/read',
   'thread/turns/list',
@@ -915,19 +933,8 @@ readLines(control, line => {
     uncertainSwitches.set(message.threadId, undefined)
     return
   }
-  if (message.type === 'task-create' && typeof message.id === 'string') {
-    void nativeCall('mcpServer/tool/call', {
-      server: 'codex_app',
-      threadId: message.sourceThreadId,
-      tool: 'create_thread',
-      arguments: message.arguments,
-      _meta: {
-        'openai/toolCallId': message.callId,
-        'openai/threadId': message.sourceThreadId,
-        'openai/turnId': message.sourceTurnId,
-      },
-    }).then(value => write(control, { id: message.id, ok: true, value }))
-      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+  if (['task-create', 'codex-tool'].includes(message.type) && typeof message.id === 'string') {
+    dispatchNativeTaskTool({ message, nativeCall, write, control, stop, emitDiagnostic })
     return
   }
   // The CordisX agent bridge reads and starts threads in this same app-server, so

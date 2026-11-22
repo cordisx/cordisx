@@ -1,4 +1,5 @@
 import type { CordisXPluginManifestV16 } from '../channel-exact-request-permissions.js'
+import type { DeferredPermissionDecision } from '../permission-deferral.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
@@ -312,6 +313,8 @@ export interface CordisXRuntimeMetadata {
 }
 
 export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'package'> {
+  /** Host-private exact distribution provenance for configured local archives. */
+  readonly distributionArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
   /** Host-private distribution provenance; never injected into plugin Contexts. */
   readonly package?: NonNullable<CordisXBrowserPlugin['package']> & {
     readonly artifactIntegrity?: `sha256:${string}`
@@ -512,6 +515,8 @@ export interface RendererPluginMutation {
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
+  readonly bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>
   /** Host-private activation lease; never projected to plugins. */
   readonly ownerDocumentBindings?: readonly {
     readonly source: string

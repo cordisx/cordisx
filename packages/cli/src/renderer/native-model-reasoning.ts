@@ -4,6 +4,32 @@ import {
   resolveModelReasoningEffort,
 } from '../model-reasoning-capabilities.js'
 import type { PendingNativeProviderSelection } from './native-provider-selection-client.js'
+import type { NativeModelSelectionControl } from './adapter/native-model-provider-seat.js'
+
+/** Bind current and pending reasoning choices to the same composer context. */
+export class ComposerModelReasoning {
+  constructor(
+    private readonly pending: PendingModelReasoning,
+    private readonly context: () => {
+      navigation: number
+      effort: string | undefined
+      catalog: CatalogReasoningLookup
+    },
+  ) {}
+
+  target(
+    target: { readonly providerId: string; readonly model: string },
+    control: NativeModelSelectionControl,
+    effort = this.context().effort ?? control.reasoningEffort,
+  ): TargetReasoning {
+    return resolveTargetReasoning(target, effort, control.models, this.context().catalog)
+  }
+
+  pendingTarget(pending: PendingNativeProviderSelection, control: NativeModelSelectionControl): TargetReasoning {
+    const { navigation, effort, catalog } = this.context()
+    return this.pending.target(navigation, pending, effort ?? control.reasoningEffort, control.models, catalog)
+  }
+}
 
 export type CatalogReasoningLookup = (
   providerId: string,

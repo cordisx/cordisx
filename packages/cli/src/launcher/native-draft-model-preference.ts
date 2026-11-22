@@ -15,6 +15,7 @@ export class NativeDraftModelPreference {
       catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
       defaultProviderId?: string
       defaultModelId?: string
+      defaults?(): Promise<{ providerId?: string; model?: string }>
       isStartupProvider?(providerId: string): boolean
     }>,
   ) {}
@@ -30,7 +31,13 @@ export class NativeDraftModelPreference {
   }
 
   async read(): Promise<NativeDraftModelPreferenceValue | undefined> {
-    if (this.remembered === undefined && this.options.defaultProviderId === undefined) return undefined
+    const defaults = this.options.defaults ? await this.options.defaults() : undefined
+    const defaultProviderId = defaults?.providerId ?? this.options.defaultProviderId
+    const defaultModelId = defaults?.model ?? (defaults?.providerId === undefined
+        || defaults.providerId === this.options.defaultProviderId
+      ? this.options.defaultModelId
+      : undefined)
+    if (this.remembered === undefined && defaultProviderId === undefined) return undefined
     let catalog: readonly NativeModelProviderCatalogEntry[]
     try {
       catalog = await this.options.catalog()
@@ -40,7 +47,6 @@ export class NativeDraftModelPreference {
     // Read the latest explicit choice after the catalog await, so an older read
     // cannot restore the model that the user has just replaced.
     const remembered = this.remembered
-    const { defaultProviderId, defaultModelId } = this.options
     const candidates = [
       ...new Set([remembered?.providerId, defaultProviderId].filter(
         (candidate): candidate is string => candidate !== undefined,

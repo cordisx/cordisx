@@ -4,6 +4,7 @@ import type {
   CordisXCapabilityProviderKind,
 } from '../capability-availability-contracts.js'
 import type { CordisXConfigFieldSnapshot } from '../contracts.js'
+import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
 import {
   type CordisXIconToken,
   type CordisXLocalizationDiagnostic,
@@ -272,6 +273,13 @@ export interface ManagerModel {
   applyPermissionLifecycleReviewV4?(
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
+  permissionLifecycleReviewPlanV7?(
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
+  ): Promise<DeferredPermissionPlan | undefined>
+  applyPermissionLifecycleReviewV7?(decision: DeferredPermissionDecision): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
   /** Host-private artifact transfer; the renderer never receives tarball bytes or temporary paths. */
   inspectMarketplaceArtifact?(

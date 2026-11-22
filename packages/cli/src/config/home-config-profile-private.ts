@@ -49,6 +49,29 @@ export function parseManagedProviders(value: unknown, label: string): readonly M
 export function redactedHomeConfig(config: HomeConfig): unknown {
   return {
     ...config,
+    ...(config.mcp === undefined ? {} : {
+      mcp: {
+        servers: Object.fromEntries(
+          Object.entries(config.mcp.servers).map(([name, server]) => [name, { type: server.type }]),
+        ),
+        ...(config.mcp.apps === undefined
+          ? {}
+          : {
+            apps: Object.fromEntries(
+              Object.entries(config.mcp.apps).map((
+                [app, servers],
+              ) => [
+                app,
+                Object.fromEntries(
+                  Object.entries(servers).map((
+                    [name, server],
+                  ) => [name, server === null ? null : { type: server.type }]),
+                ),
+              ]),
+            ),
+          }),
+      },
+    }),
     providers: config.providers.map(provider => {
       if (provider.kind !== 'model-service') return provider
       const { runtimeOptions, ...declaration } = provider

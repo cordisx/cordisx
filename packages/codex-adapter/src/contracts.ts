@@ -16,6 +16,8 @@ export interface NativeResourceTransform {
    */
   readonly outputContract?: 'fixed-original-v1'
 
+  /** The submission adapter proved and transformed the native first-turn token carrier. */
+  readonly taskFirstTurnCarrier?: boolean
   /** Host-discovered module used by the supplementary native task capability. */
   readonly taskExecutionUrl?: string
   readonly url: string

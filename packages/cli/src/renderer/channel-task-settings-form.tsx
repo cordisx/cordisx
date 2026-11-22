@@ -17,10 +17,17 @@ export interface ChannelTaskFormReadback {
   revision: number
   config?: ChannelTaskConfig
   settings?: ChannelTaskPatch
+  projects?: readonly { projectId: string; name: string }[]
+  projectAvailability?: 'available' | 'unavailable'
   providers: readonly {
     providerId: string
     title: string
-    models: readonly { id: string; label?: string; reasoningCapabilities?: { efforts: readonly string[] } }[]
+    models: readonly {
+      id: string
+      label?: string
+      reasoningCapabilities?: { efforts: readonly string[] }
+      supportsFastMode?: boolean
+    }[]
   }[]
 }
 function taskSchema(
@@ -88,6 +95,40 @@ function taskSchema(
         '思考强度',
         'Effort',
       ),
+      fast: label(
+        Schema.union([
+          ...(inherited ? [choice('', zh ? '继承' : 'Inherit')] : []),
+          Schema.const(false).extra('extra', { label: zh ? '关闭' : 'Off' }),
+          Schema.const(true).extra('extra', { label: zh ? '开启' : 'On' }),
+        ]).role('radio').description(
+          zh
+            ? '仅支持 Fast 的模型可以开启；切换至不支持的模型时关闭。'
+            : 'Only models that support Fast can enable it.',
+        ),
+        'Fast',
+        'Fast',
+      ),
+      projectId: label(
+        Schema.union([
+          choice(
+            '',
+            readback.projectAvailability === 'unavailable'
+              ? zh ? '不可用' : 'Unavailable'
+              : inherited
+              ? zh ? '继承' : 'Inherit'
+              : zh
+              ? '未修改'
+              : 'Unchanged',
+          ),
+          ...(readback.projects ?? []).map(project => choice(project.projectId, project.name)),
+          ...(typeof selection.projectId === 'string' && selection.projectId
+              && !readback.projects?.some(project => project.projectId === selection.projectId)
+            ? [choice(selection.projectId, selection.projectId)]
+            : []),
+        ]).disabled(readback.projectAvailability === 'unavailable'),
+        readback.projectAvailability === 'unavailable' ? '项目（不可用）' : '项目',
+        readback.projectAvailability === 'unavailable' ? 'Project (unavailable)' : 'Project',
+      ),
     }
   }
   const selector = {
@@ -120,6 +161,8 @@ function taskSchema(
               ...selector,
               settings: label(
                 Schema.object({
+                  fast: modelFields({}, true).fast,
+                  projectId: modelFields({}, true).projectId,
                   providerId: label(
                     Schema.union([
                       choice('', zh ? '继承' : 'Inherit'),
@@ -174,6 +217,8 @@ function taskSchema(
                     choice('providerId', zh ? '服务商' : 'Provider'),
                     choice('model', zh ? '模型' : 'Model'),
                     choice('effort', zh ? '强度' : 'Effort'),
+                    choice('fast', 'Fast'),
+                    choice('projectId', zh ? '项目' : 'Project'),
                   ]),
                 ),
                 '可改字段',
@@ -200,6 +245,22 @@ function taskSchema(
                 ),
                 '强度范围',
                 'Efforts',
+              ),
+              fastModes: label(
+                Schema.array(Schema.union([
+                  Schema.const(false).extra('extra', { label: zh ? '关闭' : 'Off' }),
+                  Schema.const(true).extra('extra', { label: zh ? '开启' : 'On' }),
+                ])),
+                'Fast 范围',
+                'Fast values',
+              ),
+              projectIds: label(
+                Schema.array(Schema.union([
+                  ...(readback.projects ?? []).map(project => choice(project.projectId, project.name)),
+                  choice('', zh ? '请选择' : 'Choose'),
+                ])),
+                '项目范围',
+                'Projects',
               ),
             }),
           ).description(
@@ -315,6 +376,8 @@ export function ChannelTaskSettingsForm(props: {
             providerId: 'navigation.routes',
             model: 'agent.turn-control',
             effort: 'agent.reasoning',
+            fast: 'action.submit',
+            projectId: 'content.folder',
             scopes: 'content.tags',
             permissions: 'content.key',
           },
@@ -343,6 +406,7 @@ export function ChannelTaskSettingsForm(props: {
                 selection.model = inherited ? '' : provider?.models[0]?.id ?? ''
               }
               const model = provider?.models.find(model => model.id === selection.model)
+              if (selection.fast === true && model?.supportsFastMode !== true) selection.fast = false
               if (
                 selection.effort !== undefined && selection.effort !== 'inherit' && (providerChanged || model)
                 && !model?.reasoningCapabilities?.efforts.includes(String(selection.effort))

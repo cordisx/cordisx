@@ -49,6 +49,72 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 
 `local-bindings` is a local management CLI read, not an Agent tool. It lists profile binding IDs, sessions, channel identities, states and modes at one revision and service generation, without messages or credentials. An empty input lists the profile; a conversation filter requires the complete account identity. Older running Hosts do not implement this operation; use a matching Host runtime.
 
+### Task reception feedback
+
+Feishu/Lark tasks accepted by the existing wake, binding and dispatch rules
+receive best-effort feedback. Default behavior attempts an `OnIt` reaction on
+the input message, then sends one waiting message after 30 seconds if the task
+has not replied or finished. Group chatter that does not wake the bot and
+Host slash commands do not trigger task feedback. Reaction failure does not
+block native work. Feedback is separate from automatic final-response forwarding.
+
+Configure `channel-feedback.json` beside the selected profile's
+`channel-conversations.json` (under `CORDISX_HOME/apps/codex/profiles/PROFILE/`):
+
+```json
+{
+  "reaction": { "enabled": true, "emojiType": "OnIt" },
+  "wait": {
+    "enabled": true,
+    "delaySeconds": 30,
+    "texts": [
+      "已收到，正在处理。",
+      "还在处理中，请稍候。",
+      "任务正在进行，我会继续处理。"
+    ]
+  }
+}
+```
+
+Reaction and waiting hints can be disabled independently. Delay is an integer
+from 1 to 86400 seconds; the text list contains 1–50 nonempty strings of at most
+1000 characters each. One entry is chosen randomly per attempted hint. A legacy
+single `wait.text` remains supported; `texts` takes precedence. A file at
+`CORDISX_HOME/channel-feedback.json` is the legacy fallback when the profile
+file is absent. Settings are reread for new inputs and at the hint deadline;
+no App restart is needed. Invalid configuration disables feedback for that
+input and records a diagnostic, without blocking the task.
+
+Feedback uses the existing account SDK connection and the configured reply
+route. Reserved attempts are not replayed after restart. An observed authorized
+Channel reply or question attempt conservatively cancels all waiting hints for
+the same account and destination, including hints for concurrent tasks there;
+a failed/uncertain send can therefore suppress a hint. Sends outside the Channel
+transport cannot be correlated. Unknown native turn state suppresses the hint.
+Task completion and cancellation are rechecked before sending, but an HTTP
+request already issued cannot be withdrawn atomically with task completion.
+Hints are auxiliary notices and do not represent final task results.
+
+## Pair a direct-chat administrator
+
+On a running Host with a resolved, ready Feishu/Lark connection and enabled Channel policy, a local user can issue a five-minute, one-use code:
+
+```text
+cordisx channel admin-pair-begin --input '{"account":{"adapterId":"feishu","accountId":"<app-id>","tenantId":"<application-tenant-key>"}}'
+```
+
+Send `/pair <code>` to that bot in a private chat. Keep the code private and do not send it to a group. On the same local Host, inspect the candidate and explicitly confirm or cancel using the `pairingId` returned by `admin-pair-begin`:
+
+```text
+cordisx channel admin-pair-status --input '{"pairingId":"<pairing-id>"}'
+cordisx channel admin-pair-confirm --input '{"pairingId":"<pairing-id>"}'
+cordisx channel admin-pair-cancel --input '{"pairingId":"<pairing-id>"}'
+```
+
+Compare the displayed account, user ID, direct-chat ID and command list before confirming. Expiry, replacement, a changed service generation, a changed policy revision, or restart requires a new code. The sender must be a user in the application's own tenant; external users and group submissions cannot pair. The resulting rule authorizes management commands only for that exact account, tenant, user and private conversation. It does not change task-dispatch policy, and it cannot authorize `--global`. Existing policy denials and narrower restrictions still apply. Remove the generated pairing rule in Channel policy to revoke the grant. Pairing messages are consumed before the normal Channel inbox; no pairing code or raw event is stored in the transport or consumer ledger. A mentioned `/pair` request or a mentioned group message denied task dispatch can receive at most one guidance attempt in 24 hours per account and group across launches sharing the same profile directory. This rate limit stores only a digest of the account and group, and may conservatively suppress a hint for longer. Different machines without shared storage do not share the limit. Disabled policies, receive selectors and explicit send/help denials remain authoritative.
+
+Configure the bot and subscribe to `im.message.receive_v1` over the [authenticated long connection](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-). For direct messages grant `im:message.p2p_msg:readonly`; for group mentions grant `im:message.group_at_msg:readonly`; for replies grant `im:message:send_as_bot`. Publish the app version and complete any required approval. These message scopes do not grant `tenant:tenant:readonly`. Long connections for the same app compete for events, so do not start a separate discovery listener beside an existing server. This pairing flow uses the existing configured connection and does not discover an unresolved tenant.
+
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
 shape as native `channel_*` tools where an equivalent tool exists; `ask` and `question-cancel` are CLI-only. `connections`, `conversations`, `bind`,
 `unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `listen`, `send`, `send-many`, `ask`, `question-cancel`, `receipt`,
@@ -127,6 +193,21 @@ confirms delivery; a failed, pending or unknown result does not confirm a user
 saw the question or answered it.
 
 ### Local and remote history
+
+For an incoming Feishu/Lark reply, the Host reads the current message and its
+direct parent with the already-connected bot account. When available, the
+parent's bounded message body, sender and parent ID are included in
+`messageContext.referencedMessage` as untrusted source data. A missing ID,
+permission failure or timeout is reported as unavailable; the Host does not
+substitute the thread root for the direct parent or read another conversation.
+
+To follow an older parent ID, use `cordisx channel message-get` with the exact
+configured profile and Channel context. Input is
+`{account,conversationId,kind,messageId}`. A Channel-originated request is
+restricted to its own account, conversation and verified parent chain; lookup
+is bounded to 16 ancestors. Platform read permissions still apply, and each
+returned message is untrusted data rather than an instruction or permission.
+The public request and result are defined by [message read v1](https://github.com/cordisx/cordisx-protocol/blob/9c5e32d9c702934874417d89ff8c374d766a47d0/.agents/docs/channel-runtime/message-read-v1.md).
 
 `history` returns only accepted inputs at or after each currently active
 binding's creation sequence, filtered by the `afterSequence` cursor and limit
@@ -245,6 +326,11 @@ while the turn runs. With forwarding disabled, completion reads only exact-turn
 status and does not fetch assistant items. Old pending turns without a captured
 opt-in are not converted into automatic replies. An already enqueued outbound
 message retains its durable receipt and cannot be unsent by a later toggle.
+For a completed turn, explicitly marked final messages take precedence. If the
+provider omits message phases, forwarding accepts an unphased message only
+when the whole exact turn was read, it is the sole assistant message, and it is
+the last item. Explicit commentary, multiple assistant messages, later tool
+items, and incomplete pagination remain unavailable for automatic delivery.
 
 The Host “Messages and commands” form exposes [reply policy v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/reply-routing-v2.md).
 Set the profile default, its fallback, and optional platform/account/tenant/
@@ -362,17 +448,20 @@ The credential form and target validation stay Host-owned in both paths.
 Conversation policy is saved through the profile-bound Host form, separately
 from delegated transport and binding writes.
 
-## Provider, model and effort
+## Provider, model, effort, Fast and project
 
 The unified Channel settings entry adds a **Task models** tab on Manager v12.
 It configures creation defaults, per-conversation/per-user defaults and model
 permissions. Each binding also exposes its Host-owned current model form.
 Older Hosts omit the unsupported tab. Contract and downgrade semantics are in
 [task settings v1 / Manager v12](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/task-settings-v1.md).
+This Host also accepts private Fast/project settings through the existing
+Host-owned form and CLI. These fields do not expand frozen public execution
+settings or older Manager contracts; older Hosts do not support them.
 
 Read `model-list` for the admitted catalog and `task-settings` for a chat's
 actual/pending selection. `task-settings-set` accepts
-`{sessionId, settings:{providerId?,model?,effort?}, expectedRevision?}`;
+`{sessionId, settings:{providerId?,model?,effort?,fast?,projectId?}, expectedRevision?}`;
 `task-config-set` accepts `{config:{defaults,scopes,permissions},expectedRevision}`.
 Both use the selected runtime; they do not add providers or accept credentials.
 Native tools expose corresponding `channel_*` operations. Source-scoped writes
@@ -382,6 +471,11 @@ use the actual received user's rights, even when requested through an Agent.
 /models
 /model <model> --provider <provider> --effort high
 /task-settings --provider <provider> --model <model> --target <chat-id>
+/fast on
+/fast off --all
+/project list
+/project <local-project-id> --target <chat-id>
+/task-settings --fast false --project <local-project-id> --target <chat-id>
 /task-requests
 /task-approve <request-id>
 /task-deny <request-id>
@@ -393,13 +487,84 @@ validated against the actual catalog and queued until the chat is idle. Saving,
 submission and observed application are distinct states; unknown effects are
 not replayed after restart.
 
+Some native Codex versions keep an existing thread's provider fixed. When the
+native service explicitly refuses a cross-provider resume, the change is rejected
+without retrying it, and `/task-settings` explains that the existing chat can be
+kept while a new chat is created for the other provider. A timeout or any
+unrecognized native error remains uncertain and is not treated as a refusal.
+
 Model grants constrain platform/account/conversation, users/user groups, changed
-fields, Provider, qualified model and effort. Deny wins and applicable allow
+fields, Provider, qualified model, effort, Fast values (`fastModes`) and local
+projects (`projectIds`). Deny wins and applicable allow
 scopes intersect. Reads do not require a mutation grant. An eligible sender can
 change directly; otherwise a fixed, expiring request requires explicit approval
 by a currently eligible user from the source conversation. Agent tool calls
 cannot provide that user's approval. Rights and configuration are rechecked
 before the native change.
+
+Common profile creation settings are the base layer. Channel defaults, matching
+conversation/user rules and explicit selections override that layer; explicit
+Fast `false` remains meaningful. Enabling Fast requires catalog support. A
+provider/model change to an unsupported model includes Fast disable in the exact
+authorized patch. Changes are persisted before native effects and rechecked
+between combined operations. Uncertain partial changes require reconciliation.
+
+Project defaults resolve canonical working directories and writable roots before
+creating the chat. The new chat's project membership and native settings must be
+confirmed before its first turn. A failed confirmation retains the created chat
+and starts no turn. Project switching uses the common supplemental service and
+enforces the selected roots on later turns. A headless service may opt into
+workspace projects by setting `CORDISX_CHANNEL_WORKSPACE` to an absolute,
+operator-controlled directory before service startup. The service lists Git
+repositories at that directory and its immediate child directories, rejects
+paths outside it, and applies the selected repository as the chat's cwd and
+writable root. This service-owned selection is not Desktop sidebar membership.
+Without that setting, the project catalog remains unavailable. Project selection
+retains the Channel sender's existing field/value permissions and applies when
+the chat is idle. It also grants a private profile-specific mailbox directory
+for the sandboxed Channel CLI; it does not grant all of `/tmp`.
+
+Linux service-mode Channel and supplemental Codex CLI calls from a different
+PID namespace use an authenticated, encrypted, profile-scoped file mailbox
+when the Host advertises that capability. The sandbox must be allowed to write
+the mailbox directory. A read-only sandbox cannot use this writable transport;
+its Channel CLI remains unavailable unless an explicitly permitted transport is
+provided. A missing mailbox or old Host fails closed; an uncertain result must
+be reconciled rather than resent. Direct Host socket access remains the normal
+path outside that sandbox. Fresh continuation retains its existing
+confirmed configuration/cwd flow; native sidebar project membership inheritance
+has not been established by this change.
+
+Headless service startup merges every enabled shared `model-service` declaration
+that supports Codex Responses and has Codex model IDs. There is no two-provider
+limit. Save these services through the normal Model Services configuration or
+`cordisx models services save`, then restart that service instance. Startup
+projects their provider tables into the selected Codex home without changing
+the native default provider or model. Only saved environment variables needed
+by these services' API keys and headers are added to the native app-server
+environment; Channel credentials remain excluded. A missing key/header keeps
+that declaration out of the admitted catalog and records
+`HEADLESS_MODEL_SERVICE_CREDENTIAL_UNAVAILABLE:<provider-id>` without its value.
+Disabled services, other-client-only services and empty Codex catalogs are omitted.
+
+For headless deployments with provider configuration external to shared
+declarations, an operator can still supply `CORDISX_HEADLESS_PROVIDER_ID` and
+`CORDISX_HEADLESS_MODEL_ID`, plus the optional pair
+`CORDISX_HEADLESS_EXTRA_PROVIDER` and comma-separated
+`CORDISX_HEADLESS_EXTRA_MODELS`. The legacy primary/extra entries are merged
+with shared declarations and retain their default model and ordering. These
+variables declare the admitted IDs; they do not configure provider authentication
+or prove model capabilities. Only native catalog metadata establishes supported
+reasoning efforts. An existing chat, including a `notLoaded` chat, cannot switch
+providers through this path unless the underlying app-server supports and
+confirms that change; an unsupported switch is rejected. Catalog availability
+permits new conversations with the requested provider, not cross-provider replay
+of an existing conversation.
+
+Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
+response, final-message delivery reads the exact completed turn with
+`thread/read`. This compatibility path loads the complete thread and can hit
+transport limits for very long histories; other read errors do not trigger it.
 
 ## Fresh Channel continuation
 

@@ -291,6 +291,9 @@ it('does not retain a previous thread choice when the next thread binding read f
 it('keeps the same published snapshot when focus reconciliation finds no change', async () => {
   const h = await harness()
   try {
+    // The model directory now settles independently of selection readiness.
+    await settle()
+    await settle()
     const before = h.transport.getSnapshot()
     const changed = vi.fn()
     const unsubscribe = h.transport.subscribe(changed)
@@ -370,6 +373,40 @@ it('projects cached labels immediately while withholding a real binding', async 
     })
     expect(h.transport.getSnapshot().modelProvider).toBeUndefined()
     expect(await h.transport.select({ providerId: 'saved-provider', model: 'saved-model' })).toBe('unavailable')
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('reads configuration while thread read is pending, and model list never gates the selected label', async () => {
+  let threadRequest: Record<string, unknown> | undefined
+  let modelRequest: Record<string, unknown> | undefined
+  const h = await harness(request => {
+    if (request.method === 'thread/read') {
+      threadRequest = request
+      return true
+    }
+    if (request.method === 'model/list') {
+      modelRequest = request
+      return true
+    }
+  })
+  try {
+    expect(h.requests.some(request => request.method === 'config/read')).toBe(true)
+    expect(h.channel.selectionRead).not.toHaveBeenCalled()
+    message(h.dom.window, {
+      type: 'mcp-response',
+      hostId: 'local',
+      message: {
+        id: threadRequest!.id,
+        result: { thread: { status: { type: 'idle' }, modelProvider: 'provider-a' } },
+      },
+    })
+    await settle()
+    await settle()
+    expect(modelRequest).toBeDefined()
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, modelProvider: 'provider-a', model: 'model-a' })
   } finally {
     h.transport.dispose()
     h.dom.window.close()

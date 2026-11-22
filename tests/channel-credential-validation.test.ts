@@ -1,6 +1,9 @@
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { discoverChannelTenant } from '../packages/cli/src/launcher/channel-credential-validation.js'
+import {
+  discoverChannelTenant,
+  validateChannelCredentials,
+} from '../packages/cli/src/launcher/channel-credential-validation.js'
 
 const accountId = 'cli_credential_fixture'
 const tenantResult = { code: 0, data: { tenant: { tenant_key: 'fixture-tenant' } } }
@@ -8,6 +11,16 @@ const tenantResult = { code: 0, data: { tenant: { tenant_key: 'fixture-tenant' }
 afterEach(() => vi.restoreAllMocks())
 
 describe('new Channel credentials through the actual Feishu SDK', () => {
+  it('validates manually supplied tenant credentials with a fresh token exchange and redacts failures', async () => {
+    const post = vi.spyOn(defaultHttpInstance, 'post')
+      .mockResolvedValueOnce({ code: 0, tenant_access_token: 'fixture-token', expire: 7200 })
+      .mockRejectedValueOnce(new Error('fixture-secret and fixture-token'))
+    await expect(validateChannelCredentials({ adapterId: 'feishu', accountId, secret: 'fixture-secret' }))
+      .resolves.toBeUndefined()
+    await expect(validateChannelCredentials({ adapterId: 'feishu', accountId, secret: 'fixture-secret' }))
+      .rejects.toThrow(/^CREDENTIAL_VALIDATION_FAILED$/u)
+    expect(post).toHaveBeenCalledTimes(2)
+  })
   it.each([
     ['feishu', 'https://open.feishu.cn'],
     ['lark', 'https://open.larksuite.com'],

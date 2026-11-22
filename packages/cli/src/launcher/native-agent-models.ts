@@ -1,6 +1,8 @@
+import type { NativeTaskCreationStatus } from './native-task-creation-readiness.js'
 import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { callerThreadId } from './agent-bridge-context.js'
+import { dispatchCodexSettings } from './codex-settings-dispatch.js'
 import { bridgeFailure } from './agent-bridge-contract.js'
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -45,6 +47,10 @@ export interface NativeAgentModelsAuthority {
   /** The read-only integration report. Reads files and probes; never launches or writes. */
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
+  taskCreationStatus?(): Promise<NativeTaskCreationStatus>
+  execution?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
+  configuration?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
+  modelServices?(operation: 'read' | 'save', input: unknown, metadata?: unknown): Promise<unknown>
   /** Channel operations use this launch's configured connection and conversation consumer. */
   channel?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
   channelModelSelection?(input: unknown, metadata?: unknown): Promise<unknown | undefined>
@@ -72,6 +78,23 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       return authority.channel === undefined
         ? { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
         : await authority.channel(operation.slice('channel:'.length), input, metadata)
+    }
+    const supplemental = await dispatchCodexSettings(authority, operation, input, metadata)
+    if (supplemental !== undefined) return supplemental
+    if (operation === 'capabilities') {
+      return {
+        status: 'ok',
+        capabilities: {
+          providerCatalog: true,
+          providerSelection: true,
+          providerCreation: await authority.taskCreationAvailable?.() === true,
+          executionSettings: authority.execution !== undefined,
+          modelServices: authority.modelServices !== undefined,
+          projectSwitch: authority.configuration !== undefined,
+          fastSettings: authority.configuration !== undefined,
+          modelCreationDefaults: authority.configuration !== undefined,
+        },
+      }
     }
     const session = sessionOperation(operation)
     if (session !== undefined) {
@@ -116,11 +139,18 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     const catalog = await authority.catalog()
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
+      const taskStatus = await authority.taskCreationStatus?.()
+      const taskAvailable = taskStatus?.available ?? await authority.taskCreationAvailable?.() ?? false
       return {
+        status: 'ok',
         ...(authority.startup?.snapshot === undefined ? {} : { startup: await authority.startup.snapshot() }),
-        threadCreation: await authority.taskCreationAvailable?.()
+        threadCreation: taskAvailable
           ? { status: 'available', tool: 'create_thread_with_provider' }
-          : { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
+          : {
+            status: 'unavailable',
+            reason: 'native-task-provider-creation-unavailable',
+            ...(taskStatus && !taskStatus.available ? { detail: taskStatus.reason } : {}),
+          },
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,
@@ -128,6 +158,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
           models: provider.models.map(model => ({
             id: model.id,
             label: model.label,
+            ...(model.supportsFastMode === undefined ? {} : { supportsFastMode: model.supportsFastMode }),
             ...(() => {
               const reasoningCapabilities = parseModelReasoningCapabilities(model.reasoningCapabilities)
               return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
@@ -136,14 +167,18 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
         })),
       }
     }
-    const selection = object(input)
+    const selectionInput = object(input)
+    const selection: Record<string, unknown> | undefined = selectionInput === undefined ? undefined : {
+      ...selectionInput,
+      threadId: selectionInput.threadId === undefined ? callerThreadId(metadata) : selectionInput.threadId,
+    }
     if (
       operation !== 'select' || !selection || !text(selection.threadId) || !text(selection.providerId, 128)
       || !text(selection.model)
       || Object.keys(selection).some(key => !['threadId', 'providerId', 'model'].includes(key))
     ) return { status: 'rejected', reason: 'invalid-selection' }
     const target: Selection = { threadId: selection.threadId, providerId: selection.providerId, model: selection.model }
-    const channel = await authority.channelModelSelection?.(input, metadata)
+    const channel = await authority.channelModelSelection?.(selection, metadata)
     if (channel !== undefined) return channel
     const startup = authority.startup?.availability(target.providerId, target.model)
     if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
@@ -245,6 +280,11 @@ export async function startNativeAgentModelsServer() {
   }
   return {
     bindingPath,
+    async call(operation: string, input: unknown, metadata?: unknown) {
+      return handler && !closed
+        ? handler(operation, input, metadata)
+        : { status: 'unavailable', code: 'CODEX_RUNTIME_UNAVAILABLE' }
+    },
     bind(authority: NativeAgentModelsAuthority) {
       handler = createNativeAgentModelsHandler(authority)
       const { channelModelSelection: _guard, ...trusted } = authority

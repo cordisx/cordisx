@@ -1,8 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import * as lark from '@larksuiteoapi/node-sdk'
 import type { ChannelManagerV5 } from '@cordisx/protocol/channel-manager/v5'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
@@ -27,6 +28,223 @@ import {
 } from '../packages/cli/src/renderer/ownership.js'
 
 describe('actual direct Channel service ownership assembly', () => {
+  it('persists lifecycle-installed Channel configuration without a legacy configured plugin', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-package-service-config-'))
+    const artifact = path.join(root, 'artifact')
+    const configPath = path.join(root, 'config.json')
+    const entry = path.join(artifact, 'module.js')
+    const composition = {
+      plugins: [{
+        id: 'channel',
+        enabled: true,
+        entry,
+        source: 'https://github.com/cordisx/plugin-channel',
+        package: { version: '0.1.7', digest: 'sha256:fixture', moduleGeneration: 'fixture', dependencies: [] },
+      }],
+    } as never
+    let channel: Awaited<ReturnType<typeof createRendererChannelComposition>> | undefined
+    let configApi: HostServiceConfigNarrowApi | undefined
+    try {
+      await mkdir(path.join(artifact, 'services'), { recursive: true })
+      await copyFile(
+        path.join(path.dirname(bundledPluginEntry('channel')), 'service.mjs'),
+        path.join(artifact, 'services/runtime.mjs'),
+      )
+      channel = await createRendererChannelComposition({
+        composition,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        generation: 'runtime-owner',
+        environment: {},
+      })
+      configApi = createChannelLaunchBridges({
+        channel,
+        token: 'a'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-owner',
+        configPath,
+        consumer: undefined,
+      }).configApi
+      const descriptor = await configApi!.descriptor()
+      expect(descriptor.revision).toBe(0)
+      const result = await configApi!.mutate({
+        contract: 'cordisx.service-config-mutation/v1',
+        schemaVersion: 1,
+        identity: descriptor.identity,
+        scope: descriptor.scope,
+        expectedRevision: 0,
+        configuration: SIMULATOR_CHANNEL_SERVICE_CONFIG,
+      })
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied', revision: 1 })
+      configApi!.dispose()
+      await channel.service!.dispose()
+      channel = await createRendererChannelComposition({
+        composition,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        generation: 'runtime-next',
+        environment: {},
+      })
+      configApi = createChannelLaunchBridges({
+        channel,
+        token: 'b'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-next',
+        configPath,
+        consumer: undefined,
+      }).configApi
+      expect(await configApi!.descriptor()).toMatchObject({ revision: 1, lastGoodRevision: 1 })
+    } finally {
+      configApi?.dispose()
+      await channel?.service?.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  it('assembles a pending connection and resolves its identity through the production credential bridge', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-pending-composition-'))
+    const configPath = path.join(root, 'config.json')
+    const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? bundledPluginEntry('channel')
+    const account = { adapterId: 'feishu', accountId: 'cli_pending_fixture' }
+    const pending = {
+      account,
+      adapterKind: 'feishu',
+      secretRef: 'host-secret:env/MISSING_PENDING_FIXTURE',
+      displayName: 'Pending',
+      selectors: ['direct'],
+    }
+    let channel: Awaited<ReturnType<typeof createRendererChannelComposition>> | undefined
+    let bridges: ReturnType<typeof createChannelLaunchBridges> | undefined
+    let onMessage: ((message: lark.NormalizedMessage) => Promise<void>) | undefined
+    const createSdk = vi.spyOn(lark, 'createLarkChannel').mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      on: (event: string, listener: typeof onMessage) => {
+        if (event === 'message') onMessage = listener
+        return () => {}
+      },
+      send: async () => ({ messageId: 'fixture' }),
+    } as never)
+    try {
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          ...createDefaultHomeConfig(),
+          apps: { codex: { defaultProfile: 'test', profiles: { test: { displayName: 'Test', dataMode: 'shared' } } } },
+          plugins: [{
+            id: 'channel',
+            entry,
+            services: {
+              runtime: {
+                profiles: {
+                  test: {
+                    revision: 1,
+                    lastGoodRevision: 1,
+                    config: {
+                      contract: 'cordisx.channel-service-config/v3',
+                      schemaVersion: 3,
+                      connections: [],
+                      pendingConnections: [pending],
+                    },
+                  },
+                },
+              },
+            },
+          }],
+        }),
+      )
+      const config = await loadConfig(configPath)
+      channel = await createRendererChannelComposition({
+        composition: config,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        generation: 'runtime-owner',
+        environment: { MISSING_PENDING_FIXTURE: 'fixture-secret' },
+      })
+      expect(channel.service!.snapshot()!.accounts).toEqual([])
+      const received: Array<{ tenantId: string; actorTenantId?: string; persisted: boolean }> = []
+      const stopObserving = channel.service!.observeInputs(async (_id, input, _mentioned, persisted) => {
+        received.push({
+          tenantId: input.source.event.tenantId,
+          actorTenantId: input.source.event.actor?.tenantId,
+          persisted,
+        })
+      })
+      expect(channel.manager!.accounts[0]).toMatchObject({ pendingTenant: true, ref: { ...account, tenantId: '' } })
+      bridges = createChannelLaunchBridges({
+        channel,
+        token: 'a'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-owner',
+        configPath,
+        consumer: undefined,
+      })
+      const mutation = vi.spyOn(bridges.configApi!, 'mutate')
+      const result = await bridges.credentials!.handle({
+        version: 2,
+        token: bridges.credentials!.token,
+        requestId: 'resolve-pending',
+        operation: 'resolve-tenant',
+        owner: 'test-owner',
+        account: { ...account, tenantId: '' },
+        tenantId: 'tenant-real',
+        expectedRevision: 1,
+      }, 'document')
+      const mutationResult = await mutation.mock.results[0]!.value
+      expect(
+        mutationResult.status === 'applied' || mutationResult.status === 'staged'
+          ? ''
+          : JSON.stringify(mutationResult.error),
+      ).toBe('')
+      expect(result).toMatchObject({ status: 'applied', code: 'APPLIED', ref: { ...account, tenantId: 'tenant-real' } })
+      expect(JSON.stringify(result)).not.toMatch(/host-secret|MISSING_PENDING_FIXTURE/)
+      const persisted = await readServiceConfigState({
+        profileId: 'test',
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: SIMULATOR_CHANNEL_SERVICE_CONFIG as never,
+      }, configPath)
+      expect(persisted.config).toMatchObject({
+        pendingConnections: [],
+        connections: [{
+          ref: { ...account, tenantId: 'tenant-real' },
+          secretRef: pending.secretRef,
+        }],
+      })
+      expect(channel.service!.snapshot()!.accounts).toContainEqual(expect.objectContaining({
+        ref: { ...account, tenantId: 'tenant-real' },
+        connectionState: 'ready',
+      }))
+      expect(onMessage).toBeDefined()
+      await onMessage!({
+        messageId: 'om_fixture',
+        chatId: 'oc_fixture',
+        chatType: 'p2p',
+        senderId: 'ou_fixture',
+        content: 'fixture',
+        rawContentType: 'text',
+        resources: [],
+        mentions: [],
+        mentionAll: false,
+        mentionedBot: false,
+        createTime: Date.now(),
+        raw: { sender: { tenant_key: 'external-tenant' } },
+      })
+      expect(received).toContainEqual({ tenantId: 'tenant-real', actorTenantId: 'tenant-real', persisted: true })
+      stopObserving()
+    } finally {
+      await bridges?.credentials?.dispose?.()
+      bridges?.configApi?.dispose()
+      await channel?.service?.dispose()
+      createSdk.mockRestore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it(
     'carries the started service through bundle metadata to the public management control with no user grant',
     async () => {
@@ -64,6 +282,7 @@ describe('actual direct Channel service ownership assembly', () => {
           profileId: 'test',
           appId: 'codex',
           homeDir: root,
+          generation: 'runtime-owner',
           environment: {},
         })
         expect(channel.serviceCapabilityOwners).toHaveLength(1)
@@ -82,11 +301,13 @@ describe('actual direct Channel service ownership assembly', () => {
         const manifest = normalizePluginManifest(plugin.manifest, plugin.id)
         expect(metadata.serviceCapabilityOwners[0]).toMatchObject({
           source: plugin.source,
-          moduleGeneration: plugin.artifactGeneration,
+          moduleGeneration: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
           runtimeGeneration: 'runtime-owner',
           serviceGeneration: activeOwner.serviceGeneration,
         })
-        expect(bundle.watchFiles).toContain(path.resolve(path.dirname(entry), '../runtime-manifest.json'))
+        expect(bundle.watchFiles).toContain(
+          /\.(?:tgz|tar\.gz)$/u.test(entry) ? entry : path.resolve(path.dirname(entry), '../runtime-manifest.json'),
+        )
         const store = new MemoryPermissionPolicyStore(), prompt = vi.fn(async () => undefined)
         broker = new PermissionBroker(
           store,
@@ -102,7 +323,7 @@ describe('actual direct Channel service ownership assembly', () => {
         )
         const retire = broker.register({ id: plugin.id, source: plugin.source }, manifest, {
           pluginId: plugin.id,
-          moduleGeneration: plugin.artifactGeneration,
+          moduleGeneration: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
         })
         const ctx = new Context()
         const bridges = createChannelLaunchBridges({
@@ -129,7 +350,7 @@ describe('actual direct Channel service ownership assembly', () => {
         const caller = ctx.extend({
           [CORDISX_PLUGIN_ID]: plugin.id,
           [CORDISX_PLUGIN_SOURCE]: plugin.source,
-          [CORDISX_PLUGIN_GENERATION]: plugin.artifactGeneration,
+          [CORDISX_PLUGIN_GENERATION]: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
         })
         const manager = (caller.channelManager as ChannelManagerV10).forOwnConversationService()!
         const snapshot = manager.snapshot(), account = snapshot.accounts[0]!
@@ -269,6 +490,13 @@ describe('actual direct Channel service ownership assembly', () => {
         configApi?.dispose()
         await channel?.service?.dispose()
         expect(channel?.service?.managementOwner()).toBeUndefined()
+        async function writable(directory: string): Promise<void> {
+          await chmod(directory, 0o700)
+          for (const file of await readdir(directory, { withFileTypes: true })) {
+            if (file.isDirectory()) await writable(path.join(directory, file.name))
+          }
+        }
+        await writable(root)
         await rm(root, { recursive: true, force: true })
       }
     },

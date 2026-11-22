@@ -3,12 +3,15 @@ export const HELP = `Usage:
   cordisx start|status|logs|stop|restart [app] [profile] [options]
   cordisx start --mode cli [codex|claude-code] [-s SERVICE -m MODEL] [-- client-arguments...]
   cordisx app [check|update]
+  cordisx skills <install|update> [source] [--client codex|claude-code|both]
   cordisx setup
   cordisx config
   cordisx doctor
   cordisx feedback <collect|inspect|export> [options]
   cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
   cordisx model export [options]
+  cordisx codex <command> [options]
+  cordisx models services <list|save> [options]
   cordisx cli [options] [-- codex-arguments...]
   cordisx plugin <command> [options]
   cordisx source <command> [options]
@@ -32,6 +35,8 @@ Options:
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
   model export --help      Show portable model service export commands
   cli --help               Run the original Codex terminal with a selected model service
+  codex --help             Show supplemental chat/provider/defaults commands
+  models --help            Show shared model-service commands
   plugin --help            Show plugin management commands
   source --help            Show source management commands
   feedback --help          Show local, privacy-filtered feedback commands

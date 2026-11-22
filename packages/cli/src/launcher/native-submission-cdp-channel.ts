@@ -1,3 +1,5 @@
+import { createNativeTaskCreationReadiness } from './native-task-creation-readiness.js'
+import type { NativeTaskCreationStatus } from './native-task-creation-readiness.js'
 import { readNativeSourceConfiguration, reconcileNativeThreadSelection } from './native-source-configuration.js'
 import { NativeDraftModelPreference, type NativeDraftModelPreferenceValue } from './native-draft-model-preference.js'
 import { randomUUID } from 'node:crypto'
@@ -141,6 +143,7 @@ export interface NativeSubmissionCdpAuthority {
   bindController(controller: NativeSubmissionController): void
   sourceConfiguration(threadId: string): ReturnType<typeof readNativeSourceConfiguration>
   taskCreationAvailable(): Promise<boolean>
+  taskCreationStatus(): Promise<NativeTaskCreationStatus>
   providerDisplays(): Promise<readonly ModelProviderDisplay[]>
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(session?: CdpSession): Promise<void> }>
 }
@@ -156,6 +159,7 @@ export function createNativeSubmissionCdpAuthority(options: {
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
   readonly defaultModelId?: string
+  readonly defaults?: () => Promise<{ providerId?: string; model?: string }>
   readonly management?: {
     snapshot(): CatalogManagementSnapshot
     command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
@@ -351,6 +355,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       }
     },
   }
+  const taskCreationStatus = createNativeTaskCreationReadiness(options.taskExecutionUrl, documents)
   return {
     async providerDisplays() {
       const owners = [...documents.values()].filter(owner => !owner.disposed && !owner.session.isClosed())
@@ -375,20 +380,9 @@ export function createNativeSubmissionCdpAuthority(options: {
         id => documents.get(id),
         id => threadSelections.get(id),
       ),
+    taskCreationStatus,
     async taskCreationAvailable() {
-      for (const owner of documents.values()) {
-        if (owner.disposed) continue
-        const response = await owner.session.send('Runtime.evaluate', {
-          expression:
-            `(async()=>{if(globalThis.__cordisxNativeAgentTask_initial!==true||globalThis.__cordisxNativeAgentTaskAdapter==null)return false;const url=${
-              JSON.stringify(options.taskExecutionUrl)
-            };if(typeof url!=='string'||globalThis.__cordisxNativeAgentTaskExecutionUrl!==url)return false;await import(url);return globalThis.__cordisxNativeAgentTask_execution===true})()`,
-          awaitPromise: true,
-          returnByValue: true,
-        }).catch(() => undefined)
-        if (record(response?.result)?.value === true) return true
-      }
-      return false
+      return (await taskCreationStatus()).available
     },
     agentSelection: {
       async reserve(threadId) {

@@ -230,6 +230,24 @@ async function fixture(options: { sendFailures?: number } = {}) {
 }
 
 describe('launcher-side Channel runtime and simulator', () => {
+  it('observes authorized replies and questions without letting feedback block delivery, and removes observers', async () => {
+    const { runtime } = await fixture()
+    const seen = vi.fn(() => {
+      throw new Error('feedback failure')
+    })
+    const remove = runtime.observeOutbound(seen)
+    const notification = {
+      target: target(simulatedInput('feedback-target', 'target')),
+      kind: 'reply' as const,
+      text: 'reply',
+    }
+    await runtime.notifyOnce(notification, SIMULATOR_CONSUMER_IDENTITY, 'delivery:feedback-1')
+    expect(seen).toHaveBeenCalledExactlyOnceWith(notification.target)
+    remove()
+    await runtime.notifyOnce(notification, SIMULATOR_CONSUMER_IDENTITY, 'delivery:feedback-2')
+    expect(seen).toHaveBeenCalledTimes(1)
+    await runtime.dispose()
+  })
   it('persists and deduplicates sourced connection events without task dispatch', async () => {
     const { gateway, handle, runtime } = await fixture()
     const message = createEnvelope('create-1')

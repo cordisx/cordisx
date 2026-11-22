@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tunnelResponsesWebSocket } from './responses-websocket-tunnel.js'
+import { adaptNamedOutputs } from './responses-named-output.js'
 
 export interface ResponsesReplayRouteOptions {
   readonly websocket?: boolean
@@ -195,7 +196,19 @@ export async function startResponsesEncryptedReplay() {
       } catch {
         body = undefined
       }
-      const replay = encryptedReplay(body)
+      const adapted = adaptNamedOutputs(body)
+      if (adapted.invalid) {
+        response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({
+          error: {
+            message: 'A function call output without a call_id requires a name.',
+            type: 'invalid_request_error',
+            param: 'input',
+          },
+        }))
+        return
+      }
+      const payload = adapted.body ? JSON.stringify(adapted.body) : bytes.toString('utf8')
+      const replay = encryptedReplay(adapted.body ?? body)
       const headers = new Headers()
       for (const [name, value] of Object.entries(request.headers)) {
         if (!HOP_HEADERS.has(name) && value !== undefined) {
@@ -204,7 +217,7 @@ export async function startResponsesEncryptedReplay() {
       }
       const send = (payload: string) =>
         fetch(route.target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: controller.signal })
-      const upstream = await send(bytes.toString('utf8'))
+      const upstream = await send(payload)
       if (upstream.status >= 300 && upstream.status < 400) {
         await upstream.body?.cancel()
         response.writeHead(502).end(JSON.stringify({ error: { message: 'Provider redirects are not supported' } }))

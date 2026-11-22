@@ -95,6 +95,8 @@ export interface AgentBridgeCodexAuthority {
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   observedDispatch?(operationId: string, threadId: string, turnId?: string): void
   preparationTools?(operationId: string): readonly unknown[] | undefined
+  prepareProject?(projectId: string, readOnly?: boolean): Promise<Record<string, unknown>>
+  bindCreatedProject?(threadId: string, projectId: string): Promise<boolean>
 }
 
 export interface AgentBridgeBinding {
@@ -390,7 +392,17 @@ export function createCodexBridgeHandler(
               throw new BridgeOperationError('model-not-in-provider-catalog')
             }
           }
-          const cwd = text(args.cwd, 4096) ?? homedir
+          if (args.projectId !== undefined && text(args.projectId) === undefined) {
+            throw new BridgeOperationError('invalid-arguments')
+          }
+          const projectId = text(args.projectId)
+          if (projectId && (!codex.prepareProject || !codex.bindCreatedProject)) {
+            throw new BridgeOperationError('invalid-arguments')
+          }
+          const projectStart = projectId
+            ? await codex.prepareProject!(projectId, execution.execution === 'read-only')
+            : {}
+          const cwd = text(projectStart.cwd, 4096) ?? text(args.cwd, 4096) ?? homedir
           if (!path.isAbsolute(cwd)) throw new BridgeOperationError('cwd-must-be-absolute')
           // A normal start behaves as before: the app itself decides about cwd.
           // `dryRun` is where a missing directory is reported first.
@@ -403,6 +415,7 @@ export function createCodexBridgeHandler(
           const started = object(
             await codex.nativeRequest('thread/start', {
               ...executionStart,
+              ...projectStart,
               cwd,
               ...(codex.preparationTools?.(String(args.operationId))
                 ? { dynamicTools: codex.preparationTools(String(args.operationId)) }
@@ -410,7 +423,7 @@ export function createCodexBridgeHandler(
               ...(providerId === undefined ? {} : { modelProvider: providerId }),
               ...(model === undefined ? {} : { model }),
               ...(serviceTier === undefined ? {} : { serviceTier }),
-              ...(permissions === undefined ? {} : { permissions }),
+              ...(permissions === undefined || projectId ? {} : { permissions }),
               ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
             }),
           )
@@ -420,6 +433,16 @@ export function createCodexBridgeHandler(
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
           codex.observedDispatch?.(String(args.operationId), threadId)
+          if (projectId && !await codex.bindCreatedProject!(threadId, projectId)) {
+            return turn.failed({
+              status: 'failed',
+              sessionId: threadId,
+              link,
+              reason: 'turn-failed',
+              retryable: false,
+              message: 'Project configuration could not be confirmed; the first turn was not started.',
+            })
+          }
           if (
             args.expectedContinuation !== undefined && !continuationStartMatches(started, args.expectedContinuation)
           ) {
@@ -451,7 +474,8 @@ export function createCodexBridgeHandler(
                 model: started?.model ?? object(started?.thread)?.model ?? model,
                 cwd,
               }, {}),
-              ...(permissions === undefined ? {} : { permissions }),
+              ...(projectId ? { cwd } : {}),
+              ...(permissions === undefined || projectId ? {} : { permissions }),
               ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
               ...(serviceTier === undefined ? {} : { serviceTier }),
             },

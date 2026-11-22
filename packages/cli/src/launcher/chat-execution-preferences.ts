@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { type CodexCreationSettings, parseCodexCreationSettings } from '../codex-creation-settings.js'
 import { loadHomeConfig, updateHomeConfigAtomic } from '../config/home-config.js'
 import {
   type ChatExecutionSettings,
@@ -41,6 +42,15 @@ const identity = (value: unknown): value is string =>
 
 /** Profile-owned chat preferences. No shared Codex database and no Channel binding is a settings owner. */
 export class ChatExecutionPreferences {
+  private reviewProvider: string | undefined
+  private reviewModels: ReadonlySet<string> | undefined
+  bindReviewProvider(providerId: string | undefined, models?: readonly string[]) {
+    this.reviewProvider = providerId
+    this.reviewModels = models ? new Set(models) : undefined
+  }
+  private preparation?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>
+  private configurationObservation?: (threadId: string, value: unknown) => Promise<void>
+  private finalizeConfiguration?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>
   private readonly records: Document = { schema: 'cordisx.chat-execution-preferences/v1', records: {} }
   private tail: Promise<void> = Promise.resolve()
   private readonly pendingObservations = new Map<string, number>()
@@ -103,6 +113,43 @@ export class ChatExecutionPreferences {
     if (!profile) throw new Error('PROFILE_UNAVAILABLE')
     return structuredClone(profile.chatExecution ?? { revision: 0, settings: {} })
   }
+  async creationDefaults() {
+    const config = await loadHomeConfig(this.input.configPath)
+    const profile = config.apps[this.input.appId]?.profiles[this.input.profileId]
+    if (!profile) throw new Error('PROFILE_UNAVAILABLE')
+    return structuredClone(profile.chatCreation ?? { revision: 0, settings: {} })
+  }
+  async setCreationDefaults(value: unknown, expectedRevision: number) {
+    const settings: CodexCreationSettings = parseCodexCreationSettings(value)
+    const config = await updateHomeConfigAtomic(current => {
+      const app = current.apps[this.input.appId], profile = app?.profiles[this.input.profileId]
+      if (!profile) throw new Error('PROFILE_UNAVAILABLE')
+      if ((profile.chatCreation?.revision ?? 0) !== expectedRevision) throw new Error('REVISION_CONFLICT')
+      return {
+        ...current,
+        apps: {
+          ...current.apps,
+          [this.input.appId]: {
+            ...app,
+            profiles: {
+              ...app.profiles,
+              [this.input.profileId]: { ...profile, chatCreation: { revision: expectedRevision + 1, settings } },
+            },
+          },
+        },
+      }
+    }, this.input.configPath)
+    return config.apps[this.input.appId]!.profiles[this.input.profileId]!.chatCreation!
+  }
+  bindConfiguration(
+    prepare: NonNullable<ChatExecutionPreferences['preparation']>,
+    observe: NonNullable<ChatExecutionPreferences['configurationObservation']>,
+    finalize?: NonNullable<ChatExecutionPreferences['finalizeConfiguration']>,
+  ) {
+    this.preparation = prepare
+    this.configurationObservation = observe
+    if (finalize) this.finalizeConfiguration = finalize
+  }
   async setDefaults(value: unknown, expectedRevision: number) {
     const settings = parseChatExecutionSettings(value)
     const config = await updateHomeConfigAtomic(current => {
@@ -158,7 +205,21 @@ export class ChatExecutionPreferences {
     })
   }
   async prepare(method: string, value: unknown, context?: Record<string, unknown>) {
-    const params = object(value)
+    const params = this.preparation ? await this.preparation(method, object(value)) : object(value)
+    if (method === 'thread/settings/update' && this.reviewProvider) {
+      const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
+      const effective = threadId ? this.read('local', threadId)?.effective : undefined
+      const provider = params.modelProvider ?? context?.modelProvider ?? effective?.modelProvider
+      const model = params.model ?? context?.model ?? effective?.model
+      if ((provider === undefined || model === undefined) && context === undefined) {
+        return { params, contextRequired: true }
+      }
+      if (provider !== this.reviewProvider) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+      if (typeof model !== 'string' || this.reviewModels && !this.reviewModels.has(model)) {
+        throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+      }
+      return { params }
+    }
     if (!['thread/start', 'thread/resume', 'turn/start'].includes(method)) return { params }
     const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
     const current = threadId === undefined ? undefined : this.read('local', threadId)
@@ -196,13 +257,34 @@ export class ChatExecutionPreferences {
     const selected = Object.fromEntries(
       Object.entries(params).filter(([field, value]) => value !== null || !(field in fields)),
     )
-    const prepared: Record<string, unknown> = method === 'turn/start' && current?.override !== undefined
+    let prepared: Record<string, unknown> = method === 'turn/start' && current?.override !== undefined
       ? { ...params, ...fields }
       : {
         ...fields,
         ...selected,
         ...(fields.config ? { config: { ...object(fields.config), ...object(params.config) } } : {}),
       }
+    if (this.finalizeConfiguration) prepared = await this.finalizeConfiguration(method, prepared)
+    if (this.reviewProvider) {
+      if (
+        ['model', 'model_provider', 'model_providers', 'model_catalog_json', 'profile'].some(
+          key => object(prepared.config)[key] !== undefined,
+        )
+      ) throw new Error('REVIEW_NATIVE_CONFIG_CONFLICT')
+      const provider = prepared.modelProvider ?? context?.modelProvider ?? current?.effective?.modelProvider
+      if (provider === undefined && method === 'thread/start') prepared.modelProvider = this.reviewProvider
+      else if (provider === undefined && context === undefined) return { params, contextRequired: true }
+      else if (provider !== this.reviewProvider) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+      const model = object(object(prepared.collaborationMode).settings).model ?? prepared.model ?? context?.model
+        ?? current?.effective?.model
+      if (typeof model !== 'string') {
+        if (method !== 'thread/start' && context === undefined) return { params, contextRequired: true }
+        throw new Error('REVIEW_PARENT_MODEL_REQUIRED')
+      }
+      if (typeof model === 'string' && this.reviewModels && !this.reviewModels.has(model)) {
+        throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+      }
+    }
     const capturedSettings = (method === 'turn/start' || method === 'thread/start') && !current?.override
       ? {
         ...settings,
@@ -311,6 +393,7 @@ export class ChatExecutionPreferences {
   /** Native settings events are independent confirmation, including changes made in another window. */
   async observe(threadId: string, value: unknown) {
     if (!identity(threadId)) return
+    await this.configurationObservation?.(threadId, value)
     const version = (this.pendingObservations.get(threadId) ?? 0) + 1
     this.pendingObservations.set(threadId, version)
     this.unconfirmedObservations.add(threadId)

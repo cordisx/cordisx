@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnosticRef } from '../diagnostics/context.js'
 import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -6,6 +7,8 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import type { NativeSourceConfiguration } from './native-source-configuration.js'
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import type { CodexCreationSettings } from '../codex-creation-settings.js'
+import { codexCreationSelection } from './codex-creation-selection.js'
 
 const object = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined
@@ -21,6 +24,7 @@ type Intent = {
 
 /** Durable intent is written before native dispatch. Restart/timeout never repeats creation. */
 export class NativeAgentTasks {
+  private readonly report = bindDiagnostic()
   private readonly intents = new Map<string, Intent>()
   private readonly active = new Map<string, Promise<unknown>>()
   private readonly fingerprints = new Map<string, string>()
@@ -34,6 +38,7 @@ export class NativeAgentTasks {
         input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
       ): Promise<unknown>
       sourceConfiguration?(threadId: string): Promise<NativeSourceConfiguration | undefined>
+      creationDefaults?(): Promise<CodexCreationSettings>
       routing: NativeAgentTaskRouting
     },
   ) {}
@@ -57,12 +62,14 @@ export class NativeAgentTasks {
         : undefined)
     if (
       !value || !valid(sourceThreadId) || !valid(sourceTurnId) || !valid(sourceCallId) || !valid(value.operationId, 128)
-      || !valid(value.providerId, 128)
-      || !valid(value.model) || typeof value.prompt !== 'string' || value.prompt.length === 0
+      || value.providerId !== undefined && !valid(value.providerId, 128)
+      || value.model !== undefined && !valid(value.model)
+      || value.fast !== undefined && typeof value.fast !== 'boolean'
+      || typeof value.prompt !== 'string' || value.prompt.length === 0
       || value.prompt.length > 100_000 || value.prompt.includes('\0') || !object(value.target)
       || !validTarget(value.target) || (value.title !== undefined && !valid(value.title))
       || Object.keys(value).some(key =>
-        !['operationId', 'providerId', 'model', 'prompt', 'target', 'title'].includes(key)
+        !['operationId', 'providerId', 'model', 'fast', 'prompt', 'target', 'title'].includes(key)
       )
     ) return { status: 'rejected', reason: 'invalid-creation' }
     const fingerprint = createHash('sha256').update(JSON.stringify([sourceThreadId, value])).digest('hex')
@@ -91,14 +98,7 @@ export class NativeAgentTasks {
     sourceCallId: string,
     value: Record<string, any>,
   ) {
-    const startup = this.authority.startup?.availability(value.providerId, value.model)
-    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     const file = path.join(this.authority.directory, `${key}.json`)
-    await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
-    const directory = await lstat(this.authority.directory)
-    if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0) {
-      return { status: 'rejected', reason: 'intent-storage-unavailable' }
-    }
     try {
       const record = JSON.parse(await readFile(file, 'utf8'))
       return record.fingerprint === fingerprint
@@ -107,6 +107,27 @@ export class NativeAgentTasks {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { status: 'reconciliation-required' }
     }
+    const earlyStartup = valid(value.providerId, 128) && valid(value.model)
+      ? this.authority.startup?.availability(value.providerId, value.model)
+      : undefined
+    if (earlyStartup !== undefined && !earlyStartup.available) {
+      return { status: 'unavailable', reason: earlyStartup.reason }
+    }
+    try {
+      const selection = codexCreationSelection(
+        await this.authority.creationDefaults?.() ?? {},
+        value,
+        await this.authority.catalog(),
+      )
+      if (!selection.providerId || !selection.model) {
+        return { status: 'rejected', reason: 'creation-selection-required' }
+      }
+      value = { ...value, ...selection }
+    } catch {
+      return { status: 'rejected', reason: 'selection-outside-catalog' }
+    }
+    const startup = this.authority.startup?.availability(value.providerId, value.model)
+    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     if (!await this.authority.available()) return { status: 'rejected', reason: 'native-task-adapter-unavailable' }
     if (this.intents.size >= 128) return { status: 'rejected', reason: 'native-task-pending-limit' }
     const catalog = await this.authority.catalog()
@@ -123,11 +144,17 @@ export class NativeAgentTasks {
       target: value.target,
       ...(value.title === undefined ? {} : { title: value.title }),
     }
+    await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
+    const directory = await lstat(this.authority.directory)
+    if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0) {
+      return { status: 'rejected', reason: 'intent-storage-unavailable' }
+    }
     try {
       await writeFile(file, JSON.stringify({ fingerprint, callId, phase: 'dispatching' }), { flag: 'wx', mode: 0o600 })
     } catch {
       return { status: 'reconciliation-required', reason: 'intent-already-claimed' }
     }
+    this.report({ event: 'native-task-create', phase: 'intent-recorded', requestRef: diagnosticRef(callId) })
     this.intents.set(callId, {
       callId,
       sourceThreadId,
@@ -139,7 +166,13 @@ export class NativeAgentTasks {
     try {
       const response = object(await this.authority.invoke({ callId, sourceThreadId, sourceTurnId, arguments: args }))
       const item = response?.content?.find((item: any) => item.type === 'text')
-      const native = nativeReceipt(item ? JSON.parse(item.text) : undefined)
+      let native: ReturnType<typeof nativeReceipt> = undefined
+      let invalidResponse = false
+      try {
+        native = response?.isError === true ? undefined : nativeReceipt(item ? JSON.parse(item.text) : undefined)
+      } catch {
+        invalidResponse = true
+      }
       result = native && response?.isError !== true
         ? {
           status: valid(native.threadId) && this.authority.routing.confirmed(callId, native.threadId)
@@ -150,12 +183,36 @@ export class NativeAgentTasks {
           native,
         }
         : { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
-    } catch {
-      result = { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
+      this.report({
+        event: 'native-task-create',
+        phase: native ? 'native-receipt' : 'native-receipt-missing',
+        reason: response?.isError === true ? 'native-tool-error' : invalidResponse ? 'invalid-native-response' : 'none',
+        requestRef: diagnosticRef(callId),
+      })
+      if (native) {
+        this.report({
+          event: 'native-task-create',
+          phase: 'route-result',
+          outcome: String(object(result)?.status),
+          requestRef: diagnosticRef(callId),
+        })
+      }
+    } catch (error) {
+      const missingSource = error instanceof Error && 'code' in error
+        && error.code === 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED'
+      result = missingSource
+        ? { status: 'rejected', reason: 'native-source-thread-not-loaded' }
+        : { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
+      this.report({
+        event: 'native-task-create',
+        phase: 'dispatch-failed',
+        reason: missingSource ? 'native-source-thread-not-loaded' : 'native-request-failed',
+        requestRef: diagnosticRef(callId),
+      })
     }
     try {
       await writeFile(file, JSON.stringify({ fingerprint, callId, result }), { mode: 0o600 })
-      if (object(result)?.status === 'created') {
+      if (object(result)?.status === 'created' || object(result)?.reason === 'native-source-thread-not-loaded') {
         this.authority.routing.retireCompleted(callId)
         this.intents.delete(callId)
       }
@@ -171,21 +228,41 @@ export class NativeAgentTasks {
     ) {
       const source = await this.authority.sourceConfiguration?.(request.sourceThreadId)
       if (!source) return undefined
-      const model = request.model === undefined || request.model === null ? source.model : request.model
+      const defaults = await this.authority.creationDefaults?.() ?? {}
+      const selected = Object.keys(defaults).length
+        ? codexCreationSelection(defaults, {
+          providerId: defaults.providerId ?? source.providerId,
+          ...(request.model != null
+            ? { model: request.model }
+            : defaults.model
+            ? { model: defaults.model }
+            : defaults.providerId === undefined || defaults.providerId === source.providerId
+            ? { model: source.model }
+            : {}),
+          ...(request.serviceTier === undefined ? {} : { fast: request.serviceTier === 'priority' }),
+        }, await this.authority.catalog())
+        : {
+          providerId: source.providerId,
+          model: request.model ?? source.model,
+          fast: request.serviceTier === undefined
+            ? source.serviceTier === 'priority'
+            : request.serviceTier === 'priority',
+        }
+      const model = selected.model ?? source.model
       const effort = request.thinking == null ? source.reasoningEffort : request.thinking
-      const tier = request.serviceTier === undefined ? source.serviceTier : request.serviceTier
+      const tier = selected.fast === undefined ? source.serviceTier : selected.fast ? 'priority' : null
       if (!isModelReasoningEffort(effort) || (tier !== null && tier !== 'priority')) return undefined
       if (
         !valid(model)
-        || source.providerId !== 'openai'
+        || selected.providerId !== 'openai'
           && !(await this.authority.catalog()).some(provider =>
-            provider.providerId === source.providerId && provider.models.some(item => item.id === model)
+            provider.providerId === selected.providerId && provider.models.some(item => item.id === model)
           )
       ) return undefined
       return await this.authority.routing.prepare({
         callId: request.callId,
         sourceThreadId: request.sourceThreadId,
-        providerId: source.providerId,
+        providerId: selected.providerId ?? source.providerId,
         model,
         reasoningEffort: effort,
         serviceTier: tier,
@@ -202,6 +279,7 @@ export class NativeAgentTasks {
     )
     if (startup !== undefined && !startup.available) throw new Error(`Native task unavailable: ${startup.reason}`)
     intent.claimed = true
+    this.report({ event: 'native-task-create', phase: 'claim-matched', requestRef: diagnosticRef(intent.callId) })
     if (!await this.authority.available()) throw new Error('Native task adapter retired')
     const catalog = await this.authority.catalog()
     if (
@@ -213,13 +291,20 @@ export class NativeAgentTasks {
       throw new Error('Native task selection unavailable')
     }
     const source = await this.authority.sourceConfiguration?.(intent.sourceThreadId)
-    return await this.authority.routing.prepare({
+    const handle = await this.authority.routing.prepare({
       callId: intent.callId,
       sourceThreadId: intent.sourceThreadId,
       providerId: String(intent.arguments.providerId),
       model: String(intent.arguments.model),
-      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort, serviceTier: source.serviceTier }),
+      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort }),
+      ...(typeof intent.arguments.fast === 'boolean'
+        ? { serviceTier: intent.arguments.fast ? 'priority' : null }
+        : source === undefined
+        ? {}
+        : { serviceTier: source.serviceTier }),
     })
+    this.report({ event: 'native-task-create', phase: 'handle-prepared', requestRef: diagnosticRef(intent.callId) })
+    return handle
   }
 }
 

@@ -558,8 +558,9 @@ export async function createPlaygroundSession(
       service: channelConfig,
     })
     const channelDescriptor = await channelConfig?.descriptor()
+    const channelPrivateConfiguration = await channelConfig?.privateConfiguration()
     const channelManager = channelDescriptor === undefined ? undefined : projectLocalChannelManager({
-      configuration: channelDescriptor.configuration,
+      configuration: channelPrivateConfiguration?.configuration ?? channelDescriptor.configuration,
       revision: channelDescriptor.revision,
       lastGoodRevision: channelDescriptor.lastGoodRevision,
       writable: channelDescriptor.writable,

@@ -1,3 +1,5 @@
+import { managementMailboxPath, requestManagementMailbox, startManagementMailbox } from './management-mailbox.js'
+import { readlink } from 'node:fs/promises'
 import type { ModelExportRequest } from '../cli/model-export-parse.js'
 import type { CliModelExportResult } from './model-catalog/cli-export.js'
 import {
@@ -6,7 +8,8 @@ import {
   type TerminalProviderResult,
 } from './terminal-provider.js'
 import { createHash, randomBytes } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { connect, createServer, type Server, type Socket } from 'node:net'
 import path from 'node:path'
 import type {
@@ -25,6 +28,14 @@ const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
+  | {
+    readonly kind: 'codex'
+    readonly operation: string
+    readonly input: unknown
+    readonly context?: string
+    readonly callerThreadId?: string
+    readonly callerTurnId?: string
+  }
   | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
   | { readonly kind: 'terminal-provider'; readonly request: TerminalProviderRequest }
   | {
@@ -68,6 +79,8 @@ export interface PluginManagementRpcEndpoint {
   readonly processStartedAt: string
   readonly token: string
   readonly generation: string
+  readonly mailboxId?: string
+  readonly pidNamespace?: string
 }
 
 export interface PluginManagementRpcPaths {
@@ -79,6 +92,10 @@ export interface PluginManagementRpcPaths {
 
 export interface PluginManagementRpcServer {
   close(): Promise<void>
+}
+
+export function managementMailboxRoot(paths: PluginManagementRpcPaths): string {
+  return path.join(paths.socketDirectory, `${path.basename(paths.socket, '.sock')}-mailbox`)
 }
 
 export function pluginManagementRpcPaths(homeDir: string, appId: string, profileId: string): PluginManagementRpcPaths {
@@ -122,6 +139,7 @@ export function parsePluginManagementRpcRequest(
       'model-export',
       'terminal-provider',
       'channel',
+      'codex',
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
@@ -140,6 +158,15 @@ export function parsePluginManagementRpcRequest(
         && (typeof operation.callerThreadId !== 'string'
           || !/^[a-zA-Z0-9._:-]{1,512}$/u.test(operation.callerThreadId)))
   ) throw new Error('invalid Channel operation')
+  if (
+    operation.kind === 'codex' && (typeof operation.operation !== 'string'
+      || !/^[a-z][a-z:_-]{0,64}$/u.test(operation.operation)
+      || operation.context !== undefined
+        && (typeof operation.context !== 'string' || !/^[a-f0-9]{48}$/u.test(operation.context))
+      || [operation.callerThreadId, operation.callerTurnId].some(value =>
+        value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,512}$/u.test(value))
+      ))
+  ) throw new Error('invalid Codex operation')
   return request as unknown as PluginManagementRpcRequest
 }
 
@@ -150,6 +177,7 @@ export async function handlePluginManagementRpcRequest(
   const operation = request.operation
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
+  if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
   if (operation.kind === 'query') return await service.query()
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
@@ -171,6 +199,9 @@ function validEndpoint(value: unknown): value is PluginManagementRpcEndpoint {
     && typeof item.processStartedAt === 'string'
     && typeof item.token === 'string' && /^[a-f0-9]{64}$/u.test(item.token)
     && typeof item.generation === 'string'
+    && (item.mailboxId === undefined || typeof item.mailboxId === 'string' && /^[a-f0-9]{32}$/u.test(item.mailboxId))
+    && (item.pidNamespace === undefined
+      || typeof item.pidNamespace === 'string' && /^pid:\[\d+\]$/u.test(item.pidNamespace))
 }
 
 export async function readPluginManagementRpcEndpoint(
@@ -213,13 +244,56 @@ export async function startPluginManagementRpcServer(input: {
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
   await mkdir(paths.directory, { recursive: true, mode: 0o700 })
   await mkdir(paths.socketDirectory, { recursive: true, mode: 0o700 })
-  await chmod(paths.socketDirectory, 0o700)
+  const socketDirHandle = await open(
+    paths.socketDirectory,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  )
+  try {
+    await socketDirHandle.chmod(0o700)
+  } finally {
+    await socketDirHandle.close()
+  }
   await rm(paths.socket, { force: true })
+  const dispatch = async (parsed: unknown): Promise<unknown> => {
+    const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
+    return request.operation.kind === 'codex'
+      ? await (input.codex?.(request.operation.operation, request.operation.input, {
+        ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
+        ...(request.operation.callerThreadId ? { 'openai/threadId': request.operation.callerThreadId } : {}),
+        ...(request.operation.callerTurnId ? { 'openai/turnId': request.operation.callerTurnId } : {}),
+        'openai/toolCallId': request.requestId,
+      }) ?? Promise.resolve({ status: 'unavailable', code: 'CODEX_RUNTIME_UNAVAILABLE' }))
+      : request.operation.kind === 'channel'
+      ? await (input.channel?.(
+        request.operation.operation,
+        request.operation.input,
+        request.operation.context || request.operation.callerThreadId
+          ? {
+            ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
+            ...(request.operation.callerThreadId
+              ? { 'openai/threadId': request.operation.callerThreadId }
+              : {}),
+          }
+          : undefined,
+      )
+        ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }))
+      : request.operation.kind === 'terminal-provider'
+      ? await (input.terminalProvider?.(request.operation.request)
+        ?? Promise.reject(new Error('Terminal provider unavailable; update the running CordisX Host')))
+      : request.operation.kind === 'model-export'
+      ? await (input.modelExport?.(request.operation.request)
+        ?? Promise.reject(
+          new Error('Model export unavailable; this runtime needs compatible native catalog support'),
+        ))
+      : await handlePluginManagementRpcRequest(input.service, request)
+  }
   const sockets = new Set<Socket>()
   const server: Server = createServer({ allowHalfOpen: true }, socket => {
     sockets.add(socket)
@@ -237,36 +311,9 @@ export async function startPluginManagementRpcServer(input: {
       void (async () => {
         let requestId = 'invalid'
         try {
-          const parsed = JSON.parse(line) as unknown
-          const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-          requestId = request.requestId
-          respond(socket, {
-            requestId,
-            ok: true,
-            value: request.operation.kind === 'channel'
-              ? await (input.channel?.(
-                request.operation.operation,
-                request.operation.input,
-                request.operation.context || request.operation.callerThreadId
-                  ? {
-                    ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
-                    ...(request.operation.callerThreadId
-                      ? { 'openai/threadId': request.operation.callerThreadId }
-                      : {}),
-                  }
-                  : undefined,
-              )
-                ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }))
-              : request.operation.kind === 'terminal-provider'
-              ? await (input.terminalProvider?.(request.operation.request)
-                ?? Promise.reject(new Error('Terminal provider unavailable; update the running CordisX Host')))
-              : request.operation.kind === 'model-export'
-              ? await (input.modelExport?.(request.operation.request)
-                ?? Promise.reject(
-                  new Error('Model export unavailable; this runtime needs compatible native catalog support'),
-                ))
-              : await handlePluginManagementRpcRequest(input.service, request),
-          })
+          const parsed = JSON.parse(line) as { requestId?: unknown }
+          if (typeof parsed.requestId === 'string') requestId = parsed.requestId
+          respond(socket, { requestId, ok: true, value: await dispatch(parsed) })
         } catch (error) {
           respond(socket, {
             requestId,
@@ -277,6 +324,67 @@ export async function startPluginManagementRpcServer(input: {
       })()
     })
   })
+  const mailboxRoot = managementMailboxRoot(paths)
+  let mailboxParent: Awaited<ReturnType<typeof open>> | undefined
+  if (input.sandboxMailbox && process.platform === 'linux') {
+    const socketDirectory = await open(
+      paths.socketDirectory,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    )
+    try {
+      const anchoredRoot = `/proc/self/fd/${socketDirectory.fd}/${path.basename(mailboxRoot)}`
+      await mkdir(anchoredRoot, { mode: 0o700 }).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      })
+      mailboxParent = await open(anchoredRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      await mailboxParent.chmod(0o700)
+    } catch (error) {
+      await mailboxParent?.close().catch(() => undefined)
+      throw error
+    } finally {
+      await socketDirectory.close()
+    }
+  } else if (input.sandboxMailbox) {
+    await mkdir(mailboxRoot, { recursive: true, mode: 0o700 })
+    await chmod(mailboxRoot, 0o700)
+  }
+  const mailboxId = input.sandboxMailbox ? randomBytes(16).toString('hex') : undefined
+  const mailbox = mailboxId
+    ? await startManagementMailbox({
+      directory: managementMailboxPath(mailboxRoot, mailboxId),
+      token,
+      ...(mailboxParent ? { parentHandle: mailboxParent } : {}),
+      dispatch: async parsed => {
+        const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
+        const operation = request.operation
+        // A process in the sandbox is never a local administrator merely because it can
+        // read the endpoint. The live Channel source token remains mandatory.
+        if (operation.kind !== 'channel' && operation.kind !== 'codex' || !operation.context) {
+          throw new Error('CHANNEL_CONTEXT_REQUIRED')
+        }
+        if (operation.kind === 'channel' && operation.operation.startsWith('admin-')) {
+          throw new Error('LOCAL_USER_REQUIRED')
+        }
+        if (
+          operation.kind === 'codex' && ![
+            'capabilities',
+            'list',
+            'select',
+            'execution:execution-settings',
+            'execution:execution-settings-set',
+            'configuration:fast',
+            'configuration:fast-set',
+            'configuration:project',
+            'configuration:project-set',
+          ].includes(operation.operation)
+        ) throw new Error('LOCAL_USER_REQUIRED')
+        return dispatch(parsed)
+      },
+    })
+    : undefined
+  const pidNamespace = process.platform === 'linux'
+    ? await readlink('/proc/self/ns/pid').catch(() => undefined)
+    : undefined
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
@@ -292,14 +400,17 @@ export async function startPluginManagementRpcServer(input: {
       processStartedAt: input.processStartedAt,
       token,
       generation: input.generation,
+      ...(mailboxId ? { mailboxId } : {}),
+      ...(mailboxId && pidNamespace ? { pidNamespace } : {}),
     })
   } catch (error) {
     if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()))
-    await Promise.allSettled([rm(paths.socket, { force: true }), rm(paths.state, { force: true })])
+    await Promise.allSettled([mailbox?.close(), rm(paths.socket, { force: true }), rm(paths.state, { force: true })])
     throw error
   }
   return {
     async close(): Promise<void> {
+      await mailbox?.close()
       for (const socket of sockets) socket.destroy()
       await new Promise<void>(resolve => server.close(() => resolve()))
       const current = await readPluginManagementRpcEndpoint(paths)
@@ -361,6 +472,33 @@ export async function requestPluginManagementRpc(
           operation,
         })
       }\n`))
+  })
+}
+
+/** Only an explicitly recorded, different Linux PID namespace permits the mailbox path. */
+export async function usesNamespacedManagementRpc(endpoint: PluginManagementRpcEndpoint): Promise<boolean> {
+  if (!endpoint.mailboxId || !endpoint.pidNamespace || process.platform !== 'linux') return false
+  const current = await readlink('/proc/self/ns/pid').catch(() => undefined)
+  return current !== undefined && current !== endpoint.pidNamespace
+}
+
+/** Host identity may be invisible only when the endpoint proves a different Linux PID namespace. */
+export async function requestNamespacedManagementRpc(
+  paths: PluginManagementRpcPaths,
+  endpoint: PluginManagementRpcEndpoint,
+  operation: PluginManagementRpcOperation,
+): Promise<unknown> {
+  if (!endpoint.mailboxId || !await usesNamespacedManagementRpc(endpoint)) throw new Error('MAILBOX_UNAVAILABLE')
+  return requestManagementMailbox({
+    directory: managementMailboxPath(managementMailboxRoot(paths), endpoint.mailboxId),
+    token: endpoint.token,
+    value: {
+      version: 1,
+      requestId: `management-${randomBytes(12).toString('hex')}`,
+      token: endpoint.token,
+      profileId: endpoint.profileId,
+      operation,
+    },
   })
 }
 

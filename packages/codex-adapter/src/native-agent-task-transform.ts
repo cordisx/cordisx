@@ -2,7 +2,9 @@ import { fixedNativeTransform } from './fixed-transform.js'
 import { createHash } from 'node:crypto'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeResourceTransform } from './contracts.js'
-import { literal, member, one, properties, type SyntaxNode } from './native-source-structure.js'
+import { literal, member, one, properties, type SyntaxNode, visitSyntax } from './native-source-structure.js'
+import { nativeModuleFactories } from './native-chunk-structure.js'
+import { resolveNativeVariable } from './native-source-bindings.js'
 import {
   discoverTaskExecution,
   discoverTaskInitial,
@@ -56,7 +58,10 @@ function executionEdits(plan: TaskSource): void {
   )
   const callers = plan.nodes(
     plan.ast,
-    node => node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === fn.id?.name,
+    node =>
+      node.type === 'CallExpression'
+      && (node.callee === fn
+        || fn.id?.name !== undefined && node.callee.type === 'Identifier' && node.callee.name === fn.id.name),
   )
   const caller = one(callers, 'task-dispatch-call')
   const argumentsValue = properties(caller.arguments[0]).get('argumentsValue')
@@ -66,15 +71,18 @@ function executionEdits(plan: TaskSource): void {
   plan.addProperty(caller.arguments[0], `cordisxCallId:${argumentsValue.object.name}.callId`)
 }
 
-function initialEdits(plan: TaskSource): void {
+function initialEdits(plan: TaskSource, firstTurnIsSeparate = false, scope?: SyntaxNode): void {
   const fn = discoverTaskInitial(plan)
   const input = plan.parameter(fn, ['config', 'sourceThreadId', 'startWithoutFirstTurn', 'onBeforeWorktreeCreate'])
   // Ordinary delegated config remains rejected by the unchanged native guard.
   const config = plan.binding(input, 'config'), sourceThread = plan.binding(input, 'sourceThreadId')
   const nonNull = (node: SyntaxNode, binding: string): boolean =>
     node.type === 'BinaryExpression'
-    && node.operator === '!=' && node.left.type === 'Identifier' && node.left.name === binding
-    && node.right.type === 'Literal' && node.right.value === null
+    && node.operator === '!='
+    && (node.left.type === 'Identifier' && node.left.name === binding
+        && node.right.type === 'Literal' && node.right.value === null
+      || node.right.type === 'Identifier' && node.right.name === binding
+        && node.left.type === 'Literal' && node.left.value === null)
   plan.require(fn.body, node =>
     node.type === 'IfStatement' && node.test.type === 'LogicalExpression'
     && node.test.operator === '&&'
@@ -106,10 +114,12 @@ function initialEdits(plan: TaskSource): void {
     'worktree-helper-call',
   )
   for (const call of [local, worktree]) {
-    if (call.callee.type !== 'Identifier') throw new Error('Native task helper reference unavailable')
+    if (!['Identifier', 'FunctionExpression'].includes(call.callee.type)) {
+      throw new Error('Native task helper reference unavailable')
+    }
     plan.addProperty(call.arguments[0], taskHandle)
   }
-  const localFn = plan.declaration(local.callee.name)
+  const localFn = local.callee.type === 'Identifier' ? plan.declaration(local.callee.name, scope) : local.callee
   const localInput = plan.parameter(localFn, ['config', 'model', 'thinking', 'target', 'sourceThreadId'])
   plan.addHandle(localFn, localInput, plan.binding(localInput, 'model'), plan.binding(localInput, 'thinking'))
   const localRequest = plan.require(
@@ -132,7 +142,9 @@ function initialEdits(plan: TaskSource): void {
   }),${JSON.stringify(taskToken)}:${taskHandle}.token})`
   if (priorMetadata) plan.replace(priorMetadata, taskMetadata)
   else plan.addProperty(localRequest, `responsesapiClientMetadata:${taskMetadata}`)
-  const worktreeFn = plan.declaration(worktree.callee.name)
+  const worktreeFn = worktree.callee.type === 'Identifier'
+    ? plan.declaration(worktree.callee.name, scope)
+    : worktree.callee
   const worktreeInput = plan.parameter(worktreeFn, [
     'model',
     'thinking',
@@ -163,6 +175,8 @@ function initialEdits(plan: TaskSource): void {
       JSON.stringify(taskToken)
     }:${taskHandle}.token}})`,
   )
+  // The Rspack submission dependency independently attests the first-turn carrier.
+  if (firstTurnIsSeparate) return
   // The regular submission adapter also carries this token. Keep this seam when composed or used independently.
   const firstFn = one(
     plan.functions.filter(f =>
@@ -234,6 +248,90 @@ function verifyModuleLink(
   if (!exported) throw new Error('Native task helper export unavailable')
 }
 
+interface TaskPlan {
+  readonly resource: NativeScriptResource
+  readonly plan: TaskSource
+}
+
+function enclosingFactory(plan: TaskSource, node: SyntaxNode): { factory: SyntaxNode; id: string } {
+  const factories = nativeModuleFactories(plan.ast)
+  let selected: SyntaxNode | undefined
+  visitSyntax(plan.ast, (child, parents) => {
+    if (child === node) selected = parents.findLast(parent => factories.has(parent))
+  })
+  if (!selected) throw new Error('Native task module factory unavailable')
+  return { factory: selected, id: factories.get(selected)! }
+}
+
+/** Prove the dispatcher calls the actual exported creation function by module identity. */
+function rspackTaskPlans(plans: readonly TaskPlan[], transforms: readonly NativeResourceTransform[]): {
+  initial: readonly TaskPlan[]
+  execution: TaskPlan
+} {
+  if (!transforms.some(transform => transform.taskFirstTurnCarrier === true)) {
+    throw new Error('Native task first-turn submission carrier unavailable')
+  }
+  const executions = plans.filter(({ plan }) => {
+    try {
+      discoverTaskExecution(plan)
+      return true
+    } catch {
+      return false
+    }
+  })
+  const execution = one(executions, 'task-execution-resource')
+  const fn = discoverTaskExecution(execution.plan)
+  const executionFactory = enclosingFactory(execution.plan, fn).factory
+  const call = execution.plan.require(fn.body, node =>
+    node.type === 'CallExpression'
+    && literal(properties(node.arguments[0]).get('turnTrigger')) === 'app_tool_create_thread', 'linked-create-call')
+  const callee = call.callee.type === 'SequenceExpression' && call.callee.expressions.length === 2
+      && literal(call.callee.expressions[0]) === 0
+    ? call.callee.expressions[1]
+    : call.callee
+  if (callee?.type !== 'MemberExpression' || callee.computed || callee.object.type !== 'Identifier') {
+    throw new Error('Native task module call unavailable')
+  }
+  const reference = resolveNativeVariable(execution.plan.ast, callee.object, 'task-module-import')
+  const imported = reference.init
+  if (
+    reference.start < executionFactory.start || reference.end > executionFactory.end
+    || imported?.type !== 'CallExpression' || imported.callee.type !== 'Identifier'
+    || imported.callee.name !== executionFactory.params[2]?.name || imported.arguments.length !== 1
+    || typeof literal(imported.arguments[0]) !== 'string'
+  ) {
+    throw new Error('Native task module import unavailable')
+  }
+  const moduleId = literal(imported.arguments[0])
+  const exportName = callee.property.name
+  const initial: TaskPlan[] = []
+  for (const candidate of plans) {
+    let creation: SyntaxNode
+    try {
+      creation = discoverTaskInitial(candidate.plan)
+    } catch {
+      continue
+    }
+    let identity: { factory: SyntaxNode; id: string }
+    try {
+      identity = enclosingFactory(candidate.plan, creation)
+    } catch {
+      continue
+    }
+    if (identity.id !== moduleId) continue
+    const exports = candidate.plan.nodes(identity.factory, node =>
+      node.type === 'CallExpression'
+      && member(node.callee, 'd') && node.callee.object.type === 'Identifier'
+      && node.callee.object.name === identity.factory.params[2]?.name
+      && node.arguments[0]?.type === 'Identifier' && node.arguments[0].name === identity.factory.params[1]?.name
+      && node.arguments.some((arg: SyntaxNode) => properties(arg).get(exportName) === creation))
+    if (exports.length !== 1) throw new Error('Native task module export unavailable')
+    initial.push(candidate)
+  }
+  if (!initial.length) throw new Error('Native task linked creation module unavailable')
+  return { initial, execution }
+}
+
 export function applyAgentTaskStructure(source: string, kind: 'initial' | 'execution', ast?: SyntaxNode): string {
   const plan = new TaskSource(source, ast)
   if (kind === 'execution') executionEdits(plan)
@@ -248,7 +346,8 @@ export function nativeAgentTaskTransforms(
   resources: readonly NativeScriptResource[],
   transforms: readonly NativeResourceTransform[],
   syntaxByResource?: ReadonlyMap<NativeScriptResource, SyntaxNode>,
-): { transforms: readonly NativeResourceTransform[]; available: boolean } {
+): { transforms: readonly NativeResourceTransform[]; available: boolean; reason?: string } {
+  let stage = 'discovery'
   try {
     const plans = resources.filter(resource =>
       resource.source.includes('create_thread')
@@ -264,16 +363,40 @@ export function nativeAgentTaskTransforms(
           return false
         }
       })
-    const initial = one(candidates('initial'), 'task-initial-resource')
-    const execution = one(candidates('execution'), 'task-execution-resource')
-    verifyModuleLink(initial, execution)
+    stage = 'link'
+    let initial: readonly TaskPlan[]
+    let execution: TaskPlan
+    let rspack = false
+    const possibleInitial = candidates('initial')
+    const possibleExecution = candidates('execution')
+    if (
+      possibleInitial.length === 1 && possibleExecution.length === 1
+      && discoverTaskInitial(possibleInitial[0]!.plan).id?.name !== undefined
+    ) {
+      initial = possibleInitial
+      execution = possibleExecution[0]!
+      verifyModuleLink(initial[0]!, execution)
+    } else {
+      const linked = rspackTaskPlans(plans, transforms)
+      initial = linked.initial
+      execution = linked.execution
+      rspack = true
+    }
+    stage = 'transform'
     const merged = [...transforms]
-    for (const [{ resource, plan }, kind] of [[initial, 'initial'], [execution, 'execution']] as const) {
+    const taskOwnedResources = new Set<string>()
+    const operations: Array<readonly [TaskPlan, 'initial' | 'execution']> = [
+      ...initial.map(item => [item, 'initial'] as const),
+      [execution, 'execution'],
+    ]
+    for (const [{ resource, plan }, kind] of operations) {
       // Prove all creation seams before admitting any part of this capability.
-      if (kind === 'initial') initialEdits(plan)
-      else executionEdits(plan)
+      if (kind === 'initial') {
+        initialEdits(plan, rspack, rspack ? enclosingFactory(plan, discoverTaskInitial(plan)).factory : undefined)
+      } else executionEdits(plan)
       const priorIndex = merged.findIndex(transform => transform.url === resource.url)
       const prior = merged[priorIndex]
+      const includesTaskEdits = taskOwnedResources.has(resource.url)
       const next = fixedNativeTransform({
         url: resource.url,
         sha256: hash(resource.source),
@@ -283,7 +406,19 @@ export function nativeAgentTaskTransforms(
           if (hash(source) !== hash(resource.source)) throw new Error('Native task resource drift')
           const result = prior?.transform(source)
           // Compose on the transformed source; native submission edits can shift creation offsets.
-          const transformed = result === undefined ? plan.result() : applyAgentTaskStructure(result.source, kind)
+          const composed = result === undefined
+            ? undefined
+            : new TaskSource(result.source, undefined, includesTaskEdits)
+          if (composed) {
+            if (kind === 'initial') {
+              initialEdits(
+                composed,
+                rspack,
+                rspack ? enclosingFactory(composed, discoverTaskInitial(composed)).factory : undefined,
+              )
+            } else executionEdits(composed)
+          }
+          const transformed = composed === undefined ? plan.result() : composed.result()
           return {
             source: transformed + `\n;globalThis.__cordisxNativeAgentTask_${kind}=true;${
               kind === 'initial'
@@ -301,12 +436,15 @@ export function nativeAgentTaskTransforms(
           }
         },
       })
+      stage = 'composition'
       next.transform(resource.source)
+      stage = 'transform'
       if (priorIndex < 0) merged.push(next)
       else merged[priorIndex] = next
+      taskOwnedResources.add(resource.url)
     }
     return { transforms: merged, available: true }
   } catch {
-    return { transforms, available: false }
+    return { transforms, available: false, reason: stage }
   }
 }

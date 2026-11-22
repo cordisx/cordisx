@@ -6,6 +6,22 @@ import {
 } from '../packages/cli/src/cli/native-submission-catalog-options.js'
 
 describe('native submission catalog options', () => {
+  it('keeps an explicit launch override separate from runtime creation defaults', () => {
+    const profile = { defaultModelProvider: 'legacy' }
+    expect(nativeSubmissionCatalogOptions('/home', 'default', profile, {})).toMatchObject({
+      defaultProviderId: 'legacy',
+    })
+    expect(
+      nativeSubmissionCatalogOptions('/home', 'default', profile, {}, undefined, undefined, [], [], {
+        service: 'explicit',
+        model: 'explicit-model',
+      }),
+    ).toMatchObject({
+      defaultProviderId: 'explicit',
+      defaultModelId: 'explicit-model',
+      launchSelection: { providerId: 'explicit', model: 'explicit-model' },
+    })
+  })
   it('uses plan overrides for both native completion paths without falling back to process.env', () => {
     const base = { API_KEY: 'base', BASE_ONLY: 'present' }
     const planned = { API_KEY: 'planned', PLAN_ONLY: 'present' }

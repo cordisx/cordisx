@@ -187,7 +187,8 @@ try {
           '--access=public',
           '--provenance',
         ]),
-      retry: (label, operation) => retryRegistryPropagation(label, operation),
+      // npm publish-time scanning can keep accepted packages private beyond 15 minutes.
+      retry: (label, operation) => retryRegistryPropagation(label, operation, { timeoutMs: 30 * 60 * 1000 }),
       startPhase: loaded.recovery.nextPhase,
       run: {
         workflowRunId: process.env.GITHUB_RUN_ID,

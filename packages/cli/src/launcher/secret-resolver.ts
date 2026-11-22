@@ -1,6 +1,23 @@
 import { createMacOSKeychainBackend, type LauncherKeychainBackend, LauncherKeychainError } from './secret-store.js'
+import path from 'node:path'
+import { resolveHomeConfigPath } from '../config/home-config.js'
+import { createFileSecretBackend } from './secret-file-backend.js'
 const ENV_SECRET = /^host-secret:env\/([A-Za-z_][A-Za-z0-9_]{0,127})$/
+const FILE_SECRET = /^host-secret:channel\/([a-z0-9][a-z0-9._-]{0,63})\/([a-z0-9][a-z0-9._-]{0,95})$/
 const KEYCHAIN_SECRET = /^keychain:([A-Za-z0-9][A-Za-z0-9._:/-]{0,500})$/
+
+/** Keep configured Channel credentials in the launcher, outside model subprocesses. */
+export function withoutLauncherSecrets(
+  environment: NodeJS.ProcessEnv,
+  references: readonly (string | undefined)[],
+): NodeJS.ProcessEnv {
+  const result = { ...environment }
+  for (const reference of references) {
+    const match = reference === undefined ? null : ENV_SECRET.exec(reference)
+    if (match !== null) delete result[match[1]!]
+  }
+  return result
+}
 
 /** A bounded error that deliberately never includes the secret reference or value. */
 export class LauncherSecretResolutionError extends Error {
@@ -13,6 +30,7 @@ export class LauncherSecretResolutionError extends Error {
 export interface LauncherSecretResolverOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly platform?: NodeJS.Platform
+  readonly homeDir?: string
   /** Test seam for legacy consumers; prefer `keychainBackend` for all operations. */
   readonly readKeychain?: (service: string, account: string) => Promise<string>
   readonly keychainBackend?: Pick<LauncherKeychainBackend, 'read'>
@@ -37,6 +55,17 @@ export async function resolveLauncherSecret(
     const value = (options.environment ?? process.env)[env[1]!]
     if (!validValue(value)) throw new LauncherSecretResolutionError('SECRET_MISSING')
     return value
+  }
+  const file = FILE_SECRET.exec(reference)
+  if (file !== null) {
+    const homeDir = options.homeDir ?? path.dirname(resolveHomeConfigPath({ env: options.environment ?? process.env }))
+    try {
+      return await createFileSecretBackend(homeDir).read(`cordisx/channel/${file[1]}`, file[2]!)
+    } catch (error) {
+      throw new LauncherSecretResolutionError(
+        error instanceof LauncherKeychainError && error.code === 'MISSING' ? 'SECRET_MISSING' : 'SECRET_UNAVAILABLE',
+      )
+    }
   }
   const keychain = KEYCHAIN_SECRET.exec(reference)
   if (keychain === null) throw new LauncherSecretResolutionError('SECRET_REF_INVALID')

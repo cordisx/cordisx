@@ -1,6 +1,7 @@
 import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
+import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
 import {
   type CordisXPluginManifestV12,
   type CordisXPluginManifestV13,
@@ -153,6 +154,9 @@ export interface PluginRuntimeMutation {
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
+  /** Host-only, candidate-bound effective choices from a reviewed bundle. */
+  readonly bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>
 }
 
 export interface ManagedServiceUICapabilityMutation {
@@ -238,10 +242,12 @@ export interface PendingPermissionReview {
     | CordisXPermissionAuthorizationPlanV1
     | CordisXPermissionAuthorizationPlanV2
     | CordisXPermissionAuthorizationPlanV4
+    | DeferredPermissionPlan
   readonly decision:
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+    | DeferredPermissionDecision
 }
 
 export interface HostPermissionLifecycleReviewV2Request {
@@ -270,6 +276,10 @@ export interface HostPermissionLifecycleApplyV4Request {
   readonly runtimeGeneration: string
   readonly expectedRevision: number
   readonly decision: CordisXPermissionAuthorizationDecisionV4
+}
+
+export interface HostPermissionLifecycleApplyV7Request extends Omit<HostPermissionLifecycleApplyV4Request, 'decision'> {
+  readonly decision: DeferredPermissionDecision
 }
 
 export class LifecycleFailure extends Error {
@@ -464,7 +474,7 @@ export function authorizationPlanV4(
   if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
     throw new LifecycleFailure(
       'permission-denied',
-      'Permission V4 review requires manifest-v5 through manifest-v14.',
+      'Permission V4 review requires manifest-v5 through manifest-v16.',
     )
   }
   const catalog = new CapabilityRiskCatalog()
@@ -491,7 +501,7 @@ export function authorizationPlanV4(
 }
 
 export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {
-  return schemaVersion >= 5 && schemaVersion <= 15
+  return schemaVersion >= 5 && schemaVersion <= 16
 }
 
 export function isLegacyPermissionDeclarationV4(
