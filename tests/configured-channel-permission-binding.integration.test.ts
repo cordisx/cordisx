@@ -98,29 +98,31 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       }
       const writerGeneration = await generationFor(f.invocation)
       const peerGeneration = await generationFor(second)
-      let otherConsumersCurrent = true
-      const consumers = {
-        isCurrent: () => otherConsumersCurrent,
-        adopt: async (input: {
-          profileId: string
-          ownerGeneration: string
-          requestId: string
-          candidate: readonly unknown[]
-        }) => ({
-          profileId: input.profileId,
-          ownerGeneration: input.ownerGeneration,
-          requestId: input.requestId,
-          adopted: otherConsumersCurrent,
-          candidate: input.candidate,
-        }),
-        release: () => {
-          if (!otherConsumersCurrent) return false
-          otherConsumersCurrent = false
-          return true
-        },
-        fence: () => {
-          otherConsumersCurrent = false
-        },
+      const reserveOtherConsumers = async () => {
+        let current = true
+        return {
+          isCurrent: () => current,
+          adopt: async (input: {
+            profileId: string
+            ownerGeneration: string
+            requestId: string
+            candidate: readonly unknown[]
+          }) => ({
+            profileId: input.profileId,
+            ownerGeneration: input.ownerGeneration,
+            requestId: input.requestId,
+            adopted: current,
+            candidate: input.candidate,
+          }),
+          release: () => {
+            if (!current) return false
+            current = false
+            return true
+          },
+          fence: () => {
+            current = false
+          },
+        }
       }
       channel = createServiceRendererPermissionChannel({
         profileId: f.profileId,
@@ -131,7 +133,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         lifecycle: f.lifecycle,
         sessions: () => f.sessions,
         // The other-consumer fence is synthetic; production remains gated.
-        reserveOtherConsumers: async () => consumers,
+        reserveOtherConsumers,
       })
       const identity = { id: 'channel', source: alias }
       const plan = buildDomPermissionAuthorizationPlanV3({
@@ -228,6 +230,33 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       expect(onUnknown).not.toHaveBeenCalled()
       expect(sent).toBeDefined()
       expect(() => channel.prepare(sent, requestContext!)).toThrow('MANAGER_PERMISSION_UNAVAILABLE')
+
+      const cancelReset = signer.noteReset({
+        identity,
+        pointId: point,
+        profileId: f.profileId,
+        runtimeGeneration: f.generation,
+        moduleGeneration: writerGeneration,
+        artifact: f.configuredChannel!.plugin.distributionArtifact!,
+      }, 'allow-persistent')
+      expect(cancelReset).toBeTypeOf('function')
+      const peerResetPoll = f.sessions.poll(second, 10_000)
+      const writerResetPoll = f.sessions.poll(f.invocation, 10_000)
+      const resetting = writer.value.setDomPolicy(writer.identity, point, 'ask')
+      await adopt(second, peer, (await peerResetPoll as any).value.command)
+      await adopt(f.invocation, writer, (await writerResetPoll as any).value.command)
+      await resetting
+      cancelReset?.()
+      expect(writer.value.domPolicy(writer.identity, point)).toBe('inherit')
+      expect(peer.value.domPolicy(peer.identity, point)).toBe('inherit')
+      expect((await loadHomeConfig(f.configPath)).permissions).toContainEqual(expect.objectContaining({
+        key: expect.objectContaining({
+          identity: { source: f.configuredChannel!.plugin.source, pluginId: 'channel' },
+          scope: { extensionPoints: [point] },
+        }),
+        policy: 'ask',
+      }))
+      expect(onUnknown).not.toHaveBeenCalled()
     } finally {
       signer.close()
       peerSigner.close()

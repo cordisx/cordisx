@@ -5,8 +5,10 @@ import {
   type CordisXPermissionAuthorizationDecisionV3,
   type CordisXPermissionAuthorizationPlanV3,
   type CordisXPermissionPolicyRecordV3,
+  type CordisXPermissionPolicyV2,
 } from '../permission-contracts.js'
-import { normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
+import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
 import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import { standalonePermissionProofBytes } from '../standalone-permission-proof.js'
 
@@ -22,6 +24,7 @@ type Approval = {
   readonly review: Review
   readonly planId: string
   readonly record: CordisXPermissionPolicyRecordV3
+  readonly observed: CordisXPermissionPolicyV2
   readonly expires: number
 }
 
@@ -51,6 +54,35 @@ export async function createStandalonePermissionSigner(
   const approvals = new Map<string, Approval>()
   let closed = false
   const now = () => (options.now ?? Date.now)()
+  const remember = (
+    review: Review,
+    planId: string,
+    record: CordisXPermissionPolicyRecordV3,
+    observed: CordisXPermissionPolicyV2,
+  ): (() => void) | undefined => {
+    const current = now()
+    if (!Number.isSafeInteger(current) || approvals.size >= 4) return undefined
+    const key = JSON.stringify(record)
+    const approval: Approval = {
+      // Retain only immutable values, never the live review callbacks.
+      review: {
+        identity: { ...review.identity },
+        pointId: review.pointId,
+        profileId: review.profileId,
+        runtimeGeneration: review.runtimeGeneration,
+        moduleGeneration: review.moduleGeneration,
+        artifact: { ...review.artifact },
+      },
+      planId,
+      record,
+      observed,
+      expires: current + 60_000,
+    }
+    approvals.set(key, approval)
+    return () => {
+      if (approvals.get(key) === approval) approvals.delete(key)
+    }
+  }
   return {
     publicKey,
     /** Call only after the Host dialog has accepted a trusted user event. */
@@ -97,26 +129,39 @@ export async function createStandalonePermissionSigner(
           },
           policy: selected.decision,
         })
-        const current = now()
-        if (!Number.isSafeInteger(current) || approvals.size >= 4) return false
-        approvals.set(JSON.stringify(record), {
-          // A live review also contains owner-check callbacks; retain only the
-          // immutable values covered by the decision, never clone functions.
-          review: {
-            identity: { ...review.identity },
-            pointId: review.pointId,
-            profileId: review.profileId,
-            runtimeGeneration: review.runtimeGeneration,
-            moduleGeneration: review.moduleGeneration,
-            artifact: { ...review.artifact },
-          },
-          planId: plan.planId,
-          record,
-          expires: current + 60_000,
-        })
-        return true
+        return remember(review, plan.planId, record, 'ask') !== undefined
       } catch {
         return false
+      }
+    },
+    /** The Host invokes this only for its trusted reset control. */
+    noteReset(
+      review: Review,
+      observed: 'allow-persistent' | 'deny-persistent',
+    ): (() => void) | undefined {
+      try {
+        if (
+          closed || !isStandaloneDomReviewTarget(review.identity, review.pointId)
+          || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
+          || observed !== 'allow-persistent' && observed !== 'deny-persistent'
+        ) return undefined
+        const key = domPermissionAuthorizationKeyV3({
+          profileId: review.profileId,
+          identity: { source: review.identity.source, pluginId: review.identity.id },
+          pointId: review.pointId,
+          catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+        })
+        const record = normalizePermissionPolicyRecordV3({
+          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+          schemaVersion: 3,
+          key,
+          policy: 'ask',
+        })
+        const random = provider.getRandomValues(new Uint8Array(16))
+        const planId = `reset-${[...random].map(byte => byte.toString(16).padStart(2, '0')).join('')}`
+        return remember(review, planId, record, observed)
+      } catch {
+        return undefined
       }
     },
     async sign(requestId: string, records: readonly unknown[]): Promise<unknown> {
@@ -142,7 +187,7 @@ export async function createStandalonePermissionSigner(
         decisionId,
         planId: approval.planId,
         issuedAt,
-        observed: 'ask' as const,
+        observed: approval.observed,
         record: approval.record,
       }
       const bytes = standalonePermissionProofBytes(payload)

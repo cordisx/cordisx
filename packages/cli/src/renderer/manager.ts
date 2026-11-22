@@ -233,10 +233,13 @@ export interface ManagerModel {
         version: string
         integrity: string
         authorized: boolean
+        policy: 'inherit' | 'allow' | 'deny'
         persistentAvailable?: boolean
+        resetAvailable?: boolean
       }>
       | undefined
     request(identity: CordisXPluginIdentity, pointId: string): Promise<boolean>
+    reset(identity: CordisXPluginIdentity, pointId: string, event: Event): Promise<boolean>
   }
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1

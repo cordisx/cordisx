@@ -1,5 +1,5 @@
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from './capability-risk-catalog.js'
-import type { CordisXPermissionPolicyRecordV3 } from './permission-contracts.js'
+import type { CordisXPermissionPolicyRecordV3, CordisXPermissionPolicyV2 } from './permission-contracts.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from './permission-model-v3.js'
 import { isStandaloneDomReviewTarget } from './standalone-permission-contract.js'
 
@@ -14,7 +14,7 @@ export interface StandalonePermissionProofPayload {
   readonly decisionId: string
   readonly planId: string
   readonly issuedAt: number
-  readonly observed: 'ask'
+  readonly observed: CordisXPermissionPolicyV2
   readonly record: CordisXPermissionPolicyRecordV3
 }
 
@@ -50,7 +50,8 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
     || typeof item.decisionId !== 'string' || !/^[a-f0-9]{64}$/u.test(item.decisionId)
     || typeof item.planId !== 'string' || item.planId.length === 0 || item.planId.length > 128
     || /[\u0000-\u001f\u007f]/u.test(item.planId) || !Number.isSafeInteger(item.issuedAt)
-    || Number(item.issuedAt) < 0 || item.observed !== 'ask'
+    || Number(item.issuedAt) < 0
+    || item.observed !== 'ask' && item.observed !== 'allow-persistent' && item.observed !== 'deny-persistent'
   ) return invalid()
   if (!item.artifact || typeof item.artifact !== 'object' || Array.isArray(item.artifact)) return invalid()
   const artifact = item.artifact as Record<string, unknown>
@@ -66,7 +67,9 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
   if (
     record.key.profileId !== item.profileId || record.key.scope.extensionPoints?.length !== 1
     || pointId === undefined || !isStandaloneDomReviewTarget(identity, pointId)
-    || record.policy !== 'allow-persistent' && record.policy !== 'deny-persistent'
+    || (item.observed === 'ask'
+      ? record.policy !== 'allow-persistent' && record.policy !== 'deny-persistent'
+      : record.policy !== 'ask')
   ) return invalid()
   const canonical = domPermissionAuthorizationKeyV3({
     profileId: item.profileId,
@@ -86,7 +89,7 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
     decisionId: item.decisionId,
     planId: item.planId,
     issuedAt: Number(item.issuedAt),
-    observed: 'ask',
+    observed: item.observed,
     record,
   }
 }

@@ -116,3 +116,65 @@ it('does not sign an unconfirmed or mismatched decision', async () => {
     signer.close()
   }
 })
+
+it('binds a reset to the exact previously persisted policy and consumes the decision once', async () => {
+  const signer = await createStandalonePermissionSigner(scope, { crypto: webcrypto as unknown as Crypto })
+  const controller = new AbortController()
+  const context = {
+    profileId: scope.profileId,
+    rendererId: scope.rendererId,
+    ownerGeneration: scope.generation,
+    signal: controller.signal,
+  }
+  const authority = new ManagerPermissionProofAuthority({
+    profileId: scope.profileId,
+    generation: scope.generation,
+    isCurrent: () => true,
+  })
+  const reset = normalizePermissionPolicyRecordV3({ ...record, policy: 'ask' })
+  try {
+    authority.register(context, signer.publicKey)
+    const cancel = signer.noteReset(review, 'allow-persistent')
+    expect(cancel).toBeTypeOf('function')
+    const proof = await signer.sign('reset-request', [reset])
+    cancel?.()
+    const payload = (proof as { payload: Record<string, unknown> }).payload
+    expect(payload.observed).toBe('allow-persistent')
+    expect(() => normalizeStandalonePermissionProofPayload({ ...payload, observed: 'ask' }))
+      .toThrow('standalone-permission-proof-invalid')
+    const input = {
+      context: { ...context, admitted: true },
+      requestId: 'reset-request',
+      records: [reset],
+      expected: [record],
+      moduleGeneration: review.moduleGeneration,
+      artifact: review.artifact,
+      proof,
+    }
+    expect(authority.authorize({ ...input, expected: [] })).toBe(false)
+    expect(authority.authorize({ ...input, expected: [{ ...record, policy: 'deny-persistent' }] })).toBe(false)
+    expect(authority.authorize(input)).toBe(true)
+    expect(authority.authorize(input)).toBe(false)
+    await expect(signer.sign('reset-request', [reset])).rejects.toThrow('decision-unavailable')
+
+    const denied = normalizePermissionPolicyRecordV3({ ...record, policy: 'deny-persistent' })
+    const cancelDenied = signer.noteReset(review, 'deny-persistent')
+    expect(cancelDenied).toBeTypeOf('function')
+    const deniedProof = await signer.sign('reset-denied', [reset])
+    cancelDenied?.()
+    expect(authority.authorize({
+      ...input,
+      requestId: 'reset-denied',
+      expected: [denied],
+      proof: deniedProof,
+    })).toBe(true)
+
+    const cancelled = signer.noteReset(review, 'allow-persistent')
+    expect(cancelled).toBeTypeOf('function')
+    cancelled?.()
+    await expect(signer.sign('cancelled-reset', [reset])).rejects.toThrow('decision-unavailable')
+  } finally {
+    signer.close()
+    authority.close()
+  }
+})

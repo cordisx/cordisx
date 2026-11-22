@@ -248,7 +248,9 @@ renderer-scoped Manager UI identity to the owner source, and requires each
 Manager and every other covered consumer to adopt the exact owner readback.
 A missing or stale consumer receipt fences the handoff. The service owner does
 not yet supply the other-consumer reservation, so persistent changes remain
-unavailable in the production path.
+unavailable in the production path. In the experimental composition, the Host
+permission detail can reset a persistent allow or denial to `ask`; the signed
+reset is bound to the previous decision and follows the same adoption barrier.
 
 On macOS and Linux, an experimental service-mode renderer or an eligible
 Desktop renderer holds profile-scoped fences while its

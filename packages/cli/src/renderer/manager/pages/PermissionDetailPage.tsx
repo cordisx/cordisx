@@ -1,10 +1,11 @@
 import { EmptyState } from '../../host-ui/EmptyState.js'
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { managerCopy, productLocale } from '../../ui-copy.js'
 import { Button, Select } from 'tdesign-react'
 import type { CordisXPermissionPolicy } from '../../../contracts.js'
 import type { ManagerModel, ManagerPermissionSnapshot, ManagerSnapshot } from '../../manager.js'
 import type { ManagerRouter } from '../model/routes.js'
+import { registerStandaloneDomResetButton } from '../../standalone-dom-reset-button.js'
 
 const policyOptions = [{ label: '每次询问', value: 'ask' }, { label: '始终允许', value: 'allow' }, {
   label: '始终拒绝',
@@ -18,16 +19,29 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
 }) {
   const [busy, setBusy] = useState(false)
   const [declined, setDeclined] = useState(false)
+  const [resetFailed, setResetFailed] = useState(false)
   const points = permission.scope.extensionPoints
   const pointId = permission.capability === 'ui.extension-points.render' && points?.length === 1
     ? points[0]
     : undefined
+  const unbindReset = useRef<(() => void) | undefined>(undefined)
+  const resetRef = useCallback((element: HTMLElement | null) => {
+    unbindReset.current?.()
+    unbindReset.current = undefined
+    if (element && pointId) {
+      unbindReset.current = registerStandaloneDomResetButton(element, permission.identity, pointId)
+    }
+  }, [permission.identity.id, permission.identity.source, pointId])
   const review = model.standaloneDomReview
   const artifact = pointId === undefined ? undefined : review?.describe(permission.identity, pointId)
   if (pointId === undefined || review === undefined || artifact === undefined) return null
   const chinese = productLocale(locale) === 'zh-CN'
   return (
-    <section className="cxr-section" data-standalone-dom-review={pointId}>
+    <section
+      className="cxr-section"
+      data-standalone-dom-review={artifact.policy === 'inherit' ? pointId : undefined}
+      data-standalone-dom-policy={artifact.policy === 'inherit' ? undefined : pointId}
+    >
       <h3>
         {artifact.persistentAvailable
           ? chinese ? '页面授权' : 'Page access'
@@ -50,7 +64,44 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
       <p>
         {chinese ? '制品摘要' : 'Artifact digest'}: <code>{artifact.integrity}</code>
       </p>
-      {artifact.authorized
+      {artifact.policy !== 'inherit'
+        ? (
+          <>
+            <p role="status">
+              {artifact.policy === 'allow'
+                ? chinese ? '已持续允许。' : 'Always allowed.'
+                : chinese
+                ? '已持续拒绝。'
+                : 'Always denied.'}
+            </p>
+            {artifact.resetAvailable
+              ? (
+                <Button
+                  ref={resetRef}
+                  tag="button"
+                  type="button"
+                  theme="default"
+                  variant="outline"
+                  disabled={busy}
+                  data-standalone-dom-reset={pointId}
+                  onClick={event => {
+                    if (!event.nativeEvent.isTrusted || busy) return
+                    setBusy(true)
+                    setResetFailed(false)
+                    void review.reset(permission.identity, pointId, event.nativeEvent).then(
+                      reset => setResetFailed(!reset),
+                      () => setResetFailed(true),
+                    ).finally(() => setBusy(false))
+                  }}
+                >
+                  {chinese ? '恢复每次询问' : 'Ask each time'}
+                </Button>
+              )
+              : null}
+            {resetFailed ? <p role="status">{chinese ? '权限未能更新。' : 'Access was not updated.'}</p> : null}
+          </>
+        )
+        : artifact.authorized
         ? <p role="status">{chinese ? '已在此标签页允许。' : 'Allowed in this tab.'}</p>
         : (
           <>

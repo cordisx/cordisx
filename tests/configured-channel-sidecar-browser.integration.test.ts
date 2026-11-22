@@ -340,6 +340,82 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
             'document.querySelector("[data-settings-navigation-item^=channel]")?.getAttribute("data-permission-review")',
           )
         ).toBe(null)
+        await expect.poll(
+          () => first.evaluate('document.querySelector("[data-standalone-dom-reset]")?.dataset.standaloneDomReset'),
+          { timeout: 15_000 },
+        ).toBeTruthy()
+        const resetPoint = await first.evaluate<string>(
+          'document.querySelector("[data-standalone-dom-reset]").dataset.standaloneDomReset',
+        )
+        const policy = async () =>
+          (await loadHomeConfig(f.configPath)).permissions.find(item =>
+            item.key.identity.pluginId === 'channel' && 'extensionPoints' in item.key.scope
+            && item.key.scope.extensionPoints?.includes(resetPoint)
+          )?.policy
+        const writes = () =>
+          events.filter(event =>
+            event.action === 'call' && event.channel === 'permission-policy' && event.status === 'ok'
+          ).length
+        await expect.poll(
+          () => first.evaluate('Boolean(document.querySelector("[data-standalone-dom-reset]:not(:disabled)"))'),
+          { timeout: 15_000 },
+        ).toBe(true)
+        await first.evaluate('document.querySelector("[data-standalone-dom-reset]").click()')
+        expect(await policy()).toBe('allow-persistent')
+        expect(writes()).toBe(2)
+        await trustedClick(first, '[data-standalone-dom-reset]')
+        try {
+          await expect.poll(policy, { timeout: 15_000 }).toBe('ask')
+        } catch (error) {
+          const state = await first.evaluate(`({
+            text: document.querySelector('[data-standalone-dom-policy]')?.innerText,
+            connected: !document.body.textContent.includes('CordisX 连接不可用'),
+          })`)
+          throw new Error('Reset did not reach the owner: ' + JSON.stringify({ state, events: events.slice(-20) }), {
+            cause: error,
+          })
+        }
+        await expect.poll(writes, { timeout: 60_000 }).toBe(3)
+        await expect.poll(() =>
+          second.evaluate(
+            'document.querySelector("[data-settings-navigation-item^=channel]")?.getAttribute("data-permission-review")',
+          )
+        ).toBe('pending')
+        const reviewAs = async (decision: 'allow-persistent' | 'deny-persistent') => {
+          await expect.poll(
+            () => first.evaluate('document.querySelector("[data-standalone-dom-review]")?.dataset.standaloneDomReview'),
+            { timeout: 15_000 },
+          ).toBe(resetPoint)
+          await expect.poll(
+            () =>
+              first.evaluate('Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))'),
+            { timeout: 15_000 },
+          ).toBe(true)
+          await trustedClick(first, '[data-standalone-dom-review] button')
+          const selector = `[data-permission-decision=${decision}]`
+          await expect.poll(
+            () => first.evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`),
+            { timeout: 15_000 },
+          ).toBe(true)
+          await trustedClick(first, selector)
+          await expect.poll(() =>
+            first.evaluate(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-checked')`)
+          ).toBe('true')
+          await trustedClick(first, '[data-permission-action=confirm]')
+        }
+        await reviewAs('deny-persistent')
+        await expect.poll(policy, { timeout: 60_000 }).toBe('deny-persistent')
+        await expect.poll(writes, { timeout: 60_000 }).toBe(4)
+        await expect.poll(
+          () => first.evaluate('Boolean(document.querySelector("[data-standalone-dom-reset]:not(:disabled)"))'),
+          { timeout: 15_000 },
+        ).toBe(true)
+        await trustedClick(first, '[data-standalone-dom-reset]')
+        await expect.poll(policy, { timeout: 60_000 }).toBe('ask')
+        await expect.poll(writes, { timeout: 60_000 }).toBe(5)
+        await reviewAs('allow-persistent')
+        await expect.poll(policy, { timeout: 60_000 }).toBe('allow-persistent')
+        await expect.poll(writes, { timeout: 60_000 }).toBe(6)
       }
       await openPage(first)
       await openPage(second)

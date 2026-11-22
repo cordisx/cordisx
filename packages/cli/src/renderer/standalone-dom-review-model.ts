@@ -25,53 +25,87 @@ export function createStandaloneDomReviewModel(
     ) return undefined
     return { controller, artifact, moduleGeneration: runtime.moduleGenerationOf()!(controller) }
   }
+  const reviewContext = (
+    target: CordisXPluginIdentity,
+    pointId: string,
+    selected: NonNullable<ReturnType<typeof select>>,
+  ) => {
+    const { controller, moduleGeneration } = selected
+    const artifact = Object.freeze({ ...selected.artifact })
+    const isCurrent = () => {
+      const current = select(target, pointId, false)
+      return current?.controller === controller && current.moduleGeneration === moduleGeneration
+        && current.artifact.version === artifact.version && current.artifact.integrity === artifact.integrity
+    }
+    return {
+      identity: target,
+      pointId,
+      profileId: metadata.profileId,
+      runtimeGeneration: runtime.generation()!,
+      moduleGeneration,
+      artifact,
+      isCurrent,
+      verifyCurrent: async () => {
+        try {
+          return isCurrent() && await verifySession() && isCurrent()
+        } catch {
+          return false
+        }
+      },
+      invalidate: () => broker.clearOnce(target),
+    }
+  }
 
   return {
     describe(identity, pointId) {
-      const selected = select(identity, pointId)
-      return selected === undefined ? undefined : Object.freeze({
+      const selected = select(identity, pointId, false)
+      if (selected === undefined) return undefined
+      const policy = broker.domPolicy(identity, pointId)
+      if (policy !== 'inherit' && !gate.supportsPersistentReset()) return undefined
+      return Object.freeze({
         version: selected.artifact.version,
         integrity: selected.artifact.integrity,
         authorized: broker.hasDomLease(identity, pointId, selected.controller.generationView),
+        policy,
         persistentAvailable: gate.supportsPersistentDecision(),
+        resetAvailable: gate.supportsPersistentReset(),
       })
     },
     async request(identity, pointId) {
       const target = Object.freeze({ id: identity.id, source: identity.source })
       const selected = select(target, pointId)
       if (selected === undefined) return false
-      const { controller, moduleGeneration } = selected
-      const artifact = Object.freeze({ ...selected.artifact })
-      const isCurrent = () => {
-        const current = select(target, pointId, false)
-        return current?.controller === controller && current.moduleGeneration === moduleGeneration
-          && current.artifact.version === artifact.version && current.artifact.integrity === artifact.integrity
-      }
-      const verifyCurrent = async () => {
-        try {
-          return isCurrent() && await verifySession() && isCurrent()
-        } catch {
-          return false
-        }
-      }
+      const { controller } = selected
+      const context = reviewContext(target, pointId, selected)
       if (broker.hasDomLease(target, pointId, controller.generationView)) {
-        const current = await verifyCurrent()
+        const current = await context.verifyCurrent()
         if (!current) broker.clearOnce(target)
         return current
       }
-      const allowed = await gate.review({
-        identity: target,
-        pointId,
-        profileId: metadata.profileId,
-        runtimeGeneration: runtime.generation()!,
-        moduleGeneration,
-        artifact,
-        isCurrent,
-        verifyCurrent,
-        invalidate: () => broker.clearOnce(target),
-      }, async () => (await broker.requestDomAccess(target, pointId, controller.generationView)).authorized)
+      const allowed = await gate.review(
+        context,
+        async () => (await broker.requestDomAccess(target, pointId, controller.generationView)).authorized,
+      )
       broker.refreshDomAccess()
       return allowed
+    },
+    async reset(identity, pointId, event) {
+      const target = Object.freeze({ id: identity.id, source: identity.source })
+      const selected = select(target, pointId, false)
+      const policy = broker.domPolicy(target, pointId)
+      if (selected === undefined || policy === 'inherit' || !gate.supportsPersistentReset()) return false
+      const context = reviewContext(target, pointId, selected)
+      return await gate.reset(
+        context,
+        policy === 'allow' ? 'allow-persistent' : 'deny-persistent',
+        event,
+        () => broker.domPolicy(target, pointId) === policy,
+        async () => {
+          await broker.setDomPolicy(target, pointId, 'ask')
+          broker.refreshDomAccess()
+          return broker.domPolicy(target, pointId) === 'inherit'
+        },
+      )
     },
   }
 }

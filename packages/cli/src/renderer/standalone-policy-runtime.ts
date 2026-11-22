@@ -21,11 +21,17 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
     metadata: safeMetadata,
     sign: standalonePermissionSigner?.sign,
     register(broker: PolicyBroker, signal?: AbortSignal, onUnknown?: () => void): void {
-      if (
-        standalonePermissionSigner && !standaloneDomReview(broker)?.bindPersistentDecision(
-          (context, plan, decision) => standalonePermissionSigner.noteConfirmed(context, plan, decision),
-        )
-      ) throw new Error('Standalone permission review is unavailable')
+      if (standalonePermissionSigner) {
+        const review = standaloneDomReview(broker)
+        if (
+          !review?.bindPersistentDecision(
+            (context, plan, decision) => standalonePermissionSigner.noteConfirmed(context, plan, decision),
+          )
+          || !review.bindPersistentReset(
+            (context, observed) => standalonePermissionSigner.noteReset(context, observed),
+          )
+        ) throw new Error('Standalone permission review is unavailable')
+      }
       standalonePolicyAdopter?.(async input => {
         if (signal?.aborted) return false
         const adopted = await broker.adoptStandaloneDomPolicies({

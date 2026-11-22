@@ -1,5 +1,6 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
 import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { consumeStandaloneDomReset } from './standalone-dom-reset-button.js'
 export { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
@@ -56,6 +57,12 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
       decision: CordisXPermissionAuthorizationDecisionV3,
     ) => boolean)
     | undefined
+  private persistentReset:
+    | ((
+      context: StandaloneDomReviewContext,
+      observed: 'allow-persistent' | 'deny-persistent',
+    ) => (() => void) | undefined)
+    | undefined
 
   constructor(
     private readonly createPrompt: (context: StandaloneDomReviewContext) => PermissionAuthorizationPromptV2,
@@ -70,6 +77,16 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   supportsPersistentDecision(): boolean {
     return !this.closed && this.persistentDecision !== undefined
+  }
+
+  bindPersistentReset(callback: NonNullable<StandaloneDomReview['persistentReset']>): boolean {
+    if (this.closed || this.active || this.persistentReset || typeof callback !== 'function') return false
+    this.persistentReset = callback
+    return true
+  }
+
+  supportsPersistentReset(): boolean {
+    return !this.closed && this.persistentReset !== undefined
   }
 
   private current(active: ActiveReview): boolean {
@@ -147,6 +164,33 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     }
   }
 
+  /** Reset a persisted decision only after a trusted click on the Host-owned control. */
+  async reset(
+    context: StandaloneDomReviewContext,
+    observed: 'allow-persistent' | 'deny-persistent',
+    event: Event,
+    policyCurrent: () => boolean,
+    operation: () => Promise<boolean>,
+  ): Promise<boolean> {
+    if (
+      !this.persistentReset || observed !== 'allow-persistent' && observed !== 'deny-persistent'
+      || !consumeStandaloneDomReset(event, context.identity, context.pointId)
+    ) return false
+    return await this.review(context, async () => {
+      const active = this.active
+      if (!active || !this.current(active) || !policyCurrent()) return false
+      const cancel = this.persistentReset?.(active.context, observed)
+      if (!cancel) return false
+      active.used = true
+      active.allowed = true
+      try {
+        return await operation()
+      } finally {
+        cancel()
+      }
+    })
+  }
+
   async request(): Promise<undefined> {
     return undefined
   }
@@ -216,6 +260,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     } catch { /* closing still invalidates the review */ }
     this.active = undefined
     this.persistentDecision = undefined
+    this.persistentReset = undefined
   }
 }
 
