@@ -32,6 +32,11 @@ briefly for the previous sidecar to exit; its browser sessions are not reused.
 If that exit cannot be confirmed, opening fails rather than starting another
 sidecar. A new owner must already be running.
 
+An owner-private adapter admission primitive can reserve its attached cohort,
+reject new grants and fence remaining peers after a disconnect. The reservation
+does not drain adapter work or synchronize policies by itself, and it is not
+connected to real Codex or Claude adapter startup.
+
 An experimental `host=1` query on the manager entry loads the existing Host
 Manager and plugin registration instead of the default preview pages. It is not
 the default experience. Eligible service and Desktop owners can project initial

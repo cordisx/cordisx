@@ -234,6 +234,14 @@ it.each([false, true])(
         },
         scope,
       })))
+      const reservation = admission.reserve()
+      expect(reservation.peers.map(peer => peer.identity.adapterId)).toEqual([
+        'fixture-a-adapter',
+        'fixture-b-adapter',
+      ])
+      expect(() => admission.issue({ appId: 'third-app', adapterId: 'third-adapter' }, gateway))
+        .toThrow('adapter-admission-unavailable')
+      expect(reservation.release()).toBe(true)
       const disable = async (id: string) => {
         const revision = (await store.loadActive()).revision
         const planned = await coordinator.handle(
