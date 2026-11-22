@@ -487,6 +487,8 @@ export function startStandaloneManager(input: {
         signal: lifetime.signal,
         onChannelConfiguration: (projection, revision) =>
           startedRuntime.adoptStandaloneChannelProjection?.(projection, revision) === true,
+        onManagedServiceState: async value =>
+          await (startedRuntime.confirmStandaloneManagedServiceState?.(value) ?? Promise.resolve(false)),
         onQuiesce: async () => {
           // Do not acknowledge a fence while an operation may have written or
           // while resource recovery has an unresolved result.

@@ -16,7 +16,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function fixture(dispatch: () => Promise<unknown>) {
+function fixture(dispatch: (requestId: string) => Promise<unknown>) {
   const scope = { homeDigest: 'a'.repeat(64), ownerAppId: 'codex', profileId: 'work', generation: 'owner-1' }
   const lifecycle = new ServiceRendererLifecycle({
     scope,
@@ -38,7 +38,18 @@ function fixture(dispatch: () => Promise<unknown>) {
   participants.bind(lifecycle)
   let sessions!: ManagerRendererSessions
   const channel = coordinateManagerManagedServiceMutations({
-    channel: { prepare: () => ({ mode: 'write', dispatch }) },
+    channel: {
+      prepare: payload => ({
+        mode: 'write',
+        managedServiceAuthentication: {
+          pluginId: 'fixture',
+          pluginGeneration: 'plugin-1',
+          serviceId: 'gateway',
+          expectedSequence: 1,
+        },
+        dispatch: async () => await dispatch((JSON.parse(String(payload)) as { requestId: string }).requestId),
+      }),
+    },
     sessions: () => sessions,
     participants,
     lifecycle,
@@ -71,13 +82,13 @@ function fixture(dispatch: () => Promise<unknown>) {
   return { lifecycle, participants, sessions, open }
 }
 
-it('reserves a single Manager for login and refuses a second Manager before dispatch', async () => {
+it('reserves the Manager cohort and waits for readback receipts around login', async () => {
   const entered = deferred<void>()
   const finish = deferred<void>()
-  const dispatch = vi.fn(async () => {
+  const dispatch = vi.fn(async (requestId: string) => {
     entered.resolve()
     await finish.promise
-    return { requestId: 'first', ok: true }
+    return { requestId, ok: true, value: { status: 'accepted', sequence: 2 } }
   })
   const f = fixture(dispatch)
   try {
@@ -87,16 +98,77 @@ it('reserves a single Manager for login and refuses a second Manager before disp
     expect(await f.sessions.open(gateway, secret())).toBeUndefined()
     expect(() => f.lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
     finish.resolve()
-    expect(await action).toEqual({ status: 'ok', value: { requestId: 'first', ok: true } })
-    const second = await f.open()
-    expect(await f.sessions.call(first, 'managed-service-ui', request('second'))).toEqual({
+    expect(await action).toEqual({
       status: 'ok',
-      value: { requestId: 'second', ok: false, code: 'owner-unavailable' },
+      value: { requestId: 'first', ok: true, value: { status: 'accepted', sequence: 2 } },
     })
-    expect(dispatch).toHaveBeenCalledOnce()
+    const second = await f.open()
+    const peer = f.participants.peer(second.handle.rendererId)!
+    const coordinated = f.sessions.call(first, 'managed-service-ui', request('second'))
+    const before = (await peer.next())!
+    expect(before).toMatchObject({ method: 'managed-service-state', payload: { phase: 'prepare', sequence: 1 } })
+    expect(peer.acknowledge({
+      id: before.id,
+      sequence: before.sequence,
+      ok: true,
+      value: { ...before.payload as object, confirmed: true },
+    })).toBe(true)
+    const after = (await peer.next())!
+    expect(after).toMatchObject({ method: 'managed-service-state', payload: { phase: 'confirm', sequence: 2 } })
+    expect(peer.acknowledge({
+      id: after.id,
+      sequence: after.sequence,
+      ok: true,
+      value: { ...after.payload as object, confirmed: true },
+    })).toBe(true)
+    expect(await coordinated).toMatchObject({ status: 'ok', value: { requestId: 'second', ok: true } })
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    const refused = f.sessions.call(first, 'managed-service-ui', request('third'))
+    const stale = (await peer.next())!
+    expect(peer.acknowledge({
+      id: stale.id,
+      sequence: stale.sequence,
+      ok: true,
+      value: { ...stale.payload as object, confirmed: false },
+    })).toBe(true)
+    expect(await refused).toEqual({
+      status: 'ok',
+      value: { requestId: 'third', ok: false, code: 'owner-unavailable' },
+    })
+    expect(dispatch).toHaveBeenCalledTimes(2)
     expect(await f.sessions.close(second)).toBe(true)
   } finally {
     finish.resolve()
+    f.sessions.dispose()
+    f.participants.close()
+    await f.lifecycle.close()
+  }
+})
+
+it('fences login when another Manager cannot confirm the resulting state', async () => {
+  const f = fixture(async requestId => ({ requestId, ok: true, value: { status: 'accepted', sequence: 2 } }))
+  try {
+    const first = await f.open()
+    const second = await f.open()
+    const peer = f.participants.peer(second.handle.rendererId)!
+    const action = f.sessions.call(first, 'managed-service-ui', request('uncertain'))
+    const before = (await peer.next())!
+    expect(peer.acknowledge({
+      id: before.id,
+      sequence: before.sequence,
+      ok: true,
+      value: { ...before.payload as object, confirmed: true },
+    })).toBe(true)
+    const after = (await peer.next())!
+    expect(peer.acknowledge({
+      id: after.id,
+      sequence: after.sequence,
+      ok: true,
+      value: { ...after.payload as object, confirmed: false },
+    })).toBe(true)
+    expect(await action).toEqual({ status: 'unknown' })
+    expect(f.lifecycle.requiresReconciliation).toBe(true)
+  } finally {
     f.sessions.dispose()
     f.participants.close()
     await f.lifecycle.close()
@@ -109,7 +181,7 @@ it('fences an uncertain login if its originating Manager disconnects', async () 
   const f = fixture(async () => {
     entered.resolve()
     await finish.promise
-    return { requestId: 'interrupted', ok: true }
+    return { requestId: 'interrupted', ok: true, value: { status: 'accepted', sequence: 2 } }
   })
   try {
     const first = await f.open()

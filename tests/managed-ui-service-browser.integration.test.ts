@@ -81,17 +81,23 @@ const fixture = [
   "  const result = await ctx.managedServices.get({ serviceId: 'gateway' })",
   '  globalThis.__fixtureManagedStatus = result.status',
   "  if (result.status === 'available') {",
+  '    globalThis.__fixtureManagedService = result.service',
+  '    globalThis.__fixtureManagedEvents = []',
   '    globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status',
   '    const observed = await result.service.subscribe()',
   '    globalThis.__fixtureServiceStatus = observed.status',
   "    if (observed.status === 'subscribed') {",
   '      globalThis.__fixtureServiceSubscription = observed.subscription',
   '      globalThis.__fixtureServicePublicId = observed.subscription.descriptor.subscriptionId',
-  '      const pages = observed.subscription.pages[Symbol.asyncIterator]()',
-  '      void pages.next().then(async page => {',
-  "        globalThis.__fixtureServicePage = page.done ? 'closed' : 'page'",
-  '        if (!page.done) await pages.next()',
-  "      }).catch(() => { globalThis.__fixtureServicePage = 'error' })",
+  '      void (async () => {',
+  '        for await (const page of observed.subscription.pages) {',
+  "          globalThis.__fixtureServicePage = 'page'",
+  '          for (const update of page.updates) {',
+  "            const auth = update.kind === 'snapshot-replaced' ? update.projection.auth : update.delta.auth",
+  '            if (auth) globalThis.__fixtureManagedEvents.push(auth.state)',
+  '          }',
+  '        }',
+  "      })().catch(() => { globalThis.__fixtureServicePage = 'error' })",
   '    }',
   '  }',
   '  globalThis.__fixtureStartup = ctx.startup',
@@ -206,6 +212,7 @@ it.skipIf(
       await stageServiceModePlugin(root, homeDir, 'default', true, 'https://example.test/fixtures', fixture, {
         version: 15,
         uiPoints: ['manager.content', 'manager.settings.navigation-items'],
+        authentication: true,
       })
       const channel = (await loadConfig(configPath, { profileId: 'default', projectRoot: homeDir })).plugins[0]!
       const policies = [
@@ -332,6 +339,32 @@ it.skipIf(
       }
       await channelForm(first)
       await channelForm(second)
+      const login = await first.evaluate<{ status: string; stateAt?: string }>(`(async () => {
+        const service = globalThis.__fixtureManagedService;
+        const snapshot = await service.snapshot();
+        return await service.authenticate({
+          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
+          contract: 'cordisx.managed-service-login-request/v1', schemaVersion: 1, requestId: 'channel-login',
+          binding: service.binding, action: 'login', expectedSequence: snapshot.projection.sequence,
+          userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+        });
+      })()`)
+      expect(login).toMatchObject({ status: 'accepted', stateAt: 'authenticated' })
+      await expect.poll(() => second.evaluate('globalThis.__fixtureManagedEvents.includes("authenticated")'), {
+        timeout: 20_000,
+      }).toBe(true)
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate(
+            'globalThis.__fixtureManagedService.snapshot().then(value => value.projection.auth.state)',
+          ),
+        ).toBe('authenticated')
+      }
+      const actions = await readFile(
+        path.join(homeDir, 'managed-services', 'fixture-service', 'gateway', 'fixture-auth-actions'),
+        'utf8',
+      )
+      expect(actions.split('\n').filter(value => value === 'login')).toHaveLength(1)
       const editName = async (page: CdpClient, value: string) =>
         await page.evaluate([
           '(() => {',

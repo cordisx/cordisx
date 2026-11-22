@@ -558,6 +558,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
+  /** Host-private confirmation through this standalone renderer's own managed-service capability. */
+  confirmStandaloneManagedServiceState?(
+    input: import('../managed-service-state-confirmation.js').ManagedServiceStateConfirmation,
+  ): Promise<boolean>
   /** Host-private registry readback for confirming an attached renderer's snapshot. */
   pluginRegistryEpoch(): number
   /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */

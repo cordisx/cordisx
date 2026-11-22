@@ -280,6 +280,7 @@ export function createManagerRendererGraphSession(input: {
             'rollback',
             'quiesce',
             'channel-configuration',
+            'managed-service-state',
           ].includes(
             command.method,
           )
@@ -351,6 +352,21 @@ export function createManagerRendererGraphSession(input: {
             ...Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'privateGraphs')),
             graphs: staged.map(entry => entry.publicGraph),
           }
+        } else if (command.method === 'managed-service-state') {
+          if (
+            transaction !== undefined || Object.keys(payload).length !== 7
+            || Object.keys(payload).some(key =>
+              !['rendererId', 'ownerGeneration', 'pluginId', 'pluginGeneration', 'serviceId', 'sequence', 'phase']
+                .includes(key)
+            )
+            || payload.rendererId !== input.rendererId || payload.ownerGeneration !== input.generation
+            || typeof payload.pluginId !== 'string' || !pluginId.test(payload.pluginId)
+            || typeof payload.serviceId !== 'string' || !pluginId.test(payload.serviceId)
+            || typeof payload.pluginGeneration !== 'string' || !identifier.test(payload.pluginGeneration)
+            || active.get(payload.pluginId)?.descriptor.moduleGeneration !== payload.pluginGeneration
+            || !Number.isSafeInteger(payload.sequence) || Number(payload.sequence) < 0
+            || !['prepare', 'confirm'].includes(String(payload.phase))
+          ) throw invalid()
         } else if (command.method === 'channel-configuration') {
           if (
             transaction !== undefined || Object.keys(payload).length !== 4

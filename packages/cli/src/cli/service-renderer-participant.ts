@@ -101,7 +101,9 @@ export class ServiceRendererParticipants {
     if (projected !== undefined) {
       const rendererSnapshot = structuredClone(projected)
       entry.peer.bindOwnerProjection((method, payload) => {
-        if (method === 'quiesce' || method === 'channel-configuration') return { payload }
+        if (method === 'quiesce' || method === 'channel-configuration' || method === 'managed-service-state') {
+          return { payload }
+        }
         if (method !== 'synchronize' || !attachmentEqual(payload, ownerSnapshot)) {
           throw new Error('renderer-read-only-identity-unavailable')
         }

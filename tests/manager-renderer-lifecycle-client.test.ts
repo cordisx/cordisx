@@ -96,6 +96,42 @@ it('acknowledges only the owner-scoped Channel view that the renderer adopted', 
   await stale.close()
 })
 
+it('acknowledges managed-service readback for the exact renderer without retiring on a stale view', async () => {
+  const { runtime } = fixture()
+  const confirm = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const client = createManagerRendererLifecycleClient({
+    runtime: runtime as never,
+    scope,
+    onManagedServiceState: confirm,
+  })
+  const state = {
+    rendererId,
+    ownerGeneration: scope.generation,
+    pluginId: 'example',
+    pluginGeneration: 'plugin-1',
+    serviceId: 'gateway',
+    sequence: 4,
+    phase: 'prepare',
+  }
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(await client.handle(command(2, 'managed-service-state', state))).toMatchObject({
+      ok: true,
+      value: { ...state, confirmed: false },
+    })
+    expect(client.closed).toBe(false)
+    expect(await client.handle(command(3, 'managed-service-state', { ...state, phase: 'confirm' })))
+      .toMatchObject({ ok: true, value: { ...state, phase: 'confirm', confirmed: true } })
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(await client.handle(command(4, 'managed-service-state', { ...state, rendererId: 'b'.repeat(64) })))
+      .toMatchObject({ ok: false })
+    expect(client.closed).toBe(true)
+    expect(confirm).toHaveBeenCalledTimes(2)
+  } finally {
+    await client.close()
+  }
+})
+
 it('allows resource recovery only after synchronization and outside a lifecycle transaction', async () => {
   const { runtime, loader } = fixture()
   const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })

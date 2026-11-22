@@ -27,6 +27,7 @@ import type {
 import type { StartupUIPrincipal } from '../launcher/startup-ui-rpc.js'
 import type { ManagedServiceUIBindingRequest, ManagedServiceUIOwner } from '../launcher/managed-service-ui-rpc.js'
 import type { NativeProviderProjection } from './model-providers.js'
+import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
 
 const MANAGED_SERVICE_UI_BINDING = '__cordisxManagedServiceUIRequestV1'
 const MANAGED_SERVICE_UI_RECEIVER = '__cordisxManagedServiceUIReceiveV1'
@@ -140,6 +141,32 @@ export class BrowserManagedServiceUIBridge {
     const capability = this.capabilities.get(ownerKey(owner))
     if (capability === undefined) return undefined
     return new BrowserManagedServiceUIRegistry(this, owner, capability.token)
+  }
+
+  /** Confirm state using only this renderer's existing owner-scoped capability. */
+  async confirmState(input: ManagedServiceStateConfirmation): Promise<boolean> {
+    const owner = { pluginId: input.pluginId, pluginGeneration: input.pluginGeneration }
+    const key = ownerKey(owner)
+    const capability = this.capabilities.get(key)
+    if (!capability || capability.state !== 'active' || this.closed || this.disposing) return false
+    try {
+      const registry = new BrowserManagedServiceUIRegistry(this, owner, capability.token)
+      const service = await registry.get({ serviceId: input.serviceId })
+      if (service.status !== 'available') return false
+      const snapshot = await service.service.snapshot()
+      if (
+        this.closed || this.disposing || this.capabilities.get(key) !== capability || capability.state !== 'active'
+        || snapshot.status !== 'available' || snapshot.projection.binding.identity.pluginId !== input.pluginId
+        || snapshot.projection.binding.identity.serviceId !== input.serviceId
+        || snapshot.projection.binding.scope.profileId !== this.profileId
+        || snapshot.projection.binding.scope.generation !== this.generation
+      ) return false
+      return input.phase === 'prepare'
+        ? snapshot.projection.sequence === input.sequence
+        : snapshot.projection.sequence >= input.sequence && snapshot.projection.auth.state === 'authenticated'
+    } catch {
+      return false
+    }
   }
 
   bindHostStartup() {

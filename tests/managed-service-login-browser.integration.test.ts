@@ -33,7 +33,20 @@ export const inject = ['managedServices'];
 export async function apply(ctx) {
   const result = await ctx.managedServices.get({ serviceId: 'gateway' });
   globalThis.__fixtureManagedStatus = result.status;
-  if (result.status === 'available') globalThis.__fixtureManagedService = result.service;
+  if (result.status === 'available') {
+    globalThis.__fixtureManagedService = result.service;
+    globalThis.__fixtureManagedEvents = [];
+    const observed = await result.service.subscribe();
+    globalThis.__fixtureSubscribed = observed.status;
+    if (observed.status === 'subscribed') void (async () => {
+      for await (const page of observed.subscription.pages) {
+        for (const update of page.updates) {
+          const auth = update.kind === 'snapshot-replaced' ? update.projection.auth : update.delta.auth;
+          if (auth) globalThis.__fixtureManagedEvents.push(auth.state);
+        }
+      }
+    })();
+  }
 }`
 
 async function makeRemovable(directory: string): Promise<void> {
@@ -44,7 +57,7 @@ async function makeRemovable(directory: string): Promise<void> {
 }
 
 it.skipIf(chrome === undefined)(
-  'logs in through an isolated service owner and rejects an uncoordinated second Manager',
+  'coordinates login and state readback across two isolated Manager pages',
   async () => {
     const root = await mkdtemp('/tmp/cx-managed-login-')
     const home = path.join(root, 'home')
@@ -96,20 +109,33 @@ it.skipIf(chrome === undefined)(
           .toBe('true')
         await expect.poll(() => client.evaluate('globalThis.__fixtureManagedStatus'), { timeout: 20_000 })
           .toBe('available')
+        await expect.poll(() => client.evaluate('globalThis.__fixtureSubscribed'), { timeout: 20_000 })
+          .toBe('subscribed')
+        await expect.poll(() => client.evaluate('globalThis.__fixtureManagedEvents.includes("missing")'), {
+          timeout: 20_000,
+        }).toBe(true)
       }
       await ready(first)
-      const before = await first.evaluate<{ state: string }>(`(async () => {
+      const debugOrigin = `http://${new URL(socket).host}`
+      const secondResponse = await fetch(`${debugOrigin}/json/new?${encodeURIComponent(await link())}`, {
+        method: 'PUT',
+      })
+      const secondTarget = await secondResponse.json() as { webSocketDebuggerUrl: string }
+      const second = await CdpClient.connect(secondTarget.webSocketDebuggerUrl)
+      clients.push(second)
+      await ready(second)
+      const before = await first.evaluate<{ state: string; sequence: number }>(`(async () => {
         const result = await globalThis.__fixtureManagedService.snapshot();
-        return { state: result.projection.auth.state };
+        return { state: result.projection.auth.state, sequence: result.projection.sequence };
       })()`)
       expect(before.state).toBe('missing')
-      const login = `async (id) => {
+      const login = `async (id, expected) => {
         const service = globalThis.__fixtureManagedService;
         const snapshot = await service.snapshot();
         return await service.authenticate({
           $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
           contract: 'cordisx.managed-service-login-request/v1', schemaVersion: 1, requestId: id,
-          binding: service.binding, action: 'login', expectedSequence: snapshot.projection.sequence,
+          binding: service.binding, action: 'login', expectedSequence: expected ?? snapshot.projection.sequence,
           userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
         });
       }`
@@ -131,21 +157,24 @@ it.skipIf(chrome === undefined)(
         ),
       )
         .toBe('authenticated')
+      await expect.poll(() => second.evaluate('globalThis.__fixtureManagedEvents.includes("authenticated")'), {
+        timeout: 20_000,
+      }).toBe(true)
+      expect(
+        await second.evaluate(
+          'globalThis.__fixtureManagedService.snapshot().then(value => value.projection.auth.state)',
+        ),
+      )
+        .toBe('authenticated')
       const actions = await readFile(actionLog, 'utf8')
       expect(actions.split('\n').filter(value => value === 'login')).toHaveLength(1)
-      const debugOrigin = `http://${new URL(socket).host}`
-      const secondResponse = await fetch(`${debugOrigin}/json/new?${encodeURIComponent(await link())}`, {
-        method: 'PUT',
-      })
-      const secondTarget = await secondResponse.json() as { webSocketDebuggerUrl: string }
-      const second = await CdpClient.connect(secondTarget.webSocketDebuggerUrl)
-      clients.push(second)
-      await ready(second)
-      expect(await first.evaluate(`(${login})('second-login').then(() => 'unexpected', error => error.message)`))
+      expect(
+        await first.evaluate(
+          `(${login})('stale-login', ${before.sequence}).then(() => 'unexpected', error => error.message)`,
+        ),
+      )
         .toBe('owner-unavailable')
       expect(await readFile(actionLog, 'utf8')).toBe(actions)
-      expect(await second.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
-        .toBe('available')
     } finally {
       await Promise.allSettled(clients.map(async client => await client.close()))
       if (browser) await stopChrome(browser)

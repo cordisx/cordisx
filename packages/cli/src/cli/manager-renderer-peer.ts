@@ -11,6 +11,7 @@ export type ManagerRendererCommandMethod =
   | 'rollback'
   | 'quiesce'
   | 'channel-configuration'
+  | 'managed-service-state'
 
 export interface ManagerRendererPeerScope {
   readonly homeDigest: string
@@ -50,6 +51,7 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'rollback',
   'quiesce',
   'channel-configuration',
+  'managed-service-state',
 ])
 const MAX_COMMAND_BYTES = 256 * 1024
 // Channel views omit images but can still describe many configured accounts.

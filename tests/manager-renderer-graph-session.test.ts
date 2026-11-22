@@ -88,6 +88,43 @@ it('forwards only the redacted Channel view for this exact renderer and revision
   }
 })
 
+it('allows managed-service readback only for the active plugin generation of the renderer', async () => {
+  const fixture = await managerRendererGraphFixture()
+  const session = createManagerRendererGraphSession(baseInput)
+  try {
+    const lease = await fixture.lease('old')
+    session.projectInitial([descriptor(lease)])
+    const payload = {
+      rendererId,
+      ownerGeneration: baseInput.generation,
+      pluginId: 'fixture',
+      pluginGeneration: 'old',
+      serviceId: 'gateway',
+      sequence: 3,
+      phase: 'prepare',
+    }
+    const value = command('managed-service-state', 1, payload)
+    expect(session.projectCommand(value)).toEqual(value)
+    session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+    for (
+      const bad of [
+        { ...payload, pluginGeneration: 'other' },
+        { ...payload, rendererId: '5'.repeat(64) },
+        { ...payload, secret: 'private' },
+      ]
+    ) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([descriptor(lease)])
+      expect(() => target.projectCommand(command('managed-service-state', 1, bad)))
+        .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+      target.close()
+    }
+  } finally {
+    session.close()
+    await fixture.close()
+  }
+})
+
 it('keeps initial graphs active through staging and rollback, without exposing owner secrets', async () => {
   const fixture = await managerRendererGraphFixture()
   const session = createManagerRendererGraphSession(baseInput)

@@ -1,5 +1,6 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
+import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
 
 type Method =
   | 'synchronize'
@@ -11,6 +12,7 @@ type Method =
   | 'rollback'
   | 'quiesce'
   | 'channel-configuration'
+  | 'managed-service-state'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
 
 export interface ManagerRendererLifecycleCommand {
@@ -83,6 +85,7 @@ const methods = new Set<Method>([
   'rollback',
   'quiesce',
   'channel-configuration',
+  'managed-service-state',
 ])
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const epochPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -160,6 +163,8 @@ export function createManagerRendererLifecycleClient(input: {
   readonly onQuiesce?: () => boolean | Promise<boolean>
   /** Adopt only an owner-issued, redacted Channel view for this renderer. */
   readonly onChannelConfiguration?: (projection: unknown, revision: number) => boolean | Promise<boolean>
+  /** Confirm a service through this renderer's own capability before or after an owner action. */
+  readonly onManagedServiceState?: (value: ManagedServiceStateConfirmation) => boolean | Promise<boolean>
 }): {
   readonly closed: boolean
   readonly quiesced: boolean
@@ -225,6 +230,29 @@ export function createManagerRendererLifecycleClient(input: {
   }
   const execute = async (method: Method, payload: unknown): Promise<unknown> => {
     assertLive()
+    if (method === 'managed-service-state') {
+      const item = record(payload)
+      exact(item, ['rendererId', 'ownerGeneration', 'pluginId', 'pluginGeneration', 'serviceId', 'sequence', 'phase'])
+      if (
+        item.rendererId !== scope.rendererId || item.ownerGeneration !== scope.generation
+        || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
+        || typeof item.serviceId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.serviceId)
+        || typeof item.pluginGeneration !== 'string' || !epochPattern.test(item.pluginGeneration)
+        || !Number.isSafeInteger(item.sequence) || (item.sequence as number) < 0
+        || item.phase !== 'prepare' && item.phase !== 'confirm'
+        || !synchronized || transaction !== undefined || awaitingAdoption !== undefined
+      ) throw new Error('renderer-managed-service-state-unavailable')
+      const confirmation: ManagedServiceStateConfirmation = {
+        pluginId: item.pluginId,
+        pluginGeneration: item.pluginGeneration,
+        serviceId: item.serviceId,
+        sequence: item.sequence as number,
+        phase: item.phase,
+      }
+      const confirmed = await input.onManagedServiceState?.(confirmation) === true
+      assertLive()
+      return { rendererId: scope.rendererId, ownerGeneration: scope.generation, ...confirmation, confirmed }
+    }
     if (method === 'channel-configuration') {
       const item = record(payload)
       exact(item, ['rendererId', 'ownerGeneration', 'revision', 'projection'])

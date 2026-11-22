@@ -403,6 +403,12 @@ export function createManagerManagedServiceUIBridge(input: {
           if (parsed.operation !== 'authenticate') throw unavailable()
           return {
             mode: 'write',
+            managedServiceAuthentication: {
+              pluginId: alias.public.pluginId,
+              pluginGeneration: alias.public.pluginGeneration,
+              serviceId: parsed.serviceId,
+              expectedSequence: parsed.request.expectedSequence,
+            },
             async dispatch() {
               assertCurrent(session, context)
               if (session.authenticationRequests.has(requestId) || session.authenticationRequests.size >= 4_096) {

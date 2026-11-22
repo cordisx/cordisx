@@ -19,6 +19,53 @@ const generation = 'runtime-7'
 const owner = { pluginId: 'cli-proxy-api', pluginGeneration: 'plugin-3' }
 
 describe('browser managed service UI bridge', () => {
+  it('confirms a managed service through its own active capability and scope', async () => {
+    const binding = {
+      bindingId: 'binding-9',
+      identity: { pluginId: owner.pluginId, serviceId: 'gateway' },
+      scope: { profileId, generation },
+    }
+    let sequence = 4
+    let state = 'missing'
+    const send = vi.fn((payload: string) => {
+      const request = JSON.parse(payload) as { requestId: string; operation: string }
+      const value = request.operation === 'get'
+        ? {
+          status: 'available',
+          service: {
+            $schema: 'fixture',
+            contract: 'cordisx.managed-service/v1',
+            schemaVersion: 1,
+            binding,
+            capabilities: { logout: false, readCatalog: false, accountControl: false },
+          },
+        }
+        : { status: 'available', projection: { binding, sequence, auth: { state } } }
+      queueMicrotask(() =>
+        globals.__cordisxManagedServiceUIReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: true,
+          value,
+        }))
+      )
+    })
+    globals.__cordisxManagedServiceUIRequestV1 = send
+    const bridge = BrowserManagedServiceUIBridge.connect([{ ...owner, token }], profileId, generation)
+    const request = { ...owner, serviceId: 'gateway', sequence: 4, phase: 'prepare' as const }
+    try {
+      expect(await bridge.confirmState(request)).toBe(true)
+      expect(await bridge.confirmState({ ...request, sequence: 3 })).toBe(false)
+      expect(await bridge.confirmState({ ...request, pluginGeneration: 'other' })).toBe(false)
+      sequence = 5
+      state = 'authenticated'
+      expect(await bridge.confirmState({ ...request, phase: 'confirm' })).toBe(true)
+      state = 'missing'
+      expect(await bridge.confirmState({ ...request, phase: 'confirm' })).toBe(false)
+    } finally {
+      bridge.dispose()
+    }
+  })
+
   it('sends a get request and returns the Host response', async () => {
     const requests: Array<Record<string, unknown>> = []
     globals.__cordisxManagedServiceUIRequestV1 = vi.fn(payload => {

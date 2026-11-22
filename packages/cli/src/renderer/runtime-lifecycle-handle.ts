@@ -772,6 +772,10 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
       revision,
     )
   },
+  confirmStandaloneManagedServiceState: async input => {
+    if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
+    return await (runtimeScope.managedServiceBridge()?.confirmState(input) ?? Promise.resolve(false))
+  },
   configuredPluginGraphGenerations: () =>
     runtimeScope.metadata()!.hostKind === 'standalone'
       ? runtimeScope.controllers()!.flatMap(controller => (
