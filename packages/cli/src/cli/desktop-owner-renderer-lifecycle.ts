@@ -124,6 +124,10 @@ export class DesktopOwnerRendererLifecycle implements PluginLifecycleRuntime, Ow
     }
     return await this.lifecycle.pluginConfiguration(operation)
   }
+  async managerConfigProof(pluginId: string) {
+    if (this.phase !== 'ready' || !this.lifecycle || this.failed) return undefined
+    return await this.lifecycle.managerConfigProof(pluginId)
+  }
   async commit(): Promise<void> {
     throw new Error('Desktop lifecycle requires the package authority')
   }

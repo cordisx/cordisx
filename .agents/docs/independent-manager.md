@@ -34,9 +34,14 @@ Manager and plugin registration instead of the default preview pages. It is not
 the default experience. Eligible service and Desktop owners can project initial
 capability-free v1 package graphs and host-owned v14/v15 managed backends whose
 only declared renderer capability is UI extension rendering. These packages
-must have empty plugin configuration, no durable documents or entity templates,
-and a verified browser graph. Each Manager receives only matching existing
-Manager UI permissions. Managed-service reads and subscriptions are available;
+must have no durable documents or entity templates and must have a verified
+browser graph. In service mode, their plugin configuration must be empty. An
+eligible Desktop owner can also project nonempty installed-plugin configuration
+when exactly one admitted Desktop renderer proves the same plugin generation
+and a schema classifies every projected field. Only declared non-sensitive
+values are copied; writes remain unavailable. A Desktop seat change retires
+pages using this projection, and a new page requires a fresh proof. Each
+Manager receives only matching existing Manager UI permissions. Managed-service reads and subscriptions are available;
 the service owner can coordinate an explicit login across admitted Managers.
 Desktop login and dynamic changes to those managed packages remain unavailable.
 In service mode, an unrelated capability-free v1 package may be changed through

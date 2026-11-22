@@ -42,11 +42,8 @@ import {
 } from './production-graph-admission.js'
 import { CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
 import { projectCdpDevelopmentState } from './cdp-development-projection.js'
-import {
-  evaluateRendererConfig,
-  type RendererConfigOperation,
-  type RendererConfigResult,
-} from './renderer-config-management.js'
+import { CdpRendererConfiguration } from './cdp-renderer-configuration.js'
+import type { RendererConfigOperation } from './renderer-config-management.js'
 
 /** Broadcast one reversible generation transaction to every injected Codex renderer. */
 export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
@@ -55,6 +52,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly staged = new Map<string, readonly CdpSession[]>()
   private readonly departures = createCdpDepartureObserver(this.sessions, this.staged, () => this.sharedAdmission)
   readonly onNoReadySessions = this.departures.subscribe
+  readonly onConfigSeatsChanged = this.departures.subscribeChange
   private readonly stagedMutations = new Map<string, PluginRuntimeMutation>()
   private readonly fences = new Map<string, RuntimeGenerationFence>()
   private registryEpoch = 0
@@ -80,6 +78,18 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private browserGraphBootstrapRefresh: BrowserGraphBootstrapRefresh | undefined
   private browserGraphTerminalError: ((error: unknown) => void) | undefined
   private browserGraphTransportReady = false
+  private readonly configuration = new CdpRendererConfiguration(this.sessions, () => {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      return undefined
+    }
+    const token = Symbol('plugin-configuration')
+    this.generationOwner = { kind: 'configuration', token }
+    return () => {
+      if (this.generationOwner?.kind === 'configuration' && this.generationOwner.token === token) {
+        this.generationOwner = undefined
+      }
+    }
+  })
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
     this.permissionIdentities = permissionIdentities
@@ -152,30 +162,14 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   /** A single admitted renderer owns schema validation and the configuration transaction. */
-  async pluginConfiguration(operation: RendererConfigOperation): Promise<RendererConfigResult> {
-    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
-      return { status: 'unavailable', reason: 'renderer-busy' }
-    }
-    if (this.sessions.size !== 1) {
-      return { status: 'unavailable', reason: this.sessions.size === 0 ? 'renderer-unavailable' : 'renderer-ambiguous' }
-    }
-    const session = [...this.sessions][0]!
-    const token = Symbol('plugin-configuration')
-    this.generationOwner = { kind: 'configuration', token }
-    const mutation = operation.action === 'update' || operation.action === 'update-service'
-    try {
-      const result = await evaluateRendererConfig(session, operation)
-      if (!this.sessions.has(session)) {
-        return { status: mutation ? 'unknown' : 'unavailable', reason: 'renderer-disconnected' }
-      }
-      return result
-    } catch {
-      return { status: mutation ? 'unknown' : 'unavailable', reason: 'renderer-operation-failed' }
-    } finally {
-      if (this.generationOwner?.kind === 'configuration' && this.generationOwner.token === token) {
-        this.generationOwner = undefined
-      }
-    }
+  readonly pluginConfiguration = (operation: RendererConfigOperation) =>
+    this.configuration.pluginConfiguration(operation)
+
+  /** Read only from one already-admitted Desktop seat, under the generation fence. */
+  readonly managerConfigProof = (pluginId: string) => this.configuration.managerConfigProof(pluginId)
+
+  managerConfigSeat(): symbol | undefined {
+    return this.sessions.size === 1 && this.joining.size === 0 ? this.departures.token() : undefined
   }
 
   setBrowserGraphAdmission(admission: BrowserGraphAdmission | undefined): void {
@@ -393,7 +387,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
+    const added = !this.sessions.has(session)
     this.sessions.add(session)
+    if (added) this.departures.changed()
     return () => this.departures.remove(session)
   }
 
@@ -408,6 +404,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     const token = Symbol('renderer-join')
     this.generationOwner = { kind: 'join', token, session }
     this.joining.add(session)
+    this.departures.changed()
     let settled = false
     return {
       commit: developmentVersion => {
@@ -422,6 +419,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         this.generationOwner = undefined
         settled = true
         this.sessions.add(session)
+        this.departures.changed()
         return () => this.departures.remove(session)
       },
       abort: () => {
@@ -431,6 +429,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         if (this.generationOwner?.kind === 'join' && this.generationOwner.token === token) {
           this.generationOwner = undefined
         }
+        this.departures.changed()
       },
     }
   }

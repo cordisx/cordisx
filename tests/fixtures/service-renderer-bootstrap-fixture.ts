@@ -4,6 +4,7 @@ import path from 'node:path'
 import { expect, vi } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../../packages/channel-runtime/src/simulator.js'
 import { ServiceRendererBootstrap } from '../../packages/cli/src/cli/service-renderer-bootstrap.js'
+import type { DesktopManagerConfigProjection } from '../../packages/cli/src/cli/desktop-manager-config-projection.js'
 import { createConfiguredChannelOwner } from '../../packages/cli/src/cli/configured-channel-owner.js'
 import { createManagerRendererServiceConfigChannel } from '../../packages/cli/src/cli/manager-renderer-service-config.js'
 import { createManagerRendererChannelCredentials } from '../../packages/cli/src/cli/manager-renderer-channel-credentials.js'
@@ -69,6 +70,7 @@ export async function fixture(
     channelCredentialCommitUnknown?: boolean
     browserManagement?: boolean
     coordinateLifecycle?: boolean
+    projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -310,6 +312,7 @@ export async function fixture(
     store,
     managedServiceUI: managedUI,
     protectProfileInputs: options.protectProfileInputs === true,
+    ...(options.projectPluginConfig === undefined ? {} : { projectPluginConfig: options.projectPluginConfig }),
     ...(options.browserManagement && options.coordinateLifecycle
       ? {
         restrictedManagement: {

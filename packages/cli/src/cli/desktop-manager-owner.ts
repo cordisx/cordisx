@@ -19,6 +19,7 @@ import { createManagerManagedServiceUIBridge } from './manager-managed-service-u
 import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { supportsReadonlyConfiguredChannel } from './readonly-headless-channel.js'
+import { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
 
 /** Compose the optional Manager inside an already-authorized Desktop owner. */
 export function createDesktopManagerOwner(input: {
@@ -44,6 +45,7 @@ export function createDesktopManagerOwner(input: {
   }
   const participants = new ServiceRendererParticipants(scope)
   let bootstrap!: ServiceRendererBootstrap
+  let closed = false
   const lifecycle = new DesktopOwnerRendererLifecycle({
     scope,
     cdp: input.cdp,
@@ -62,7 +64,26 @@ export function createDesktopManagerOwner(input: {
     }),
   })
   participants.bind(lifecycle)
-  const unsubscribeNoSeats = input.cdp.onNoReadySessions(() => participants.disconnectAll())
+  const configProjection = new DesktopManagerConfigProjection({
+    current: snapshot => {
+      try {
+        return !closed && attachmentEqual(lifecycle.snapshot(), snapshot)
+      } catch {
+        return false
+      }
+    },
+    seat: () => input.cdp.managerConfigSeat(),
+    read: async pluginId => await lifecycle.managerConfigProof(pluginId),
+  })
+  const unsubscribeSeats = input.cdp.onConfigSeatsChanged(() => {
+    const hadProjection = configProjection.hasValues
+    configProjection.clear()
+    if (hadProjection) participants.disconnectAll()
+  })
+  const unsubscribeNoSeats = input.cdp.onNoReadySessions(() => {
+    configProjection.clear()
+    participants.disconnectAll()
+  })
   const participant = {
     create: (request: Parameters<typeof participants.participant.create>[0]) => {
       // No private session may outlive or precede its last admitted Desktop seat.
@@ -71,7 +92,6 @@ export function createDesktopManagerOwner(input: {
     },
     attach: participants.participant.attach,
   }
-  let closed = false
   let closing: Promise<boolean> | undefined
   let managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   const channelBridge = input.configuredChannel === undefined
@@ -93,6 +113,7 @@ export function createDesktopManagerOwner(input: {
     store: input.store,
     // Empty profiles also project permission and plugin-configuration snapshots.
     protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
+    projectPluginConfig: configProjection,
   })
   const rendererModelServices = input.codex === undefined
     ? undefined
@@ -155,6 +176,8 @@ export function createDesktopManagerOwner(input: {
     close(): Promise<boolean> {
       if (closing) return closing
       closed = true
+      configProjection.clear()
+      unsubscribeSeats()
       unsubscribeNoSeats()
       closing = (async () => {
         const retired = await bootstrap.close()

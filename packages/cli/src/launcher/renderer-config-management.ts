@@ -1,4 +1,5 @@
 import type { ConfigMutationOperation, ManagerPluginConfigSnapshot } from '../renderer/configuration/model.js'
+import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type {
   HostServiceConfigDescriptor,
   HostServiceConfigMutation,
@@ -39,6 +40,23 @@ export type RendererConfigResult =
   | { readonly status: 'ok'; readonly result: HostServiceConfigMutationResult }
   | { readonly status: 'rejected' | 'unavailable' | 'unknown'; readonly reason: string }
 
+/** Private Desktop-owner readback; never published as a renderer capability. */
+export interface DesktopManagerConfigProof {
+  readonly snapshot: { readonly active: CordisXPluginActivationRecordV1; readonly registryEpoch: number }
+  readonly plugin: {
+    readonly id: string
+    readonly source: string
+    readonly package?: {
+      readonly version: string
+      readonly digest: string
+      readonly moduleGeneration: string
+      readonly dependencies: readonly string[]
+      readonly canonicalSource?: string
+    }
+    readonly configuration: ManagerPluginConfigSnapshot
+  }
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('invalid plugin configuration request')
@@ -52,6 +70,21 @@ function exact(value: Record<string, unknown>, allowed: readonly string[]): void
 
 function identifier(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,95}$/u.test(value)
+}
+
+/** The existing Desktop runtime supplies its redacted schema projection and exact generation. */
+export function desktopManagerConfigProofExpression(pluginId: string): string {
+  if (!identifier(pluginId)) throw new Error('invalid plugin configuration request')
+  return `(() => {
+    const runtime = globalThis.__cordisxRuntime;
+    if (!runtime?.activePluginGeneration || !runtime?.pluginRegistryEpoch || !runtime?.snapshot) return { ok: true };
+    const plugin = runtime.snapshot().plugins.find(item => item.id === ${JSON.stringify(pluginId)});
+    if (!plugin?.package || !plugin.configuration) return { ok: true };
+    return { ok: true, result: {
+      snapshot: { active: runtime.activePluginGeneration(), registryEpoch: runtime.pluginRegistryEpoch() },
+      plugin: { id: plugin.id, source: plugin.source, package: plugin.package, configuration: plugin.configuration }
+    } };
+  })()`
 }
 
 function revision(value: unknown): value is number {

@@ -32,6 +32,8 @@ import {
 import { dispatchCodexSettings } from '../packages/cli/src/launcher/codex-settings-dispatch.js'
 import { nativeCodexSettings } from '../packages/cli/src/launcher/native-codex-settings-composition.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
+import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-composition.js'
+import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import { PlatformProviderPluginLifecycleRuntime } from '../packages/cli/src/launcher/platform-provider-plugin-lifecycle.js'
@@ -40,7 +42,7 @@ import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-p
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
-import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
+import { decision, FakeRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
 
 const chrome = [
   process.env.CHROME_PATH,
@@ -59,7 +61,7 @@ const chrome = [
   }
 })
 
-async function exerciseDesktopOwner(archive?: string, review = false) {
+async function exerciseDesktopOwner(archive?: string, review = false, configFixture = false) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
   const homeDir = path.join(root, 'home')
@@ -130,6 +132,58 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
     cdp.setBrowserGraphBootstrapRefresh(async () => {})
   }
   const store = new PluginActivationStore(homeDir, profileId, generation)
+  const fixtureSecret = 'synthetic-desktop-config-secret'
+  const fixtureLabel = 'synthetic-desktop-config-label'
+  const configStore = new PackagePluginConfigStore(homeDir, profileId, generation)
+  if (configFixture) {
+    const sourceDirectory = await localPackage({
+      root,
+      id: 'desktop-config-fixture',
+      code: [
+        "const descriptor = { type: 'object', dict: { label: { type: 'string' },",
+        "  token: { type: 'string', meta: { role: 'secret' } } } }",
+        "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
+        '  validate: value => ({ value }) }, toJSON: () => descriptor }',
+        "export const configApplies = 'live'",
+        'export function apply(_ctx, config) { globalThis.__desktopConfigValue = config }',
+      ].join('\n'),
+    })
+    const seed = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId,
+      runtimeGeneration: generation,
+      permissionPolicies: [],
+      runtime: new FakeRuntime(),
+    })
+    await seed.store.bindRuntimeGeneration()
+    const planned = await seed.handle({
+      ...request({ kind: 'inspect-local', sourceDirectory }, 0, generation),
+      profileId,
+    })
+    if (planned.outcome !== 'planned' || !planned.candidateId || !planned.authorizationPlan) {
+      throw new Error('configuration fixture package could not be planned')
+    }
+    const installed = await seed.handle({
+      ...request(
+        {
+          kind: 'install',
+          candidateId: planned.candidateId,
+          authorizationDecision: decision(planned.authorizationPlan),
+        },
+        0,
+        generation,
+      ),
+      profileId,
+    })
+    if (installed.outcome !== 'applied') throw new Error('configuration fixture package could not be installed')
+    const candidate = await configStore.stage(
+      'desktop-config-fixture',
+      0,
+      { label: fixtureLabel, token: fixtureSecret },
+      'fixture-owner',
+    )
+    await configStore.commit('desktop-config-fixture', candidate.candidateRevision, 'fixture-owner')
+  }
   const settings = nativeCodexSettings({
     configPath,
     options: { nativeDiscoveryEnvironment: {} },
@@ -238,7 +292,8 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
       expect(await desktop!.evaluate('location.origin')).toBe(desktopOrigin)
       expect(await desktop!.evaluate('document.readyState')).toBe('complete')
     }, { timeout: 10_000 })
-    const bundle = await buildRendererBundle(configured, {
+    const nativePlugins = configFixture ? await loadPluginComposition(store, active) : []
+    const bundle = await buildRendererBundle({ ...configured, plugins: [...configured.plugins, ...nativePlugins] }, {
       profileId,
       generation,
       pluginActivation: active,
@@ -275,6 +330,7 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
       throw new Error('Desktop fixture did not start: ' + JSON.stringify(diagnostics), { cause: error })
     }
     unregister = cdp.register(desktop as never)
+    const configProof = vi.spyOn(cdp, 'managerConfigProof')
     const managerOwner = await openManagerOwner(profileId, { CORDISX_HOME: homeDir })
     // Built assets are used by the same sidecar module shipped in the package.
     const fixturePackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
@@ -332,7 +388,8 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
       } catch (error) {
         const resources = await page.evaluate(`performance.getEntriesByType('resource')
             .filter(item => new URL(item.name).pathname.startsWith('/api/'))
-            .map(item => ({ path: new URL(item.name).pathname, status: item.responseStatus, duration: item.duration }))`)
+            .map(item => ({ path: new URL(item.name).pathname.replace(/[a-f0-9]{32,}/giu, '[id]'),
+              status: item.responseStatus, duration: item.duration }))`)
         throw new Error('Manager did not start: ' + JSON.stringify(resources), { cause: error })
       }
     }
@@ -352,6 +409,60 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
       })`)
     expect(await snapshot(first)).toEqual(await snapshot(second))
     expect(await snapshot(first)).toEqual(await snapshot(desktop))
+    if (configFixture) {
+      for (const page of [first, second]) {
+        const projection = await page.evaluate<any>([
+          '(() => {',
+          '  const plugin = globalThis.__cordisxRuntime.snapshot().plugins',
+          "    .find(item => item.id === 'desktop-config-fixture')",
+          '  return { value: plugin?.configuration.value, writable: plugin?.configuration.writable,',
+          '    body: document.body.textContent, pluginConfig: globalThis.__desktopConfigValue }',
+          '})()',
+        ].join('\n'))
+        expect(projection.value).toEqual({ label: fixtureLabel })
+        expect(projection.pluginConfig).toEqual({ label: fixtureLabel })
+        expect(projection.writable).toBe(false)
+        expect(JSON.stringify(projection)).not.toContain(fixtureSecret)
+      }
+      expect(configProof).toHaveBeenCalledOnce()
+      await expect(configStore.stage('desktop-config-fixture', 1, { label: 'other' }, 'other-owner'))
+        .rejects.toThrow('plugin configuration is in use')
+      await first.evaluate('globalThis.__configFixtureBeforeReload = true')
+      await first.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('globalThis.__configFixtureBeforeReload === undefined')).toBe(true)
+      }, { timeout: 15_000 })
+      await ready(first)
+      expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: fixtureLabel })
+      expect(configProof).toHaveBeenCalledOnce()
+      // Adding and removing a second seat must not let either page retain a
+      // projection proved by the previous single-seat membership.
+      const removeTransientSeat = cdp.register({ send: async () => ({}) } as never)
+      removeTransientSeat()
+      for (const page of [first, second]) {
+        await vi.waitFor(async () => {
+          const status = await page.evaluate<{ hidden: boolean; text: string }>(`({
+            hidden: document.querySelector('p[role=status]')?.hidden,
+            text: document.querySelector('p[role=status]')?.textContent ?? ''
+          })`)
+          expect(status.hidden).toBe(false)
+          expect(status.text).toContain('连接不可用')
+        }, { timeout: 15_000 })
+      }
+      await vi.waitFor(async () => {
+        expect(await owner.lifecycle.pluginConfiguration({ kind: 'plugin-configuration', action: 'list' }))
+          .toMatchObject({ status: 'ok' })
+      }, { timeout: 15_000 })
+      await desktop.send('Target.closeTarget', { targetId: firstTarget.targetId })
+      await first.close().catch(() => {})
+      const reopened = await desktop.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
+      first = await connect(reopened.targetId)
+      await first.send('Page.navigate', { url: url(web.issueUrl()) })
+      await ready(first)
+      expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: fixtureLabel })
+      expect(configProof).toHaveBeenCalledTimes(2)
+      return
+    }
     if (archive !== undefined && review) {
       for (const page of [first, second]) {
         await vi.waitFor(async () => {
@@ -683,6 +794,12 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
 it.skipIf(chrome === undefined)(
   'shares one Desktop owner between a real CDP document and two standalone Manager pages',
   async () => await exerciseDesktopOwner(),
+  120_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'projects a redacted Desktop plugin configuration into two Manager pages',
+  async () => await exerciseDesktopOwner(undefined, false, true),
   120_000,
 )
 

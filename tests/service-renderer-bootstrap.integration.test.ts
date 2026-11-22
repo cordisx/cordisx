@@ -13,6 +13,7 @@ import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-ren
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import * as homeConfigLoader from '../packages/cli/src/config/home-config.js'
 import * as configLoader from '../packages/cli/src/launcher/config.js'
+import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
@@ -459,6 +460,51 @@ it('keeps configured plugins and their private configuration outside the bootstr
     await f.close()
   }
 }, 30_000)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'uses only the owner-redacted package configuration and clears it on session retirement',
+  async () => {
+    const privateValue = 'synthetic-secret-' + secret()
+    const publicValue = 'synthetic-public-' + secret()
+    const projection = {
+      project: vi.fn(async () => ({ label: publicValue })),
+      clear: vi.fn(),
+    }
+    const f = await fixture({ protectProfileInputs: true, projectPluginConfig: projection })
+    try {
+      expect(await f.install('configured-package')).toMatchObject({ outcome: 'applied' })
+      const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
+      const staged = await configs.stage(
+        'configured-package',
+        0,
+        { label: publicValue, token: privateValue },
+        'fixture',
+      )
+      await configs.commit('configured-package', staged.candidateRevision, 'fixture')
+      const prepared = await f.call({ action: 'prepare' }) as any
+      expect(prepared.status).toBe('ok')
+      expect(projection.project).toHaveBeenCalledOnce()
+      const complete = await f.call({
+        action: 'complete',
+        managerOrigin: origin,
+        graphs: prepared.value.privateGraphs.map(project),
+      }) as any
+      expect(complete.status).toBe('ok')
+      const bytes = await decodeManagerRendererBundle(complete.value.bundle)
+      try {
+        expect(bytes.toString('utf8')).toContain(publicValue)
+        expect(bytes.toString('utf8')).not.toContain(privateValue)
+      } finally {
+        bytes.fill(0)
+      }
+      expect(await f.sessions.close(f.invocation)).toBe(true)
+      expect(projection.clear).toHaveBeenCalled()
+    } finally {
+      await f.close()
+    }
+  },
+  30_000,
+)
 
 const configuredChannelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 it.skipIf(

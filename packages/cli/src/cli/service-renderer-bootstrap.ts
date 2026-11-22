@@ -41,6 +41,7 @@ import { readSettledProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
+import type { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
 import type {
   ServiceRendererBootstrapEntry as Entry,
   ServiceRendererConfiguredChannelInput as ConfiguredChannel,
@@ -98,6 +99,8 @@ export class ServiceRendererBootstrap {
         readonly available: () => boolean
         readonly discardPlan: (token: string) => void
       }
+      /** Desktop owner only: read schema-redacted values from its existing authorized seat. */
+      readonly projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
     },
   ) {
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
@@ -176,6 +179,8 @@ export class ServiceRendererBootstrap {
       generation: this.input.generation,
       ownerStartupConfig: this.ownerStartupConfig,
       pluginIds: snapshot.active.plugins.map(plugin => plugin.id),
+      allowNonEmptyPluginConfig: this.input.protectProfileInputs === true
+        && this.input.projectPluginConfig !== undefined,
     })
   }
 
@@ -274,6 +279,11 @@ export class ServiceRendererBootstrap {
     // A session can disconnect while an asynchronous lease is being created.
     // Drain this entry even if it has already been removed from the map.
     if (this.entries.get(rendererId) === entry) this.entries.delete(rendererId)
+    try {
+      if (this.entries.size === 0) this.input.projectPluginConfig?.clear()
+    } catch {
+      entry.cleanupFailed = true
+    }
     entry.unsubscribe()
     const writes = this.writeLifetimes.retire(rendererId)
     const reads = this.readLifetimes.retire(rendererId)
@@ -528,6 +538,7 @@ export class ServiceRendererBootstrap {
         // the constrained read-only Channel composition.
         if (
           plugins.some(plugin => !emptyConfig(plugin.config))
+            && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
           || config.plugins.length !== 0 && (
               !this.input.protectProfileInputs || !this.configuredChannel
               || config.plugins.length !== 1
@@ -554,6 +565,16 @@ export class ServiceRendererBootstrap {
             if (!this.managedServiceUI) throw new Error('renderer-bootstrap-plugin-unsupported')
             if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
           }
+        }
+        const projectedConfigs = new Map<string, unknown>()
+        for (const plugin of plugins) {
+          if (emptyConfig(plugin.config)) continue
+          const projected = await this.input.projectPluginConfig!.project(snapshot, plugin)
+          if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
+          projectedConfigs.set(plugin.id, projected)
+          // A renderer with a copied configuration cannot mutate the package
+          // until every owner participant supports configuration handoff.
+          needsIdentityProjection = true
         }
         if (needsIdentityProjection && !this.input.protectProfileInputs) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
@@ -601,6 +622,7 @@ export class ServiceRendererBootstrap {
         entry.snapshot = snapshot
         entry.config = config
         entry.plugins = plugins
+        entry.projectedConfigs = projectedConfigs
         entry.policies = policies
         entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
@@ -678,7 +700,11 @@ export class ServiceRendererBootstrap {
         const snapshot = entry.snapshot
         let projectedSnapshot: Snapshot | undefined
         let projectedPolicies = entry.policies
-        let projectedPlugins = entry.plugins
+        let projectedPlugins = entry.plugins.map(plugin => {
+          if (emptyConfig(plugin.config)) return plugin
+          if (!entry.projectedConfigs?.has(plugin.id)) throw new Error('renderer-bootstrap-plugin-unsupported')
+          return { ...plugin, config: entry.projectedConfigs.get(plugin.id) }
+        })
         if (entry.needsIdentityProjection) {
           const identity = new ServiceRendererIdentityProjection({
             homeDir: this.input.homeDir,
@@ -701,7 +727,7 @@ export class ServiceRendererBootstrap {
           projectedPolicies = entry.plugins.flatMap(plugin =>
             identity.projectManagerPolicies(context, aliases.get(plugin.id)!, plugin.id, entry.policies!)
           )
-          projectedPlugins = entry.plugins.map(plugin => {
+          projectedPlugins = projectedPlugins.map(plugin => {
             const alias = aliases.get(plugin.id)!
             if (!plugin.package) throw new Error('renderer-bootstrap-plugin-unsupported')
             return {

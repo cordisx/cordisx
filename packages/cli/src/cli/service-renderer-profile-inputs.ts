@@ -15,6 +15,8 @@ type Input = {
   readonly profileId: string
   readonly generation: string
   readonly pluginIds: readonly string[]
+  /** Only an owner with a separate verified redaction path may accept nonempty input. */
+  readonly allowNonEmptyPluginConfig?: boolean
 }
 
 async function existingStateDirectory(homeDir: string, parts: readonly string[]): Promise<string | undefined> {
@@ -48,7 +50,7 @@ export async function readSettledPackageInputs(input: Input): Promise<Map<string
     const state = configDirectory ? await configs.loadStable(pluginId) : { revision: 0, config: {} }
     if (
       state.config === null || typeof state.config !== 'object' || Array.isArray(state.config)
-      || Object.keys(state.config).length !== 0
+      || !input.allowNonEmptyPluginConfig && Object.keys(state.config).length !== 0
     ) throw new Error('renderer-profile-input-unavailable')
     const hash = createHash('sha256').update(JSON.stringify(['plugin', state]))
     const directory = await existingStateDirectory(input.homeDir, [...root, 'services', pluginId])

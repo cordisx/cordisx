@@ -476,6 +476,12 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     return await this.input.cdp.pluginConfiguration(operation)
   }
 
+  /** A joining Manager cannot query a native seat once another Manager is admitted. */
+  async managerConfigProof(pluginId: string) {
+    if (this.failed || this.reservation || this.joiningManagers > 0 || this.managers.size > 0) return undefined
+    return await this.input.cdp.managerConfigProof(pluginId)
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true

@@ -273,16 +273,39 @@ export function createCdpDepartureObserver(
   sessions: Set<CdpSession>,
   staged: Map<string, readonly CdpSession[]>,
   admission: () => SharedAdmissionState | undefined,
-): { subscribe(listener: () => void): () => void; remove(session: CdpSession): void } {
+): {
+  subscribe(listener: () => void): () => void
+  subscribeChange(listener: () => void): () => void
+  token(): symbol
+  changed(): void
+  remove(session: CdpSession): void
+} {
   const listeners = new Set<() => void>()
+  const changeListeners = new Set<() => void>()
+  let seatToken = Symbol('desktop-seats')
+  const changed = () => {
+    seatToken = Symbol('desktop-seats')
+    for (const listener of changeListeners) {
+      try {
+        listener()
+      } catch { /* isolate lifecycle observers */ }
+    }
+  }
   return {
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    subscribeChange(listener) {
+      changeListeners.add(listener)
+      return () => changeListeners.delete(listener)
+    },
+    token: () => seatToken,
+    changed,
     remove(session) {
       const present = sessions.has(session)
       removeCdpSession(sessions, staged, admission(), session)
+      if (present) changed()
       if (present && sessions.size === 0) {
         for (const listener of listeners) {
           try {
