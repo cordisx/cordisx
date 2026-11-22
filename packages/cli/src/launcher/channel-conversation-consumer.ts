@@ -115,7 +115,7 @@ export class ChannelConversationConsumer {
     return channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
   }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
-    if (this.personas) native()?.setPersonaRegistry(this.personas)
+    if (this.personas) native()?.setPersonaRegistry?.(this.personas)
     this.extraNative = native
     this.continuation.attachContext()
     this.approvals.attach(native())
