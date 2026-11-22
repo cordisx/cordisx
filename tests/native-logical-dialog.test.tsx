@@ -144,6 +144,7 @@ describe('logical continuation confirmation', () => {
     expect(radios).toHaveLength(2)
     expect(dialog.textContent).toContain('/continue-provider authorize-desktop linked second shared')
     expect(dialog.textContent).toContain('--challenge=' + 'A'.repeat(32))
+    expect(dialog.textContent).toContain('Check the account, source conversation and relevant authorization')
     expect(submit.disabled).toBe(true)
     expect(confirmLogicalSubmission).not.toHaveBeenCalled()
   })

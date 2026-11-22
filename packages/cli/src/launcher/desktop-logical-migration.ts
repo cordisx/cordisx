@@ -20,6 +20,7 @@ export function desktopLogicalMigration(input: {
   native(): ChannelNativeSessions | undefined
   profileId: string
   identity(scope: NativeSubmissionScope): Promise<string | undefined>
+  dispatchIdentity?(scope: NativeSubmissionScope): Promise<string | undefined>
   targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
   historyReady(): boolean
 }) {
@@ -63,6 +64,7 @@ export function desktopLogicalMigration(input: {
       ) return undefined
       const identity = await input.identity(scope)
       if (!identity) return undefined
+      const dispatchReady = !input.dispatchIdentity || await input.dispatchIdentity(scope) === identity
       const config = await native.continuationConfiguration(scope.threadId)
       if (!config) return undefined
       const source = { hostId: 'local', appId: 'codex', profileId: input.profileId, sessionId: scope.threadId }
@@ -92,13 +94,14 @@ export function desktopLogicalMigration(input: {
       if (
         !await input.targetAllowed(target.providerId, target.model, effort) || input.native() !== native
         || !input.owner.store.hasCommitBarrier() || await input.identity(scope) !== identity
+        || input.dispatchIdentity !== undefined && (await input.dispatchIdentity(scope) === identity) !== dispatchReady
         || !isDeepStrictEqual(input.owner.store.snapshot().logicalContinuations, logical)
       ) return undefined
       const channelChallenge = channelBound ? input.owner.desktopChannelGrants.begin(scope.threadId, target) : undefined
       return {
         recommended,
         forkAvailable,
-        linkedAvailable: channelBound ? jointHistoryReady : input.historyReady(),
+        linkedAvailable: dispatchReady && (channelBound ? jointHistoryReady : input.historyReady()),
         ...(legacyFreshPreference ? { legacyFreshPreference: true } : {}),
         chain,
         channelBound,
@@ -190,6 +193,7 @@ export function desktopLogicalMigration(input: {
         ...(channelGrant ? { channelGrant } : {}),
         authority: {
           identity: () => input.identity(scope),
+          ...(input.dispatchIdentity ? { dispatchIdentity: () => input.dispatchIdentity!(scope) } : {}),
           current: () =>
             inputAction.current()
             && logicalConversationIdentity(input.owner.store.snapshot().logicalContinuations, source)

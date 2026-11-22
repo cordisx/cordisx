@@ -23,3 +23,18 @@ export async function desktopLogicalIdentity(input: {
     return undefined
   }
 }
+
+/** Read the native owner directly while the Desktop input queue awaits admission. */
+export async function desktopLogicalDispatchIdentity(input: {
+  current(): Promise<boolean>
+  readNativeOwner(): Promise<string | undefined>
+}): Promise<string | undefined> {
+  try {
+    if (!await input.current()) return undefined
+    const identity = await input.readNativeOwner()
+    if (!identity || !/^desktop:[a-f0-9]{64}$/u.test(identity) || !await input.current()) return undefined
+    return identity
+  } catch {
+    return undefined
+  }
+}

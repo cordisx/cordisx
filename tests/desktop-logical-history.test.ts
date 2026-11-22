@@ -104,6 +104,16 @@ it('rechecks the Desktop turn and identity around the authorized history read', 
     expect(ticket.state).toBe('issued')
     if (ticket.state === 'issued') expect(preparation.cancel(scope, ticket.token)).toBe(true)
     const sourceScope = { ...scope, threadId: 'source' }
+    const mismatched = desktopLogicalTurnPreparation({
+      owner: profileLogicalConversationOwner(store),
+      turns,
+      identity: async () => 'desktop:fixture',
+      dispatchIdentity: async () => 'desktop:other',
+      appId: 'codex',
+      profileId: 'fixture',
+    })
+    expect(await mismatched.prepare(scope)).toEqual({ state: 'unavailable' })
+    expect(await mismatched.attach(sourceScope, 'destination', 'mismatched-operation-ticket')).toBe(false)
     const attached = 'provider-operation-ticket-0123456789'
     expect(await preparation.attach(sourceScope, 'destination', attached)).toBe(true)
     expect(turns.attached(attached)).toBe(true)
@@ -111,10 +121,13 @@ it('rechecks the Desktop turn and identity around the authorized history read', 
     preparation.cancelAttached(attached)
     let boundTurns: DesktopLogicalTurnAuthority | undefined
     let boundHistory: ((params: unknown) => Promise<unknown>) | undefined
+    const scopedIdentity = vi.fn(async () => 'desktop:fixture')
+    const dispatchIdentity = vi.fn(async () => 'desktop:fixture')
     const composition = createDesktopLogicalComposition({
       owner: profileLogicalConversationOwner(store),
       profileId: 'fixture',
-      identity: async () => 'desktop:fixture',
+      identity: scopedIdentity,
+      dispatchIdentity,
       control: {
         bindLogicalTurns: (value: DesktopLogicalTurnAuthority) => {
           boundTurns = value
@@ -128,7 +141,9 @@ it('rechecks the Desktop turn and identity around the authorized history read', 
     const prepared = await composition.preparation!.prepare(scope)
     expect(prepared.state).toBe('issued')
     if (prepared.state !== 'issued') throw new Error('ticket unavailable')
+    scopedIdentity.mockRejectedValue(new Error('Desktop input queue is awaiting admission'))
     expect(await boundTurns!.begin(prepared.token, 'destination', 'request')).toBe(true)
+    scopedIdentity.mockResolvedValue('desktop:fixture')
     boundTurns!.observe('turn/started', { threadId: 'destination', turn: { id: 'turn' } })
     expect(boundTurns!.confirm(prepared.token, 'destination', 'turn', 'request')).toBe(true)
     expect(await boundHistory!(call)).toMatchObject({ success: true })

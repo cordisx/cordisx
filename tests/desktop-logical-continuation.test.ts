@@ -194,6 +194,47 @@ it('does not create a target when its selected effort becomes unavailable during
   }
 })
 
+it('does not create a linked target when the native owner changes during preflight', async () => {
+  const f = await fixture()
+  try {
+    const dispatchIdentity = vi.fn().mockResolvedValueOnce('desktop:fixture')
+      .mockResolvedValueOnce('desktop:fixture').mockResolvedValue('desktop:other')
+    expect(
+      await startDesktopLogicalContinuation({
+        ...f.input,
+        authority: { ...f.authority, dispatchIdentity },
+      }),
+    ).toMatchObject({ state: 'rejected', code: 'PREFLIGHT_UNAVAILABLE' })
+    expect(f.control.createFencedLogicalDestination).not.toHaveBeenCalled()
+    expect(f.store.snapshot().logicalContinuations?.intents.operation).toBeUndefined()
+  } finally {
+    await f.close()
+  }
+})
+
+it('keeps the result uncertain if the native owner changes after target creation', async () => {
+  const f = await fixture()
+  try {
+    const dispatchIdentity = vi.fn(async () => 'desktop:fixture')
+    const create = f.native.createLogicalDestination.getMockImplementation()!
+    f.native.createLogicalDestination.mockImplementationOnce(async (...args) => {
+      const result = await create(...args)
+      dispatchIdentity.mockResolvedValue('desktop:other')
+      return result
+    })
+    expect(
+      await startDesktopLogicalContinuation({
+        ...f.input,
+        authority: { ...f.authority, dispatchIdentity },
+      }),
+    ).toMatchObject({ state: 'unknown', destination: { sessionId: 'destination' } })
+    expect(f.store.snapshot().logicalContinuations?.intents.operation?.state).toBe('unknown')
+    expect(f.owner.fence.isMigrating('source')).toBe(true)
+  } finally {
+    await f.close()
+  }
+})
+
 it.each(['profile', 'conversation'] as const)(
   'commits the %s mode with the destination, without saving consent',
   async scope => {

@@ -42,12 +42,14 @@ it('recommends fork only when compatible and applies the saved profile mode with
     supportsLogicalFork: () => true,
   }
   const identity = vi.fn(async () => 'account')
+  const dispatchIdentity = vi.fn(async () => 'account')
   const migration = desktopLogicalMigration({
     owner,
     control: {} as never,
     native: () => native as never,
     profileId: 'profile',
     identity,
+    dispatchIdentity,
     targetAllowed: async () => true,
     historyReady: () => true,
   })
@@ -61,6 +63,11 @@ it('recommends fork only when compatible and applies the saved profile mode with
       recommended: 'linked',
       forkAvailable: false,
     })
+    dispatchIdentity.mockResolvedValue('another-account')
+    expect(await migration.suggest(scope, { providerId: 'new', model: 'model' })).toMatchObject({
+      linkedAvailable: false,
+    })
+    dispatchIdentity.mockResolvedValue('account')
     await channelLogicalTransactionStore(store).mutate(state => {
       const logical = state.logicalContinuations!, savedScope = { kind: 'profile' as const, id: 'profile' }
       const key = JSON.stringify([savedScope.kind, savedScope.id])

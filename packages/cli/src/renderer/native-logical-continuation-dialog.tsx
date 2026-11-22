@@ -135,6 +135,15 @@ export function NativeLogicalContinuationDialog(input: {
             : 'On demand: read authorized user and assistant text from the source and earlier links'}
         </label>
       </fieldset>
+      {!input.confirmation.logical.forkAvailable && !input.confirmation.logical.linkedAvailable
+        ? (
+          <p role="status">
+            {zh
+              ? '当前无法安全接续。请检查登录、来源对话和相关授权后重试。'
+              : 'Continuation is unavailable. Check the account, source conversation and relevant authorization.'}
+          </p>
+        )
+        : null}
       {input.confirmation.logical.channelBound
         ? (
           <div>

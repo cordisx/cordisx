@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { desktopLogicalIdentity } from '../packages/cli/src/launcher/desktop-logical-identity.js'
+import {
+  desktopLogicalDispatchIdentity,
+  desktopLogicalIdentity,
+} from '../packages/cli/src/launcher/desktop-logical-identity.js'
 import { harness } from './fixtures/native-submission-channel-harness.js'
 
 describe('desktop logical identity admission', () => {
@@ -39,6 +42,15 @@ describe('desktop logical identity admission', () => {
     expect(await desktopLogicalIdentity({ current: async () => true, read })).toBeUndefined()
     const current = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false)
     expect(await desktopLogicalIdentity({ current, read: async () => JSON.stringify(['account', 'one']) }))
+      .toBeUndefined()
+  })
+  it('rechecks the live scope around a direct native owner read', async () => {
+    const identity = 'desktop:' + 'a'.repeat(64)
+    const current = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    expect(await desktopLogicalDispatchIdentity({ current, readNativeOwner: async () => identity })).toBeUndefined()
+    expect(await desktopLogicalDispatchIdentity({ current: async () => true, readNativeOwner: async () => identity }))
+      .toBe(identity)
+    expect(await desktopLogicalDispatchIdentity({ current: async () => true, readNativeOwner: async () => 'invalid' }))
       .toBeUndefined()
   })
 })

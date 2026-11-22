@@ -602,6 +602,9 @@ Channel-bound Desktop modes and Desktop checkpoint transfer are unavailable. The
 owner coordinates its own native operations and compares bounded source
 snapshots; another independent native process modifying the source is outside
 that coordination.
+Desktop linked mode also requires the renderer account and the independently
+read native owner to match before target creation and at turn admission. If the
+native owner is unavailable or differs, linked history remains unavailable.
 The source must be idle and its effective security settings and default work
 mode must be observable. Some native versions do not report an implicit default
 mode; explicitly selecting default and completing a source turn can establish

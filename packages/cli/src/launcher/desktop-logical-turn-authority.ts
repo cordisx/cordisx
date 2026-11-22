@@ -24,6 +24,7 @@ export class DesktopLogicalTurnAuthority {
   constructor(
     private readonly identity: (scope: NativeSubmissionScope) => Promise<string | undefined>,
     private readonly ownerIdentity: (scope: NativeSubmissionScope) => Promise<string | undefined> = identity,
+    private readonly dispatchIdentity: (scope: NativeSubmissionScope) => Promise<string | undefined> = identity,
   ) {}
   private prune(): void {
     for (const [token, ticket] of this.tickets) {
@@ -75,7 +76,7 @@ export class DesktopLogicalTurnAuthority {
       )
     ) return false
     if (
-      await this.identity(ticket.scope) !== ticket.identity || this.tickets.get(token) !== ticket
+      await this.dispatchIdentity(ticket.scope) !== ticket.identity || this.tickets.get(token) !== ticket
       || ticket.state !== 'issued' || ticket.expiresAt <= Date.now()
       || [...this.tickets.values()].some(other =>
         other !== ticket && other.threadId === threadId
@@ -91,7 +92,7 @@ export class DesktopLogicalTurnAuthority {
     if (!ticket || ticket.state !== 'starting' || ticket.requestId !== requestId || ticket.expiresAt <= Date.now()) {
       return false
     }
-    return await this.identity(ticket.scope) === ticket.identity && this.tickets.get(token) === ticket
+    return await this.dispatchIdentity(ticket.scope) === ticket.identity && this.tickets.get(token) === ticket
       && ticket.state === 'starting' && ticket.requestId === requestId
   }
   confirm(token: string, threadId: string, turnId: string, requestId: string | number): boolean {

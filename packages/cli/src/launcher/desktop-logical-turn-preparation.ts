@@ -8,6 +8,7 @@ export function desktopLogicalTurnPreparation(input: {
   owner: ProfileLogicalConversationOwner
   turns: DesktopLogicalTurnAuthority
   identity(scope: NativeSubmissionScope): Promise<string | undefined>
+  dispatchIdentity?(scope: NativeSubmissionScope): Promise<string | undefined>
   appId: string
   profileId: string
   ready?(): boolean
@@ -22,6 +23,8 @@ export function desktopLogicalTurnPreparation(input: {
     )
     return { matches, logical }
   }
+  const dispatchMatches = async (scope: NativeSubmissionScope, identity: string) =>
+    !input.dispatchIdentity || await input.dispatchIdentity(scope) === identity
   return {
     async prepare(scope: NativeSubmissionScope) {
       let issued: string | undefined
@@ -34,7 +37,7 @@ export function desktopLogicalTurnPreparation(input: {
         const relation = matches[0]!, intent = logical!.intents[relation.operationId]!
         const identity = await input.identity(scope)
         if (
-          !identity
+          !identity || !await dispatchMatches(scope, identity)
           || !isDeepStrictEqual(intent.actor, {
             principal: identity,
             scope: `desktop:${input.appId}:${input.profileId}`,
@@ -50,7 +53,7 @@ export function desktopLogicalTurnPreparation(input: {
           !input.owner.store.hasCommitBarrier() || input.ready?.() === false || current.matches.length !== 1
           || !isDeepStrictEqual(current.matches[0], relation)
           || !isDeepStrictEqual(current.logical?.intents[relation.operationId], intent)
-          || await input.identity(scope) !== identity
+          || await input.identity(scope) !== identity || !await dispatchMatches(scope, identity)
         ) {
           input.turns.cancel(token)
           return { state: 'unavailable' as const }
@@ -70,7 +73,7 @@ export function desktopLogicalTurnPreparation(input: {
         const relation = matches[0]!, intent = logical!.intents[relation.operationId]!
         const identity = await input.identity(scope)
         if (
-          !identity || relation.source.sessionId !== scope.threadId
+          !identity || !await dispatchMatches(scope, identity) || relation.source.sessionId !== scope.threadId
           || !isDeepStrictEqual(intent.actor, {
             principal: identity,
             scope: `desktop:${input.appId}:${input.profileId}`,
@@ -85,7 +88,7 @@ export function desktopLogicalTurnPreparation(input: {
           !issued || !input.owner.store.hasCommitBarrier() || input.ready?.() === false
           || current.matches.length !== 1 || !isDeepStrictEqual(current.matches[0], relation)
           || !isDeepStrictEqual(current.logical?.intents[relation.operationId], intent)
-          || await input.identity(scope) !== identity
+          || await input.identity(scope) !== identity || !await dispatchMatches(scope, identity)
         ) {
           if (issued) input.turns.cancel(issued)
           return false

@@ -1,6 +1,7 @@
 import { approvalReviewCatalogEnvironment } from './approval-review-catalog.js'
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
 import { createDesktopLogicalServices } from './desktop-logical-composition.js'
+import { desktopLogicalDispatchIdentity } from './desktop-logical-identity.js'
 import { desktopLogicalTargetAdmission } from './desktop-logical-target.js'
 import {
   bundledCodexVersion,
@@ -14,8 +15,6 @@ import { RemoteTerminalProviderClient } from './remote-terminal-provider-client.
 import type { ExistingTerminalProviderSource } from './existing-terminal-provider-rpc.js'
 import { StartupRequirementsCoordinator } from '../cli/startup-requirements.js'
 import { startupProviderAdmission } from './startup-provider-admission.js'
-import { bundle as builtinAdapter } from '@cordisx/codex-adapter'
-import { selectAdapterModules } from './codex-adapter/selection.js'
 import { adapterStoreRoot } from './codex-adapter/store.js'
 import { resolveHomeConfigPath } from '../config/home-config.js'
 import { defaultNativeSubmissionCacheDirectory, startNativeAdapterPreparation } from './native-adapter-analysis.js'
@@ -54,7 +53,7 @@ import { createChannelNativeSession } from './channel-native-composition.js'
 import * as desktopContext from './desktop-native-context-observer.js'
 import type { DesktopStaticCatalogLease } from './desktop-static-catalog.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
-import type { NativeScriptResource } from './native-submission-structure.js'
+export { nativeSubmissionTransformsForApp } from './native-adapter-analysis.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { nativeManagedModelList } from './native-managed-model-list.js'
@@ -166,18 +165,6 @@ export type NativeSubmissionCompletionStage =
   | 'native-submission-controller-bound'
 export function nativeAppServerIntermediaryPath(): string {
   return fileURLToPath(new URL('../../assets/launcher/native-app-server-intermediary.mjs', import.meta.url))
-}
-
-export function nativeSubmissionTransformsForApp(
-  appVersion: string,
-  buildNumber: string,
-  resources: readonly NativeScriptResource[],
-): readonly NativeResourceTransform[] {
-  return selectAdapterModules([{ identity: `builtin:${builtinAdapter.version}`, bundle: builtinAdapter }], {
-    appVersion,
-    buildNumber,
-    resources,
-  }).transforms
 }
 
 export async function createNativeSubmissionComposition(
@@ -729,6 +716,11 @@ export async function prepareNativeSubmissionBootstrap(
           profileId: completeOptions.managedCatalog?.profileId,
           identity: scope => cdp.desktopIdentity(scope),
           ownerIdentity: scope => cdp.desktopOwnerIdentity(scope),
+          dispatchIdentity: scope =>
+            desktopLogicalDispatchIdentity({
+              current: () => cdp.runtime.revalidate(scope, false),
+              readNativeOwner: () => control.nativeOwnerIdentity(),
+            }),
           channelHistory: completeOptions.logicalHistory,
           native: () => channelSession,
           targetAllowed: desktopLogicalTargetAdmission(

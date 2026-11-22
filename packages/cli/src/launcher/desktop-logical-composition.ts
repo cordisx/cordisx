@@ -15,10 +15,11 @@ export function createDesktopLogicalComposition(input: {
   profileId?: string | undefined
   identity(scope: NativeSubmissionScope): Promise<string | undefined>
   ownerIdentity?(scope: NativeSubmissionScope): Promise<string | undefined>
+  dispatchIdentity?(scope: NativeSubmissionScope): Promise<string | undefined>
   channelHistory?: ((params: unknown) => Promise<unknown>) | undefined
 }) {
   const turns = input.owner && input.profileId
-    ? new DesktopLogicalTurnAuthority(input.identity, input.ownerIdentity ?? input.identity)
+    ? new DesktopLogicalTurnAuthority(input.identity, input.ownerIdentity ?? input.identity, input.dispatchIdentity)
     : undefined
   if (turns) input.control.bindLogicalTurns(turns)
   let desktopHistory: ((params: unknown) => Promise<unknown>) | undefined
@@ -27,6 +28,7 @@ export function createDesktopLogicalComposition(input: {
       owner: input.owner,
       turns,
       identity: input.identity,
+      ...(input.dispatchIdentity ? { dispatchIdentity: input.dispatchIdentity } : {}),
       appId: 'codex',
       profileId: input.profileId,
       ready: () => desktopHistory !== undefined,
@@ -71,6 +73,7 @@ export function createDesktopLogicalServices(
       native: input.native,
       profileId: input.profileId,
       identity: input.identity,
+      ...(input.dispatchIdentity ? { dispatchIdentity: input.dispatchIdentity } : {}),
       targetAllowed: input.targetAllowed,
       historyReady: composition.historyReady,
     })

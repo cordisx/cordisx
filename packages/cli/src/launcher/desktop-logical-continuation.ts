@@ -30,6 +30,7 @@ export async function startDesktopLogicalContinuation(input: {
   channelGrant?: ChannelEventRef
   authority: {
     identity(): Promise<string | undefined>
+    dispatchIdentity?(): Promise<string | undefined>
     current(): boolean
     targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
     targetReasoningEffort?: ModelReasoningEffort
@@ -40,6 +41,13 @@ export async function startDesktopLogicalContinuation(input: {
   const { owner, control, native, request, authority } = input
   const identity = await authority.identity()
   const actor = identity && { principal: identity, scope: `desktop:${input.appId}:${input.profileId}` }
+  const dispatchMatches = async () => {
+    try {
+      return !authority.dispatchIdentity || await authority.dispatchIdentity() === identity
+    } catch {
+      return false
+    }
+  }
   if (
     !actor || !owner.store.hasCommitBarrier() || !authority.current() || !request?.source
     || typeof request.source.sessionId !== 'string'
@@ -53,7 +61,7 @@ export async function startDesktopLogicalContinuation(input: {
     || authority.configuredProviderOverrides !== undefined
       && authority.configuredProviderOverrides.model_reasoning_effort !== authority.targetReasoningEffort
     || request.source.profileId !== input.profileId || request.mode === 'linked' && (!authority.linkedHistoryReady
-        || request.handoffConsent !== 'none')
+        || request.handoffConsent !== 'none' || !await dispatchMatches())
   ) {
     return {
       state: 'rejected' as const,
@@ -164,6 +172,7 @@ export async function startDesktopLogicalContinuation(input: {
     preflight: async current => {
       if (
         !isDeepStrictEqual(current, actor) || !authority.current() || await authority.identity() !== identity
+        || request.mode === 'linked' && !await dispatchMatches()
         || !await authority.targetAllowed(
           request.target.providerId,
           request.target.model,
@@ -193,6 +202,7 @@ export async function startDesktopLogicalContinuation(input: {
       const version = await native.logicalSourceVersion(request.source)
       if (
         !version || !authority.current() || await authority.identity() !== identity
+        || request.mode === 'linked' && !await dispatchMatches()
         || !await authority.targetAllowed(
           request.target.providerId,
           request.target.model,
