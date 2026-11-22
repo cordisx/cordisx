@@ -47,7 +47,6 @@ import type {
 } from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
 
-/** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {
   private readonly lifetime = new AbortController()
   private readonly timer: ReturnType<typeof setInterval>
@@ -62,9 +61,10 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
-  readonly memory
-  readonly memoryAuthority
-  readonly personas
+  private readonly memoryComposition = createChannelMemory(this.input.file)
+  readonly memory = this.memoryComposition.memory
+  readonly memoryAuthority = this.memoryComposition.memoryAuthority
+  readonly personas = this.memoryComposition.personas
   private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
@@ -72,10 +72,6 @@ export class ChannelConversationConsumer {
     private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
-    const memory = createChannelMemory(input.file)
-    this.memory = memory.memory
-    this.memoryAuthority = memory.memoryAuthority
-    this.personas = memory.personas
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
