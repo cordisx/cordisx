@@ -851,6 +851,8 @@ export function installReactCordisXManager(
       'data-app-shell-compact-page-gutter',
       'data-app-shell-active-page',
       'data-app-shell-shared-local-frame',
+      'data-codex-composer-root',
+      'data-composer-placement',
       'data-app-shell-workspace-layout',
       'data-app-shell-tab-controller',
       'data-app-shell-tab-panel-controller',

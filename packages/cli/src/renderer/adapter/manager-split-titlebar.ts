@@ -1,5 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
-import { isManager1117ThreadHeader } from './manager-1117-thread.js'
+import { isManager1117WorkspaceHeader } from './manager-1117-workspace.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
@@ -49,7 +49,7 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   const headers = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
     .filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
-  const markerLight = header !== undefined && isManager1117ThreadHeader(header)
+  const markerLight = header !== undefined && isManager1117WorkspaceHeader(header)
   if (
     headers.length !== 1 || header === undefined
     || header.parentElement?.getAttribute('data-app-shell-unified-tab-strip') !== 'true'
