@@ -1,6 +1,7 @@
 import { readChannelCompletion } from './channel-legacy-completion.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash, randomBytes } from 'node:crypto'
+import { channelAttachmentTicket } from './channel-inbound-resources.js'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
@@ -868,6 +869,7 @@ export class ChannelNativeSessions {
         await bridge.call('codex', sessionId === undefined ? 'start_session' : 'send_message', {
           operationId: continuation?.operationId ?? operationId,
           prompt,
+          channelAttachmentTicket: await channelAttachmentTicket(message),
           ...(sessionId === undefined
             ? {
               cwd: continuation?.configuration.cwd ?? this.input.cwd,

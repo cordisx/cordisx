@@ -232,6 +232,7 @@ export interface ChannelOutboundDelivery {
   readonly target: ChannelThreadRef
   readonly kind: 'completion' | 'approval' | 'failure' | 'reply'
   readonly text: string
+  readonly media?: import('./outbound-media.js').ChannelOutboundMedia
   readonly createdAt: string
   /** Launcher-only validated question payload; never part of plugin notifications. */
   readonly questionCard?: import('./question-card.js').ChannelQuestionCard
@@ -243,6 +244,7 @@ export interface ChannelSendResult {
 }
 
 export interface ChannelAdapterConnection {
+  readonly supportsOutboundMedia?: boolean
   send(delivery: ChannelOutboundDelivery): Promise<ChannelSendResult>
   stop(reason: 'replaced' | 'disposed' | 'failed'): Promise<void>
 }
@@ -312,6 +314,7 @@ export interface ChannelNotification {
   readonly target: ChannelThreadRef
   readonly kind: ChannelOutboundDelivery['kind']
   readonly text: string
+  readonly media?: import('./outbound-media.js').ChannelOutboundMedia
 }
 
 export interface ChannelDeliveryHandle {

@@ -6,6 +6,12 @@ import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { channelReplyDefaults, channelReplyTarget } from './channel-reply-routing.js'
 import { type ChannelFeedbackSettings } from './channel-feedback-settings.js'
 
+export interface ChannelReactionReceipt {
+  reactionId: string
+  emojiType?: string
+  removed?: boolean
+}
+
 type Entry = {
   recordId: string
   event: ChannelEventRef
@@ -113,9 +119,14 @@ export class ChannelFeedback {
         return
       }
       if (config.reaction.enabled) {
-        void this.options.access()?.feedbackReact?.(event, config.reaction.emojiType).catch(() =>
-          this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED')
-        )
+        void this.options.access()?.feedbackReact?.(event, config.reaction.emojiType).then(async receipt => {
+          if (receipt) {
+            await this.options.store.mutate(state => {
+              const feedback = state.inputs[recordId]?.feedback
+              if (feedback) feedback.reaction = receipt
+            })
+          }
+        }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED'))
       }
       if (config.wait.enabled) this.arm(entry, entry.since + config.wait.delaySeconds * 1000 - this.now())
       else this.finish(entry)
@@ -123,6 +134,43 @@ export class ChannelFeedback {
       this.diagnostic('CHANNEL_FEEDBACK_UNAVAILABLE')
       this.finish(entry)
     }
+  }
+  jobUpdated(_recordId: string) {
+    this.sync()
+  }
+  async catchup() {
+    for (
+      const record of Object.values(this.options.store.snapshot().inputs).filter(record =>
+        record.feedback?.reaction && !record.feedback.completionAttempted
+      ).slice(0, 100)
+    ) {
+      await this.completed(record.recordId).catch(() => this.diagnostic('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN'))
+    }
+  }
+  async completed(recordId: string) {
+    const state = this.options.store.snapshot(), record = state.inputs[recordId]
+    const jobs = Object.values(state.jobs).filter(job => job.recordId === recordId)
+    if (
+      !record?.feedback?.reaction || record.feedback.completionAttempted || !jobs.length
+      || jobs.some(job => job.state !== 'completed') || !this.permitted(state, record.input.source.event)
+    ) return
+    const config = await this.options.settings(), emoji = config.reaction.completionEmojiType
+    if (!config.reaction.enabled || !emoji) return
+    const reserved = await this.options.store.mutate(state => {
+      const feedback = state.inputs[recordId]?.feedback
+      if (!feedback || feedback.completionAttempted) return false
+      feedback.completionAttempted = true
+      return true
+    })
+    if (!reserved) return
+    const access = this.options.access(), event = record.input.source.event
+    if (!access?.feedbackRemove || !access.feedbackReact) throw new Error('CHANNEL_FEEDBACK_UNAVAILABLE')
+    await access.feedbackRemove(event, record.feedback.reaction.reactionId)
+    const receipt = await access.feedbackReact(event, emoji)
+    await this.options.store.mutate(state => {
+      const feedback = state.inputs[recordId]?.feedback
+      if (feedback) feedback.completion = receipt
+    })
   }
   private outbound(target: ChannelThreadRef) {
     for (const entry of this.pending.values()) {

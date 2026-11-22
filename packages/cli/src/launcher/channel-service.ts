@@ -247,6 +247,7 @@ export function createLocalChannelService(input: {
     (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>
   >()
   const key = (ref: ChannelTenantRef) => JSON.stringify([ref.adapterId, ref.accountId, ref.tenantId])
+  const feedbackAccess = new WeakMap<ActiveRuntime, ReturnType<typeof channelFeedbackSdk>>()
   const caller = (generation: string) => ({ source: input.source, pluginId: 'channel', generation })
   const definitions = (configuration: ReturnType<typeof parseChannelServiceConfig>, current: ActiveRuntime) =>
     feishuDefinitionsForConfig(configuration, {
@@ -622,10 +623,15 @@ export function createLocalChannelService(input: {
     conversationAccess: () => {
       const current = active, configuration = activeConfiguration
       if (!current || disposed) return undefined
+      let feedback = feedbackAccess.get(current)
+      if (!feedback) {
+        feedback = channelFeedbackSdk(event => current.directory.channel(event), () => !disposed && active === current)
+        feedbackAccess.set(current, feedback)
+      }
       return {
         generation: current.generation,
         runtime: current.runtime,
-        ...channelFeedbackSdk(event => current.directory.channel(event), () => !disposed && active === current),
+        ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
             ref: connection.ref,

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface ChannelFeedbackSettings {
-  reaction: { enabled: boolean; emojiType: string }
+  reaction: { enabled: boolean; emojiType: string; completionEmojiType?: string }
   wait: { enabled: boolean; delaySeconds: number; text: string; texts?: readonly string[] }
 }
 export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
@@ -19,7 +19,7 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
   const row = object(value), reaction = object(row.reaction ?? {}), wait = object(row.wait ?? {})
   if (
     Object.keys(row).some(key => !['reaction', 'wait'].includes(key))
-    || Object.keys(reaction).some(key => !['enabled', 'emojiType'].includes(key))
+    || Object.keys(reaction).some(key => !['enabled', 'emojiType', 'completionEmojiType'].includes(key))
     || Object.keys(wait).some(key => !['enabled', 'delaySeconds', 'text', 'texts'].includes(key))
   ) throw new Error('INVALID_FEEDBACK_CONFIG')
   const result = {
@@ -29,6 +29,9 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
   if (
     typeof result.reaction.enabled !== 'boolean' || typeof result.reaction.emojiType !== 'string'
     || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.emojiType)
+    || result.reaction.completionEmojiType !== undefined
+      && (typeof result.reaction.completionEmojiType !== 'string'
+        || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.completionEmojiType))
     || typeof result.wait.enabled !== 'boolean' || !Number.isSafeInteger(result.wait.delaySeconds)
     || result.wait.delaySeconds < 1 || result.wait.delaySeconds > 86400 || !text(result.wait.text)
     || result.wait.texts !== undefined && (!Array.isArray(result.wait.texts) || result.wait.texts.length < 1

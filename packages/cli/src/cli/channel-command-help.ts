@@ -1,4 +1,6 @@
 const HELP: Readonly<Record<string, string>> = {
+  reaction:
+    'Incoming --context required. React to that known source message only. Input: {action:"add",emojiType:"OnIt"} or {action:"remove",reactionId:"returned-id"}. Remove only reactions this bot created. Preserve receipt reactionId; unknown API outcome is not success and must not be blindly retried. Completion emoji is separately configured, never literal "done".',
   connections: 'List configured live Channel connections. Input: {}.',
   conversations: 'List conversations with readable names. Input: {account:{adapterId,accountId,tenantId}}.',
   bind:

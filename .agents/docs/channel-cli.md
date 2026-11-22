@@ -1,5 +1,8 @@
 # Channel CLI and chat bindings
 
+See [media and reactions](channel-media-reactions.md) for candidate reaction CLI
+arguments, completion semantics, capability boundaries and unavailable media APIs.
+
 ## Configured runtime
 
 ### Scoped memory (local implementation)

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { validateOutboundMedia } from './outbound-media.js'
 import type {
   ChannelAdapterDescriptor,
   ChannelInboundEnvelope,
@@ -136,6 +137,12 @@ export class JsonChannelStore {
     try {
       const parsed: unknown = JSON.parse(await readFile(store.#file, 'utf8'))
       if (!isState(parsed)) throw new Error('Channel store has an unsupported contract or malformed root')
+      for (const record of Object.values(parsed.outbox)) {
+        if (record.media !== undefined) {
+          validateOutboundMedia(record.media)
+          if (record.text !== '' || record.questionCard !== undefined) throw new Error('Invalid stored media delivery')
+        }
+      }
       // The v1 connection store intentionally discards historical task-routing
       // fields on open. Channel owns transport durability only.
       store.#state = {

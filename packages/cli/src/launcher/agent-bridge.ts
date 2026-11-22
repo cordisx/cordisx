@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
+import { channelNativeResourceInput } from './channel-inbound-resources.js'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
@@ -479,6 +480,7 @@ export function createCodexBridgeHandler(
               ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
               ...(serviceTier === undefined ? {} : { serviceTier }),
             },
+            args.channelAttachmentTicket,
           )
           codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           const base = {
@@ -523,7 +525,7 @@ export function createCodexBridgeHandler(
           signal?.throwIfAborted()
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
-          const turnId = await startTurn(codex, threadId, prompt, signal)
+          const turnId = await startTurn(codex, threadId, prompt, signal, {}, args.channelAttachmentTicket)
           codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           if (turnId === undefined) {
             return turn.failed({
@@ -613,13 +615,14 @@ async function startTurn(
   prompt: string,
   signal?: AbortSignal,
   settings: Readonly<Record<string, unknown>> = {},
+  attachmentTicket?: unknown,
 ): Promise<string | undefined> {
   signal?.throwIfAborted()
   const started = object(
     await codex.nativeRequest('turn/start', {
       ...settings,
       threadId,
-      input: [{ type: 'text', text: prompt, text_elements: [] }],
+      input: channelNativeResourceInput(prompt, attachmentTicket),
     }),
   )
   return text(object(started?.turn)?.id)
