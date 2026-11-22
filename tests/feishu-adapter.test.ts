@@ -103,7 +103,7 @@ describe('official Feishu direct-message adapter', () => {
       await active.stop('disposed')
     }
   })
-  it.each([true, false])('preserves main, quoted and topic sends with raw SDK=%s', async raw => {
+  it.each([true, false])('preserves main, quoted and topic Markdown sends with raw SDK=%s', async raw => {
     const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_created' } }))
     const reply = vi.fn(async () => ({ code: 0, data: { message_id: 'om_replied' } }))
     const send = vi.fn(async () => ({ messageId: 'om_sent' }))
@@ -140,25 +140,37 @@ describe('official Feishu direct-message adapter', () => {
             semantics,
           },
           kind: 'reply',
-          text: 'requested',
+          text: '**requested**',
           createdAt: '2026-11-15T00:00:00Z',
         })
       }
       if (raw) {
         expect(create).toHaveBeenCalledTimes(1)
-        expect(create.mock.calls[0]?.[0]).toMatchObject({ data: { receive_id: 'oc_group' } })
+        expect(create.mock.calls[0]?.[0]).toMatchObject({
+          data: {
+            receive_id: 'oc_group',
+            msg_type: 'post',
+            content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'md', text: '**requested**' }]] } }),
+            uuid: expect.stringMatching(/^[a-f0-9]{32}$/),
+          },
+        })
         expect(reply.mock.calls.map(([input]) => input)).toEqual([
           expect.objectContaining({
             path: { message_id: 'om_source' },
-            data: expect.objectContaining({ reply_in_thread: false }),
+            data: expect.objectContaining({ reply_in_thread: false, msg_type: 'post' }),
           }),
           expect.objectContaining({
             path: { message_id: 'om_source' },
-            data: expect.objectContaining({ reply_in_thread: true }),
+            data: expect.objectContaining({ reply_in_thread: true, msg_type: 'post' }),
           }),
         ])
         expect(send).not.toHaveBeenCalled()
       } else {
+        expect(send.mock.calls.map(([, input]) => input)).toEqual([
+          { text: '**requested**' },
+          { text: '**requested**' },
+          { text: '**requested**' },
+        ])
         expect(send.mock.calls.map(([, , options]) => options)).toEqual([
           {},
           { replyTo: 'om_source', replyInThread: false },
