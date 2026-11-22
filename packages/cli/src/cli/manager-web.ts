@@ -292,7 +292,11 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       try {
         const input = object(await body(request))
         if (!input || Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
-        const claimed = await resumes.claim(resumeMatch[1]!, request.headers.cookie)
+        const claimed = await resumes.claim(
+          resumeMatch[1]!,
+          request.headers.cookie,
+          async session => await retireSession(session, true),
+        )
         if (claimed === 'pending') return json(response, 409, { error: 'RESUME_PENDING' })
         if (claimed !== 'accepted' || !await owner.isCurrent().catch(() => false)) {
           return json(response, 401, { error: 'UNAUTHORIZED' })

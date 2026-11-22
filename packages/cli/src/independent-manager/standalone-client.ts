@@ -483,7 +483,11 @@ export function startStandaloneManager(input: {
       if (!admitted || closed) throw new Error('manager-admission-unavailable')
       return true
     } catch {
-      fail()
+      // Navigation can abort a startup request after beforeunload but before
+      // pagehide. Preserve only the same idle session that pagehide could
+      // preserve; the owner still has to confirm its retirement.
+      if (navigating && canPreserveResume()) void close(true)
+      else fail()
       return false
     }
   })()

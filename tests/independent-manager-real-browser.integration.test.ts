@@ -106,10 +106,20 @@ it.skipIf(chrome === undefined)(
       // The startup migration is a real write. Its localStorage removal is the
       // renderer's acknowledgement that the write and readback completed.
       await first.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: `if (location.origin === ${JSON.stringify(new URL(firstUrl).origin)}
-          && !sessionStorage.getItem('fixture-migration-seeded')) {
-          sessionStorage.setItem('fixture-migration-seeded', '1')
-          localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
+        source: `if (location.origin === ${JSON.stringify(new URL(firstUrl).origin)}) {
+          if (!sessionStorage.getItem('fixture-migration-seeded')) {
+            sessionStorage.setItem('fixture-migration-seeded', '1')
+            localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
+          }
+          const original = window.fetch.bind(window)
+          window.fetch = (request, options) => {
+            if (request === '/api/renderer/close' && sessionStorage.getItem('fixture-drop-close') === '1') {
+              sessionStorage.removeItem('fixture-drop-close')
+              sessionStorage.setItem('fixture-close-dropped', '1')
+              return Promise.reject(new Error('simulated lost unload request'))
+            }
+            return original(request, options)
+          }
         }`,
       })
       await first.send('Page.navigate', { url: firstUrl })
@@ -139,6 +149,9 @@ it.skipIf(chrome === undefined)(
       }, { timeout: 15_000 })
       const migratedBeforeReload = await migrationComplete()
       expect(migratedBeforeReload).toBe(true)
+      // Browsers may drop an unload keepalive. The authenticated replacement
+      // must still retire the old owner session before joining.
+      await first.evaluate("sessionStorage.setItem('fixture-drop-close', '1')")
       await first.send('Page.reload')
       try {
         await vi.waitFor(async () => {
@@ -165,6 +178,7 @@ it.skipIf(chrome === undefined)(
         )
       }
       await ready(first)
+      expect(await first.evaluate("sessionStorage.getItem('fixture-close-dropped')")).toBe('1')
       expect(await first.evaluate('location.hash')).toBe('')
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
       const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }

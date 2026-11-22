@@ -62,7 +62,11 @@ export class ManagerSessionResumeGrants {
     if (grant) this.forget(grant)
   }
 
-  async claim(id: string, header: string | undefined): Promise<'pending' | 'denied' | 'accepted'> {
+  async claim(
+    id: string,
+    header: string | undefined,
+    retire?: (session: string) => Promise<boolean>,
+  ): Promise<'pending' | 'denied' | 'accepted'> {
     this.prune()
     if (!idPattern.test(id)) return 'denied'
     const grant = this.grants.get(id)
@@ -74,11 +78,16 @@ export class ManagerSessionResumeGrants {
     ) {
       return 'denied'
     }
-    if (grant.parkedUntil === undefined || grant.retirement === undefined) return 'pending'
     if (grant.consuming) return 'denied'
+    if ((grant.parkedUntil === undefined || grant.retirement === undefined) && retire === undefined) return 'pending'
     grant.consuming = true
-    const confirmed = await grant.retirement.catch(() => false)
-    const current = this.grants.get(id) === grant && grant.parkedUntil > Date.now()
+    // A browser may drop its pagehide keepalive. A valid tab handle and cookie
+    // may request retirement, but never bypass the owner's confirmation.
+    const confirmed = grant.retirement === undefined
+      ? await retire!(grant.session).catch(() => false)
+      : await grant.retirement.catch(() => false)
+    const current = this.grants.get(id) === grant && grant.parkedUntil !== undefined
+      && grant.retirement !== undefined && grant.parkedUntil > Date.now()
     this.forget(grant)
     return confirmed && current ? 'accepted' : 'denied'
   }

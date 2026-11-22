@@ -291,6 +291,25 @@ it('preserves refresh during bootstrap before bindings or lifecycle exist', asyn
   }
 })
 
+it('preserves refresh if navigation aborts bootstrap before pagehide', async () => {
+  const gate = deferred<void>()
+  const test = fixture({ issueResume: true, bootstrapGate: gate.promise })
+  try {
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/bootstrap')).toBe(true))
+    test.beforeUnload()
+    gate.reject(new Error('navigation interrupted bootstrap'))
+    expect(await test.manager.ready).toBe(false)
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    gate.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
 it('preserves refresh while a startup write is queued behind admission', async () => {
   const gate = deferred<void>()
   const test = fixture({ issueResume: true, startGate: gate.promise, modelServices: true })
