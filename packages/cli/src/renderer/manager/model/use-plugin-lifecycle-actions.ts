@@ -64,7 +64,8 @@ export function usePluginLifecycleActions(
     const item = management?.plugins.find(value => value.id === plugin.id)
     return !!standalone?.binding.planLifecycle && !!standalone.binding.executeLifecycle
       && !!plugin.package && !!snapshot.pluginLifecycle && management?.profileId === snapshot.pluginLifecycle.profileId
-      && management.runtime.kind === 'active' && management.runtime.mode === 'service'
+      && management.runtime.kind === 'active'
+      && management.runtime.runtimeGeneration === snapshot.pluginLifecycle.runtimeGeneration
       && management.rendererLifecycleAccess === 'session-scoped-v1'
       && management.activationRevision === snapshot.pluginLifecycle.revision
       && !!item && item.version === plugin.package.version && item.digest === plugin.package.digest

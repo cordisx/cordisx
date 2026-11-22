@@ -96,14 +96,6 @@ export function restrictedLifecycleIntent(value: unknown): RestrictedLifecycleIn
   return { kind: item.kind, pluginId: item.pluginId } as RestrictedLifecycleIntent
 }
 
-/** Recognize malformed requests too, so they cannot fall through to the legacy path. */
-export function hasRestrictedLifecycleKind(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  return ['plugin-enable', 'plugin-disable', 'plugin-uninstall'].includes(
-    String((value as Record<string, unknown>).kind),
-  )
-}
-
 export function restrictedExecutionToken(value: unknown): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>

@@ -113,6 +113,33 @@ it('projects only a safe dependency closure and consumes the originating page pl
     request: { ...intent, extra: true } as any,
   })).toBe(false)
   expect(allowsManagementWrite({ ...entry(plans), restricted: undefined }, planOperation)).toBe(false)
+  const unscoped = [
+    { kind: 'plan', request: { kind: 'plugin-plan-local', sourceDirectory: '/fixture' } },
+    { kind: 'plan', request: { kind: 'plugin-plan-marketplace', pluginId: 'new' } },
+    { kind: 'plan', request: { ...intent, extra: true } },
+    { kind: 'execute', request: intent, expectedRevision: 4 },
+    {
+      kind: 'execute',
+      request: { kind: 'plugin-execute-plan', executionToken: ownerToken() },
+      expectedRevision: 4,
+    },
+  ] as const
+  const unscopedDispatch = vi.fn()
+  for (const operation of unscoped) {
+    expect(allowsManagementWrite(entry(plans), operation as any)).toBe(false)
+    await expect(projectManagementRequest({
+      context,
+      operation: operation as any,
+      dispatch: unscopedDispatch,
+      entry: () => entry(plans),
+      ownerSnapshot: snapshot,
+    })).rejects.toThrow('renderer-management-projection-unavailable')
+  }
+  expect(unscopedDispatch).not.toHaveBeenCalled()
+  expect(allowsManagementWrite(entry(plans), {
+    kind: 'plan',
+    request: { kind: 'source-remove', url: 'https://example.test/' },
+  })).toBe(true)
   const owner = ownerToken()
   const dispatchPlan = vi.fn(async () => ({
     status: 'planned',

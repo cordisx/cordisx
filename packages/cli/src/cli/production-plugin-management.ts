@@ -50,6 +50,7 @@ export interface ProductionPluginManagementComposition {
     hasLive(): boolean
     admitted(peer: ManagerRendererCommandPeer): boolean
     reserveWrites(): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
+    matchesDesktop?(participants: ServiceRendererParticipants, lifecycle: DesktopOwnerRendererLifecycle): boolean
   }
   close(): Promise<void>
 }
@@ -90,6 +91,12 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererModelServices?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
   readonly rendererReadonlyChannel?: ManagerRendererChannel
+  /** The Desktop owner supplies the same private participant and lifecycle registry. */
+  readonly rendererDesktopLifecycle?: {
+    readonly participant: NonNullable<ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']>
+    readonly participants: ServiceRendererParticipants
+    readonly lifecycle: DesktopOwnerRendererLifecycle
+  }
   readonly rendererDesktopPackageConfig?: {
     readonly participant: NonNullable<ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']>
     readonly participants: ServiceRendererParticipants
@@ -112,6 +119,11 @@ export async function openProductionPluginManagementComposition(input: {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
   if (
+    input.rendererDesktopLifecycle && (input.mode === 'service' || input.rendererParticipants || input.rendererLifecycle
+      || input.rendererParticipant !== input.rendererDesktopLifecycle.participant
+      || !input.rendererDesktopLifecycle.participants.isBoundTo(input.rendererDesktopLifecycle.lifecycle))
+  ) throw new Error('manager-consumer-fence-scope-invalid')
+  if (
     input.rendererConfiguredChannelService && (
       input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
       || !input.rendererReadonlyChannel
@@ -120,7 +132,12 @@ export async function openProductionPluginManagementComposition(input: {
   if (
     input.rendererDesktopPackageConfig && (input.mode === 'service'
       || input.rendererParticipant !== input.rendererDesktopPackageConfig.participant
-      || !input.rendererDesktopPackageConfig.participants.isBoundTo(input.rendererDesktopPackageConfig.lifecycle))
+      || !input.rendererDesktopPackageConfig.participants.isBoundTo(input.rendererDesktopPackageConfig.lifecycle)
+      || input.rendererDesktopLifecycle && (
+          input.rendererDesktopLifecycle.participant !== input.rendererDesktopPackageConfig.participant
+          || input.rendererDesktopLifecycle.participants !== input.rendererDesktopPackageConfig.participants
+          || input.rendererDesktopLifecycle.lifecycle !== input.rendererDesktopPackageConfig.lifecycle
+        ))
   ) throw new Error('manager-consumer-fence-scope-invalid')
   const service = await openPluginManagementService({
     configPath: input.configPath,
@@ -295,15 +312,20 @@ export async function openProductionPluginManagementComposition(input: {
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
-    ...(input.rendererParticipants === undefined ? {} : {
+    ...(input.rendererParticipants === undefined && input.rendererDesktopLifecycle === undefined ? {} : {
       lifecycleParticipants: {
         hasLive: () => !closed && rendererSessions.hasLiveRenderers(),
         admitted: (peer: ManagerRendererCommandPeer) => !closed && rendererSessions.hasAdmittedPeer(peer),
+        matchesDesktop: (participants: ServiceRendererParticipants, lifecycle: DesktopOwnerRendererLifecycle) =>
+          !closed && input.rendererDesktopLifecycle?.participants === participants
+          && input.rendererDesktopLifecycle.lifecycle === lifecycle,
         reserveWrites: async () => {
           if (closed) throw new Error('manager-lifecycle-fence-unavailable')
           return await rendererSessions.suspendMutationsForLifecycle()
         },
       },
+    }),
+    ...(input.rendererParticipants === undefined ? {} : {
       fenceManagers: async () => {
         if (closed) throw new Error('manager-consumer-fence-unavailable')
         return await fenceManagerConsumers({

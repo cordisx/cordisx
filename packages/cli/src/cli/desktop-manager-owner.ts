@@ -6,6 +6,7 @@ import type { PluginGenerationArtifactServer } from '../launcher/plugin-generati
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
+import type { PluginLifecycleRuntime } from '../launcher/plugin-lifecycle-model.js'
 import { attachmentEqual, attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
 import { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
@@ -21,6 +22,9 @@ import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridg
 import { supportsReadonlyConfiguredChannel } from './readonly-headless-channel.js'
 import { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
 import { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
+import type { ProductionPluginManagementComposition } from './production-plugin-management.js'
+import { reserveServiceOwnerLifecycle } from './service-owner-lifecycle-fence.js'
+import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
 
 /** Compose the optional Manager inside an already-authorized Desktop owner. */
 export function createDesktopManagerOwner(input: {
@@ -37,6 +41,8 @@ export function createDesktopManagerOwner(input: {
   readonly codex?: (operation: string, request: unknown) => Promise<unknown>
   /** Exact configured archive selected before the Desktop service starts. */
   readonly configuredChannel?: CordisXConfigPlugin
+  /** Bound lazily after the same owner opens its management RPC. */
+  readonly management?: () => ProductionPluginManagementComposition | undefined
 }) {
   const scope = {
     homeDigest: attachmentHomeDigest(input.homeDir),
@@ -98,6 +104,18 @@ export function createDesktopManagerOwner(input: {
   }
   let closing: Promise<boolean> | undefined
   let managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
+  const management = () => {
+    try {
+      const current = input.management?.()
+      return !closed && current?.handler.profileId === input.profileId
+          && current.handler.generation === input.generation && current.lifecycleParticipants
+          && current.lifecycleParticipants.matchesDesktop?.(participants, lifecycle) === true
+        ? current
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
   const channelBridge = input.configuredChannel === undefined
     ? undefined
     : new ReadonlyChannelRendererBridge({
@@ -119,6 +137,16 @@ export function createDesktopManagerOwner(input: {
     protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
     projectPluginConfig: configProjection,
     desktopPackageConfigEnabled: () => packageConfigWritesEnabled,
+    ...(input.management === undefined ? {} : {
+      restrictedManagement: {
+        available: () => management()?.handler.service.discardExecutionPlan !== undefined,
+        discardPlan: token => {
+          const discard = management()?.handler.service.discardExecutionPlan
+          if (!discard) throw new Error('renderer-management-plan-cleanup-unavailable')
+          discard(token)
+        },
+      },
+    }),
   })
   const rendererModelServices = input.codex === undefined
     ? undefined
@@ -156,6 +184,9 @@ export function createDesktopManagerOwner(input: {
         rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
         rendererWriteLifetimes: bootstrap.writeLifetimes,
         rendererReadLifetimes: bootstrap.readLifetimes,
+        ...(input.management === undefined ? {} : {
+          rendererDesktopLifecycle: { participant, participants, lifecycle },
+        }),
         ...(packageConfigWritesEnabled
           ? {
             rendererDesktopPackageConfig: {
@@ -190,6 +221,29 @@ export function createDesktopManagerOwner(input: {
       return bootstrap.bindConfiguredChannel({ plugin, service, bridge: channelBridge })
     },
     bindManagedServiceRuntime,
+    coordinateLifecycle(runtime: PluginLifecycleRuntime): PluginLifecycleRuntime {
+      return new ServiceOwnerLifecycleRuntime({
+        runtime,
+        reserve: mutation => {
+          const livePeers = participants.ownerPeers()
+          const owner = management()
+          const managers = owner?.lifecycleParticipants
+          if (!managers?.hasLive()) {
+            if (livePeers.length > 0) throw new Error('manager-lifecycle-fence-unavailable')
+            return undefined
+          }
+          if (!managedServiceUI) throw new Error('manager-lifecycle-fence-unavailable')
+          return reserveServiceOwnerLifecycle({
+            mutation,
+            management: managers,
+            bootstrap,
+            managedUI: managedServiceUI,
+            lifecycle,
+            participants,
+          })
+        },
+      })
+    },
     initialize(
       active: CordisXPluginActivationRecordV1,
       recoveryPending: boolean,

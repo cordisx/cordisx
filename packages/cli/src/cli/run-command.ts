@@ -250,6 +250,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       cdp: lifecycleRuntime,
       artifactServer: activePluginGenerationArtifactServer,
       store: lifecycleStore,
+      management: () => productionPluginManagement,
       ownerVerified: releaseRuntimeOwner !== undefined,
       attach: invocation.options.attach,
       configuredPlugins: configuredComposition.plugins,
@@ -281,7 +282,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       loadPermissionPolicies: async () =>
         (await loadHomeConfig(configPath)).permissions
           .filter(policy => policy.key.profileId === selection.profileId),
-      runtime: lifecycleTransactionRuntime,
+      runtime: desktopManager?.coordinateLifecycle(lifecycleTransactionRuntime) ?? lifecycleTransactionRuntime,
       pluginGenerationArtifactServer: activePluginGenerationArtifactServer,
       reservedPluginIds: [...configuredIds],
       ...(activeCertifiedPermissionAuthority === undefined ? {} : {

@@ -39,15 +39,23 @@ browser graph. In service mode, their plugin configuration must be empty. An
 eligible Desktop owner can also project nonempty installed-plugin configuration
 when exactly one admitted Desktop renderer proves the same plugin generation
 and a schema classifies every projected field. Only declared non-sensitive
-values are copied; writes remain unavailable. A Desktop seat change retires
-pages using this projection, and a new page requires a fresh proof. Each
-Manager receives only matching existing Manager UI permissions. Managed-service reads and subscriptions are available;
-the service owner can coordinate an explicit login across admitted Managers.
+values are copied. For a service-free, capability-free v1 package, declared
+live primitive fields and bounded arrays of primitive values may also be saved
+after the owner verifies the Desktop seat, durable readback, and each admitted
+Manager's adoption. Secrets and other field types remain unavailable. A Desktop
+seat change retires pages using this projection, and a new page requires a fresh
+proof. Each Manager receives only matching existing Manager UI permissions.
+Managed-service reads and subscriptions are available; the service owner can
+coordinate an explicit login across admitted Managers.
 Desktop login and dynamic changes to those managed packages remain unavailable.
-In service mode, an unrelated capability-free v1 package may be changed through
-the owner while all admitted Manager pages retain their projected identities.
-The owner waits for the participating pages' receipts and holds outstanding
-subscription results until service continuity is confirmed. If a participant
+The service owner and an eligible Desktop owner can change an unrelated
+capability-free v1 package while admitted Manager pages retain their projected
+identities; the Desktop owner also coordinates its ready renderer seats. Manager
+controls can enable, disable or uninstall only owner-verified packages with empty
+configuration. Installation, upgrades and managed-package changes are not
+available through these controls. The owner waits for the participating pages'
+receipts and holds outstanding subscription results until service continuity is
+confirmed. If a participant
 disconnects or continuity cannot be confirmed, affected pages are retired and
 the operation may require reconciliation. The installed managed packages remain
 read-only in these Manager pages.
@@ -85,10 +93,10 @@ for the selected app and profile must also match the value used when the owner
 started. Changes to that startup input are fenced while a Manager is attached;
 when the value already differs, the owner must be restarted or the previous value
 restored before a new page can attach. These checks do not project private
-startup values into the browser. Installed-package configuration writes are not
-yet coordinated across Manager sessions and remain unavailable while the fence is
-held. The separate, explicitly coordinated configured-Channel service update
-retains its existing owner and receipt checks.
+startup values into the browser. Installed-package configuration writes remain
+unavailable while the fence is held, except for the coordinated Desktop subset
+described above. The separate, explicitly coordinated configured-Channel
+service update retains its existing owner and receipt checks.
 
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second bootstrap

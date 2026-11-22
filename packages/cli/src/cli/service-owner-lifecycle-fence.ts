@@ -1,5 +1,5 @@
 import type { PluginRuntimePreflight } from '../launcher/plugin-lifecycle-model.js'
-import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
@@ -19,7 +19,7 @@ export async function reserveServiceOwnerLifecycle(input: {
   readonly management: NonNullable<ProductionPluginManagementComposition['lifecycleParticipants']>
   readonly bootstrap: ServiceRendererBootstrap
   readonly managedUI: ReturnType<typeof createManagerManagedServiceUIBridge>
-  readonly lifecycle: ServiceRendererLifecycle
+  readonly lifecycle: OwnerRendererLifecycle
   readonly participants: ServiceRendererParticipants
 }): Promise<ServiceOwnerLifecycleFence> {
   if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-lifecycle-fence-unavailable')

@@ -117,6 +117,7 @@ it.skipIf(chrome === undefined)(
     })
     const store = new PluginActivationStore(homeDir, profileId, generation)
     const active = await store.bindRuntimeGeneration()
+    let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
     const productionOwner = await createDesktopManagerOwnerIfEligible({
       homeDir,
       configPath,
@@ -126,6 +127,7 @@ it.skipIf(chrome === undefined)(
       cdp,
       artifactServer,
       store,
+      management: () => composition,
       ownerVerified: true,
       attach: false,
       configuredPlugins: [],
@@ -134,9 +136,10 @@ it.skipIf(chrome === undefined)(
     productionOwner.initialize(active, false)
     const lifecycle = productionOwner.lifecycle
     const originalParticipant = productionOwner.managementOptions.rendererParticipant
-    const participant = {
-      create: (input: Parameters<typeof originalParticipant.create>[0]) => {
-        const peer = originalParticipant.create(input)
+    const createParticipant = originalParticipant.create
+    vi.spyOn(originalParticipant, 'create').mockImplementation(
+      (input: Parameters<typeof originalParticipant.create>[0]) => {
+        const peer = createParticipant(input)
         managerPeers.push(peer)
         const request = peer.request.bind(peer)
         vi.spyOn(peer, 'request').mockImplementation(async (method, payload) => {
@@ -153,16 +156,8 @@ it.skipIf(chrome === undefined)(
         })
         return peer
       },
-      attach: originalParticipant.attach,
-    }
-    const owner = {
-      lifecycle,
-      managementOptions: {
-        ...productionOwner.managementOptions,
-        rendererParticipant: participant,
-      },
-      close: () => productionOwner.close(),
-    }
+    )
+    const owner = productionOwner
     // No launcher page-replacement transport exists in this browser fixture.
     // Existing documents use real CDP; future-document refresh is a substitute.
     cdp.markBrowserGraphTransportReady()
@@ -177,15 +172,15 @@ it.skipIf(chrome === undefined)(
       dryRun: false,
       requireOwnedProcess: true,
     })
+    expect(owner.bindManagedServiceRuntime(managed)).toBe(true)
     const coordinator = new PluginLifecycleCoordinator({
       homeDir,
       profileId,
       runtimeGeneration: generation,
       permissionPolicies: [],
-      runtime: managed,
+      runtime: owner.coordinateLifecycle(managed),
       pluginGenerationArtifactServer: artifactServer,
     })
-    let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
     let web: { url: string; issueUrl(): string; close(): Promise<void> } | undefined
     let browser: ChildProcess | undefined
     let desktop: CdpClient | undefined
@@ -195,6 +190,7 @@ it.skipIf(chrome === undefined)(
     let third: CdpClient | undefined
     let unregister: (() => void) | undefined
     let unregisterSecond: (() => void) | undefined
+    let checkpoint = 'start'
     try {
       await writeSupervisorState(paths, state)
       expect(await coordinator.prepareRecovery()).toHaveLength(0)
@@ -312,6 +308,35 @@ it.skipIf(chrome === undefined)(
       second = await connect(secondTarget.targetId)
       await ready(second)
       expect(managerPeers).toHaveLength(2)
+      for (const page of [first, second]) {
+        await page.evaluate(`(() => {
+          globalThis.__fixtureDialogRoots = []
+          const attach = Element.prototype.attachShadow
+          Element.prototype.attachShadow = function(options) {
+            const root = attach.call(this, options)
+            globalThis.__fixtureDialogRoots.push(root)
+            return root
+          }
+          globalThis.__fixtureExecutions = []
+          globalThis.__fixtureManagementTrace = []
+          const forward = window.fetch.bind(window)
+          window.fetch = async (url, options) => {
+            let operation
+            if (url === '/api/renderer/binding' && typeof options?.body === 'string') {
+              try { operation = JSON.parse(JSON.parse(options.body).payload).operation.kind } catch {}
+            }
+            const response = await forward(url, options)
+            if (['plan', 'execute', 'query'].includes(operation)) {
+              const reply = await response.clone().json().catch(() => undefined)
+              const result = { operation, http: response.status, ok: reply?.ok, status: reply?.value?.status,
+                code: reply?.value?.error?.code, error: reply?.error }
+              globalThis.__fixtureManagementTrace.push(result)
+              if (operation === 'execute') globalThis.__fixtureExecutions.push(result)
+            }
+            return response
+          }
+        })()`)
+      }
       const snapshot = async (page: CdpClient) =>
         await page.evaluate(`({
         active: globalThis.__cordisxRuntime.activePluginGeneration(),
@@ -361,24 +386,75 @@ it.skipIf(chrome === undefined)(
         expect(expected.active.plugins.map(item => item.enabled)).toEqual(enabled)
         for (const page of [secondDesktop!, first!, second!]) expect(await snapshot(page)).toEqual(expected)
       }
+      const openDetail = async (page: CdpClient, id: string) => {
+        const item = JSON.stringify(`[data-plugin-id="${id}"]`)
+        const detail = JSON.stringify(`[data-plugin-detail="${id}"]`)
+        await expect.poll(() => page.evaluate(`Boolean(document.querySelector(${item}))`), { timeout: 20_000 })
+          .toBe(true)
+        await page.evaluate(`document.querySelector(${item}).click()`)
+        await expect.poll(() => page.evaluate(`Boolean(document.querySelector(${detail}))`), { timeout: 20_000 })
+          .toBe(true)
+      }
+      const clickLifecycle = async (page: CdpClient, action: 'enable' | 'disable') => {
+        const selector = JSON.stringify(`[data-plugin-lifecycle-action="${action}"]`)
+        const previous = await page.evaluate<number>('globalThis.__fixtureExecutions.length')
+        await expect.poll(() =>
+          page.evaluate(`(() => {
+          const button = document.querySelector(${selector})
+          if (!button || button.disabled || button.hasAttribute('disabled')
+            || button.classList.contains('t-is-disabled') || button.getAttribute('aria-disabled') === 'true') return false
+          button.click()
+          return true
+        })()`), { timeout: 20_000 }).toBe(true)
+        if (action === 'disable') {
+          try {
+            await expect.poll(() =>
+              page.evaluate(`globalThis.__fixtureDialogRoots.some(root =>
+              root.querySelector('dialog[open] [data-action=confirm]'))`), { timeout: 20_000 }).toBe(true)
+          } catch (cause) {
+            const details = await page.evaluate(`({
+              button: document.querySelector(${selector})?.outerHTML.slice(0, 500),
+              roots: globalThis.__fixtureDialogRoots.length,
+              alerts: [...document.querySelectorAll('[role=alert]')].map(item => item.textContent),
+              trace: globalThis.__fixtureManagementTrace.slice(-12),
+              lifecycle: globalThis.__cordisxRuntime.snapshot().pluginLifecycle
+            })`)
+            throw new Error(`Manager lifecycle confirmation unavailable: ${JSON.stringify(details)}`, { cause })
+          }
+          await page.evaluate(`globalThis.__fixtureDialogRoots.find(root =>
+            root.querySelector('dialog[open] [data-action=confirm]'))
+            .querySelector('dialog[open] [data-action=confirm]').click()`)
+        }
+        await expect.poll(() =>
+          page.evaluate(`globalThis.__fixtureExecutions.slice(${previous})
+          .some(item => item.ok === true && item.status === 'applied')`), { timeout: 45_000 }).toBe(true)
+      }
+      checkpoint = 'install base'
       await install('base-fixture')
       await verifyAll([true])
       for (const page of [desktop, secondDesktop, first, second]) {
         expect(await page!.evaluate('globalThis.__base_fixture === true')).toBe(true)
       }
+      checkpoint = 'install dependent'
       await install('dependent-fixture', [{ id: 'base-fixture', version: '1.0.0' }])
       await verifyAll([true, true])
       for (const page of [desktop, secondDesktop, first, second]) {
         expect(await page!.evaluate('globalThis.__dependent_fixture === true')).toBe(true)
       }
-      await change('plugin-disable', 'base-fixture')
+      await openDetail(first, 'base-fixture')
+      await openDetail(second, 'base-fixture')
+      checkpoint = 'disable dependency closure through first Manager'
+      await clickLifecycle(first, 'disable')
       await verifyAll([false, false])
-      await change('plugin-enable', 'base-fixture')
+      checkpoint = 'enable base through second Manager'
+      await clickLifecycle(second, 'enable')
       await verifyAll([true, false])
+      checkpoint = 'enable dependent'
       await change('plugin-enable', 'dependent-fixture')
       await verifyAll([true, true])
       // A Manager joining after packages are active must bootstrap the same
       // owner-selected graphs, not an empty or independently rebuilt registry.
+      checkpoint = 'admit third Manager'
       const thirdTarget = await desktop.send('Target.createTarget', { url: url(web.issueUrl()) }) as {
         targetId: string
       }
@@ -396,6 +472,7 @@ it.skipIf(chrome === undefined)(
       )
       // Disconnect one real Manager after the participants are frozen and
       // another participant can have received the stage command.
+      checkpoint = 'interrupt staged change'
       const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
         kind: 'plan',
         request: { kind: 'plugin-disable', pluginId: 'base-fixture' },
@@ -430,6 +507,8 @@ it.skipIf(chrome === undefined)(
         expect(status.hidden).toBe(false)
         expect(status.text).toContain('连接不可用')
       }, { timeout: 10_000 })
+    } catch (cause) {
+      throw new Error(`Desktop fleet failed at ${checkpoint}: ${JSON.stringify(stageErrors)}`, { cause })
     } finally {
       releaseStage()
       await first?.close().catch(() => {})
@@ -452,5 +531,5 @@ it.skipIf(chrome === undefined)(
       await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   },
-  120_000,
+  180_000,
 )

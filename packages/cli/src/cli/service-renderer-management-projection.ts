@@ -13,7 +13,6 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import {
-  hasRestrictedLifecycleKind,
   hasSessionExecutionToken,
   ownerExecutionToken,
   restrictedExecutionToken,
@@ -58,6 +57,12 @@ function permittedIntent(entry: ManagementProjectionEntry, intent: RestrictedLif
   }
 }
 
+function isPluginLifecycleRequest(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && typeof (value as { kind?: unknown }).kind === 'string'
+    && (value as { kind: string }).kind.startsWith('plugin-')
+}
+
 /** Refuse a known read-only write before it enters the mutation lifetime. */
 export function allowsManagementWrite(entry: ManagementProjectionEntry | undefined, operation: Operation): boolean {
   if (!entry?.confirmed || !entry.current()) return false
@@ -65,13 +70,16 @@ export function allowsManagementWrite(entry: ManagementProjectionEntry | undefin
   const restricted = entry.restricted
   if (operation.kind === 'plan') {
     const intent = restrictedLifecycleIntent(operation.request)
-    if (entry.scopedLifecycle && hasRestrictedLifecycleKind(operation.request)) {
+    if (entry.scopedLifecycle && isPluginLifecycleRequest(operation.request)) {
       return !!intent && !!restricted && restricted.plans.available && permittedIntent(entry, intent)
     }
     if (intent && restricted) return restricted.plans.available && permittedIntent(entry, intent)
     return !entry.identity
   }
-  if (operation.kind === 'execute' && hasSessionExecutionToken(operation.request)) {
+  if (
+    operation.kind === 'execute' && (hasSessionExecutionToken(operation.request)
+      || entry.scopedLifecycle && isPluginLifecycleRequest(operation.request))
+  ) {
     const token = restrictedExecutionToken(operation.request)
     const plan = token === undefined ? undefined : restricted?.plans.peek(token)
     return !!plan && operation.expectedRevision === plan.managementRevision
@@ -244,6 +252,10 @@ export async function projectManagementRequest(input: {
     return result
   }
   if (!entry.current()) throw new Error('renderer-management-projection-unavailable')
+  if (
+    entry.scopedLifecycle && (operation.kind === 'plan' || operation.kind === 'execute')
+    && isPluginLifecycleRequest(operation.request) && !allowsManagementWrite(entry, operation)
+  ) throw new Error('renderer-management-projection-unavailable')
   if (
     operation.kind === 'plan' && !!restrictedLifecycleIntent(operation.request) && !!entry.restricted
     || operation.kind === 'execute' && hasSessionExecutionToken(operation.request)
