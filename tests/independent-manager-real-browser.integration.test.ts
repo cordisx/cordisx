@@ -114,6 +114,18 @@ it.skipIf(chrome === undefined)(
             globalThis.__fixtureDialogRoots.push(root)
             return root
           }
+          let managementReceiver
+          const stableManagementReceiver = raw => {
+            const response = JSON.parse(raw)
+            if (response.ok && response.value?.status === 'applied'
+              && response.value.request?.kind === 'plugin-disable') globalThis.__fixtureDisableApplied = true
+            managementReceiver?.(raw)
+          }
+          Object.defineProperty(window, '__cordisxPluginManagementReceiveV1', {
+            configurable: true,
+            get: () => managementReceiver ? stableManagementReceiver : undefined,
+            set: value => { managementReceiver = value },
+          })
           if (!sessionStorage.getItem('fixture-migration-seeded')) {
             sessionStorage.setItem('fixture-migration-seeded', '1')
             localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
@@ -278,17 +290,6 @@ it.skipIf(chrome === undefined)(
           .toBe(true)
       }, { timeout: 20_000 })
       await first.evaluate('document.querySelector("[data-plugin-id=first-browser-plugin]").click()')
-      await first.evaluate([
-        '(() => {',
-        '  const receive = window.__cordisxPluginManagementReceiveV1',
-        '  window.__cordisxPluginManagementReceiveV1 = raw => {',
-        '    const response = JSON.parse(raw)',
-        "    if (response.ok && response.value?.status === 'applied'",
-        "      && response.value.request?.kind === 'plugin-disable') globalThis.__fixtureDisableApplied = true",
-        '    receive?.(raw)',
-        '  }',
-        '})()',
-      ].join('\n'))
       await vi.waitFor(async () => {
         const clicked = await first!.evaluate([
           '(() => {',

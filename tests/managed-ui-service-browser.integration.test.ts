@@ -57,10 +57,11 @@ const fixture = [
   '    }',
   '    return fetch(url, options).then(async response => {',
   '      const error = !response.ok ? (await response.clone().json().catch(() => ({}))).error : undefined',
-  "      const reply = response.ok && ['plan', 'execute'].includes(operation)",
+  "      const reply = response.ok && ['plan', 'execute', 'query'].includes(operation)",
   '        ? await response.clone().json().catch(() => ({})) : undefined',
   '      if (operation) transport.push({ operation, status: response.status, ...(error ? { error } : {}),',
-  '        ...(reply ? { ok: reply.ok, outcome: reply.value?.status, code: reply.value?.error?.code } : {}) })',
+  '        ...(reply ? { ok: reply.ok, outcome: reply.value?.status, code: reply.value?.error?.code,',
+  '          revision: reply.value?.activationRevision, access: reply.value?.rendererLifecycleAccess } : {}) })',
   '      return response',
   '    })',
   '  }',
@@ -248,34 +249,60 @@ it.skipIf(
       pages.push(first)
       await first.send('Runtime.enable')
       await first.send('Page.enable')
-      // The Host dialog uses a closed shadow root. Capture it only in this
-      // isolated browser so the test can confirm the actual user control.
+      // Keep one stable receiver for the page lifetime: replacing it while a
+      // Manager query is in flight would intentionally discard that receipt.
+      const probe = [
+        '(() => {',
+        '  globalThis.__fixtureDialogRoots = []',
+        '  const attach = Element.prototype.attachShadow',
+        '  Element.prototype.attachShadow = function(options) {',
+        '    const root = attach.call(this, options)',
+        '    globalThis.__fixtureDialogRoots.push(root)',
+        '    return root',
+        '  }',
+        '  const pending = new Map()',
+        '  let receiver',
+        '  const stable = raw => {',
+        '    const response = JSON.parse(raw)',
+        '    const item = pending.get(response.requestId)',
+        '    if (!item) return receiver?.(raw)',
+        '    clearTimeout(item.timer); pending.delete(response.requestId); item.resolve(response)',
+        '  }',
+        '  Object.defineProperty(window, "__cordisxPluginManagementReceiveV1", {',
+        '    configurable: true, get: () => receiver ? stable : undefined, set: value => { receiver = value }',
+        '  })',
+        '  globalThis.__fixtureManagement = operation => new Promise((resolve, reject) => {',
+        '    const requestId = "fixture-" + crypto.randomUUID()',
+        '    const timer = setTimeout(() => { pending.delete(requestId); reject(new Error("timeout")) }, 15000)',
+        '    pending.set(requestId, { resolve, timer })',
+        '    try { window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId,',
+        '      token: "renderer-binding-placeholder", profileId: "default", operation })) }',
+        '    catch (error) { clearTimeout(timer); pending.delete(requestId); reject(error) }',
+        '  })',
+        '})()',
+      ].join('\n')
       await first.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: [
-          'globalThis.__fixtureDialogRoots = []',
-          'const fixtureAttachShadow = Element.prototype.attachShadow',
-          'Element.prototype.attachShadow = function(options) {',
-          '  const root = fixtureAttachShadow.call(this, options)',
-          '  globalThis.__fixtureDialogRoots.push(root)',
-          '  return root',
-          '}',
-        ].join('\n'),
+        source: probe,
       })
       await first.send('Page.navigate', { url: await open() })
       await ready(first)
       const port = Number((await readFile(path.join(browserProfile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
       const debugOrigin = 'http://127.0.0.1:' + port
       const newPage = async () => {
-        const response = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(await open()), { method: 'PUT' })
+        const response = await fetch(debugOrigin + '/json/new?about:blank', { method: 'PUT' })
         const target = await response.json() as { webSocketDebuggerUrl: string }
         const page = await CdpClient.connect(target.webSocketDebuggerUrl)
         pages.push(page)
         await page.send('Runtime.enable')
         await page.send('Page.enable')
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: probe })
+        await page.send('Page.navigate', { url: await open() })
         await ready(page)
         return page
       }
       const second = await newPage()
+      const pageManagement = async (page: CdpClient, operation: unknown) =>
+        await page.evaluate<any>('globalThis.__fixtureManagement(' + JSON.stringify(operation) + ')')
       const firstServiceId = await first.evaluate<string>('globalThis.__fixtureServicePublicId')
       const secondServiceId = await second.evaluate<string>('globalThis.__fixtureServicePublicId')
       expect(firstServiceId !== secondServiceId).toBe(true)
@@ -285,50 +312,19 @@ it.skipIf(
         )
       expect(await alias(first)).toMatch(/^https:\/\/renderer\.cordisx\.invalid\/plugin\/[a-f0-9]{64}$/u)
       expect(await alias(first)).not.toBe(await alias(second))
-      const managementState = async (page: CdpClient) =>
-        await page.evaluate<{ source: string; operations: unknown[] }>([
-          '(async () => {',
-          "  const id = 'fixture-query-' + crypto.randomUUID()",
-          '  const old = window.__cordisxPluginManagementReceiveV1',
-          '  return await new Promise((resolve, reject) => {',
-          '    const timer = setTimeout(() => { window.__cordisxPluginManagementReceiveV1 = old; reject(new Error("timeout")) }, 5000)',
-          '    window.__cordisxPluginManagementReceiveV1 = raw => {',
-          '      const response = JSON.parse(raw)',
-          '      if (response.requestId !== id) return old?.(raw)',
-          '      clearTimeout(timer); window.__cordisxPluginManagementReceiveV1 = old',
-          "      const item = response.value?.plugins.find(value => value.id === 'fixture-service')",
-          '      if (!response.ok || !item) return reject(new Error("management unavailable: " + JSON.stringify({',
-          '        code: response.code, error: response.error, transport: globalThis.__fixtureTransport.slice(-20),',
-          '        events: globalThis.__fixtureStartupEvents.slice(-20)',
-          '      })))',
-          '      resolve({ source: item.canonicalSource, operations: item.availableOperations })',
-          '    }',
-          '    window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId: id,',
-          "      token: 'renderer-binding-placeholder', profileId: 'default', operation: { kind: 'query' } }))",
-          '  })',
-          '})()',
-        ].join('\n'))
+      const managementState = async (page: CdpClient) => {
+        const response = await pageManagement(page, { kind: 'query' })
+        const item = response.value?.plugins.find((value: { id: string }) => value.id === 'fixture-service')
+        if (!response.ok || !item) throw new Error('management unavailable: ' + String(response.error ?? 'missing'))
+        return { source: item.canonicalSource, operations: item.availableOperations }
+      }
       for (const page of [first, second]) {
         expect(await managementState(page)).toEqual({ source: await alias(page), operations: [] })
       }
-      const refusal = await first.evaluate<{ ok: boolean; error: string }>([
-        '(async () => {',
-        "  const id = 'fixture-plan-' + crypto.randomUUID()",
-        '  const old = window.__cordisxPluginManagementReceiveV1',
-        '  return await new Promise((resolve, reject) => {',
-        '    const timer = setTimeout(() => { window.__cordisxPluginManagementReceiveV1 = old; reject(new Error("timeout")) }, 5000)',
-        '    window.__cordisxPluginManagementReceiveV1 = raw => {',
-        '      const response = JSON.parse(raw)',
-        '      if (response.requestId !== id) return old?.(raw)',
-        '      clearTimeout(timer); window.__cordisxPluginManagementReceiveV1 = old',
-        '      resolve({ ok: response.ok, error: response.error })',
-        '    }',
-        '    window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId: id,',
-        "      token: 'renderer-binding-placeholder', profileId: 'default', operation: {",
-        "        kind: 'plan', request: { kind: 'plugin-disable', pluginId: 'fixture-service' } } }))",
-        '  })',
-        '})()',
-      ].join('\n'))
+      const refusal = await pageManagement(first, {
+        kind: 'plan',
+        request: { kind: 'plugin-disable', pluginId: 'fixture-service' },
+      })
       expect(refusal).toMatchObject({ ok: false, error: expect.stringContaining('read-only') })
       expect(await managementState(first)).toEqual({ source: await alias(first), operations: [] })
       for (const page of [first, second]) {
@@ -392,25 +388,6 @@ it.skipIf(
         expect(await page.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
           .toBe('available')
       }
-      const pageManagement = async (page: CdpClient, operation: unknown) =>
-        await page.evaluate<any>([
-          '(async () => {',
-          '  const operation = ' + JSON.stringify(operation),
-          "  const id = 'fixture-session-plan-' + crypto.randomUUID()",
-          '  const old = window.__cordisxPluginManagementReceiveV1',
-          '  return await new Promise((resolve, reject) => {',
-          '    const timer = setTimeout(() => { window.__cordisxPluginManagementReceiveV1 = old; reject(new Error("timeout")) }, 15000)',
-          '    window.__cordisxPluginManagementReceiveV1 = raw => {',
-          '      const response = JSON.parse(raw)',
-          '      if (response.requestId !== id) return old?.(raw)',
-          '      clearTimeout(timer); window.__cordisxPluginManagementReceiveV1 = old',
-          '      resolve(response)',
-          '    }',
-          '    window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId: id,',
-          "      token: 'renderer-binding-placeholder', profileId: 'default', operation }))",
-          '  })',
-          '})()',
-        ].join('\n'))
       const openPlugin = async (page: CdpClient) => {
         await expect.poll(() =>
           page.evaluate(
@@ -428,16 +405,50 @@ it.skipIf(
         const previousReceipts = await page.evaluate<number>(
           'globalThis.__fixtureTransport.filter(item => item.operation === "execute" && item.status === 200).length',
         )
-        await expect.poll(() =>
-          page.evaluate([
+        try {
+          await expect.poll(() =>
+            page.evaluate([
+              '(() => {',
+              '  const button = document.querySelector(' + JSON.stringify(selector) + ')',
+              '  if (!button || button.disabled || button.hasAttribute("disabled") ||',
+              '      button.classList.contains("t-is-disabled") || button.getAttribute("aria-disabled") === "true") return false',
+              '  button.click()',
+              '  return true',
+              '})()',
+            ].join('\n')), { timeout: 20_000 }).toBe(true)
+        } catch (cause) {
+          const state = await page.evaluate<unknown>([
             '(() => {',
-            '  const button = document.querySelector(' + JSON.stringify(selector) + ')',
-            '  if (!button || button.disabled || button.hasAttribute("disabled") ||',
-            '      button.classList.contains("t-is-disabled") || button.getAttribute("aria-disabled") === "true") return false',
-            '  button.click()',
-            '  return true',
+            '  const snapshot = globalThis.__cordisxRuntime.snapshot()',
+            '  const plugin = snapshot.plugins.find(item => item.id === "lifecycle-fixture")',
+            '  return { lifecycle: snapshot.pluginLifecycle,',
+            '    plugin: plugin && { status: plugin.status, package: plugin.package },',
+            '    button: document.querySelector(' + JSON.stringify(selector) + ')?.outerHTML.slice(0, 400),',
+            '    transport: globalThis.__fixtureTransport.filter(item => item.operation === "query").slice(-12) }',
             '})()',
-          ].join('\n')), { timeout: 20_000 }).toBe(true)
+          ].join('\n'))
+          const response = await pageManagement(page, { kind: 'query' }).catch(() => undefined)
+          const projection = response?.value
+          const plugin = projection?.plugins?.find((item: { id: string }) => item.id === 'lifecycle-fixture')
+          throw new Error(
+            'Lifecycle control remained unavailable: ' + JSON.stringify({
+              state,
+              projection: projection && {
+                revision: projection.activationRevision,
+                access: projection.rendererLifecycleAccess,
+                runtime: projection.runtime,
+                plugin: plugin && {
+                  version: plugin.version,
+                  digest: plugin.digest,
+                  moduleGeneration: plugin.moduleGeneration,
+                  canonicalSource: plugin.canonicalSource,
+                  operations: plugin.availableOperations,
+                },
+              },
+            }),
+            { cause },
+          )
+        }
         if (action !== 'enable') {
           try {
             await expect.poll(() =>
