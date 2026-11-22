@@ -9,6 +9,7 @@ import { createManagerRendererGraphSession } from './manager-renderer-graph-sess
 import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 import { ManagerSessionResumeGrants } from './manager-session-resume.js'
+import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
@@ -89,7 +90,6 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   /** Private supervisor identity; it must never be supplied by the browser. */
   readonly rendererGateway?: ManagerRendererGatewayProof
 } = {}) {
-  const bootstraps = new Map<string, { deadline: number; timer: NodeJS.Timeout; retire?: () => Promise<void> }>()
   type BrowserSession = {
     id: string
     deadline: number
@@ -111,29 +111,11 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   const resumes = new ManagerSessionResumeGrants()
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
-  const retire = async (key: string) => {
-    const entry = bootstraps.get(key)
-    if (!entry) return
-    bootstraps.delete(key)
-    clearTimeout(entry.timer)
-    await entry.retire?.()
-  }
-  const issueUrl = (onRetire?: () => Promise<void>) => {
-    if (bootstraps.size >= 16) throw new Error('MANAGER_LINK_LIMIT')
-    const bootstrap = randomBytes(32).toString('hex')
-    const timer = setTimeout(() => {
-      void retire(bootstrap).catch(() => undefined)
-    }, 60_000)
-    timer.unref()
-    bootstraps.set(bootstrap, { deadline: Date.now() + 60_000, timer, ...(onRetire ? { retire: onRetire } : {}) })
-    return `http://${authority}/#${bootstrap}`
-  }
-  const revokeUrl = async (url: string) => {
-    await retire(new URL(url).hash.slice(1))
-  }
-  const retireSession = async (token: string, preserveResume = false) => {
+  let bootstraps!: ManagerBootstrapEntries
+  const retireSession = async (token: string, preserveResume = false, preserveBootstrap = false) => {
     const session = sessions.get(token)
     if (!session) return await closedSessions.get(token)?.retired ?? false
+    if (!preserveBootstrap) bootstraps.finalizeSession(token)
     sessions.delete(token)
     clearTimeout(session.timer)
     session.controller.abort()
@@ -186,6 +168,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     while (closedSessions.size > 128) closedSessions.delete(closedSessions.keys().next().value!)
     return await retired
   }
+  bootstraps = new ManagerBootstrapEntries(async token => await retireSession(token, false, true))
+  const issueUrl = (onRetire?: () => Promise<void>) => `http://${authority}/#${bootstraps.issue(onRetire)}`
+  const revokeUrl = async (url: string) => await bootstraps.revoke(new URL(url).hash.slice(1))
   const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
     const previous = sessions.get(token)
     if (previous) clearTimeout(previous.timer)
@@ -266,19 +251,32 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       try {
         const offered = object(await body(request))
         const bootstrap = typeof offered?.token === 'string' ? offered.token : ''
-        const entry = bootstraps.get(bootstrap)
-        // Remove and retire before issuing a session, including for expired links.
-        await retire(bootstrap)
-        if (entry === undefined || entry.deadline <= Date.now()) {
+        const attempt = offered?.attempt
+        if (
+          attempt !== undefined
+          && (offered?.resume !== true || typeof attempt !== 'string' || !/^[a-f0-9]{64}$/u.test(attempt))
+        ) return json(response, 400, { error: 'INVALID_REQUEST' })
+        const exchanged = await bootstraps.exchange(bootstrap, attempt as string | undefined, async () => {
+          const token = randomBytes(32).toString('hex')
+          for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
+          while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
+          const resume = offered?.resume === true ? resumes.issue(token) : undefined
+          touchSession(token, randomBytes(32).toString('hex'), false)
+          return { token, ...(resume ? { resumeId: resume.id, cookie: resume.cookie } : {}) }
+        })
+        if (!exchanged) {
           return json(response, 401, { error: 'UNAUTHORIZED' })
         }
-        const token = randomBytes(32).toString('hex')
-        for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
-        while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
-        const resume = offered?.resume === true ? resumes.issue(token) : undefined
-        touchSession(token, randomBytes(32).toString('hex'), false)
-        if (resume) response.setHeader('set-cookie', resume.cookie)
-        return json(response, 200, { token, ...(resume ? { resumeId: resume.id } : {}) })
+        if (exchanged.cookie) {
+          response.setHeader('set-cookie', [
+            ...(exchanged.previousResumeId === undefined ? [] : [resumes.deleteCookie(exchanged.previousResumeId)]),
+            exchanged.cookie,
+          ])
+        }
+        return json(response, 200, {
+          token: exchanged.token,
+          ...(exchanged.resumeId === undefined ? {} : { resumeId: exchanged.resumeId }),
+        })
       } catch {
         return json(response, 400, { error: 'INVALID_REQUEST' })
       }
@@ -339,6 +337,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     if (request.method === 'POST' && origin !== `http://${authority}`) {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
+    bootstraps.finalizeSession(token)
     const activeSession = () =>
       sessions.get(token) === session && session.deadline > Date.now()
       && !session.controller.signal.aborted
@@ -883,7 +882,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     issueUrl,
     revokeUrl,
     async close() {
-      await Promise.allSettled([...bootstraps.keys()].map(retire))
+      await bootstraps.close()
       await Promise.allSettled([...sessions.keys()].map(token => retireSession(token)))
       resumes.close()
       server.closeAllConnections()

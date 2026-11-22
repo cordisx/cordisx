@@ -21,6 +21,7 @@ const heartbeatMilliseconds = 15_000
 const requestMilliseconds = 20_000
 const bootMilliseconds = 60_000
 const resumeStorageKey = 'cordisx-manager-resume-id'
+const entryStorageKey = 'cordisx-manager-entry-attempt'
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
@@ -186,6 +187,23 @@ export function startStandaloneManager(input: {
       clearTimeout(timer)
     }
   }
+  const entryAttempt = (): string | undefined => {
+    try {
+      const existing = browser.sessionStorage.getItem(entryStorageKey)
+      if (existing && tokenPattern.test(existing)) return existing
+      const bytes = browser.crypto.getRandomValues(new Uint8Array(32))
+      const value = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+      browser.sessionStorage.setItem(entryStorageKey, value)
+      return value
+    } catch {
+      return undefined
+    }
+  }
+  const forgetEntryAttempt = () => {
+    try {
+      browser.sessionStorage.removeItem(entryStorageKey)
+    } catch { /* storage may be disabled */ }
+  }
   const takeResumeId = (): string | undefined => {
     try {
       const value = browser.sessionStorage.getItem(resumeStorageKey)
@@ -310,11 +328,17 @@ export function startStandaloneManager(input: {
         throw new Error('manager-origin-invalid')
       }
       const entryToken = url.hash.slice(1)
-      // A one-time entry token should not survive a reload or remain visible.
-      browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
+      const isEntry = tokenPattern.test(entryToken)
+      if (!isEntry) browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
       const previousResume = takeResumeId()
-      const exchanged = tokenPattern.test(entryToken)
-        ? await post('/api/session', { token: entryToken, resume: true }, undefined, true)
+      const attempt = isEntry ? entryAttempt() : undefined
+      const exchanged = isEntry
+        ? await post(
+          '/api/session',
+          { token: entryToken, resume: true, ...(attempt ? { attempt } : {}) },
+          undefined,
+          true,
+        )
         : entryToken !== '' || previousResume === undefined
         ? undefined
         : await resumeSession(previousResume)
@@ -326,6 +350,12 @@ export function startStandaloneManager(input: {
       }
       sessionToken = exchanged.token
       resumeId = saveResumeId(exchanged.resumeId)
+      if (isEntry) {
+        // Keep the bootstrap in the fragment until exchange succeeds, then
+        // remove it before starting any owner operation.
+        browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
+        forgetEntryAttempt()
+      }
       const opened = record(await post('/api/renderer/open', {}, sessionToken), [
         'status',
         'rendererId',

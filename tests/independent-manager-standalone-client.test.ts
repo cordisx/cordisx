@@ -39,6 +39,7 @@ function fixture(input: {
   readonly bundlePath?: string
   readonly graphs?: readonly unknown[]
   readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
+  readonly exchangeGate?: Promise<void>
   readonly bootstrapGate?: Promise<void>
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
@@ -92,9 +93,10 @@ function fixture(input: {
   let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
     if (path === '/api/session') {
-      return Promise.resolve(
-        response({ token: sessionToken, ...(input.issueResume ? { resumeId: 'f'.repeat(64) } : {}) }),
-      )
+      const result = response({ token: sessionToken, ...(input.issueResume ? { resumeId: 'f'.repeat(64) } : {}) })
+      return input.exchangeGate
+        ? Promise.race([input.exchangeGate.then(() => result), abortResponse(options.signal!)])
+        : Promise.resolve(result)
     }
     if (path === `/api/session/resume/${'e'.repeat(64)}`) {
       if (resumes++ === 0) {
@@ -267,6 +269,28 @@ it('recovers a refreshed tab only after the old renderer is confirmed retired', 
     expect(test.fetch.mock.calls.some(call => call[0] === '/api/session')).toBe(false)
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
   } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retains the entry and tab attempt if the initial exchange is interrupted', async () => {
+  const gate = deferred<void>()
+  const test = fixture({ issueResume: true, exchangeGate: gate.promise })
+  try {
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/session')).toBe(true))
+    const request = test.fetch.mock.calls.find(call => call[0] === '/api/session')!
+    const body = JSON.parse(String(request[1].body)) as { token: string; attempt: string }
+    expect(body.token).toBe(entryToken)
+    expect(body.attempt).toMatch(/^[a-f0-9]{64}$/u)
+    expect(test.win.location.hash).toBe(`#${entryToken}`)
+    test.beforeUnload()
+    test.pageHide()
+    expect(await test.manager.ready).toBe(false)
+    expect(test.win.location.hash).toBe(`#${entryToken}`)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-entry-attempt')).toBe(body.attempt)
+  } finally {
+    gate.resolve()
     await test.manager.close()
     test.dom.window.close()
   }

@@ -63,12 +63,18 @@ semantics described below. An edit started against an older revision is rejected
 if another client changes the declarations first.
 
 The sidecar listens only on loopback and communicates with the owner through its
-private management socket. Each browser opening obtains a 60-second, single-use
-bootstrap in the URL fragment; it is exchanged for a separate session token and
-removed from the address bar. The default page stores its session token in that
-tab's session storage. The experimental Host page keeps its session token in
+private management socket. Each browser opening obtains a 60-second bootstrap
+in the URL fragment; it is exchanged for a separate session token and removed
+from the address bar. If that exchange is interrupted, the same tab may retry
+its temporary attempt until the session first makes an authenticated request;
+the previous session must retire before a replacement is issued. The default
+page stores its session token in that tab's session storage. The experimental
+Host page keeps its session token in
 memory. On refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
+If the browser loses the unload request, the authenticated replacement requests
+that retirement itself. A duplicated tab carrying the same recovery handle
+replaces the previous session; open a new manager entry for an independent tab.
 This includes a hard reload, where the fixed resource worker reclaims the page
 before the new authenticated session binds. Requests still queued before owner
 admission are cancelled rather than treated as dispatched writes.

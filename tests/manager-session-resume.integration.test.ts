@@ -13,6 +13,64 @@ const deferred = <T>() => {
   return { promise, resolve }
 }
 
+it('retries a lost initial exchange only for the same tab attempt', async () => {
+  const cleanup = vi.fn(async () => {})
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'work',
+    generation: 'owner-1',
+    isCurrent: async () => true,
+    request: async (operation: { action?: string }) =>
+      operation.action === 'open'
+        ? {
+          status: 'ok',
+          channels: ['plugin-management'],
+          commands: true,
+          handle: { rendererId: secret('a'), grant: secret('b'), ownerGeneration: 'owner-1' },
+        }
+        : { status: 'ok' },
+  } as never, { rendererGateway: { pid: 42, processStartedAt: 'fixture', instanceToken: secret('c') } })
+  const origin = new URL(web.url).origin
+  const post = async (path: string, body: unknown, token?: string, cookie?: string) =>
+    await fetch(`${origin}${path}`, {
+      method: 'POST',
+      headers: {
+        origin,
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+  try {
+    const entryToken = new URL(web.issueUrl(cleanup)).hash.slice(1)
+    const offer = { token: entryToken, resume: true, attempt: secret('d') }
+    const first = await post('/api/session', offer)
+    expect(first.status).toBe(200)
+    const previous = await first.json() as { token: string; resumeId: string }
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect((await post('/api/session', { ...offer, attempt: secret('e') })).status).toBe(401)
+    const retry = await post('/api/session', offer)
+    expect(retry.status).toBe(200)
+    const current = await retry.json() as { token: string; resumeId: string }
+    expect(current.token).not.toBe(previous.token)
+    expect(current.resumeId).not.toBe(previous.resumeId)
+    expect((await post('/api/renderer/open', {}, previous.token)).status).toBe(401)
+    expect((await post('/api/renderer/open', {}, current.token)).status).toBe(200)
+    expect((await post('/api/session', offer)).status).toBe(401)
+    expect(cleanup).toHaveBeenCalledOnce()
+
+    const nextOffer = { token: new URL(web.issueUrl()).hash.slice(1), resume: true, attempt: secret('f') }
+    const nextOpen = await post('/api/session', nextOffer)
+    const next = await nextOpen.json() as { token: string; resumeId: string }
+    const nextCookie = nextOpen.headers.get('set-cookie')!.split(';')[0]!
+    expect((await post(`/api/session/resume/${next.resumeId}`, {}, undefined, nextCookie)).status).toBe(200)
+    expect((await post('/api/session', nextOffer)).status).toBe(401)
+  } finally {
+    await web.close()
+  }
+})
+
 it('rotates tab-scoped recovery only after the owner confirms renderer retirement', async () => {
   const retired = deferred<{ status: string }>()
   const revoke = vi.fn(async () => await retired.promise)

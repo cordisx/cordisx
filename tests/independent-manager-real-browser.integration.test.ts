@@ -113,6 +113,13 @@ it.skipIf(chrome === undefined)(
           }
           const original = window.fetch.bind(window)
           window.fetch = (request, options) => {
+            if (request === '/api/session' && !sessionStorage.getItem('fixture-exchange-issued')) {
+              return original(request, options).then(response => {
+                if (!response.ok) return response
+                sessionStorage.setItem('fixture-exchange-issued', '1')
+                return new Promise(() => {})
+              })
+            }
             if (request === '/api/renderer/close' && sessionStorage.getItem('fixture-drop-close') === '1') {
               sessionStorage.removeItem('fixture-drop-close')
               sessionStorage.setItem('fixture-close-dropped', '1')
@@ -132,7 +139,16 @@ it.skipIf(chrome === undefined)(
       })`)
           expect(state.ready, state.status).toBe(true)
         }, { timeout: 45_000 })
+      // The server consumed the bootstrap, but the browser lost the first
+      // response. Reload must retry the same tab attempt before bootstrapping.
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate("sessionStorage.getItem('fixture-exchange-issued')")).toBe('1')
+      }, { timeout: 15_000 })
+      expect(await first.evaluate('location.hash.length > 1')).toBe(true)
+      await first.send('Page.reload')
       await ready(first)
+      expect(await first.evaluate('location.hash')).toBe('')
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-entry-attempt')")).toBeNull()
       const priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(priorResume).toMatch(/^[a-f0-9]{64}$/u)
       const migrationComplete = async () => {
