@@ -151,6 +151,11 @@ The exact running-runtime CLI's ordinary reads and policy-allowed source replies
 receive one-time native approval automatically. This does not approve arbitrary
 shell commands, binding/policy mutations or sends to another conversation.
 Commands that cannot be verified retain normal approval behavior.
+Scoped `memory guide/navigate/search-page/search/get/batch/grant-list` are
+ordinary reads only when their exact runtime and current incoming context are
+verified. The memory endpoint still filters by owner and grants. `remember`,
+`update`, `forget`, index rebuild, sharing and identity changes retain normal
+native approval behavior; memory is never blanket-approved as a subcommand.
 
 `conversations` returns `complete: true` when the platform group directory was
 fully read. A missing permission, transport failure or pagination limit returns
