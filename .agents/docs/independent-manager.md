@@ -56,6 +56,9 @@ proof. Each Manager receives only matching existing Manager UI permissions.
 Managed-service reads and subscriptions are available; the service owner can
 coordinate an explicit login or logout across admitted Managers. Logout is
 unavailable while affected terminal or managed-service clients hold leases.
+An owner-private reservation can temporarily borrow specific service operations
+while other clients stay fenced. Manager account switching and OAuth do not yet
+use this facility and remain unavailable.
 When initial service sources are still being adopted, the owner waits before
 taking the Manager's profile fences; admission remains bounded and stops when
 the page disconnects.

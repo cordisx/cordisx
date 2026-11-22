@@ -23,6 +23,7 @@ import type {
 } from './managed-service-native-connection.js'
 import { ManagedServiceRuntimeNative } from './managed-service-runtime-native.js'
 import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js'
+import { ManagedServiceRuntimeClientReservations } from './managed-service-runtime-client-reservations.js'
 import type {
   ManagedServiceClientIdentity,
   ManagedServiceClientReservation,
@@ -52,7 +53,6 @@ import {
   ManagedServiceStartupError,
 } from './managed-service-startup-diagnostic.js'
 import {
-  managedBindingCurrent,
   managedDiagnostic,
   managedFailure,
   managedHandle,
@@ -111,8 +111,10 @@ export class ManagedServiceRuntime {
   private readonly records = new Map<string, ManagedServiceRecord>()
   private readonly registrations = new Map<string, ManagedServiceRecord>()
   private readonly pendingRegistrations = new Map<string, Promise<ManagedServiceRecord>>()
-  private readonly clientReservations = new Map<string, symbol>()
-  private readonly fencedClients = new Set<string>()
+  private readonly clientReservations = new ManagedServiceRuntimeClientReservations(
+    this.records,
+    record => [...this.native.authorities.values()].some(owner => owner === record),
+  )
   private readonly native = new ManagedServiceRuntimeNative(this.registrations, record => this.clientsBlocked(record))
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
@@ -144,63 +146,18 @@ export class ManagedServiceRuntime {
       this.registrations,
       this.fetch,
       record => this.clientsBlocked(record),
+      this.clientReservations.borrowAuthority,
     )
-  }
-
-  private clientKey(record: ManagedServiceRecord): string {
-    return `${record.access.owner.pluginId}\u0000${record.definition.serviceId}`
   }
 
   private clientsBlocked(record: ManagedServiceRecord): boolean {
-    const key = this.clientKey(record)
-    return this.clientReservations.has(key) || this.fencedClients.has(key)
+    return this.clientReservations.blocked(record)
   }
 
-  /** Reserve native connections and plugin consumer leases before revoking a service login. */
+  /** Reserve native connections and plugin consumer leases before changing a service. */
   reserveServiceClients(identity: ManagedServiceClientIdentity): ManagedServiceClientReservation | undefined {
-    const matches = [...this.records.values()].filter(record =>
-      !record.disposed && record.access.owner.pluginId === identity.pluginId
-      && record.access.owner.pluginGeneration === identity.pluginGeneration
-      && record.definition.serviceId === identity.serviceId
-    )
-    if (matches.length !== 1) return undefined
-    const record = matches[0]!
-    const key = this.clientKey(record)
-    const hasDependentMaterialization = [...this.records.values()].some(candidate =>
-      candidate !== record && !candidate.disposed
-      && [...candidate.materializations.values()].some(materialization =>
-        materialization.sources.some(source => managedBindingCurrent(source.binding, record.binding, record.disposed))
-      )
-    )
-    if (
-      this.clientsBlocked(record) || record.leases.size > 0 || hasDependentMaterialization
-      || [...this.native.authorities.values()].some(owner => owner === record)
-    ) return undefined
-    const token = Symbol('managed-service-client-reservation')
-    this.clientReservations.set(key, token)
-    let ended = false
-    const current = () =>
-      !ended && !record.disposed && this.records.get(managedIdentityKey(record.binding.identity)) === record
-      && this.clientReservations.get(key) === token && !this.fencedClients.has(key)
-    return {
-      isCurrent: current,
-      release: () => {
-        if (!current()) return false
-        ended = true
-        this.clientReservations.delete(key)
-        return true
-      },
-      fence: () => {
-        if (ended) return
-        ended = true
-        if (this.clientReservations.get(key) === token) {
-          this.clientReservations.delete(key)
-          this.fencedClients.add(key)
-        }
-      },
-    }
+    return this.clientReservations.reserve(identity)
   }
-
   bind(access: ManagedServiceActivationAccess, signal: AbortSignal): ManagedServiceActivationBinding {
     return createManagedServiceActivationBinding({
       access,

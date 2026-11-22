@@ -1,14 +1,40 @@
-/** Owner-private identity for clients affected by a managed-service logout. */
+import type { ManagedServiceSafeValueV1 } from '@cordisx/protocol/managed-service-runtime/v1'
+
+/** Owner-private identity for clients affected by a managed-service mutation. */
 export interface ManagedServiceClientIdentity {
   readonly pluginId: string
   readonly pluginGeneration: string
   readonly serviceId: string
 }
 
+/** A bounded owner action may use only these operations and exact request values. */
+export interface ManagedServiceClientBorrowPolicy {
+  readonly operations: readonly string[]
+  /** An omitted limit permits one invocation of that operation. */
+  readonly limits?: Readonly<Record<string, number>>
+  readonly allows: (operation: string, value: ManagedServiceSafeValueV1 | undefined) => boolean
+  /** Outer owner and client reservations must remain current through every call. */
+  readonly isCurrent?: () => boolean
+}
+
 export interface ManagedServiceClientReservation {
   isCurrent(): boolean
   release(): boolean
   fence(): void
+  runBorrowed?<T>(policy: ManagedServiceClientBorrowPolicy, action: () => Promise<T>): Promise<T>
+}
+
+function guardedBorrowPolicy(
+  policy: ManagedServiceClientBorrowPolicy,
+  current: () => boolean,
+): ManagedServiceClientBorrowPolicy {
+  const previous = policy.isCurrent
+  return {
+    operations: policy.operations,
+    ...(policy.limits === undefined ? {} : { limits: policy.limits }),
+    allows: policy.allows,
+    isCurrent: () => current() && (previous?.() ?? true),
+  }
 }
 
 /** Bind a reservation to the active plugin generation, not a staged fleet. */
@@ -33,6 +59,24 @@ export function reserveActiveManagedServiceClients(
     isCurrent: current,
     release: () => current() && reservation.release(),
     fence: () => reservation.fence(),
+    ...(reservation.runBorrowed === undefined ? {} : {
+      async runBorrowed<T>(policy: ManagedServiceClientBorrowPolicy, action: () => Promise<T>): Promise<T> {
+        try {
+          if (!current()) throw new Error('managed-service-borrow-unavailable')
+          const result = await reservation.runBorrowed!(guardedBorrowPolicy(policy, current), async () => {
+            if (!current()) throw new Error('managed-service-borrow-unavailable')
+            const value = await action()
+            if (!current()) throw new Error('managed-service-borrow-unavailable')
+            return value
+          })
+          if (!current()) throw new Error('managed-service-borrow-unavailable')
+          return result
+        } catch (error) {
+          reservation.fence()
+          throw error
+        }
+      },
+    }),
   }
 }
 
@@ -46,10 +90,11 @@ export function reserveManagedServiceClients(
   const abandon = () => {
     for (const reservation of reservations.reverse()) {
       try {
-        if (!reservation.release()) reservation.fence()
-      } catch {
+        if (reservation.release()) continue
+      } catch { /* A failed release must still be fenced. */ }
+      try {
         reservation.fence()
-      }
+      } catch { /* Continue fencing the remaining sources. */ }
     }
   }
   try {
@@ -65,8 +110,22 @@ export function reserveManagedServiceClients(
     abandon()
     return undefined
   }
+  const borrowers = reservations.filter(reservation => reservation.runBorrowed !== undefined)
+  if (borrowers.length > 1) {
+    abandon()
+    return undefined
+  }
   let ended = false
   const current = () => !ended && reservations.every(reservation => reservation.isCurrent())
+  const fence = () => {
+    if (ended) return
+    ended = true
+    for (const reservation of reservations) {
+      try {
+        reservation.fence()
+      } catch { /* Continue fencing the remaining sources. */ }
+    }
+  }
   return {
     isCurrent: current,
     release() {
@@ -79,14 +138,31 @@ export function reserveManagedServiceClients(
           released = false
         }
       }
-      if (!released) { for (const reservation of reservations) reservation.fence() }
+      if (!released) {
+        fence()
+        return false
+      }
       ended = true
-      return released
+      return true
     },
-    fence() {
-      if (ended) return
-      ended = true
-      for (const reservation of reservations) reservation.fence()
-    },
+    fence,
+    ...(borrowers.length === 0 ? {} : {
+      async runBorrowed<T>(policy: ManagedServiceClientBorrowPolicy, action: () => Promise<T>): Promise<T> {
+        try {
+          if (!current()) throw new Error('managed-service-borrow-unavailable')
+          const value = await borrowers[0]!.runBorrowed!(guardedBorrowPolicy(policy, current), async () => {
+            if (!current()) throw new Error('managed-service-borrow-unavailable')
+            const result = await action()
+            if (!current()) throw new Error('managed-service-borrow-unavailable')
+            return result
+          })
+          if (!current()) throw new Error('managed-service-borrow-unavailable')
+          return value
+        } catch (error) {
+          fence()
+          throw error
+        }
+      },
+    }),
   }
 }
