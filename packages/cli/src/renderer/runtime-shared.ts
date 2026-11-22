@@ -337,6 +337,8 @@ export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'packag
   readonly artifactGeneration?: string
   /** Owner-issued initial graph for a configured plugin in an independent Host. */
   readonly standaloneConfiguredGraph?: true
+  /** Owner-issued initial graph for an installed package in an independent Host. */
+  readonly standaloneInstalledGraph?: true
   /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot

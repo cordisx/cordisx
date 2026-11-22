@@ -427,6 +427,9 @@ export async function buildRendererCompositionSource(
       const configuredGraphField = attachedStandalone && plugin.package === undefined && graphModule !== undefined
         ? ', standaloneConfiguredGraph: true'
         : ''
+      const installedGraphField = attachedStandalone && plugin.package !== undefined && graphModule !== undefined
+        ? ', standaloneInstalledGraph: true'
+        : ''
       const readme = readmes[pluginIndex]
       const readmeField = readme?.default === undefined ? '' : `, readme: ${JSON.stringify(readme.default)}`
       const localizedReadmes = readme === undefined ? {} : {
@@ -451,7 +454,7 @@ export async function buildRendererCompositionSource(
         JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)
       }, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${
         plugin.revision ?? 0
-      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${configuredGraphField}${moduleField}${isolatedArtifactField} }`
+      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${configuredGraphField}${installedGraphField}${moduleField}${isolatedArtifactField} }`
     }).join(',')
   }]`
   const providers = [

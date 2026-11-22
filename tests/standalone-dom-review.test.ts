@@ -21,6 +21,7 @@ const context: StandaloneDomReviewContext = {
   runtimeGeneration: 'owner-1',
   moduleGeneration: 'configured-1',
   artifact: { version: '1.2.3', integrity: `sha256:${'b'.repeat(64)}` },
+  persistentEligible: true,
   isCurrent: () => true,
   verifyCurrent: async () => true,
   invalidate: () => {},

@@ -1,5 +1,5 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
-import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneDomOnceReviewTarget, isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import { consumeStandaloneDomReset } from './standalone-dom-reset-button.js'
 export { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import type {
@@ -31,6 +31,8 @@ export interface StandaloneDomReviewContext {
   readonly runtimeGeneration: string
   readonly moduleGeneration: string
   readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
+  /** Only the owner-selected configured Channel participates in persistent handoff. */
+  readonly persistentEligible: boolean
   readonly isCurrent: () => boolean
   /** Checks the owner-bound renderer and its resources, without exposing its session token. */
   readonly verifyCurrent: () => Promise<boolean>
@@ -46,7 +48,7 @@ type ActiveReview = {
   invalidated: boolean
 }
 
-/** A Host interaction can review only the selected Channel's two Manager UI points, once per tab. */
+/** A Host interaction reviews one owner-selected Manager UI point per tab. */
 export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
   private active: ActiveReview | undefined
   private closed = false
@@ -75,8 +77,9 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     return true
   }
 
-  supportsPersistentDecision(): boolean {
-    return !this.closed && this.persistentDecision !== undefined
+  supportsPersistentDecision(context: StandaloneDomReviewContext): boolean {
+    return !this.closed && context.persistentEligible
+      && isStandaloneDomReviewTarget(context.identity, context.pointId) && this.persistentDecision !== undefined
   }
 
   bindPersistentReset(callback: NonNullable<StandaloneDomReview['persistentReset']>): boolean {
@@ -85,8 +88,9 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     return true
   }
 
-  supportsPersistentReset(): boolean {
-    return !this.closed && this.persistentReset !== undefined
+  supportsPersistentReset(context: StandaloneDomReviewContext): boolean {
+    return !this.closed && context.persistentEligible
+      && isStandaloneDomReviewTarget(context.identity, context.pointId) && this.persistentReset !== undefined
   }
 
   private current(active: ActiveReview): boolean {
@@ -128,7 +132,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   async review(context: StandaloneDomReviewContext, operation: () => Promise<boolean>): Promise<boolean> {
     if (
-      this.closed || this.active || !isStandaloneDomReviewTarget(context.identity, context.pointId)
+      this.closed || this.active || !isStandaloneDomOnceReviewTarget(context.identity, context.pointId)
       || !ID.test(context.profileId)
       || !ID.test(context.runtimeGeneration) || !ID.test(context.moduleGeneration)
       || !context.artifact.version || context.artifact.version.length > 128
@@ -173,7 +177,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     operation: () => Promise<boolean>,
   ): Promise<boolean> {
     if (
-      !this.persistentReset || observed !== 'allow-persistent' && observed !== 'deny-persistent'
+      !this.supportsPersistentReset(context) || observed !== 'allow-persistent' && observed !== 'deny-persistent'
       || !consumeStandaloneDomReset(event, context.identity, context.pointId)
     ) return false
     return await this.review(context, async () => {
@@ -215,7 +219,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
       || !item.allowedDecisions.includes('allow-once') || !item.allowedDecisions.includes('deny-once')
     ) return undefined
     active.used = true
-    const persistent = this.persistentDecision !== undefined
+    const persistent = this.supportsPersistentDecision(active.context)
     const allowedDecisions = [
       'deny-once' as const,
       'allow-once' as const,
@@ -269,7 +273,7 @@ export function createStandaloneDomReview(document: Document): StandaloneDomRevi
   return new StandaloneDomReview(context =>
     new BrowserPermissionAuthorizationPromptV2(document, (_plan, identity) => ({
       plugin: {
-        name: `Channel ${context.artifact.version}`,
+        name: `${identity.id === 'channel' ? 'Channel' : identity.id} ${context.artifact.version}`,
         source: `${identity.source} · ${context.artifact.integrity}`,
         trust: 'configured',
       },

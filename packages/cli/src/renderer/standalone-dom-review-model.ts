@@ -1,9 +1,10 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
 import type { ManagerModel } from './manager.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
-import { isStandaloneDomReviewTarget, standaloneDomReview } from './standalone-dom-review.js'
+import { isStandaloneDomOnceReviewTarget } from '../standalone-permission-contract.js'
+import { standaloneDomReview } from './standalone-dom-review.js'
 
-/** Bind the Manager control to the exact configured graph and the live owner session. */
+/** Bind the Manager control to an exact owner-issued graph and the live owner session. */
 export function createStandaloneDomReviewModel(
   runtime: RuntimeClosureScope,
 ): ManagerModel['standaloneDomReview'] {
@@ -14,16 +15,41 @@ export function createStandaloneDomReviewModel(
   if (metadata.hostKind !== 'standalone' || verifySession === undefined || gate === undefined) return undefined
 
   const select = (identity: CordisXPluginIdentity, pointId: string, requireReview = true) => {
-    if (runtime.disposed || !isStandaloneDomReviewTarget(identity, pointId)) return undefined
+    if (runtime.disposed || !isStandaloneDomOnceReviewTarget(identity, pointId)) return undefined
     const controller = runtime.activeController()!(identity.id, identity.source)
-    const artifact = controller?.item.distributionArtifact
     if (
       controller === undefined || controller.status !== 'active' || !controller.principalLive
       || !runtime.activeControllers()!().includes(controller)
-      || controller.item.standaloneConfiguredGraph !== true || controller.item.package !== undefined
-      || artifact === undefined || requireReview && broker.domPolicy(identity, pointId) !== 'inherit'
+      || controller.identity.id !== identity.id || controller.identity.source !== identity.source
+      || requireReview && broker.domPolicy(identity, pointId) !== 'inherit'
     ) return undefined
-    return { controller, artifact, moduleGeneration: runtime.moduleGenerationOf()!(controller) }
+    const moduleGeneration = runtime.moduleGenerationOf()!(controller)
+    const configured = controller.item.standaloneConfiguredGraph === true && controller.item.package === undefined
+      && identity.id === 'channel'
+    const packageItem = controller.item.package
+    let artifact = configured ? controller.item.distributionArtifact : undefined
+    if (!configured && controller.item.standaloneInstalledGraph === true && packageItem !== undefined) {
+      const activation = runtime.currentActivation
+      const matches = activation.plugins.filter(item => item.id === identity.id)
+      const active = matches[0]
+      if (
+        activation.recordKind !== 'active' || activation.profileId !== metadata.profileId
+        || activation.runtimeGeneration !== runtime.generation() || matches.length !== 1 || !active?.enabled
+        || active.digest !== packageItem.digest || active.version !== packageItem.version
+        || active.moduleGeneration !== packageItem.moduleGeneration || moduleGeneration !== packageItem.moduleGeneration
+        || active.canonicalSource !== packageItem.canonicalSource
+        || packageItem.canonicalSource !== undefined && packageItem.canonicalSource !== identity.source
+      ) return undefined
+      artifact = { version: packageItem.version, integrity: packageItem.artifactIntegrity ?? packageItem.digest }
+    }
+    if (artifact === undefined) return undefined
+    return {
+      controller,
+      artifact,
+      moduleGeneration,
+      persistentEligible: configured,
+      packageDigest: packageItem?.digest,
+    }
   }
   const reviewContext = (
     target: CordisXPluginIdentity,
@@ -36,6 +62,8 @@ export function createStandaloneDomReviewModel(
       const current = select(target, pointId, false)
       return current?.controller === controller && current.moduleGeneration === moduleGeneration
         && current.artifact.version === artifact.version && current.artifact.integrity === artifact.integrity
+        && current.packageDigest === selected.packageDigest
+        && current.persistentEligible === selected.persistentEligible
     }
     return {
       identity: target,
@@ -44,6 +72,7 @@ export function createStandaloneDomReviewModel(
       runtimeGeneration: runtime.generation()!,
       moduleGeneration,
       artifact,
+      persistentEligible: selected.persistentEligible,
       isCurrent,
       verifyCurrent: async () => {
         try {
@@ -61,14 +90,15 @@ export function createStandaloneDomReviewModel(
       const selected = select(identity, pointId, false)
       if (selected === undefined) return undefined
       const policy = broker.domPolicy(identity, pointId)
-      if (policy !== 'inherit' && !gate.supportsPersistentReset()) return undefined
+      const context = reviewContext(identity, pointId, selected)
+      if (policy !== 'inherit' && !gate.supportsPersistentReset(context)) return undefined
       return Object.freeze({
         version: selected.artifact.version,
         integrity: selected.artifact.integrity,
         authorized: broker.hasDomLease(identity, pointId, selected.controller.generationView),
         policy,
-        persistentAvailable: gate.supportsPersistentDecision(),
-        resetAvailable: gate.supportsPersistentReset(),
+        persistentAvailable: gate.supportsPersistentDecision(context),
+        resetAvailable: gate.supportsPersistentReset(context),
       })
     },
     async request(identity, pointId) {
@@ -93,8 +123,9 @@ export function createStandaloneDomReviewModel(
       const target = Object.freeze({ id: identity.id, source: identity.source })
       const selected = select(target, pointId, false)
       const policy = broker.domPolicy(target, pointId)
-      if (selected === undefined || policy === 'inherit' || !gate.supportsPersistentReset()) return false
+      if (selected === undefined || policy === 'inherit') return false
       const context = reviewContext(target, pointId, selected)
+      if (!gate.supportsPersistentReset(context)) return false
       return await gate.reset(
         context,
         policy === 'allow' ? 'allow-persistent' : 'deny-persistent',
