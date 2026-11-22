@@ -83,7 +83,15 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
     if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || !base.port) {
       throw new Error('Fixture gateway is not loopback')
     }
-    const allowed = [...installRoots, root, helperRoot, '/private/etc', '/private/var/db/dyld']
+    // Native Claude Code reads the system time-zone database during startup.
+    const allowed = [
+      ...installRoots,
+      root,
+      helperRoot,
+      '/private/etc',
+      '/private/var/db/dyld',
+      '/private/var/db/timezone',
+    ]
     return [
       '(version 1)',
       '(allow default)',
