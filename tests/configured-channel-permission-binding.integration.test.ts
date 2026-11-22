@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { buildDomPermissionAuthorizationPlanV3 } from '../packages/cli/src/capability-risk-catalog.js'
 import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
 import { createServiceRendererPermissionChannel } from '../packages/cli/src/cli/service-renderer-permission-channel.js'
+import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service-owner-permission-consumers.js'
 import type {
   ManagerRendererChannel,
   ManagerRendererChannelContext,
@@ -79,6 +80,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
     let writer: ReturnType<typeof broker> | undefined
     let peer: ReturnType<typeof broker> | undefined
     let store: BindingPermissionPolicyStore | undefined
+    let consumers: ServiceOwnerPermissionConsumers | undefined
     const signer = await createStandalonePermissionSigner({
       rendererId: f.handle.rendererId,
       profileId: f.profileId,
@@ -98,32 +100,20 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       }
       const writerGeneration = await generationFor(f.invocation)
       const peerGeneration = await generationFor(second)
-      const reserveOtherConsumers = async () => {
-        let current = true
-        return {
-          isCurrent: () => current,
-          adopt: async (input: {
-            profileId: string
-            ownerGeneration: string
-            requestId: string
-            candidate: readonly unknown[]
-          }) => ({
-            profileId: input.profileId,
-            ownerGeneration: input.ownerGeneration,
-            requestId: input.requestId,
-            adopted: current,
-            candidate: input.candidate,
-          }),
-          release: () => {
-            if (!current) return false
-            current = false
-            return true
-          },
-          fence: () => {
-            current = false
-          },
-        }
-      }
+      const channelSource = f.configuredChannel?.plugin.source
+      if (!channelSource) throw new Error('fixture Channel source missing')
+      consumers = new ServiceOwnerPermissionConsumers({
+        profileId: f.profileId,
+        generation: f.generation,
+        channelSource,
+        participants: f.participants,
+        lifecycle: f.lifecycle,
+        ownerCurrent: () => true,
+        loadPolicies: async () =>
+          (await loadHomeConfig(f.configPath)).permissions.filter(
+            policy => policy.key.profileId === f.profileId,
+          ),
+      })
       channel = createServiceRendererPermissionChannel({
         profileId: f.profileId,
         configPath: f.configPath,
@@ -132,8 +122,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         participants: f.participants,
         lifecycle: f.lifecycle,
         sessions: () => f.sessions,
-        // The other-consumer fence is synthetic; production remains gated.
-        reserveOtherConsumers,
+        reserveOtherConsumers: async origin => consumers!.reserve(origin),
       })
       const identity = { id: 'channel', source: alias }
       const plan = buildDomPermissionAuthorizationPlanV3({
@@ -258,6 +247,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       }))
       expect(onUnknown).not.toHaveBeenCalled()
     } finally {
+      consumers?.close()
       signer.close()
       peerSigner.close()
       proof.close()

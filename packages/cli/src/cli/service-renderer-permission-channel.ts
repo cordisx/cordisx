@@ -1,4 +1,4 @@
-import { fenceManagerOrigin } from './manager-origin-fence.js'
+import { fenceManagerOrigin, type ManagerOriginFence } from './manager-origin-fence.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { createManagerRendererPermissionChannel } from './manager-renderer-permission.js'
 import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
@@ -19,7 +19,7 @@ export function createServiceRendererPermissionChannel(input: {
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: ServiceRendererLifecycle
   readonly sessions: () => ManagerRendererSessions
-  readonly reserveOtherConsumers: () => Promise<ServiceRendererPermissionConsumerFence>
+  readonly reserveOtherConsumers: (origin: ManagerOriginFence) => Promise<ServiceRendererPermissionConsumerFence>
 }) {
   return createManagerRendererPermissionChannel({
     profileId: input.profileId,
@@ -72,7 +72,7 @@ export function createServiceRendererPermissionChannel(input: {
         })
         let consumers: ServiceRendererPermissionConsumerFence | undefined
         try {
-          consumers = await input.reserveOtherConsumers()
+          consumers = await input.reserveOtherConsumers(origin)
           if (!origin.isCurrent() || !consumers.isCurrent()) {
             throw new Error('renderer-permission-consumers-unavailable')
           }

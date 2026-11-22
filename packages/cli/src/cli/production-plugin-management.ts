@@ -24,6 +24,7 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
+import type { ManagerOriginFence } from './manager-origin-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
@@ -117,7 +118,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererPermissionPolicy?: {
     readonly bootstrap: ServiceRendererBootstrap
     readonly proof: ManagerPermissionProofAuthority
-    readonly reserveOtherConsumers: () => Promise<ServiceRendererPermissionConsumerFence>
+    readonly reserveOtherConsumers: (origin: ManagerOriginFence) => Promise<ServiceRendererPermissionConsumerFence>
   }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {

@@ -84,7 +84,7 @@ an initial stylesheet are not admitted. A compatible service owner and Channel
 version can also expose the existing connection form for a resolved account's display
 name and reception selectors, and can rotate a Feishu/Lark credential within
 that Host-owned form. The eligible Desktop owner remains read-only. Connection
-creation, connection controls, policies, logs and sessions are not available
+creation, connection controls, Channel policies, logs and sessions are not available
 through this restricted page. Other configured plugins,
 adapters, concurrent permission changes and recovery after an uncertain result
 are not yet supported. The isolated browser tests do not constitute real Codex
@@ -218,10 +218,11 @@ permission and configuration synchronization.
 
 When the owner-selected Channel has no matching UI allow, its Manager entry can
 lead to a Host permission review. The user may allow the navigation entry and
-page body separately for that tab. Each dialog identifies the verified archive
-version and digest, offers only one-time decisions, and defaults to denial.
-The grants are not written to profile policy; refresh, renderer retirement or
-owner loss requires a new review. An existing denial is not overridden.
+page body separately. Each dialog identifies the verified archive version and
+digest and defaults to denial. A one-time decision is limited to that tab and
+requires a new review after refresh, renderer retirement or owner loss. An
+eligible service owner can also coordinate a persistent decision across its
+admitted Managers. An existing denial is not overridden without a new review.
 
 If the configured owner check fails before an action is dispatched, the action
 is unavailable and can be retried after the exact archive, configuration and
@@ -245,17 +246,16 @@ admitting another renderer. An uncertain review keeps coordination closed.
 Other permission writers and native or external consumers are not yet covered
 by a profile-wide barrier.
 
-The owner can borrow its held permission fence for one exact policy batch while
-keeping other profile and Home changes excluded. This internal primitive does
-not by itself enable persistent permission changes from the Host page. The
-experimental permission channel verifies a signed user decision, resolves a
-renderer-scoped Manager UI identity to the owner source, and requires each
-Manager and every other covered consumer to adopt the exact owner readback.
-A missing or stale consumer receipt fences the handoff. The service owner does
-not yet supply the other-consumer reservation, so persistent changes remain
-unavailable in the production path. In the experimental composition, the Host
-permission detail can reset a persistent allow or denial to `ask`; the signed
-reset is bound to the previous decision and follows the same adoption barrier.
+The service owner can borrow its held permission fence for one exact Channel
+Manager UI policy change while keeping other profile and Home changes excluded.
+It verifies the signed user decision, resolves the renderer-scoped identity to
+the owner source and reads back the policy before each admitted Manager adopts
+it. The reservation rejects an unaccounted renderer; the service owner has no
+non-renderer consumer of these two UI policies. A missing or stale receipt, or
+an unconfirmed release, fences the handoff and can require reconciliation. The
+Host permission detail can reset a persistent allow or denial to `ask` under
+the same barrier. Desktop and external adapters do not yet participate in
+this persistent-policy handoff.
 
 On macOS and Linux, an experimental service-mode renderer or an eligible
 Desktop renderer holds profile-scoped fences while its

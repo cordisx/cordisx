@@ -27,6 +27,7 @@ const issued = new WeakMap<ManagerOriginFence, {
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: OwnerRendererLifecycle
   readonly current: () => boolean
+  readonly consumeRelease: () => boolean
 }>()
 
 /** Read-only verification: callers cannot fabricate an origin reservation. */
@@ -37,6 +38,16 @@ export function isCurrentManagerOriginFence(
 ): boolean {
   const record = issued.get(fence)
   return record?.participants === participants && record.lifecycle === lifecycle && record.current()
+}
+
+/** Consume the same-turn proof that this exact origin released successfully. */
+export function consumeReleasedManagerOriginFence(
+  fence: ManagerOriginFence,
+  participants: ServiceRendererParticipants,
+  lifecycle: OwnerRendererLifecycle,
+): boolean {
+  const record = issued.get(fence)
+  return record?.participants === participants && record.lifecycle === lifecycle && record.consumeRelease()
 }
 
 /**
@@ -71,6 +82,7 @@ export async function fenceManagerOrigin(input: {
     throw new Error('manager-origin-fence-unavailable')
   }
   let ended = false
+  let releaseReceipt = false
   const subscriptions: Array<() => void> = []
   const unsubscribe = () => {
     for (const dispose of subscriptions.splice(0)) dispose()
@@ -138,7 +150,11 @@ export async function fenceManagerOrigin(input: {
       let lifecycleReleased = false
       try {
         lifecycleReleased = lifecycle.release()
-        if (lifecycleReleased && writes.release()) return true
+        if (lifecycleReleased && writes.release()) {
+          releaseReceipt = true
+          queueMicrotask(() => releaseReceipt = false)
+          return true
+        }
       } catch {
         // A lifecycle exception must never leave the Manager gate open.
       }
@@ -157,6 +173,15 @@ export async function fenceManagerOrigin(input: {
     },
     fence,
   })
-  issued.set(result, { participants: input.participants, lifecycle: input.lifecycle, current })
+  issued.set(result, {
+    participants: input.participants,
+    lifecycle: input.lifecycle,
+    current,
+    consumeRelease: () => {
+      if (!releaseReceipt) return false
+      releaseReceipt = false
+      return true
+    },
+  })
   return result
 }

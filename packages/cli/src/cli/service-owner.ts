@@ -32,6 +32,8 @@ import { createManagerChannelCredentials } from './manager-channel-credentials-c
 import { createConfiguredChannelOwner } from './configured-channel-owner.js'
 import { reserveServiceOwnerLifecycle } from './service-owner-lifecycle-fence.js'
 import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
+import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
+import { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -74,6 +76,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererBootstrap: ServiceRendererBootstrap | undefined
       let rendererReadonlyChannel: ReadonlyChannelRendererBridge | undefined
       let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
+      let rendererPermissionProof: ManagerPermissionProofAuthority | undefined
+      let rendererPermissionConsumers: ServiceOwnerPermissionConsumers | undefined
       let ownerOpen = true
       let failure: unknown
       const stopServices = () => {
@@ -245,6 +249,24 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
           })
           : undefined
+        if (configuredServiceOwner && channelOwner?.plugin.source) {
+          rendererPermissionProof = new ManagerPermissionProofAuthority({
+            profileId,
+            generation,
+            isCurrent: context =>
+              ownerOpen && !lifetime.signal.aborted
+              && rendererParticipants?.peer(context.rendererId) !== undefined,
+          })
+          rendererPermissionConsumers = new ServiceOwnerPermissionConsumers({
+            profileId,
+            generation,
+            channelSource: channelOwner.plugin.source,
+            participants: rendererParticipants,
+            lifecycle: rendererLifecycle,
+            ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
+            loadPolicies,
+          })
+        }
         rendererBootstrap = new ServiceRendererBootstrap({
           homeDir,
           configPath,
@@ -257,6 +279,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           store,
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
+          ...(rendererPermissionProof === undefined ? {} : { permissionProof: rendererPermissionProof }),
           restrictedManagement: {
             available: () =>
               ownerOpen && !lifetime.signal.aborted
@@ -316,6 +339,13 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               authority: configuredServiceOwner,
             },
           }),
+          ...(rendererPermissionProof === undefined || rendererPermissionConsumers === undefined ? {} : {
+            rendererPermissionPolicy: {
+              bootstrap: rendererBootstrap,
+              proof: rendererPermissionProof,
+              reserveOtherConsumers: async origin => rendererPermissionConsumers!.reserve(origin),
+            },
+          }),
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
           ...(managerChannel === undefined
@@ -356,6 +386,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),
+            () => rendererPermissionConsumers?.close(),
+            () => rendererPermissionProof?.close(),
             () => managerChannel?.close(),
             () => terminalProvider?.close(),
             () => channel?.close(),
