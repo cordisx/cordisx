@@ -62,6 +62,7 @@ interface AvailableServiceDescriptor {
   readonly capabilities: {
     readonly logout: boolean
     readonly readCatalog: boolean
+    readonly readAccounts?: boolean
     readonly accountControl: boolean
   }
 }
@@ -538,15 +539,16 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
     const authenticationTimeoutMs = authenticationActionTimeoutMs === undefined
       ? REQUEST_TIMEOUT_MS
       : authenticationActionTimeoutMs + AUTHENTICATION_RESPONSE_GRACE_MS
+    const readAccounts: ManagedServiceCliProxyAccountControlV1['readAccounts'] = async () =>
+      await invoke({
+        requestId: nextRequestId(),
+        operation: 'readAccounts',
+        serviceId,
+        binding: descriptor.binding,
+      }) as Awaited<ReturnType<ManagedServiceCliProxyAccountControlV1['readAccounts']>>
     const accountControl: ManagedServiceCliProxyAccountControlV1 | undefined = descriptor.capabilities.accountControl
       ? {
-        readAccounts: async () =>
-          await invoke({
-            requestId: nextRequestId(),
-            operation: 'readAccounts',
-            serviceId,
-            binding: descriptor.binding,
-          }) as Awaited<ReturnType<ManagedServiceCliProxyAccountControlV1['readAccounts']>>,
+        readAccounts,
         toggleAccount: async (request: ManagedServiceCliProxyAccountToggleRequestV1) =>
           await invoke({
             requestId: nextRequestId(),
@@ -638,6 +640,7 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
             }) as Awaited<ReturnType<NonNullable<ManagedServiceV1['readCatalog']>>>,
         }
         : {}),
+      ...(descriptor.capabilities.readAccounts === true ? { readAccounts } : {}),
       ...(accountControl === undefined ? {} : { accountControl }),
       ...(descriptor.authenticatedConsole?.contract !== 'cordisx.managed-service-console/v1' ? {} : {
         authenticatedConsole: createBrowserManagedServiceConsole({

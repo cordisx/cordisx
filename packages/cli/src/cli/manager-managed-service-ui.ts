@@ -11,6 +11,7 @@ import type { StartupUIRequest } from '../launcher/startup-ui-rpc.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { ManagerStartupObservation } from './manager-startup-observation.js'
 import { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
+import { ManagerManagedServiceAccounts } from './manager-managed-service-accounts.js'
 import {
   ManagerManagedServiceObservation,
   type ManagerManagedServiceObservationRequest,
@@ -224,6 +225,8 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly allowAuthentication?: boolean
   /** Enabled only when the same reservation covers logout and service revocation. */
   readonly allowLogout?: boolean
+  /** Read-only accounts require an admitted Manager and owner-bound validation. */
+  readonly allowAccountReads?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
     waitForInitialManagedServiceUI?(signal: AbortSignal): Promise<void>
@@ -239,6 +242,7 @@ export function createManagerManagedServiceUIBridge(input: {
   const usedObservationIds = new Set<string>()
   const retirements = new Map<string, Promise<boolean>>()
   const gate = new ManagerManagedServiceUIGate()
+  const accountReads = input.allowAccountReads ? new ManagerManagedServiceAccounts() : undefined
   const lifetime = new AbortController()
   let disposed = false
 
@@ -554,7 +558,9 @@ export function createManagerManagedServiceUIBridge(input: {
             },
           }
         }
-        if (!readOperations.has(request.operation)) {
+        const accountRead = request.operation === 'readAccounts' && accountReads !== undefined
+          && context.admitted === true
+        if (!readOperations.has(request.operation) && !accountRead) {
           return {
             mode: 'read',
             async dispatch() {
@@ -567,7 +573,9 @@ export function createManagerManagedServiceUIBridge(input: {
         const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
         const validation = validator(alias.ownerToken, input.profileId, input.runtimeGeneration)
         const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
-        if (!readOperations.has(parsed.operation)) throw unavailable()
+        if (!readOperations.has(parsed.operation) && !(accountRead && parsed.operation === 'readAccounts')) {
+          throw unavailable()
+        }
         return {
           mode: 'read',
           async dispatch() {
@@ -584,6 +592,30 @@ export function createManagerManagedServiceUIBridge(input: {
             assertCurrent(session, context)
             const response = sanitize(session, result, requestId)
             if (response.ok === false) return response
+            if (parsed.operation === 'readAccounts' && accountReads) {
+              const projected = await accountReads.project(response.value, parsed.binding)
+              assertCurrent(session, context)
+              if (projected.status === 'available') {
+                const confirmationId = 'accounts-' + randomBytes(16).toString('hex')
+                const confirmation = sanitize(
+                  session,
+                  await input.runtime.managedServiceUI.handleBindingValue(
+                    JSON.stringify({ ...forwarded, requestId: confirmationId, operation: 'snapshot' }),
+                    context.signal,
+                  ),
+                  confirmationId,
+                )
+                assertCurrent(session, context)
+                const snapshot = object(confirmation.value)
+                const projection = object(snapshot.projection)
+                if (
+                  confirmation.ok !== true || snapshot.status !== 'available'
+                  || !isDeepStrictEqual(projection.binding, parsed.binding)
+                  || projection.serviceGeneration !== projected.accounts.serviceGeneration
+                ) throw unavailable()
+              }
+              return { requestId, ok: true, value: projected }
+            }
             if (parsed.operation !== 'get') return { requestId, ok: true, value: response.value }
             const value = object(response.value)
             if (value.status === 'unavailable') {
@@ -599,6 +631,7 @@ export function createManagerManagedServiceUIBridge(input: {
               value.status !== 'available' || service.contract !== 'cordisx.managed-service/v1'
               || service.schemaVersion !== 1 || typeof service.$schema !== 'string'
               || typeof capabilities.readCatalog !== 'boolean' || typeof capabilities.logout !== 'boolean'
+              || capabilities.readAccounts !== undefined && typeof capabilities.readAccounts !== 'boolean'
             ) throw unavailable()
             // Reuse the native parser to check the returned binding's owner and scope.
             parseManagedServiceUIBindingRequest(
@@ -655,6 +688,7 @@ export function createManagerManagedServiceUIBridge(input: {
                   capabilities: {
                     logout,
                     readCatalog: capabilities.readCatalog,
+                    ...(input.allowAccountReads && capabilities.readAccounts === true ? { readAccounts: true } : {}),
                     accountControl: false,
                   },
                 },

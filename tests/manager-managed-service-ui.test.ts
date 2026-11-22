@@ -38,12 +38,12 @@ function descriptor() {
       webEntry: { url: 'https://internal.example.test' },
       authenticatedConsole: { serviceGeneration: 'generation-1' },
       authenticationTimeoutMs: 300_000,
-      capabilities: { logout: true, readCatalog: true, accountControl: true },
+      capabilities: { logout: true, readCatalog: true, readAccounts: true, accountControl: true },
     },
   }
 }
 
-function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean } = {}) {
+function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean; allowAccountReads?: boolean } = {}) {
   let epoch = 1
   let live = true
   let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
@@ -63,6 +63,7 @@ function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean
     readLifecycleFence: () => epoch,
     allowAuthentication: options.allowAuthentication,
     allowLogout: options.allowLogout,
+    allowAccountReads: options.allowAccountReads,
     runtime: { capabilities: () => capabilities, managedServiceUI: { handleBindingValue: handle } },
   })
   return {
@@ -166,6 +167,78 @@ describe('manager managed-service UI bridge', () => {
     }
     expect(handle).not.toHaveBeenCalled()
     bridge.dispose()
+  })
+
+  it('projects validated account reads without granting account control', async () => {
+    const { bridge, handle } = fixture({ allowAccountReads: true })
+    const a = { ...context('1', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(a)[0]!.token
+    const accounts = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+      schemaVersion: 1,
+      binding,
+      sequence: 3,
+      observedAt: '2026-01-01T00:00:00Z',
+      revision: 42,
+      serviceGeneration: 'service-1',
+      accounts: [{
+        accountId: 'account-1',
+        authIndex: 'index-1',
+        provider: 'codex',
+        label: 'Example account',
+        status: 'active',
+        disabled: false,
+        unavailable: false,
+        authKind: 'oauth',
+        sourceKind: 'memory',
+        runtimeOnly: false,
+      }],
+    }
+    let answer: unknown = { status: 'available', accounts }
+    let generation = 'service-1'
+    handle.mockImplementation(async value => {
+      const input = JSON.parse(value) as { requestId: string; operation: string }
+      return {
+        requestId: input.requestId,
+        ok: true,
+        value: input.operation === 'get'
+          ? descriptor()
+          : input.operation === 'readAccounts'
+          ? answer
+          : { status: 'available', projection: { binding, serviceGeneration: generation } },
+      }
+    })
+    try {
+      expect(await bridge.channel.prepare(request(token), a).dispatch()).toMatchObject({
+        ok: true,
+        value: { service: { capabilities: { readAccounts: true, accountControl: false } } },
+      })
+      const read = () => bridge.channel.prepare(request(token, 'readAccounts', { binding }), a).dispatch()
+      expect(await read()).toEqual({ requestId: 'request-1', ok: true, value: { status: 'available', accounts } })
+
+      generation = 'service-replaced'
+      await expect(read()).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      generation = 'service-1'
+      answer = { status: 'available', accounts: { ...accounts, extra: 'not part of the public projection' } }
+      await expect(read()).rejects.toThrow()
+      answer = { status: 'available', accounts: { ...accounts, binding: { ...binding, bindingId: 'other' } } }
+      await expect(read()).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      answer = { status: 'unavailable', code: 'management-disabled' }
+      expect(await read()).toEqual({ requestId: 'request-1', ok: true, value: answer })
+
+      const unadmitted = context('2', new AbortController().signal)
+      const otherToken = bridge.projectInitial(unadmitted)[0]!.token
+      const calls = handle.mock.calls.length
+      expect(await bridge.channel.prepare(request(otherToken, 'readAccounts', { binding }), unadmitted).dispatch())
+        .toEqual({ requestId: 'request-1', ok: false, code: 'unsupported' })
+      expect(handle).toHaveBeenCalledTimes(calls)
+      expect(await bridge.channel.prepare(request(token, 'toggleAccount'), a).dispatch())
+        .toEqual({ requestId: 'request-1', ok: false, code: 'unsupported' })
+    } finally {
+      bridge.dispose()
+    }
   })
 
   it('checks logout capability before dispatch and confirms the resulting state', async () => {

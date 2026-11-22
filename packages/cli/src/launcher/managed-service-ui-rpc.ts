@@ -348,6 +348,7 @@ export function createManagedServiceUIBridgeHandler(input: {
             capabilities: {
               logout: typeof resolved.source.logout === 'function',
               readCatalog: typeof resolved.source.readCatalog === 'function',
+              readAccounts: typeof resolved.source.readAccounts === 'function',
               accountControl: [
                 resolved.source.readAccounts,
                 resolved.source.toggleAccount,

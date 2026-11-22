@@ -21,11 +21,35 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
     }
     const snapshot = vi.fn(async () => ({
       status: 'available',
-      projection: { binding, auth: { state: 'authenticated' } },
+      projection: { binding, serviceGeneration: 'service-1', auth: { state: 'authenticated' } },
     }))
     const subscribe = vi.fn()
     const authenticate = vi.fn()
-    const source = { binding, snapshot, subscribe, authenticate } as unknown as ManagedServiceSourceV1
+    const accounts = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+      schemaVersion: 1,
+      binding,
+      sequence: 1,
+      observedAt: '2026-01-01T00:00:00Z',
+      revision: 9,
+      serviceGeneration: 'service-1',
+      accounts: [{
+        accountId: 'account-1',
+        authIndex: 'index-1',
+        provider: 'codex',
+        label: 'Example account',
+        status: 'active',
+        disabled: false,
+        unavailable: false,
+        authKind: 'oauth',
+        sourceKind: 'memory',
+        runtimeOnly: false,
+      }],
+    }
+    const readAccounts = vi.fn(async () => ({ status: 'available', accounts }))
+    const source = { binding, snapshot, subscribe, authenticate, readAccounts } as unknown as ManagedServiceSourceV1
     const fleet = {
       hostGeneration: 'runtime-1',
       authorities: [],
@@ -67,6 +91,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
       rendererId: '1'.repeat(64),
       ownerGeneration: 'owner-1',
       signal: controller.signal,
+      admitted: true,
     }
     const bridge = createManagerManagedServiceUIBridge({
       profileId: 'work',
@@ -74,6 +99,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
       ownerGeneration: 'owner-1',
       ownerCurrent: () => true,
       readLifecycleFence: () => 1,
+      allowAccountReads: true,
       runtime,
     })
     const capabilities = bridge.projectInitial(context)
@@ -102,9 +128,12 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
         status: 'available',
         projection: { auth: { state: 'authenticated' } },
       })
+      expect(await service.service.readAccounts?.()).toEqual({ status: 'available', accounts })
+      expect(service.service.accountControl).toBeUndefined()
       expect(await renderer.nativeProviders()).toEqual([])
       await expect(service.service.authenticate({} as never)).rejects.toThrow('unsupported')
-      expect(snapshot).toHaveBeenCalledOnce()
+      expect(snapshot).toHaveBeenCalledTimes(2)
+      expect(readAccounts).toHaveBeenCalledOnce()
       expect(subscribe).not.toHaveBeenCalled()
       expect(authenticate).not.toHaveBeenCalled()
       expect(JSON.stringify(capabilities)).not.toContain(ownerToken)

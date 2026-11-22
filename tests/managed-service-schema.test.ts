@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ManagedServiceSchemaRegistry } from '../packages/cli/src/launcher/managed-service-schema.js'
+import { definition } from './managed-service-runtime-fixture.js'
 
 const SOURCE = 'https://github.com/example/managed-plugin' as const
 const SCHEMA = 'https://raw.githubusercontent.com/example/managed-plugin/main/schemas/value.v1.schema.json'
@@ -42,6 +43,40 @@ async function packageSchema(
 }
 
 describe('managed service package schema registry', () => {
+  it('validates source-bound account projections while definition validation starts concurrently', async () => {
+    const registry = new ManagedServiceSchemaRegistry()
+    const accountSchema =
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json'
+    const accounts = {
+      $schema: accountSchema,
+      contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+      schemaVersion: 1,
+      binding: {
+        bindingId: 'binding-1',
+        identity: { source: 'https://plugins.example.test/provider', pluginId: 'sample', serviceId: 'gateway' },
+        scope: { profileId: 'default', generation: 'runtime-1' },
+      },
+      sequence: 1,
+      observedAt: '2026-01-01T00:00:00Z',
+      revision: 7,
+      serviceGeneration: 'service-1',
+      accounts: [],
+    }
+    await expect(Promise.all([
+      registry.validateDefinition(definition('gateway')),
+      registry.validate(accountSchema, accounts),
+      registry.validate(accountSchema, accounts),
+    ])).resolves.toEqual([undefined, undefined, undefined])
+    const unsafe = {
+      ...accounts,
+      binding: {
+        ...accounts.binding,
+        identity: { ...accounts.binding.identity, source: 'https://user:example@plugins.example.test/provider' },
+      },
+    }
+    await expect(registry.validate(accountSchema, unsafe)).rejects.toThrow()
+  })
+
   it('loads an admitted package schema offline and enforces its $id', async () => {
     const fixture = await packageSchema()
     const registry = new ManagedServiceSchemaRegistry().forPackage({
