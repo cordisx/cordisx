@@ -1,9 +1,9 @@
 import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
 import {
-  isManager1117ThreadHeader,
   isManager1117UnderHeaderThread,
-  resolveManager1117ThreadFrame,
-} from './adapter/manager-1117-thread.js'
+  isManager1117WorkspaceHeader,
+  resolveManager1117WorkspaceFrame,
+} from './adapter/manager-1117-workspace.js'
 import { managerTitlebarPresentationRight } from './adapter/manager-titlebar-presentation.js'
 import {
   type ManagerCollapsedSidebarSeat,
@@ -149,7 +149,7 @@ export function resolveManagerCardSeat(document: Document): {
   const frame = frames.length === 1
     ? frames[0]
     : frames.length === 0
-    ? resolveManager1117ThreadFrame(anchor)
+    ? resolveManager1117WorkspaceFrame(anchor)
     : undefined
   if (frame === undefined || !visible(frame)) return undefined
   if (
@@ -347,7 +347,7 @@ export function resolveManagerTitlebarSeat(document: Document): {
   const titles = bar.querySelectorAll<HTMLElement>(
     ':scope > [data-app-shell-main-titlebar="true"][data-testid="app-shell-header-context-menu-surface"]',
   )
-  const markerLight = isManager1117ThreadHeader(bar)
+  const markerLight = isManager1117WorkspaceHeader(bar)
     && bar.parentElement?.getAttribute('data-app-shell-unified-tab-strip') === 'false'
   const slots = titles[0]?.querySelectorAll<HTMLElement>(
     markerLight

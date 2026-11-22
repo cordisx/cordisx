@@ -13,7 +13,7 @@ vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
   createBrandMarkElement: (document: Document) => document.createElement('span'),
 }))
 
-function fixture(split = true) {
+function fixture(split = true, home = false) {
   const f = reactManagerFixture()
   const { document, dom } = f
   installNativeManagerShell(dom)
@@ -53,8 +53,13 @@ function fixture(split = true) {
   setRect(workspaceRow, rect(0, 0, 1920, 1050))
   setRect(workspace, rect(0, 0, 1920, 1050))
   workspace.prepend(aside)
-  surface.append(main)
-  main.dataset.appShellMainContentLayout = 'thread-edge-scroll'
+  if (home) {
+    const mainSurface = document.createElement('main')
+    mainSurface.dataset.appShellMainSurface = 'default'
+    surface.append(mainSurface)
+    mainSurface.append(main)
+  } else surface.append(main)
+  main.dataset.appShellMainContentLayout = home ? 'default' : 'thread-edge-scroll'
   main.dataset.appShellWorkspaceLayout = 'split'
   native.removeAttribute('data-app-shell-thread-edge-divider')
   const fade = native.querySelector<HTMLElement>('[data-app-shell-main-content-top-fade]')!
@@ -65,7 +70,13 @@ function fixture(split = true) {
   native.append(inner)
   const draft = document.createElement('input')
   draft.value = 'unsent draft'
-  inner.lastElementChild!.append(draft)
+  if (home) {
+    const composer = document.createElement('div')
+    composer.dataset.codexComposerRoot = ''
+    composer.dataset.composerPlacement = 'home'
+    composer.append(draft)
+    inner.lastElementChild!.append(composer)
+  } else inner.lastElementChild!.append(draft)
   const slot = element('[data-app-shell-titlebar-slot]')
   slot.removeAttribute('data-app-shell-titlebar-slot')
   const wrapper = document.createElement('div')
@@ -95,9 +106,9 @@ function fixture(split = true) {
   const resizer = element('[data-native-manager-resizer]')
   setRect(header, rect(0, 0, 1920, 46))
   setRect(start, rect(0, 0, 326, 46))
-  setRect(element('[data-app-shell-main-titlebar]'), rect(326, 0, split ? 420 : 1554, 46))
-  setRect(slot, rect(326, 0, split ? 414 : 1548, 46))
-  setRect(end, rect(split ? 746 : 1880, 0, split ? 1174 : 40, 46))
+  setRect(element('[data-app-shell-main-titlebar]'), rect(326, 0, split ? 420 : home ? 1548 : 1554, 46))
+  setRect(slot, rect(326, 0, split ? 414 : home ? 1542 : 1548, 46))
+  setRect(end, rect(split ? 746 : home ? 1874 : 1880, 0, split ? 1174 : home ? 46 : 40, 46))
   if (tab !== null) {
     setRect(element('[data-app-shell-tab-controller]'), rect(754, 7, 240, 32))
     setRect(tab, rect(754, 7, 238, 32))
@@ -107,8 +118,8 @@ function fixture(split = true) {
   setRect(rail, rect(0, 46, 52, 1004))
   setRect(nav, rect(52, 46, 274, 1004))
   setRect(resizer, rect(318, 46, 16, 1004))
-  setRect(main, rect(326, split ? 46 : 0, split ? 420 : 1594, split ? 1004 : 1050))
-  setRect(native, rect(326, split ? 46 : 0, split ? 420 : 1594, split ? 1004 : 1050))
+  setRect(main, rect(326, split || home ? 46 : 0, split ? 420 : 1594, split || home ? 1004 : 1050))
+  setRect(native, rect(326, split || home ? 46 : 0, split ? 420 : 1594, split || home ? 1004 : 1050))
   setRect(back, rect(88, 7, 32, 32))
   setRect(element('[data-native-forward]'), rect(286, 9, 28, 28))
   const nativeStyle = dom.window.getComputedStyle.bind(dom.window)
@@ -125,6 +136,48 @@ function fixture(split = true) {
 }
 
 describe('26.1117 marker-light native thread', () => {
+  it('opens, closes and reopens on the native home without losing its unsent draft', async () => {
+    const f = fixture(false, true)
+    const pane = resolveManagerPaneSeat(f.document)
+    expect(pane).toBeDefined()
+    expect(resolveManagerTitlebarSeat(f.document)?.slot).toBe(f.slot)
+    expect(captureManagerTitlebarLease(f.document, 'native', pane!)).toBeDefined()
+    let dispose: (() => void) | undefined
+    try {
+      await act(async () => {
+        dispose = installReactCordisXManager(f.document, managerModel(), { presentationMode: 'workspace' })
+      })
+      for (let i = 0; i < 2; i++) {
+        await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+        expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+        expect(f.native.inert).toBe(true)
+        await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+        expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+        expect(f.native.inert).toBeFalsy()
+        expect(f.draft.value).toBe('unsent draft')
+      }
+    } finally {
+      await act(async () => dispose?.())
+      await f.dispose()
+    }
+  })
+
+  it('rejects default layouts without a unique home composer or with an unmeasured titlebar', async () => {
+    const f = fixture(false, true)
+    const composer = f.element('[data-codex-composer-root]')
+    composer.dataset.composerPlacement = 'thread'
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    composer.dataset.composerPlacement = 'home'
+    const duplicate = composer.cloneNode(true)
+    composer.after(duplicate)
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    duplicate.remove()
+    f.surface.dataset.appShellUnifiedTabStrip = 'true'
+    f.surface.dataset.appShellCompactPageGutter = 'true'
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    await f.dispose()
+  })
+
   it('requires the exact measured shell and preserves the native tab and draft on open and close', async () => {
     const f = fixture()
     const pane = resolveManagerPaneSeat(f.document)
