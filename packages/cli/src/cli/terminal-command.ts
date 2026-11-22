@@ -96,6 +96,23 @@ export function terminalClaudeArguments(invocation: TerminalInvocation, instruct
   ]
 }
 
+/** The verified owner supplies a command lease, never the managed gateway credential itself. */
+function claudeManagedCredentialHelper(provider: Readonly<Record<string, unknown>>): string | undefined {
+  if (provider.auth === undefined) return undefined
+  if (!provider.auth || typeof provider.auth !== 'object' || Array.isArray(provider.auth)) {
+    throw new Error('Invalid Claude Code credential helper')
+  }
+  const auth = provider.auth as Record<string, unknown>
+  const valid = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(value)
+  if (
+    !valid(auth.command) || !path.isAbsolute(auth.command) || !valid(auth.cwd) || !path.isAbsolute(auth.cwd)
+    || !Array.isArray(auth.args) || auth.args.length > 32 || !auth.args.every(valid)
+  ) throw new Error('Invalid Claude Code credential helper')
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+  return 'cd ' + quote(auth.cwd) + ' && exec ' + [auth.command, ...auth.args].map(quote).join(' ')
+}
+
 export async function runTerminalCommand(invocation: TerminalInvocation, runtime: CordisXCliRuntime): Promise<void> {
   const stdout = runtime.stdout ?? console.log
   if (invocation.help) return stdout(TERMINAL_HELP)
@@ -292,21 +309,26 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       }
       prepared = result
     }
+    let managedClaudeHelper: string | undefined
     if (client === 'claude-code' && prepared) {
       if (!prepared.anthropicBaseUrl) throw new Error('This Host does not provide Claude Code gateway support')
       environment.ANTHROPIC_BASE_URL = prepared.anthropicBaseUrl
-      // Claude requires an auth selection even when the local plugin owns login.
-      environment.ANTHROPIC_AUTH_TOKEN = 'cordisx-local-gateway'
+      managedClaudeHelper = claudeManagedCredentialHelper(prepared.provider)
+      // Claude requires an auth selection even when the local gateway has none.
+      if (!managedClaudeHelper) environment.ANTHROPIC_AUTH_TOKEN = 'cordisx-local-gateway'
+      else delete environment.ANTHROPIC_AUTH_TOKEN
       delete environment.ANTHROPIC_API_KEY
     }
     let claudeSettings: string | undefined
     if (client === 'claude-code' && invocation.service) {
-      environment.CORDISX_TERMINAL_SERVICE_KEY = environment.ANTHROPIC_AUTH_TOKEN
+      if (managedClaudeHelper) delete environment.CORDISX_TERMINAL_SERVICE_KEY
+      else environment.CORDISX_TERMINAL_SERVICE_KEY = environment.ANTHROPIC_AUTH_TOKEN
       const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
       claudeSettings = JSON.stringify({
-        apiKeyHelper: `${quote(process.execPath)} ${
-          quote(fileURLToPath(new URL('../../assets/launcher/terminal-claude-key.mjs', import.meta.url)))
-        }`,
+        apiKeyHelper: managedClaudeHelper
+          ?? `${quote(process.execPath)} ${
+            quote(fileURLToPath(new URL('../../assets/launcher/terminal-claude-key.mjs', import.meta.url)))
+          }`,
         env: { ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_API_KEY: '' },
       })
       delete environment.ANTHROPIC_AUTH_TOKEN

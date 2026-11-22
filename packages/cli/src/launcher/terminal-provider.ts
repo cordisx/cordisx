@@ -221,14 +221,14 @@ export function createTerminalProviderAuthority(options: {
             }
             if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
             const provider = nativeProviderConfig(credential)
-            // Claude Code can reuse an unauthenticated loopback gateway. Bearer
-            // credentials retain the Codex command broker and are never exported.
+            // Claude Code may use a loopback gateway with the same scoped
+            // credential command as Codex. It must not receive remote endpoints.
             if (
               request.client === 'claude-code'
-              && ('auth' in provider || !String(provider.base_url).startsWith('http://127.0.0.1:'))
+              && !String(provider.base_url).startsWith('http://127.0.0.1:')
             ) {
               throw new Error(
-                'This managed gateway cannot supply Claude Code authentication; select an anthropic-messages shared service',
+                'This managed gateway is not a local Claude Code endpoint; select an anthropic-messages service',
               )
             }
             const leaseId = randomUUID()

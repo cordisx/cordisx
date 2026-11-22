@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { parse as parseToml } from 'smol-toml'
@@ -10,7 +10,10 @@ import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
-import { createNativeProviderCredentialBroker } from '../packages/cli/src/launcher/native-provider-credential-broker.js'
+import {
+  createNativeProviderCredentialBroker,
+  nativeProviderCredentialHelperPath,
+} from '../packages/cli/src/launcher/native-provider-credential-broker.js'
 import { createTerminalProviderAuthority } from '../packages/cli/src/launcher/terminal-provider.js'
 import type { NativeManagedGatewayConnectionSession } from '../packages/cli/src/launcher/managed-service-native-connection.js'
 
@@ -184,7 +187,9 @@ it('uses the production management socket, real credential helper and original t
     },
     dispose,
   })
-  const credentials = createNativeProviderCredentialBroker({ resolve: connection })
+  const helperPath = path.join(f.root, "credential helper's fixture.mjs")
+  await symlink(nativeProviderCredentialHelperPath(), helperPath)
+  const credentials = createNativeProviderCredentialBroker({ resolve: connection, helperPath })
   closes.push(() => credentials.close())
   const authority = createTerminalProviderAuthority({
     catalog: async () => [{
@@ -273,6 +278,42 @@ it('uses the production management socket, real credential helper and original t
     child.once('exit', code => resolve(code))
   })
   expect(status).toBe(1)
+  let claudeHelper = ''
+  await runCordisXCli([
+    'start',
+    '--mode',
+    'cli',
+    'claude-code',
+    '--service',
+    'fixture-provider',
+    '--model',
+    'model-one',
+    '--',
+    '--version',
+  ], {
+    ...runtime,
+    internalCheckTerminalClient: checkClient,
+    internalSpawnTerminal: ((executable: string, args: string[], options: { env: NodeJS.ProcessEnv }): ChildProcess => {
+      expect(executable).toBe('claude')
+      expect(JSON.stringify(args)).not.toContain('TEST_HOST_PRIVATE_TOKEN')
+      expect(JSON.stringify(options.env)).not.toContain('TEST_HOST_PRIVATE_TOKEN')
+      expect(options.env.CORDISX_TERMINAL_SERVICE_KEY).toBeUndefined()
+      const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { apiKeyHelper: string }
+      claudeHelper = settings.apiKeyHelper
+      return spawn(process.execPath, [
+        '-e',
+        "const {spawnSync}=require('node:child_process');"
+        + "const result=spawnSync('/bin/sh',['-c',process.argv[1]],{encoding:'utf8'});"
+        + "process.exit(result.status===0 && result.stdout==='TEST_HOST_PRIVATE_TOKEN' ? 0 : 42);",
+        claudeHelper,
+      ])
+    }) as typeof spawn,
+  })
+  const claudeStatus = await new Promise<number | null>(resolve => {
+    const child = spawn('/bin/sh', ['-c', claudeHelper], { stdio: 'ignore' })
+    child.once('exit', code => resolve(code))
+  })
+  expect(claudeStatus).toBe(1)
   await runCordisXCli(['cli', '--list'], runtime)
 })
 

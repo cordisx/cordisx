@@ -58,9 +58,12 @@ For Claude Code an invocation-scoped `--settings` overlay pins the endpoint and
 credential helper, so a user settings `env` entry cannot redirect the explicitly
 selected service. The key stays in the child environment, never command arguments
 or a settings file. Existing tool permissions are retained; the launcher does
-not enable bypass mode. An unauthenticated loopback managed gateway can also
-serve Claude Code; a managed bearer gateway is rejected until a Claude-specific
-credential adapter is provided. Gateway support for a model remains necessary.
+not enable bypass mode. A loopback managed gateway can also serve Claude Code.
+When it needs bearer authentication, the existing owner issues a command-backed
+credential lease for that CLI session; the upstream credential is not put in
+arguments or the settings overlay. The gateway must support Anthropic Messages
+for the selected model. Managed gateway catalogs do not yet declare that
+protocol, so an incompatible gateway can return an error after launch.
 
 ## Select an existing plugin service
 

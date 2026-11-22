@@ -7,7 +7,10 @@ import { parseTerminalCli } from '../packages/cli/src/cli/terminal-parse.js'
 import { terminalCodexArguments } from '../packages/cli/src/cli/terminal-command.js'
 import type { NativeManagedGatewayConnectionSession } from '../packages/cli/src/launcher/managed-service-native-connection.js'
 
-function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]['startup']) {
+function fixture(
+  startup?: Parameters<typeof createTerminalProviderAuthority>[0]['startup'],
+  origin = 'http://127.0.0.1:54321',
+) {
   let generation = 'generation-one', clock = 1000
   const dispose = vi.fn()
   const releaseCredential = vi.fn()
@@ -15,7 +18,7 @@ function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]
     value: {
       service: { pluginId: 'test-plugin', serviceId: 'gateway', generation },
       endpoint: {
-        origin: 'http://127.0.0.1:54321',
+        origin,
         apiPath: '/v1',
         auth: { scheme: 'bearer', token: 'HOST_ONLY_TOKEN' },
       },
@@ -70,7 +73,7 @@ function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]
 }
 
 describe('terminal provider lifecycle', () => {
-  it('reuses an unauthenticated loopback gateway for Claude without exporting bearer credentials', async () => {
+  it('leases loopback gateways to Claude without putting bearer credentials in the response', async () => {
     const dispose = vi.fn()
     const authority = createTerminalProviderAuthority({
       owns: id => id === 'aiden',
@@ -111,14 +114,16 @@ describe('terminal provider lifecycle', () => {
     expect(dispose).toHaveBeenCalledOnce()
     const bearer = fixture()
     try {
-      await expect(
-        bearer.authority.request({
-          kind: 'prepare',
-          providerId: 'plugin-provider',
-          model: 'model-one',
-          client: 'claude-code',
-        }),
-      ).rejects.toThrow('authentication')
+      const result = await bearer.authority.request({
+        kind: 'prepare',
+        providerId: 'plugin-provider',
+        model: 'model-one',
+        client: 'claude-code',
+      })
+      expect(result).toMatchObject({ kind: 'prepared', anthropicBaseUrl: 'http://127.0.0.1:54321' })
+      expect(JSON.stringify(result)).not.toContain('HOST_ONLY_TOKEN')
+      if (result.kind !== 'prepared') throw new Error('provider was not prepared')
+      await bearer.authority.request({ kind: 'release', leaseId: result.leaseId })
       expect(bearer.releaseCredential).toHaveBeenCalledOnce()
     } finally {
       bearer.authority.close()
@@ -145,6 +150,21 @@ describe('terminal provider lifecycle', () => {
       f.authority.close()
     }
     expect(f.releaseCredential).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not supply a Claude credential helper for a remote managed gateway', async () => {
+    const f = fixture(undefined, 'https://gateway.example.test')
+    try {
+      await expect(f.authority.request({
+        kind: 'prepare',
+        providerId: 'plugin-provider',
+        model: 'model-one',
+        client: 'claude-code',
+      })).rejects.toThrow('not a local Claude Code endpoint')
+      expect(f.releaseCredential).toHaveBeenCalledOnce()
+    } finally {
+      f.authority.close()
+    }
   })
 
   it('rejects unknown models before credentials and revokes on generation replacement', async () => {

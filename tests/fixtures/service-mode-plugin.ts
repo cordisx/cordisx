@@ -15,15 +15,42 @@ import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli
 import { declaration, definition } from '../managed-service-runtime-fixture.js'
 
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`
-export const backend = `#!/usr/bin/env node
+export const backend = String.raw`#!/usr/bin/env node
 import { createServer } from 'node:http'
 const server = createServer(async (request, response) => {
   if (request.headers.authorization !== 'Bearer ' + process.env.SERVICE_TOKEN) return response.writeHead(401).end()
   if (request.url === '/health') return response.writeHead(204).end()
-  if (request.method !== 'POST' || !request.url.startsWith('/v1/responses')) return response.writeHead(404).end()
+  if (request.method !== 'POST' || !['/v1/responses', '/v1/messages'].some(path => request.url.startsWith(path))) {
+    return response.writeHead(404).end()
+  }
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks))
+  if (request.url.startsWith('/v1/messages')) {
+    response.setHeader('content-type', 'application/json')
+    return response.end(JSON.stringify({
+      id: 'msg_fixture', type: 'message', role: 'assistant', model: body.model,
+      content: [{ type: 'text', text: 'local fixture response' }], stop_reason: 'end_turn',
+      stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
+    }))
+  }
+  if (body.stream) {
+    const message = {
+      id: 'msg_fixture', type: 'message', status: 'completed', role: 'assistant',
+      content: [{ type: 'output_text', text: 'local fixture response', annotations: [] }],
+    }
+    const completed = {
+      id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: body.model,
+      output: [message], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }
+    const events = [
+      { type: 'response.output_item.done', output_index: 0, item: message },
+      { type: 'response.completed', response: completed },
+    ]
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    for (const event of events) response.write('event: ' + event.type + '\ndata: ' + JSON.stringify(event) + '\n\n')
+    return response.end()
+  }
   response.setHeader('content-type', 'application/json')
   response.end(JSON.stringify({model: body.model, output_text: 'local fixture', pid: process.pid, port: server.address().port}))
 })

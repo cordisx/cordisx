@@ -31,14 +31,17 @@ the manager sidecar shuts down. Starting it again requires the new owner.
 
 An experimental `host=1` query on the manager entry loads the existing Host
 Manager and plugin registration instead of the default preview pages. It is not
-the default experience. With a service owner, it supports capability-free v1
-package graphs and initial read-only access to host-owned v14 managed backends
-that have no declared permissions, plugin configuration or documents. Dynamic
-changes to those managed packages remain unavailable. A Desktop owner must own
-the profile exclusively, have a ready Desktop renderer, not be in attach mode,
-and have no installed plugin packages. It can admit an empty profile or one
-configured Channel archive. On macOS or Linux, either owner can project that
-Channel when its staged browser graph has an initial
+the default experience. Eligible service and Desktop owners can project initial
+capability-free v1 package graphs and host-owned v14/v15 managed backends whose
+only declared renderer capability is UI extension rendering. These packages
+must have empty plugin configuration, no durable documents or entity templates,
+and a verified browser graph. Each Manager receives only matching existing
+Manager UI permissions. Managed-service reads and subscriptions are available;
+the service owner can coordinate an explicit login across admitted Managers.
+Desktop login and dynamic changes to those managed packages remain unavailable.
+A Desktop owner must own the profile exclusively, have a ready Desktop renderer
+and not be in attach mode. On macOS or Linux, either owner can project one
+configured Channel archive when its staged browser graph has an initial
 stylesheet and its live service owner matches. An existing source-specific
 Manager UI permission or a separate one-tab review is required. The exact
 published Channel 0.1.7 archive is supported as a read-only legacy view: its

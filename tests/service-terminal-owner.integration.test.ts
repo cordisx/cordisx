@@ -54,7 +54,7 @@ it('publishes live plugin leases from the production service owner without a Des
     await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: first.leaseId } })
     expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: second.leaseId } }))
       .toEqual({ kind: 'renewed' })
-    await expect(request({
+    const claude = await request({
       kind: 'terminal-provider',
       request: {
         kind: 'prepare',
@@ -62,7 +62,15 @@ it('publishes live plugin leases from the production service owner without a Des
         providerId: 'fixture-provider',
         model: 'fixture-model',
       },
-    })).rejects.toThrow('cannot supply Claude Code authentication')
+    }) as { kind: string; leaseId: string; anthropicBaseUrl: string }
+    expect(claude).toMatchObject({
+      kind: 'prepared',
+      anthropicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:/u),
+    })
+    expect(claude.leaseId).not.toBe(second.leaseId)
+    await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: claude.leaseId } })
+    expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: second.leaseId } }))
+      .toEqual({ kind: 'renewed' })
   } finally {
     await command('stop').catch(() => undefined)
     const allowRemoval = async (directory: string) => {

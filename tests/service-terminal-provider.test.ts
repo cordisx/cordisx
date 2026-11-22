@@ -67,19 +67,18 @@ describe('headless service terminal provider authority', () => {
     expect(f.dispose).toHaveBeenCalled()
   })
 
-  it('never gives an upstream bearer credential to Claude Code', async () => {
+  it('gives Claude a revocable command lease without returning the upstream bearer', async () => {
     const f = activation({ scheme: 'bearer', token: 'PRIVATE_FIXTURE_SECRET' })
     const terminal = createServiceTerminalProvider({ activation: f.value })
     try {
-      await expect(
-        terminal.request({
-          kind: 'prepare',
-          providerId: 'fixture-provider',
-          model: 'model-one',
-          client: 'claude-code',
-        }),
-      )
-        .rejects.toThrow('cannot supply Claude Code authentication')
+      const claude = await terminal.request({
+        kind: 'prepare',
+        providerId: 'fixture-provider',
+        model: 'model-one',
+        client: 'claude-code',
+      })
+      expect(claude).toMatchObject({ kind: 'prepared', anthropicBaseUrl: 'http://127.0.0.1:54321' })
+      expect(JSON.stringify(claude)).not.toContain('PRIVATE_FIXTURE_SECRET')
       const codex = await terminal.request({ kind: 'prepare', providerId: 'fixture-provider', model: 'model-one' })
       expect(JSON.stringify(codex)).not.toContain('PRIVATE_FIXTURE_SECRET')
     } finally {
