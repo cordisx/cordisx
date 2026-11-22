@@ -47,6 +47,7 @@ describe('Channel native insertion', () => {
       },
     })
     const first = message('one', 'initial'), second = message('two', 'adjustment')
+    Object.assign(second.source.event, { threadId: 'quote-chain', semantics: 'reply-chain' })
     expect((await sessions.start('job-one', first, 'session')).state).toBe('running')
     expect((await sessions.steer('job-two', second, 'session', 'turn')).state).toBe('accepted')
     const submitted = requests.find(entry => entry.method === 'turn/steer')!.params
@@ -60,8 +61,11 @@ describe('Channel native insertion', () => {
     const access = new ChannelAgentAccess(state, () => sessions)
     expect(access.caller({ 'cordisx/channelContext': contextToken })?.source).toEqual(second.source.event)
     expect(access.requestText({ 'cordisx/channelContext': contextToken })).toBe('adjustment')
+    const third = message('three', 'quoted again')
+    Object.assign(third.source.event, { threadId: 'different-chain', semantics: 'reply-chain' })
+    expect((await sessions.steer('job-third', third, 'session', 'turn')).state).toBe('accepted')
     expect(access.caller({ 'cordisx/channelContext': contextToken, 'openai/threadId': 'another' })).toBeUndefined()
-    const bob = message('three', 'different sender')
+    const bob = message('four', 'different sender')
     const other = {
       ...bob,
       source: {

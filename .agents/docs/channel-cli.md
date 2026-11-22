@@ -180,6 +180,9 @@ not use this path; normal wake, policy and queue rules still apply. Multiple
 follow-ups retain input order and carry their own sender, references, CLI
 context and supported attachments. They do not produce a second automatic final
 reply for the same turn.
+In a direct chat, quoted replies remain the same conversation even when the
+platform changes their reply-chain ID/semantics. Each reply retains its own
+referenced-message context. Group topic/chain boundaries remain distinct.
 
 The Host persists the submission before calling native `turn/steer`. A definite
 native "no active turn" or exact-turn mismatch returns the message to the queue

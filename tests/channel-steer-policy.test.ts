@@ -139,3 +139,12 @@ it('retains wake/dispatch, sender, topic, and takeover boundaries', () => {
     expect(channelSteerParent(state, 'first')).toBeUndefined()
   }
 })
+it('treats ordinary and quoted direct messages as one chat without weakening group topic boundaries', () => {
+  const { event } = fixture()
+  const direct = { ...event, kind: 'direct', semantics: 'conversation' }
+  const quote = { ...direct, threadId: 'quoted-message', semantics: 'reply-chain' }
+  expect(sameChannelPrincipal(direct as never, quote as never)).toBe(true)
+  expect(sameChannelPrincipal(quote as never, { ...quote, threadId: 'next-quote' } as never)).toBe(true)
+  expect(sameChannelPrincipal(event as never, { ...event, threadId: 'another-topic' } as never)).toBe(false)
+  expect(sameChannelPrincipal(direct as never, { ...quote, conversationId: 'another-chat' } as never)).toBe(false)
+})

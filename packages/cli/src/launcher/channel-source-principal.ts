@@ -3,8 +3,10 @@ import type { ChannelEventRef } from '@cordisx/channel-runtime'
 /** Equality excludes the message ID but retains the sender and complete conversation scope. */
 export function sameChannelPrincipal(left: ChannelEventRef, right: ChannelEventRef): boolean {
   return !!left.actor?.userId && left.actor.userId === right.actor?.userId
-    && (['adapterId', 'accountId', 'tenantId', 'conversationId', 'kind', 'threadId', 'semantics'] as const)
+    && (['adapterId', 'accountId', 'tenantId', 'conversationId', 'kind'] as const)
       .every(key => left[key] === right[key])
+    // Direct replies keep the same chat identity even when quoting creates a reply-chain ID.
+    && (left.kind === 'direct' || left.threadId === right.threadId && left.semantics === right.semantics)
 }
 
 export function channelPrincipalSource(entries: readonly { source: ChannelEventRef }[]): ChannelEventRef | undefined {
