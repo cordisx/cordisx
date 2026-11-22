@@ -20,6 +20,8 @@ it('mock platform dispatch reaches real command/store with reset verified contex
     expect(guide.result.unsupportedContextProfiles).toContain('one continuous configurable assistant')
     expect(guide.result.unsupportedContextProfiles).toContain('Human person entities/role scopes are distinct')
     expect(guide.result.unsupportedContextProfiles).toContain('not implemented')
+    expect(guide.result.unsupportedContextProfiles).toContain('integrated into native dispatch and operator CLI')
+    expect(guide.result.unsupportedContextProfiles).not.toContain('not integrated into production')
     expect(guide.result.experienceOrganization).toContain(
       'Keep episodic/person/group/project details and petty trivia local',
     )
@@ -109,6 +111,41 @@ it('mock platform dispatch reaches real command/store with reset verified contex
     expect(await boundary.call({ action: 'send', text: 'Code CODE-77', operationId: 'synthetic-send' }, 'send-context'))
       .toMatchObject({ status: 'ok', deliveryState: 'sent' })
     expect(boundary.outbound()).toHaveLength(1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('Chinese owned project recall matches concise stored subjects without opening unrelated private records', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-chinese-boundary-'))
+  try {
+    const boundary = mockMemoryBoundary(root)
+    boundary.dispatch('alice', 'A', 'direct', 'feishu', 'save', 'save-context', '记住青杉项目')
+    const record = {
+      kind: 'fact',
+      title: '青杉',
+      summary: '已完成接口，下一步是文档',
+      tags: ['青杉'],
+      entityRefs: [],
+      evidenceType: 'explicit',
+      confidence: 1,
+    }
+    const saved = await boundary.call({ action: 'remember', record }, 'save-context') as any
+    boundary.dispatch('alice', 'B', 'group', 'feishu', 'recall', 'recall-context', '我的青杉项目现在进度是什么？')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'recall-context')).toMatchObject({
+      status: 'ok',
+    })
+    expect(await boundary.call({ action: 'search-page', query: '青杉' }, 'recall-context')).toMatchObject({
+      result: { cards: [{ id: saved.result.id }] },
+    })
+    boundary.dispatch('bob', 'B', 'group', 'feishu', 'other-user', 'other-context', '我的青杉项目现在进度是什么？')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'other-context')).toMatchObject({
+      status: 'rejected',
+    })
+    boundary.dispatch('alice', 'B', 'group', 'feishu', 'generic', 'generic-context', '我的项目现在进度是什么？')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'generic-context')).toMatchObject({
+      status: 'rejected',
+    })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
