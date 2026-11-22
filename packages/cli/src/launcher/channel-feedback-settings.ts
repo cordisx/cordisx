@@ -2,11 +2,24 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface ChannelFeedbackSettings {
-  reaction: { enabled: boolean; emojiType: string; completionEmojiType?: string }
+  reaction: {
+    enabled: boolean
+    emojiType: string
+    receivedEnabled?: boolean
+    receivedEmojiType?: string
+    processingEnabled?: boolean
+    completionEmojiType?: string
+  }
   wait: { enabled: boolean; delaySeconds: number; text: string; texts?: readonly string[] }
 }
 export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
-  reaction: { enabled: true, emojiType: 'OnIt' },
+  reaction: {
+    enabled: true,
+    emojiType: 'OnIt',
+    receivedEnabled: true,
+    receivedEmojiType: 'Get',
+    processingEnabled: true,
+  },
   wait: { enabled: true, delaySeconds: 30, text: '已收到，正在处理，请稍候。' },
 }
 const object = (value: unknown): Record<string, unknown> => {
@@ -19,16 +32,31 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
   const row = object(value), reaction = object(row.reaction ?? {}), wait = object(row.wait ?? {})
   if (
     Object.keys(row).some(key => !['reaction', 'wait'].includes(key))
-    || Object.keys(reaction).some(key => !['enabled', 'emojiType', 'completionEmojiType'].includes(key))
+    || Object.keys(reaction).some(key =>
+      !['enabled', 'emojiType', 'completionEmojiType', 'receivedEnabled', 'receivedEmojiType', 'processingEnabled']
+        .includes(key)
+    )
     || Object.keys(wait).some(key => !['enabled', 'delaySeconds', 'text', 'texts'].includes(key))
   ) throw new Error('INVALID_FEEDBACK_CONFIG')
   const result = {
-    reaction: { ...DEFAULT_CHANNEL_FEEDBACK.reaction, ...reaction },
+    reaction: {
+      ...DEFAULT_CHANNEL_FEEDBACK.reaction,
+      ...reaction,
+      receivedEnabled: reaction.receivedEnabled === undefined
+        ? reaction.enabled ?? DEFAULT_CHANNEL_FEEDBACK.reaction.enabled
+        : reaction.receivedEnabled,
+      processingEnabled: reaction.processingEnabled === undefined
+        ? reaction.enabled ?? DEFAULT_CHANNEL_FEEDBACK.reaction.enabled
+        : reaction.processingEnabled,
+    },
     wait: { ...DEFAULT_CHANNEL_FEEDBACK.wait, ...wait },
   }
   if (
     typeof result.reaction.enabled !== 'boolean' || typeof result.reaction.emojiType !== 'string'
     || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.emojiType)
+    || typeof result.reaction.receivedEnabled !== 'boolean' || typeof result.reaction.processingEnabled !== 'boolean'
+    || typeof result.reaction.receivedEmojiType !== 'string'
+    || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.receivedEmojiType)
     || result.reaction.completionEmojiType !== undefined
       && (typeof result.reaction.completionEmojiType !== 'string'
         || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.completionEmojiType))

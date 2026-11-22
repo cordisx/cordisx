@@ -1,3 +1,4 @@
+import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
 import { createChannelMemory } from './channel-memory-composition.js'
@@ -457,14 +458,8 @@ export class ChannelConversationConsumer {
           await this.feedback.completed(job.recordId).catch(() =>
             this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
           )
-        } catch {
-          await this.store.mutate(state => {
-            const current = state.jobs[job.id]
-            if (current?.state === 'dispatching') {
-              current.state = 'reconciliation-required'
-              current.code = 'NATIVE_EFFECT_UNCERTAIN'
-            } else if (current?.state === 'running') current.code = 'NATIVE_READBACK_UNAVAILABLE'
-          })
+        } catch (error) {
+          await recordChannelDispatchFailure(this.store, job.id, error, this.input.report)
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
@@ -519,6 +514,8 @@ export class ChannelConversationConsumer {
       }
       return
     } else if (received && addressed && policy.enabled && channelPolicyAllows(policy, 'dispatch', event)) {
+      // Acknowledge receipt before a busy conversation is ready to create a job.
+      void this.feedback.received(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
       const waiting = await this.store.mutate(state => {
         const bindings = Object.values(state.bindings).filter(binding =>
           binding.state === 'active'

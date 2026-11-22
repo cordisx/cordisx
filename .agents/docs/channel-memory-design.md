@@ -537,3 +537,15 @@ CLI and model prompts must not expose memory storage paths to other groups.
 The first implementation should not promise automatic knowledge of all groups,
 automatic cross-platform identity resolution, unlimited transcript access,
 speech understanding or cloud embeddings.
+
+## Memory directory troubleshooting
+
+A memory directory may live beneath a valid ancestor symlink. The Host resolves
+and pins its canonical directory while still rejecting a symlink at the memory
+directory itself, foreign ownership and group/world access. Retargeting an
+already prepared ancestor does not redirect subsequent memory operations.
+
+`MEMORY_UNSAFE_ROOT` remains a real validation failure for an unsafe leaf. A
+dispatch failure retains that safe diagnostic instead of losing it behind a
+generic uncertain-effect code. The task stays fenced for reconciliation; the
+Host does not automatically replay a dispatch whose outcome is unconfirmed.
