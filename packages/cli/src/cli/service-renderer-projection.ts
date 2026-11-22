@@ -11,6 +11,18 @@ import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-a
 import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 
+// The standalone Manager has no Platform provider bridge. Optional Platform
+// declarations may be present, but no corresponding owner policy is projected.
+const unavailablePlatformCapabilities = new Set([
+  'models.read',
+  'tasks.catalog.read',
+  'tasks.content.read',
+  'tasks.create',
+  'tasks.control',
+  'turns.submit',
+  'turns.control',
+])
+
 /** Private owner→sidecar only. URLs carry an upstream lease secret. */
 export interface ServiceRendererPrivateGraph {
   readonly leaseId: string
@@ -89,8 +101,10 @@ async function loadAllowedRendererPackage(
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
   const managed = allowReadOnlyManaged && managedVersion
-    && manifest.services.length > 0
-    && manifest.services.every(service => service.kind === 'managed-backend' && service.owner === 'host')
+    && manifest.services.some(service => service.kind === 'managed-backend')
+    && manifest.services.every(service =>
+      (service.kind === 'managed-backend' || service.kind === 'platform-provider') && service.owner === 'host'
+    )
     && staged.serviceModules.length === manifest.services.length
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
@@ -102,7 +116,10 @@ async function loadAllowedRendererPackage(
     || (!legacy && !managed)
     || (legacy
       ? manifest.capabilities.length !== 0
-      : manifest.capabilities.some(capability => capability.name !== 'ui.extension-points.render'))
+      : manifest.capabilities.some(capability =>
+        capability.name !== 'ui.extension-points.render'
+        && (capability.required !== false || !unavailablePlatformCapabilities.has(capability.name))
+      ))
     || staged.entityTemplates.length !== 0
     || (staged.documents?.length ?? 0) !== 0 || staged.browserArtifact === undefined
   ) throw new Error('renderer-projection-plugin-unsupported')

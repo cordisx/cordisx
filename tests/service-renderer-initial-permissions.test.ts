@@ -51,11 +51,35 @@ it('admits the narrow initial managed slice while retaining the dynamic lifecycl
   await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
 })
 
+it('admits mixed Host services with optional Platform declarations only for the initial projection', async () => {
+  const value = staged()
+  const provider = { id: 'fixture-provider', kind: 'platform-provider', owner: 'host' }
+  value.manifest.runtimeManifest.services.push(provider)
+  value.serviceModules.push({ declaration: provider })
+  value.manifest.runtimeManifest.capabilities.push(
+    { name: 'models.read', required: false, scope: {} },
+    { name: 'turns.submit', required: false, scope: { runtime: 'exact-request' } },
+  )
+  vi.mocked(loadStagedPluginPackage).mockResolvedValue(value as never)
+  expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(value)
+  await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+})
+
 it('rejects declared permissions, unrelated services, documents and mismatched owner metadata', async () => {
   const cases = [
     () => {
       const value = staged()
       value.manifest.runtimeManifest.capabilities.push({ id: 'fixture-permission' })
+      return value
+    },
+    () => {
+      const value = staged()
+      value.manifest.runtimeManifest.capabilities.push({ name: 'models.read', required: true, scope: {} })
+      return value
+    },
+    () => {
+      const value = staged()
+      value.manifest.runtimeManifest.capabilities.push({ name: 'connector.send', required: false, scope: {} })
       return value
     },
     () => {

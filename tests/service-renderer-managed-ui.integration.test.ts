@@ -4,6 +4,7 @@ import type { ServiceRendererPrivateGraph } from '../packages/cli/src/cli/servic
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-composition.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
@@ -192,7 +193,18 @@ it('binds installed aliases to the exact owner package and never promotes non-ma
       ...policy,
       key: { ...policy.key, identity: { ...policy.key.identity, source: plugin.source! } },
     }))
-    expect(identity.projectManagerPolicies(context, alias, plugin.id, policies).map(value => value.key.scope))
+    const platformGrant = createPermissionPolicyRecord({
+      profileId: f.profileId,
+      identity: { source: plugin.source!, id: plugin.id },
+      capability: 'models.read',
+      scope: { providers: ['fixture-provider'] },
+      policy: 'allow',
+    })
+    expect(
+      identity.projectManagerPolicies(context, alias, plugin.id, [...policies, platformGrant]).map(value =>
+        value.key.scope
+      ),
+    )
       .toEqual([{ extensionPoints: ['manager.content'] }, { extensionPoints: ['manager.settings.navigation-items'] }])
     expect(identity.projectActivation(context, active).plugins[0]!.canonicalSource).toBe(alias)
     expect(() =>
