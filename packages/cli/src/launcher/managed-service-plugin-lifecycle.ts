@@ -37,6 +37,11 @@ import {
 } from './managed-service-fleet.js'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import {
+  type ManagedServiceClientIdentity,
+  type ManagedServiceClientReservation,
+  reserveActiveManagedServiceClients,
+} from './managed-service-client-reservation.js'
+import {
   createManagedServiceUIBridgeHandler,
   type ManagedServiceUIBridgeHandler,
   type ManagedServiceUIOwner,
@@ -384,6 +389,13 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         return () => owner.nativeProviderListeners.delete(listener)
       },
     })
+  }
+
+  /** Reserve only the active plugin generation; staged or retired fleets cannot participate. */
+  reserveServiceClients(identity: ManagedServiceClientIdentity): ManagedServiceClientReservation | undefined {
+    const active = this.active
+    const current = () => !this.disposed && this.transactions.size === 0 && this.active === active
+    return reserveActiveManagedServiceClients(active, identity, current)
   }
 
   prepare(transactionId: string): RuntimeGenerationFence {

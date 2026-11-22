@@ -6,6 +6,11 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
@@ -76,6 +81,7 @@ it.skipIf(chrome === undefined)(
       await exec(process.execPath, [cli, ...args], { env, cwd: root, timeout: 35_000 })
     const clients: CdpClient[] = []
     let browser: ChildProcess | undefined
+    let modelRequest: AbortController | undefined
     try {
       await mkdir(home)
       await writeFile(path.join(home, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
@@ -86,8 +92,11 @@ it.skipIf(chrome === undefined)(
         true,
         'https://example.test/fixtures',
         browserPlugin,
-        { authentication: true },
+        { version: 15, authentication: true, logout: true },
       )
+      const serviceHome = path.join(home, 'managed-services', 'fixture-service', 'gateway')
+      await mkdir(serviceHome, { recursive: true, mode: 0o700 })
+      await writeFile(path.join(serviceHome, 'fixture-authenticated'), 'ready', { mode: 0o600 })
       const started = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
       expect(started).toMatchObject({ status: 'ready', mode: 'service' })
       const link = async () => {
@@ -111,7 +120,7 @@ it.skipIf(chrome === undefined)(
           .toBe('available')
         await expect.poll(() => client.evaluate('globalThis.__fixtureSubscribed'), { timeout: 20_000 })
           .toBe('subscribed')
-        await expect.poll(() => client.evaluate('globalThis.__fixtureManagedEvents.includes("missing")'), {
+        await expect.poll(() => client.evaluate('globalThis.__fixtureManagedEvents.includes("authenticated")'), {
           timeout: 20_000,
         }).toBe(true)
       }
@@ -124,11 +133,75 @@ it.skipIf(chrome === undefined)(
       const second = await CdpClient.connect(secondTarget.webSocketDebuggerUrl)
       clients.push(second)
       await ready(second)
+      const paths = pluginManagementRpcPaths(home, 'codex', 'default')
+      const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+      const request = (operation: Parameters<typeof requestPluginManagementRpc>[2]) =>
+        requestPluginManagementRpc(paths, endpoint, operation)
+      expect(
+        await request({
+          kind: 'terminal-provider',
+          request: { kind: 'wait', providerId: 'fixture-provider', model: 'fixture-model' },
+        }),
+      ).toEqual({ kind: 'ready' })
+      const lease = await request({
+        kind: 'terminal-provider',
+        request: { kind: 'prepare', providerId: 'fixture-provider', model: 'fixture-model' },
+      }) as { kind: string; leaseId: string }
+      expect(lease.kind).toBe('prepared')
+      const logout = [
+        'async (id) => {',
+        '  const service = globalThis.__fixtureManagedService;',
+        '  const snapshot = await service.snapshot();',
+        '  return await service.logout({',
+        "    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-request.v1.schema.json',",
+        "    contract: 'cordisx.managed-service-logout-request/v1', schemaVersion: 1, requestId: id,",
+        "    binding: service.binding, action: 'logout', expectedSequence: snapshot.projection.sequence,",
+        "    userGesture: { kind: 'explicit-click', at: new Date().toISOString() },",
+        '  });',
+        '}',
+      ].join('\n')
+      const actionLog = path.join(serviceHome, 'fixture-auth-actions')
+      expect(
+        await first.evaluate('(' + logout + ")('blocked-logout').then(() => 'unexpected', error => error.message)"),
+      )
+        .toBe('owner-unavailable')
+      expect((await readFile(actionLog, 'utf8')).split('\n')).not.toContain('logout')
+      await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: lease.leaseId } })
+      const accessKey = (await readFile(path.join(home, 'run', 'model-api', 'default', 'access-key'), 'utf8')).trim()
+      modelRequest = new AbortController()
+      const stream = await fetch(started.modelApiUrl + '/responses', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'fixture-provider::fixture-model', input: 'hold-open-fixture', stream: true }),
+        signal: modelRequest.signal,
+      })
+      expect(stream.status).toBe(200)
+      expect((await stream.body!.getReader().read()).done).toBe(false)
+      expect(
+        await first.evaluate('(' + logout + ")('api-blocked-logout').then(() => 'unexpected', error => error.message)"),
+      ).toBe('owner-unavailable')
+      expect((await readFile(actionLog, 'utf8')).split('\n')).not.toContain('logout')
+      modelRequest.abort()
+      const afterAbort = JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout)
+      expect(afterAbort.status).toBe('ready')
+      await expect.poll(
+        async () =>
+          await first.evaluate(
+            'globalThis.__fixtureManagedService.snapshot().then(value => value.projection.auth.state, () => "unavailable")',
+          ),
+        { timeout: 15_000 },
+      ).toBe('authenticated')
+      expect(await first.evaluate('(' + logout + ")('initial-logout')"))
+        .toMatchObject({ status: 'accepted', stateAt: 'logged-out' })
+      await expect.poll(() => second.evaluate('globalThis.__fixtureManagedEvents.includes("logged-out")'), {
+        timeout: 20_000,
+      }).toBe(true)
+      for (const page of [first, second]) await page.evaluate('globalThis.__fixtureManagedEvents = []')
       const before = await first.evaluate<{ state: string; sequence: number }>(`(async () => {
         const result = await globalThis.__fixtureManagedService.snapshot();
         return { state: result.projection.auth.state, sequence: result.projection.sequence };
       })()`)
-      expect(before.state).toBe('missing')
+      expect(before.state).toBe('logged-out')
       const login = `async (id, expected) => {
         const service = globalThis.__fixtureManagedService;
         const snapshot = await service.snapshot();
@@ -139,7 +212,6 @@ it.skipIf(chrome === undefined)(
           userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
         });
       }`
-      const actionLog = path.join(home, 'managed-services', 'fixture-service', 'gateway', 'fixture-auth-actions')
       const loginResult = await first.evaluate<{ status: string; error?: { code?: string } }>(
         `(${login})('first-login')`,
       )
@@ -175,7 +247,33 @@ it.skipIf(chrome === undefined)(
       )
         .toBe('owner-unavailable')
       expect(await readFile(actionLog, 'utf8')).toBe(actions)
+      const logoutResult = await second.evaluate<{ status: string; stateAt?: string }>([
+        '(async () => {',
+        '  const service = globalThis.__fixtureManagedService;',
+        '  const snapshot = await service.snapshot();',
+        '  return await service.logout({',
+        "    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-request.v1.schema.json',",
+        "    contract: 'cordisx.managed-service-logout-request/v1', schemaVersion: 1, requestId: 'logout-after-login',",
+        "    binding: service.binding, action: 'logout', expectedSequence: snapshot.projection.sequence,",
+        "    userGesture: { kind: 'explicit-click', at: new Date().toISOString() },",
+        '  });',
+        '})()',
+      ].join('\n'))
+      expect(logoutResult).toMatchObject({ status: 'accepted', stateAt: 'logged-out' })
+      await expect.poll(() => first.evaluate('globalThis.__fixtureManagedEvents.includes("logged-out")'), {
+        timeout: 20_000,
+      }).toBe(true)
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate(
+            'globalThis.__fixtureManagedService.snapshot().then(value => value.projection.auth.state)',
+          ),
+        ).toBe('logged-out')
+      }
+      const afterLogout = await readFile(actionLog, 'utf8')
+      expect(afterLogout.split('\n').filter(value => value === 'logout')).toHaveLength(2)
     } finally {
+      modelRequest?.abort()
       await Promise.allSettled(clients.map(async client => await client.close()))
       if (browser) await stopChrome(browser)
       await run('manager', 'stop').catch(() => undefined)

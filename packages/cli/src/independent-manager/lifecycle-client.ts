@@ -232,7 +232,16 @@ export function createManagerRendererLifecycleClient(input: {
     assertLive()
     if (method === 'managed-service-state') {
       const item = record(payload)
-      exact(item, ['rendererId', 'ownerGeneration', 'pluginId', 'pluginGeneration', 'serviceId', 'sequence', 'phase'])
+      exact(item, [
+        'rendererId',
+        'ownerGeneration',
+        'pluginId',
+        'pluginGeneration',
+        'serviceId',
+        'sequence',
+        'phase',
+        'action',
+      ])
       if (
         item.rendererId !== scope.rendererId || item.ownerGeneration !== scope.generation
         || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
@@ -240,6 +249,7 @@ export function createManagerRendererLifecycleClient(input: {
         || typeof item.pluginGeneration !== 'string' || !epochPattern.test(item.pluginGeneration)
         || !Number.isSafeInteger(item.sequence) || (item.sequence as number) < 0
         || item.phase !== 'prepare' && item.phase !== 'confirm'
+        || item.action !== 'login' && item.action !== 'logout'
         || !synchronized || transaction !== undefined || awaitingAdoption !== undefined
       ) throw new Error('renderer-managed-service-state-unavailable')
       const confirmation: ManagedServiceStateConfirmation = {
@@ -248,6 +258,7 @@ export function createManagerRendererLifecycleClient(input: {
         serviceId: item.serviceId,
         sequence: item.sequence as number,
         phase: item.phase,
+        action: item.action,
       }
       const confirmed = await input.onManagedServiceState?.(confirmation) === true
       assertLive()

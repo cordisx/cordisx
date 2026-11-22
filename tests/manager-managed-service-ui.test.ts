@@ -43,7 +43,7 @@ function descriptor() {
   }
 }
 
-function fixture(options: { allowAuthentication?: boolean } = {}) {
+function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean } = {}) {
   let epoch = 1
   let live = true
   let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
@@ -62,6 +62,7 @@ function fixture(options: { allowAuthentication?: boolean } = {}) {
     ownerCurrent: () => live,
     readLifecycleFence: () => epoch,
     allowAuthentication: options.allowAuthentication,
+    allowLogout: options.allowLogout,
     runtime: { capabilities: () => capabilities, managedServiceUI: { handleBindingValue: handle } },
   })
   return {
@@ -165,6 +166,82 @@ describe('manager managed-service UI bridge', () => {
     }
     expect(handle).not.toHaveBeenCalled()
     bridge.dispose()
+  })
+
+  it('checks logout capability before dispatch and confirms the resulting state', async () => {
+    const { bridge, handle } = fixture({ allowLogout: true })
+    const a = { ...context('1', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(a)[0]!.token
+    let supported = false
+    let sequence = 2
+    let state = 'authenticated'
+    const logout = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-request.v1.schema.json',
+      contract: 'cordisx.managed-service-logout-request/v1',
+      schemaVersion: 1,
+      requestId: 'logout-1',
+      binding,
+      action: 'logout',
+      expectedSequence: 2,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    handle.mockImplementation(async value => {
+      const input = JSON.parse(value) as { requestId: string; operation: string }
+      if (input.operation === 'logout') {
+        sequence = 3
+        state = 'logged-out'
+        return {
+          requestId: input.requestId,
+          ok: true,
+          value: {
+            $schema:
+              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
+            contract: 'cordisx.managed-service-logout-result/v1',
+            schemaVersion: 1,
+            requestId: logout.requestId,
+            binding,
+            status: 'accepted',
+            stateAt: 'logged-out',
+            sequence,
+          },
+        }
+      }
+      return {
+        requestId: input.requestId,
+        ok: true,
+        value: input.operation === 'get' ? descriptor() : {
+          status: 'available',
+          projection: { binding, sequence, auth: { state }, capabilities: { logout: supported } },
+        },
+      }
+    })
+    try {
+      expect(await bridge.channel.prepare(request(token), a).dispatch()).toMatchObject({
+        value: { service: { capabilities: { logout: false } } },
+      })
+      const denied = bridge.channel.prepare(request(token, 'logout', { binding, request: logout }), a)
+      expect(await denied.dispatch()).toMatchObject({ value: { status: 'denied', error: { code: 'unsupported' } } })
+      expect(handle.mock.calls.map(([value]) => JSON.parse(value).operation)).not.toContain('logout')
+      supported = true
+      expect(await bridge.channel.prepare(request(token), a).dispatch()).toMatchObject({
+        value: { service: { capabilities: { logout: true } } },
+      })
+      const action = bridge.channel.prepare(
+        request(token, 'logout', {
+          requestId: 'request-2',
+          binding,
+          request: logout,
+        }),
+        a,
+      )
+      expect(action.mode).toBe('write')
+      expect(action.managedServiceAuthentication).toMatchObject({ action: 'logout', expectedSequence: 2 })
+      expect(await action.dispatch()).toMatchObject({ ok: true, value: { status: 'accepted', stateAt: 'logged-out' } })
+      expect(handle.mock.calls.filter(([value]) => JSON.parse(value).operation === 'logout')).toHaveLength(1)
+    } finally {
+      bridge.dispose()
+    }
   })
 
   it('admits one scoped login only after confirming the resulting service snapshot', async () => {

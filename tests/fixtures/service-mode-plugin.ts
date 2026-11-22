@@ -26,6 +26,11 @@ const server = createServer(async (request, response) => {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks))
+  if (body.input === 'hold-open-fixture') {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write('data: fixture-ready\n\n')
+    return
+  }
   if (request.url.startsWith('/v1/messages')) {
     response.setHeader('content-type', 'application/json')
     return response.end(JSON.stringify({
@@ -58,12 +63,13 @@ server.listen(Number(process.argv[2]), '127.0.0.1')
 process.on('SIGTERM', () => server.close(() => process.exit(0)))
 `
 const authHelper = String.raw`#!/usr/bin/env node
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 const marker = path.join(process.env.HOME, 'fixture-authenticated')
 const action = process.argv[2]
 appendFileSync(path.join(process.env.HOME, 'fixture-auth-actions'), action + '\n')
 if (action === 'login') writeFileSync(marker, 'ready')
+if (action === 'logout' && existsSync(marker)) unlinkSync(marker)
 process.exit(existsSync(marker) ? 0 : 1)
 `
 
@@ -74,8 +80,12 @@ export async function stageServiceModePlugin(
   withService: boolean,
   canonicalSource: string | null = 'https://example.test/fixtures',
   browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
-  options: { readonly version?: 14 | 15; readonly uiPoints?: readonly string[]; readonly authentication?: boolean } =
-    {},
+  options: {
+    readonly version?: 14 | 15
+    readonly uiPoints?: readonly string[]
+    readonly authentication?: boolean
+    readonly logout?: boolean
+  } = {},
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
   const dir = path.join(root, id)
@@ -100,7 +110,12 @@ export async function stageServiceModePlugin(
     ...definition('gateway'),
     ...(options.authentication
       ? {
-        authentication: { mode: 'cli' as const, status: authAction('status'), login: authAction('login') },
+        authentication: {
+          mode: 'cli' as const,
+          status: authAction('status'),
+          login: authAction('login'),
+          ...(options.logout ? { logout: authAction('logout') } : {}),
+        },
       }
       : {}),
   }

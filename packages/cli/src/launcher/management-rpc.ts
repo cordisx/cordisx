@@ -123,7 +123,7 @@ function managementRpcDeadline(operation: PluginManagementRpcOperation): number 
       if (value && ['next', 'pull', 'closed', 'startupNext'].includes(String(value.operation))) {
         return 8 * 60 * 60_000
       }
-      if (value?.operation === 'authenticate') return 310_000
+      if (value?.operation === 'authenticate' || value?.operation === 'logout') return 310_000
     } catch { /* Malformed requests retain the ordinary deadline. */ }
   }
   return operation.kind === 'execute' ? 180_000 : 60_000

@@ -35,6 +35,7 @@ export class ManagedServiceRuntimeBroker {
     private readonly records: Map<string, ManagedServiceRecord>,
     private readonly registrations: Map<string, ManagedServiceRecord>,
     private readonly fetch: typeof globalThis.fetch,
+    private readonly clientsBlocked: (record: ManagedServiceRecord) => boolean = () => false,
   ) {}
 
   boundClient(state: ManagedServiceClientState): ManagedServiceBoundClientV1 {
@@ -71,6 +72,7 @@ export class ManagedServiceRuntimeBroker {
     if (signal?.aborted) return managedFailure('cancelled', 'cancelled', true)
     const record = this.records.get(managedIdentityKey(identity))
     if (record === undefined || record.disposed) return managedFailure('unavailable', 'stale-generation', true)
+    if (this.clientsBlocked(record)) return managedFailure('unavailable', 'health-check-failed', true)
     if (record.state !== 'ready' || record.brokerHandle === undefined) {
       return managedFailure('unavailable', 'health-check-failed', true)
     }

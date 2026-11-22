@@ -68,10 +68,8 @@ function sameKeys(value: Record<string, unknown>, keys: readonly string[]): bool
   return Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key))
 }
 
-type LoginRequest = Extract<ManagedServiceUIBindingRequest, { readonly operation: 'authenticate' }>
-const loginResultSchema =
-  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json'
-const loginErrorCodes = new Set([
+type AuthenticationRequest = Extract<ManagedServiceUIBindingRequest, { readonly operation: 'authenticate' | 'logout' }>
+const authenticationErrorCodes = new Set([
   'stale-generation',
   'binding-replaced',
   'service-unavailable',
@@ -90,17 +88,21 @@ const loginErrorCodes = new Set([
 ])
 
 /** Keep the receipt bound to the requested service and redact backend error text. */
-function projectLoginResult(value: unknown, request: LoginRequest): Record<string, unknown> {
+function projectAuthenticationResult(value: unknown, request: AuthenticationRequest): Record<string, unknown> {
   const result = object(value)
   const base = ['$schema', 'contract', 'schemaVersion', 'requestId', 'binding', 'status']
+  const action = request.operation === 'authenticate' ? 'login' : 'logout'
+  const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-'
+    + action + '-result.v1.schema.json'
   if (
-    result.$schema !== loginResultSchema || result.contract !== 'cordisx.managed-service-login-result/v1'
+    result.$schema !== schema || result.contract !== 'cordisx.managed-service-' + action + '-result/v1'
     || result.schemaVersion !== 1 || result.requestId !== request.request.requestId
     || !isDeepStrictEqual(result.binding, request.binding)
   ) throw unavailable()
   if (result.status === 'accepted') {
     if (
-      !sameKeys(result, [...base, 'stateAt', 'sequence']) || result.stateAt !== 'authenticated'
+      !sameKeys(result, [...base, 'stateAt', 'sequence'])
+      || result.stateAt !== (action === 'login' ? 'authenticated' : 'logged-out')
       || !Number.isSafeInteger(result.sequence) || (result.sequence as number) <= request.request.expectedSequence
     ) throw unavailable()
     return result
@@ -109,9 +111,9 @@ function projectLoginResult(value: unknown, request: LoginRequest): Record<strin
   if (
     !['denied', 'failed', 'unavailable'].includes(String(result.status))
     || !sameKeys(result, [...base, 'error']) || !sameKeys(error, ['code', 'message'])
-    || typeof error.code !== 'string' || !loginErrorCodes.has(error.code) || typeof error.message !== 'string'
+    || typeof error.code !== 'string' || !authenticationErrorCodes.has(error.code) || typeof error.message !== 'string'
   ) throw unavailable()
-  return { ...result, error: { code: error.code, message: 'Managed service login could not be completed.' } }
+  return { ...result, error: { code: error.code, message: 'Managed service ' + action + ' could not be completed.' } }
 }
 
 function copyCapabilities(value: readonly ManagedServiceUICapabilityMutation[]): readonly OwnerCapability[] {
@@ -219,6 +221,8 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly readLifecycleFence: () => number | undefined
   /** Enabled only when the production owner wraps writes in its Manager/lifecycle reservation. */
   readonly allowAuthentication?: boolean
+  /** Enabled only when the same reservation covers logout and service revocation. */
+  readonly allowLogout?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
     readonly managedServiceUI: {
@@ -394,13 +398,17 @@ export function createManagerManagedServiceUIBridge(input: {
           if (!observationOperations.has(parsed.operation)) throw unavailable()
           return session.observation.prepare(parsed as ManagerManagedServiceObservationRequest, alias)
         }
-        if (request.operation === 'authenticate' && input.allowAuthentication) {
+        if (
+          request.operation === 'authenticate' && input.allowAuthentication
+          || request.operation === 'logout' && input.allowLogout
+        ) {
           if (context.admitted !== true) throw unavailable()
           const forwarded = { ...request, token: alias.ownerToken }
           const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
           const validation = validator(alias.ownerToken, input.profileId, input.runtimeGeneration)
           const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
-          if (parsed.operation !== 'authenticate') throw unavailable()
+          if (parsed.operation !== 'authenticate' && parsed.operation !== 'logout') throw unavailable()
+          const action = parsed.operation === 'authenticate' ? 'login' : 'logout'
           return {
             mode: 'write',
             managedServiceAuthentication: {
@@ -408,6 +416,7 @@ export function createManagerManagedServiceUIBridge(input: {
               pluginGeneration: alias.public.pluginGeneration,
               serviceId: parsed.serviceId,
               expectedSequence: parsed.request.expectedSequence,
+              action,
             },
             async dispatch() {
               assertCurrent(session, context)
@@ -415,6 +424,54 @@ export function createManagerManagedServiceUIBridge(input: {
                 throw unavailable()
               }
               session.authenticationRequests.add(requestId)
+              if (action === 'logout') {
+                const checkId = 'check-' + randomBytes(16).toString('hex')
+                const check = sanitize(
+                  session,
+                  await input.runtime.managedServiceUI.handleBindingValue(
+                    JSON.stringify({
+                      version: 1,
+                      token: alias.ownerToken,
+                      requestId: checkId,
+                      operation: 'snapshot',
+                      scope,
+                      serviceId: parsed.serviceId,
+                      binding: parsed.binding,
+                    }),
+                    context.signal,
+                  ),
+                  checkId,
+                )
+                assertCurrent(session, context)
+                const snapshot = object(check.value)
+                const projection = object(snapshot.projection)
+                const capabilities = object(projection.capabilities)
+                if (
+                  check.ok !== true || snapshot.status !== 'available'
+                  || !isDeepStrictEqual(projection.binding, parsed.binding)
+                  || !Number.isSafeInteger(projection.sequence) || (projection.sequence as number) < 0
+                  || typeof capabilities.logout !== 'boolean'
+                ) throw unavailable()
+                if (!capabilities.logout || projection.sequence !== parsed.request.expectedSequence) {
+                  return {
+                    requestId,
+                    ok: true,
+                    value: {
+                      $schema:
+                        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
+                      contract: 'cordisx.managed-service-logout-result/v1',
+                      schemaVersion: 1,
+                      requestId: parsed.request.requestId,
+                      binding: parsed.binding,
+                      status: 'denied',
+                      error: {
+                        code: capabilities.logout ? 'stale-revision' : 'unsupported',
+                        message: 'Managed service logout is unavailable for this request.',
+                      },
+                    },
+                  }
+                }
+              }
               const response = sanitize(
                 session,
                 await input.runtime.managedServiceUI.handleBindingValue(JSON.stringify(forwarded), context.signal),
@@ -422,7 +479,7 @@ export function createManagerManagedServiceUIBridge(input: {
               )
               assertCurrent(session, context)
               if (response.ok !== true) throw unavailable()
-              const result = projectLoginResult(response.value, parsed)
+              const result = projectAuthenticationResult(response.value, parsed)
               // A failed action can have changed the external service before
               // the backend reported an error; do not present it as retryable.
               if (result.status === 'failed' || result.status === 'unavailable') throw unavailable()
@@ -452,7 +509,8 @@ export function createManagerManagedServiceUIBridge(input: {
                 || !isDeepStrictEqual(projection.binding, parsed.binding)
                 || !Number.isSafeInteger(projection.sequence) || (projection.sequence as number) < 0
                 || result.status === 'accepted'
-                  && ((projection.sequence as number) < (result.sequence as number) || auth.state !== 'authenticated')
+                  && ((projection.sequence as number) < (result.sequence as number)
+                    || auth.state !== (action === 'login' ? 'authenticated' : 'logged-out'))
               ) throw unavailable()
               return { requestId, ok: true, value: result }
             },
@@ -502,7 +560,7 @@ export function createManagerManagedServiceUIBridge(input: {
             if (
               value.status !== 'available' || service.contract !== 'cordisx.managed-service/v1'
               || service.schemaVersion !== 1 || typeof service.$schema !== 'string'
-              || typeof capabilities.readCatalog !== 'boolean'
+              || typeof capabilities.readCatalog !== 'boolean' || typeof capabilities.logout !== 'boolean'
             ) throw unavailable()
             // Reuse the native parser to check the returned binding's owner and scope.
             parseManagedServiceUIBindingRequest(
@@ -510,6 +568,36 @@ export function createManagerManagedServiceUIBridge(input: {
               validation,
               owner,
             )
+            let logout = false
+            if (input.allowLogout && capabilities.logout) {
+              const checkId = 'capability-' + randomBytes(16).toString('hex')
+              const check = sanitize(
+                session,
+                await input.runtime.managedServiceUI.handleBindingValue(
+                  JSON.stringify({
+                    ...forwarded,
+                    requestId: checkId,
+                    operation: 'snapshot',
+                    binding: service.binding,
+                  }),
+                  context.signal,
+                ),
+                checkId,
+              )
+              assertCurrent(session, context)
+              if (check.ok === true) {
+                const snapshot = object(check.value)
+                if (snapshot.status === 'available') {
+                  const projection = object(snapshot.projection)
+                  const projectedCapabilities = object(projection.capabilities)
+                  if (
+                    !isDeepStrictEqual(projection.binding, service.binding)
+                    || typeof projectedCapabilities.logout !== 'boolean'
+                  ) throw unavailable()
+                  logout = projectedCapabilities.logout
+                } else if (snapshot.status !== 'unavailable') throw unavailable()
+              }
+            }
             return {
               requestId,
               ok: true,
@@ -526,7 +614,11 @@ export function createManagerManagedServiceUIBridge(input: {
                       && (service.authenticationTimeoutMs as number) <= 300_000
                     ? { authenticationTimeoutMs: service.authenticationTimeoutMs }
                     : {}),
-                  capabilities: { logout: false, readCatalog: capabilities.readCatalog, accountControl: false },
+                  capabilities: {
+                    logout,
+                    readCatalog: capabilities.readCatalog,
+                    accountControl: false,
+                  },
                 },
               },
             }

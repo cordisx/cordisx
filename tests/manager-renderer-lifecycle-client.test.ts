@@ -112,6 +112,7 @@ it('acknowledges managed-service readback for the exact renderer without retirin
     serviceId: 'gateway',
     sequence: 4,
     phase: 'prepare',
+    action: 'login',
   }
   try {
     await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))

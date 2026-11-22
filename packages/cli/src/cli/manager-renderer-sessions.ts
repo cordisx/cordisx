@@ -40,12 +40,13 @@ export interface ManagerRendererChannel {
     readonly channelConfigurationIndependent?: true
     /** A bounded owner-controlled observation may wait without occupying an ordinary request slot. */
     readonly longLivedRead?: true
-    /** Owner-validated identity for coordinating a managed-service login across admitted Managers. */
+    /** Owner-validated identity for coordinating a managed-service authentication action. */
     readonly managedServiceAuthentication?: {
       readonly pluginId: string
       readonly pluginGeneration: string
       readonly serviceId: string
       readonly expectedSequence: number
+      readonly action: 'login' | 'logout'
     }
     dispatch(): Promise<unknown>
   }

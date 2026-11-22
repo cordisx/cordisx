@@ -22,6 +22,7 @@ import { createManagerRendererModelServicesChannel } from './manager-renderer-mo
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
+import { reserveManagedServiceClients } from '../launcher/managed-service-client-reservation.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
@@ -116,6 +117,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
           readLifecycleFence: () => services!.readManagedServiceUIFence(),
           allowAuthentication: true,
+          allowLogout: true,
           runtime: services,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
@@ -283,6 +285,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             ? {}
             : { managerChannelCredentials: operation => managerChannel!.handle(operation) }),
           terminalProvider: request => terminalProvider!.request(request),
+          reserveServiceClients: identity =>
+            reserveManagedServiceClients(identity, [
+              value => terminalProvider!.reserveForService(value),
+              value => services!.reserveServiceClients(value),
+            ]),
           ...(channel?.channel === undefined
             ? {}
             : {

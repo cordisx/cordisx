@@ -646,7 +646,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (input.channel === 'managed-service-ui') {
           try {
             const envelope = object(JSON.parse(input.payload))
-            rendererWrite = envelope?.operation === 'authenticate'
+            rendererWrite = envelope?.operation === 'authenticate' || envelope?.operation === 'logout'
           } catch {
             return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
           }

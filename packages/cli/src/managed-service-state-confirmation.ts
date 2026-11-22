@@ -5,4 +5,5 @@ export interface ManagedServiceStateConfirmation {
   readonly serviceId: string
   readonly sequence: number
   readonly phase: 'prepare' | 'confirm'
+  readonly action: 'login' | 'logout'
 }

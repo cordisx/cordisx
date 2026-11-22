@@ -1,5 +1,10 @@
 import { safeStartupSnapshot } from './startup-ui-projection.js'
-import type { StartupActionAvailabilityV1, StartupObserverV1, StartupSnapshotV1 } from '@cordisx/protocol/startup/v1'
+import type {
+  StartupActionAvailabilityV1,
+  StartupCapabilityRefV1,
+  StartupObserverV1,
+  StartupSnapshotV1,
+} from '@cordisx/protocol/startup/v1'
 import { StartupRequirementsCoordinator, type StartupRequirementsResult } from '../cli/startup-requirements.js'
 import type { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 
@@ -9,12 +14,33 @@ export interface StartupProviderAdmission {
   wait(providerId: string, modelId: string, signal?: AbortSignal): Promise<StartupRequirementsResult | undefined>
 }
 
+/** Native clients select gateway model IDs; startup discovery reports aliases. */
+export async function waitForNativeStartupProvider(
+  authority: ManagedServiceStartupAuthority,
+  target: StartupCapabilityRefV1,
+  modelId?: string,
+  signal?: AbortSignal,
+): Promise<StartupRequirementsResult> {
+  const result = await new StartupRequirementsCoordinator(authority).wait({
+    mode: 'command',
+    explicit: { target },
+    timeoutMs: 55_000,
+    ...(signal === undefined ? {} : { signal }),
+  })
+  if (signal?.aborted) return { status: 'cancelled' }
+  if (result.status !== 'ready' || modelId === undefined) return result
+  const admission = authority.nativeCatalogAdmission(target)
+  if (!admission.available) return { status: 'unavailable', target, reason: admission.reason }
+  return admission.modelIds.has(modelId)
+    ? result
+    : { status: 'unavailable', target, reason: 'model-unavailable' }
+}
+
 /** Undefined means legacy/not declared, never a declared provider that is still preparing. */
 export function startupProviderAdmission(
   authority: ManagedServiceStartupAuthority,
   observer?: StartupObserverV1,
 ): StartupProviderAdmission {
-  const coordinator = new StartupRequirementsCoordinator(authority)
   return {
     ...(observer === undefined ? {} : { snapshot: async () => safeStartupSnapshot(await observer.read()) }),
     availability(providerId, modelId) {
@@ -28,12 +54,7 @@ export function startupProviderAdmission(
     },
     async wait(providerId, modelId, signal) {
       const target = authority.providerReference(providerId)
-      return target === undefined ? undefined : await coordinator.wait({
-        mode: 'command',
-        explicit: { target, modelId },
-        timeoutMs: 55_000,
-        ...(signal === undefined ? {} : { signal }),
-      })
+      return target === undefined ? undefined : await waitForNativeStartupProvider(authority, target, modelId, signal)
     },
   }
 }
@@ -60,14 +81,13 @@ export function startupTerminalRequests(
         const waiter = new AbortController()
         if (request.waiterId !== undefined) waiters.set(request.waiterId, waiter)
         try {
-          const result = await new StartupRequirementsCoordinator(authority).wait({
-            signal: waiter.signal,
-            mode: 'command',
-            timeoutMs: 55_000,
-            ...(target === undefined
-              ? {}
-              : { explicit: { target, ...(request.model === undefined ? {} : { modelId: request.model }) } }),
-          })
+          const result = target === undefined
+            ? await new StartupRequirementsCoordinator(authority).wait({
+              signal: waiter.signal,
+              mode: 'command',
+              timeoutMs: 55_000,
+            })
+            : await waitForNativeStartupProvider(authority, target, request.model, waiter.signal)
           return result.status === 'ready' ? { kind: 'ready' } : { kind: 'unavailable', startup: result }
         } finally {
           if (request.waiterId !== undefined) waiters.delete(request.waiterId)

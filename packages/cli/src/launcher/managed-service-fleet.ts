@@ -86,6 +86,10 @@ export function managedServiceFleetActivation(
       if (owners.length !== 1) throw new Error('native managed provider is unavailable or duplicated')
       return owners[0]!.prepareNativeConnection(providerId)
     },
+    reserveServiceClients(identity) {
+      const owners = groups.filter(group => group.pluginIds.includes(identity.pluginId))
+      return owners.length === 1 ? owners[0]!.reserveServiceClients?.(identity) : undefined
+    },
     async dispose() {
       await Promise.all(groups.map(group => group.dispose()))
     },

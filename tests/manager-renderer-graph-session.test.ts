@@ -102,6 +102,7 @@ it('allows managed-service readback only for the active plugin generation of the
       serviceId: 'gateway',
       sequence: 3,
       phase: 'prepare',
+      action: 'login',
     }
     const value = command('managed-service-state', 1, payload)
     expect(session.projectCommand(value)).toEqual(value)
@@ -110,6 +111,7 @@ it('allows managed-service readback only for the active plugin generation of the
       const bad of [
         { ...payload, pluginGeneration: 'other' },
         { ...payload, rendererId: '5'.repeat(64) },
+        { ...payload, action: 'refresh' },
         { ...payload, secret: 'private' },
       ]
     ) {

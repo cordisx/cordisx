@@ -51,7 +51,7 @@ describe('browser managed service UI bridge', () => {
     })
     globals.__cordisxManagedServiceUIRequestV1 = send
     const bridge = BrowserManagedServiceUIBridge.connect([{ ...owner, token }], profileId, generation)
-    const request = { ...owner, serviceId: 'gateway', sequence: 4, phase: 'prepare' as const }
+    const request = { ...owner, serviceId: 'gateway', sequence: 4, phase: 'prepare' as const, action: 'login' as const }
     try {
       expect(await bridge.confirmState(request)).toBe(true)
       expect(await bridge.confirmState({ ...request, sequence: 3 })).toBe(false)
@@ -61,6 +61,9 @@ describe('browser managed service UI bridge', () => {
       expect(await bridge.confirmState({ ...request, phase: 'confirm' })).toBe(true)
       state = 'missing'
       expect(await bridge.confirmState({ ...request, phase: 'confirm' })).toBe(false)
+      state = 'logged-out'
+      expect(await bridge.confirmState({ ...request, phase: 'confirm', action: 'logout' })).toBe(true)
+      expect(await bridge.confirmState({ ...request, phase: 'confirm', action: 'login' })).toBe(false)
     } finally {
       bridge.dispose()
     }

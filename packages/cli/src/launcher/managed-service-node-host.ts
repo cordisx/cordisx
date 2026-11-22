@@ -19,6 +19,10 @@ import { isDeepStrictEqual } from 'node:util'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { NativeManagedGatewayConnectionSession } from './managed-service-native-connection.js'
+import type {
+  ManagedServiceClientIdentity,
+  ManagedServiceClientReservation,
+} from './managed-service-client-reservation.js'
 import type { ManagedBackendRuntimeServiceModuleAccess } from './packages/authority-access.js'
 import {
   type ManagedServiceActivationBinding,
@@ -72,6 +76,7 @@ export interface ManagedServiceNodeActivation {
   readonly nativeProviderIds: readonly string[]
   subscribeNativeProviders(listener: () => void): () => void
   prepareNativeConnection(providerId: string): NativeManagedGatewayConnectionSession
+  reserveServiceClients?(identity: ManagedServiceClientIdentity): ManagedServiceClientReservation | undefined
   dispose(): Promise<void>
 }
 
@@ -529,6 +534,12 @@ export class ManagedServiceNodeHost {
               },
             })
           },
+          reserveServiceClients: (identity: ManagedServiceClientIdentity) => {
+            if (groupDisposal !== undefined || !adoptedSources.has(group) || !pluginIds.includes(identity.pluginId)) {
+              return undefined
+            }
+            return runtime.reserveServiceClients(identity)
+          },
           dispose: disposeActivation,
         })
         return value
@@ -568,6 +579,11 @@ export class ManagedServiceNodeHost {
             throw new Error('native managed gateway provider is unavailable')
           }
           return group.prepareNativeConnection(providerId)
+        },
+        reserveServiceClients: (identity: ManagedServiceClientIdentity) => {
+          if (cleanupPromise !== undefined) return undefined
+          const matching = activations.filter(group => group.pluginIds.includes(identity.pluginId))
+          return matching.length === 1 ? matching[0]!.reserveServiceClients?.(identity) : undefined
         },
         dispose,
       })

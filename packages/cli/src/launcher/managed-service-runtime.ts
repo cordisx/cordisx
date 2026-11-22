@@ -23,6 +23,10 @@ import type {
 } from './managed-service-native-connection.js'
 import { ManagedServiceRuntimeNative } from './managed-service-runtime-native.js'
 import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js'
+import type {
+  ManagedServiceClientIdentity,
+  ManagedServiceClientReservation,
+} from './managed-service-client-reservation.js'
 import {
   createManagedServiceActivationBinding,
   createManagedServiceRegistrationHandle,
@@ -107,7 +111,9 @@ export class ManagedServiceRuntime {
   private readonly records = new Map<string, ManagedServiceRecord>()
   private readonly registrations = new Map<string, ManagedServiceRecord>()
   private readonly pendingRegistrations = new Map<string, Promise<ManagedServiceRecord>>()
-  private readonly native = new ManagedServiceRuntimeNative(this.registrations)
+  private readonly clientReservations = new Map<string, symbol>()
+  private readonly fencedClients = new Set<string>()
+  private readonly native = new ManagedServiceRuntimeNative(this.registrations, record => this.clientsBlocked(record))
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
   private readonly endpointReservations: ManagedServiceEndpointReservations
@@ -133,7 +139,66 @@ export class ManagedServiceRuntime {
       throw new Error('managed service health failure threshold is invalid')
     }
     this.failuresBeforeUnhealthy = failuresBeforeUnhealthy
-    this.broker = new ManagedServiceRuntimeBroker(this.records, this.registrations, this.fetch)
+    this.broker = new ManagedServiceRuntimeBroker(
+      this.records,
+      this.registrations,
+      this.fetch,
+      record => this.clientsBlocked(record),
+    )
+  }
+
+  private clientKey(record: ManagedServiceRecord): string {
+    return `${record.access.owner.pluginId}\u0000${record.definition.serviceId}`
+  }
+
+  private clientsBlocked(record: ManagedServiceRecord): boolean {
+    const key = this.clientKey(record)
+    return this.clientReservations.has(key) || this.fencedClients.has(key)
+  }
+
+  /** Reserve native connections and plugin consumer leases before revoking a service login. */
+  reserveServiceClients(identity: ManagedServiceClientIdentity): ManagedServiceClientReservation | undefined {
+    const matches = [...this.records.values()].filter(record =>
+      !record.disposed && record.access.owner.pluginId === identity.pluginId
+      && record.access.owner.pluginGeneration === identity.pluginGeneration
+      && record.definition.serviceId === identity.serviceId
+    )
+    if (matches.length !== 1) return undefined
+    const record = matches[0]!
+    const key = this.clientKey(record)
+    const hasDependentMaterialization = [...this.records.values()].some(candidate =>
+      candidate !== record && !candidate.disposed
+      && [...candidate.materializations.values()].some(materialization =>
+        materialization.sources.some(source => managedBindingCurrent(source.binding, record.binding, record.disposed))
+      )
+    )
+    if (
+      this.clientsBlocked(record) || record.leases.size > 0 || hasDependentMaterialization
+      || [...this.native.authorities.values()].some(owner => owner === record)
+    ) return undefined
+    const token = Symbol('managed-service-client-reservation')
+    this.clientReservations.set(key, token)
+    let ended = false
+    const current = () =>
+      !ended && !record.disposed && this.records.get(managedIdentityKey(record.binding.identity)) === record
+      && this.clientReservations.get(key) === token && !this.fencedClients.has(key)
+    return {
+      isCurrent: current,
+      release: () => {
+        if (!current()) return false
+        ended = true
+        this.clientReservations.delete(key)
+        return true
+      },
+      fence: () => {
+        if (ended) return
+        ended = true
+        if (this.clientReservations.get(key) === token) {
+          this.clientReservations.delete(key)
+          this.fencedClients.add(key)
+        }
+      },
+    }
   }
 
   bind(access: ManagedServiceActivationAccess, signal: AbortSignal): ManagedServiceActivationBinding {

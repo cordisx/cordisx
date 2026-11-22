@@ -83,57 +83,60 @@ it('yields observation HTTP requests while retaining one authenticated owner cal
   }
 }, 15_000)
 
-it('retires a browser session when a managed-service login result is unknown', async () => {
-  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
-  const authority = new ManagerRendererSessions({
-    profileId: 'fixture',
-    ownerGeneration: 'generation',
-    ownerCurrent: () => true,
-    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
-    channels: new Map([['plugin-management', {
-      prepare: () => {
-        throw new Error('unused')
-      },
-    }], ['managed-service-ui', {
-      prepare: () => ({
-        mode: 'write' as const,
-        dispatch: async () => {
-          throw new Error('response lost after dispatch')
+it.each(['authenticate', 'logout'] as const)(
+  'retires a browser session when a managed-service %s result is unknown',
+  async operation => {
+    const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+    const authority = new ManagerRendererSessions({
+      profileId: 'fixture',
+      ownerGeneration: 'generation',
+      ownerCurrent: () => true,
+      authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+      channels: new Map([['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
         },
-      }),
-    }]]),
-  })
-  const web = await startManagerWeb({
-    appId: 'codex',
-    profileId: 'fixture',
-    generation: 'generation',
-    isCurrent: async () => true,
-    request: async operation => await dispatchManagerRendererOperation(authority, operation),
-  }, { rendererGateway: gateway })
-  const origin = new URL(web.url).origin
-  const post = async (route: string, data: unknown, token?: string) =>
-    await fetch(origin + route, {
-      method: 'POST',
-      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
-      body: JSON.stringify(data),
+      }], ['managed-service-ui', {
+        prepare: () => ({
+          mode: 'write' as const,
+          dispatch: async () => {
+            throw new Error('response lost after dispatch')
+          },
+        }),
+      }]]),
     })
-  try {
-    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
-    const token = (await session.json() as { token: string }).token
-    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
-    const input = {
-      channel: 'managed-service-ui',
-      payload: JSON.stringify({ requestId: 'login', operation: 'authenticate' }),
+    const web = await startManagerWeb({
+      appId: 'codex',
+      profileId: 'fixture',
+      generation: 'generation',
+      isCurrent: async () => true,
+      request: async operation => await dispatchManagerRendererOperation(authority, operation),
+    }, { rendererGateway: gateway })
+    const origin = new URL(web.url).origin
+    const post = async (route: string, data: unknown, token?: string) =>
+      await fetch(origin + route, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify(data),
+      })
+    try {
+      const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+      const token = (await session.json() as { token: string }).token
+      expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+      const input = {
+        channel: 'managed-service-ui',
+        payload: JSON.stringify({ requestId: 'action', operation }),
+      }
+      const result = await post('/api/renderer/binding', input, token)
+      expect(result.status).toBe(503)
+      expect(await result.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
+      expect((await post('/api/renderer/binding', input, token)).status).toBe(401)
+    } finally {
+      authority.dispose()
+      await web.close()
     }
-    const result = await post('/api/renderer/binding', input, token)
-    expect(result.status).toBe(503)
-    expect(await result.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
-    expect((await post('/api/renderer/binding', input, token)).status).toBe(401)
-  } finally {
-    authority.dispose()
-    await web.close()
-  }
-})
+  },
+)
 
 it('bootstraps two authenticated renderer sessions without exposing private graphs or grants', async () => {
   const fixture = await managerRendererGraphFixture()

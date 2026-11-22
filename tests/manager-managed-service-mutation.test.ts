@@ -16,7 +16,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function fixture(dispatch: (requestId: string) => Promise<unknown>) {
+function fixture(dispatch: (requestId: string) => Promise<unknown>, action: 'login' | 'logout' = 'login') {
   const scope = { homeDigest: 'a'.repeat(64), ownerAppId: 'codex', profileId: 'work', generation: 'owner-1' }
   const lifecycle = new ServiceRendererLifecycle({
     scope,
@@ -37,6 +37,8 @@ function fixture(dispatch: (requestId: string) => Promise<unknown>) {
   const participants = new ServiceRendererParticipants(scope)
   participants.bind(lifecycle)
   let sessions!: ManagerRendererSessions
+  let clientsAvailable = true
+  const reservations: Array<{ fenced: boolean; released: boolean }> = []
   const channel = coordinateManagerManagedServiceMutations({
     channel: {
       prepare: payload => ({
@@ -46,6 +48,7 @@ function fixture(dispatch: (requestId: string) => Promise<unknown>) {
           pluginGeneration: 'plugin-1',
           serviceId: 'gateway',
           expectedSequence: 1,
+          action,
         },
         dispatch: async () => await dispatch((JSON.parse(String(payload)) as { requestId: string }).requestId),
       }),
@@ -53,6 +56,21 @@ function fixture(dispatch: (requestId: string) => Promise<unknown>) {
     sessions: () => sessions,
     participants,
     lifecycle,
+    reserveServiceClients: () => {
+      if (!clientsAvailable) return undefined
+      const state = { fenced: false, released: false }
+      reservations.push(state)
+      return {
+        isCurrent: () => !state.fenced && !state.released,
+        release: () => {
+          state.released = true
+          return true
+        },
+        fence: () => {
+          state.fenced = true
+        },
+      }
+    },
   })
   sessions = new ManagerRendererSessions({
     profileId: scope.profileId,
@@ -79,10 +97,19 @@ function fixture(dispatch: (requestId: string) => Promise<unknown>) {
     expect(await admission).toMatchObject({ status: 'ok' })
     return invocation
   }
-  return { lifecycle, participants, sessions, open }
+  return {
+    lifecycle,
+    participants,
+    sessions,
+    open,
+    reservations,
+    busy: () => {
+      clientsAvailable = false
+    },
+  }
 }
 
-it('reserves the Manager cohort and waits for readback receipts around login', async () => {
+it.each(['login', 'logout'] as const)('reserves the Manager cohort around %s and waits for readback', async action => {
   const entered = deferred<void>()
   const finish = deferred<void>()
   const dispatch = vi.fn(async (requestId: string) => {
@@ -90,15 +117,15 @@ it('reserves the Manager cohort and waits for readback receipts around login', a
     await finish.promise
     return { requestId, ok: true, value: { status: 'accepted', sequence: 2 } }
   })
-  const f = fixture(dispatch)
+  const f = fixture(dispatch, action)
   try {
     const first = await f.open()
-    const action = f.sessions.call(first, 'managed-service-ui', request('first'))
+    const firstAction = f.sessions.call(first, 'managed-service-ui', request('first'))
     await entered.promise
     expect(await f.sessions.open(gateway, secret())).toBeUndefined()
     expect(() => f.lifecycle.prepare('blocked')).toThrow('service renderer fence is active')
     finish.resolve()
-    expect(await action).toEqual({
+    expect(await firstAction).toEqual({
       status: 'ok',
       value: { requestId: 'first', ok: true, value: { status: 'accepted', sequence: 2 } },
     })
@@ -106,7 +133,10 @@ it('reserves the Manager cohort and waits for readback receipts around login', a
     const peer = f.participants.peer(second.handle.rendererId)!
     const coordinated = f.sessions.call(first, 'managed-service-ui', request('second'))
     const before = (await peer.next())!
-    expect(before).toMatchObject({ method: 'managed-service-state', payload: { phase: 'prepare', sequence: 1 } })
+    expect(before).toMatchObject({
+      method: 'managed-service-state',
+      payload: { phase: 'prepare', sequence: 1, action },
+    })
     expect(peer.acknowledge({
       id: before.id,
       sequence: before.sequence,
@@ -114,7 +144,7 @@ it('reserves the Manager cohort and waits for readback receipts around login', a
       value: { ...before.payload as object, confirmed: true },
     })).toBe(true)
     const after = (await peer.next())!
-    expect(after).toMatchObject({ method: 'managed-service-state', payload: { phase: 'confirm', sequence: 2 } })
+    expect(after).toMatchObject({ method: 'managed-service-state', payload: { phase: 'confirm', sequence: 2, action } })
     expect(peer.acknowledge({
       id: after.id,
       sequence: after.sequence,
@@ -167,6 +197,42 @@ it('fences login when another Manager cannot confirm the resulting state', async
       value: { ...after.payload as object, confirmed: false },
     })).toBe(true)
     expect(await action).toEqual({ status: 'unknown' })
+    expect(f.lifecycle.requiresReconciliation).toBe(true)
+  } finally {
+    f.sessions.dispose()
+    f.participants.close()
+    await f.lifecycle.close()
+  }
+})
+
+it('does not dispatch logout while an affected terminal lease cannot be reserved', async () => {
+  const dispatch = vi.fn(async () => ({ requestId: 'blocked', ok: true, value: { status: 'accepted', sequence: 2 } }))
+  const f = fixture(dispatch, 'logout')
+  try {
+    const first = await f.open()
+    f.busy()
+    expect(await f.sessions.call(first, 'managed-service-ui', request('blocked'))).toEqual({
+      status: 'ok',
+      value: { requestId: 'blocked', ok: false, code: 'owner-unavailable' },
+    })
+    expect(dispatch).not.toHaveBeenCalled()
+  } finally {
+    f.sessions.dispose()
+    f.participants.close()
+    await f.lifecycle.close()
+  }
+})
+
+it('keeps the terminal reservation fenced when a dispatched logout loses its receipt', async () => {
+  const f = fixture(async () => {
+    throw new Error('receipt lost')
+  }, 'logout')
+  try {
+    const first = await f.open()
+    expect(await f.sessions.call(first, 'managed-service-ui', request('uncertain-logout'))).toEqual({
+      status: 'unknown',
+    })
+    expect(f.reservations).toEqual([{ fenced: true, released: false }])
     expect(f.lifecycle.requiresReconciliation).toBe(true)
   } finally {
     f.sessions.dispose()

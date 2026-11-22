@@ -3,7 +3,7 @@ import type { ManagedCatalogComposition } from './model-catalog/managed-catalog-
 import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { createNativeProviderCredentialBroker } from './native-provider-credential-broker.js'
-import { startupProviderAdmission } from './startup-provider-admission.js'
+import { startupProviderAdmission, waitForNativeStartupProvider } from './startup-provider-admission.js'
 import { createTerminalProviderAuthority } from './terminal-provider.js'
 
 /** A headless profile owner lends bounded provider leases without starting a Desktop app. */
@@ -41,12 +41,13 @@ export function createServiceTerminalProvider(input: {
           throw new Error('Selected provider/model is not available in this profile')
         }
       }
-      return await new StartupRequirementsCoordinator(activation.startup).wait({
-        mode: 'command',
-        timeoutMs: 55_000,
-        ...(target === undefined ? {} : { explicit: { target, ...(model === undefined ? {} : { modelId: model }) } }),
-        ...(signal === undefined ? {} : { signal }),
-      })
+      return target === undefined
+        ? await new StartupRequirementsCoordinator(activation.startup).wait({
+          mode: 'command',
+          timeoutMs: 55_000,
+          ...(signal === undefined ? {} : { signal }),
+        })
+        : await waitForNativeStartupProvider(activation.startup, target, model, signal)
     },
     catalog,
     owns: id => managed?.owns(id) === true || activation.nativeProviderIds.includes(id),
@@ -55,6 +56,7 @@ export function createServiceTerminalProvider(input: {
   })
   return {
     request: terminal.request,
+    reserveForService: terminal.reserveForService,
     async close() {
       terminal.close()
       await credentials.close()

@@ -354,9 +354,18 @@ export function createManagerRendererGraphSession(input: {
           }
         } else if (command.method === 'managed-service-state') {
           if (
-            transaction !== undefined || Object.keys(payload).length !== 7
+            transaction !== undefined || Object.keys(payload).length !== 8
             || Object.keys(payload).some(key =>
-              !['rendererId', 'ownerGeneration', 'pluginId', 'pluginGeneration', 'serviceId', 'sequence', 'phase']
+              ![
+                'rendererId',
+                'ownerGeneration',
+                'pluginId',
+                'pluginGeneration',
+                'serviceId',
+                'sequence',
+                'phase',
+                'action',
+              ]
                 .includes(key)
             )
             || payload.rendererId !== input.rendererId || payload.ownerGeneration !== input.generation
@@ -366,6 +375,7 @@ export function createManagerRendererGraphSession(input: {
             || active.get(payload.pluginId)?.descriptor.moduleGeneration !== payload.pluginGeneration
             || !Number.isSafeInteger(payload.sequence) || Number(payload.sequence) < 0
             || !['prepare', 'confirm'].includes(String(payload.phase))
+            || !['login', 'logout'].includes(String(payload.action))
           ) throw invalid()
         } else if (command.method === 'channel-configuration') {
           if (

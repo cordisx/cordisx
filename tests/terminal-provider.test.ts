@@ -167,6 +167,54 @@ describe('terminal provider lifecycle', () => {
     }
   })
 
+  it('reserves logout only after the affected terminal lease retires', async () => {
+    const f = fixture()
+    try {
+      const lease = await f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })).toBeUndefined()
+      const other = f.authority.reserveForService({ pluginId: 'other', serviceId: 'gateway' })!
+      expect(other.isCurrent()).toBe(true)
+      await expect(f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+        .rejects.toThrow('coordinating')
+      expect(other.release()).toBe(true)
+      await f.authority.request({ kind: 'release', leaseId: lease.leaseId })
+      const own = f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })!
+      own.fence()
+      expect(own.release()).toBe(false)
+      await expect(f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+        .rejects.toThrow('coordinating')
+    } finally {
+      f.authority.close()
+    }
+  })
+
+  it('does not reserve a service while a terminal credential is being prepared', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const blocked = new Promise<void>(resolve => {
+      finish = resolve
+    })
+    const original = f.prepare.getMockImplementation()!
+    f.prepare.mockImplementation(async () => {
+      await blocked
+      return await original()
+    })
+    const preparing = f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+    try {
+      await vi.waitFor(() => expect(f.prepare).toHaveBeenCalledOnce())
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })).toBeUndefined()
+      finish()
+      const lease = await preparing
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      await f.authority.request({ kind: 'release', leaseId: lease.leaseId })
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })?.release()).toBe(true)
+    } finally {
+      finish()
+      f.authority.close()
+    }
+  })
+
   it('rejects unknown models before credentials and revokes on generation replacement', async () => {
     const f = fixture()
     try {

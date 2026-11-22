@@ -163,7 +163,8 @@ export class BrowserManagedServiceUIBridge {
       ) return false
       return input.phase === 'prepare'
         ? snapshot.projection.sequence === input.sequence
-        : snapshot.projection.sequence >= input.sequence && snapshot.projection.auth.state === 'authenticated'
+        : snapshot.projection.sequence >= input.sequence
+          && snapshot.projection.auth.state === (input.action === 'login' ? 'authenticated' : 'logged-out')
     } catch {
       return false
     }
@@ -623,7 +624,9 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
           serviceId,
           binding: descriptor.binding,
           request,
-        }) as Awaited<ReturnType<ManagedServiceV1['logout']>>,
+        }, MAX_AUTHENTICATION_TIMEOUT_MS + AUTHENTICATION_RESPONSE_GRACE_MS) as Awaited<
+          ReturnType<ManagedServiceV1['logout']>
+        >,
       ...(descriptor.capabilities.readCatalog
         ? {
           readCatalog: async () =>

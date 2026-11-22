@@ -33,6 +33,10 @@ import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { createConfiguredChannelOwner } from './configured-channel-owner.js'
+import type {
+  ManagedServiceClientIdentity,
+  ManagedServiceClientReservation,
+} from '../launcher/managed-service-client-reservation.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -51,6 +55,10 @@ export async function openProductionPluginManagementComposition(input: {
   readonly coordinator: PluginLifecycleCoordinator
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
+  /** Owner-only reservation of affected clients during a managed-service logout. */
+  readonly reserveServiceClients?: (
+    identity: ManagedServiceClientIdentity,
+  ) => ManagedServiceClientReservation | undefined
   readonly channel?: (operation: string, input: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
@@ -121,6 +129,9 @@ export async function openProductionPluginManagementComposition(input: {
       sessions: () => rendererSessions,
       ...(input.mode === 'service' && input.rendererParticipants && input.rendererLifecycle
         ? { participants: input.rendererParticipants, lifecycle: input.rendererLifecycle }
+        : {}),
+      ...(input.mode === 'service' && input.reserveServiceClients
+        ? { reserveServiceClients: input.reserveServiceClients }
         : {}),
     })
   const rendererServiceConfig = input.rendererConfiguredChannelService

@@ -3,6 +3,10 @@ import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { fenceManagerOrigin } from './manager-origin-fence.js'
+import type {
+  ManagedServiceClientIdentity,
+  ManagedServiceClientReservation,
+} from '../launcher/managed-service-client-reservation.js'
 
 /** Coordinate managed-service actions only when the owner can reserve their complete Manager cohort. */
 export function coordinateManagerManagedServiceMutations(input: {
@@ -10,6 +14,9 @@ export function coordinateManagerManagedServiceMutations(input: {
   readonly sessions: () => ManagerRendererSessions
   readonly participants?: ServiceRendererParticipants
   readonly lifecycle?: ServiceRendererLifecycle
+  readonly reserveServiceClients?: (
+    identity: ManagedServiceClientIdentity,
+  ) => ManagedServiceClientReservation | undefined
 }): ManagerRendererChannel {
   return {
     prepare(payload, context) {
@@ -35,15 +42,27 @@ export function coordinateManagerManagedServiceMutations(input: {
         || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(authentication.serviceId)
         || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(authentication.pluginGeneration)
         || !Number.isSafeInteger(authentication.expectedSequence) || authentication.expectedSequence < 0
+        || !['login', 'logout'].includes(authentication.action)
       ) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
       const identity = {
         pluginId: authentication.pluginId,
         pluginGeneration: authentication.pluginGeneration,
         serviceId: authentication.serviceId,
+        action: authentication.action,
       }
       return {
         mode: 'write',
         async dispatch() {
+          const clients = authentication.action === 'logout'
+            ? input.reserveServiceClients?.({
+              pluginId: identity.pluginId,
+              pluginGeneration: identity.pluginGeneration,
+              serviceId: identity.serviceId,
+            })
+            : undefined
+          if (authentication.action === 'logout' && !clients) {
+            return { requestId, ok: false, code: 'owner-unavailable' }
+          }
           let origin: Awaited<ReturnType<typeof fenceManagerOrigin>>
           try {
             origin = await fenceManagerOrigin({
@@ -54,10 +73,19 @@ export function coordinateManagerManagedServiceMutations(input: {
             })
           } catch {
             // No action was dispatched when the cohort could not be reserved.
+            if (clients && !clients.release()) clients.fence()
             return { requestId, ok: false, code: 'owner-unavailable' }
           }
+          const current = () => origin.isCurrent() && (clients?.isCurrent() ?? true)
+          const release = () => {
+            if (!current() || !origin.release()) return false
+            if (!clients || clients.release()) return true
+            clients.fence()
+            lifecycle.terminal(new Error('terminal-service-reservation-unavailable'))
+            return false
+          }
           try {
-            if (origin.rendererId !== context.rendererId || !origin.isCurrent() || context.signal.aborted) {
+            if (origin.rendererId !== context.rendererId || !current() || context.signal.aborted) {
               throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
             }
             const peers = participants.ownerPeers().filter(peer => peer.identity.rendererId !== origin.rendererId)
@@ -73,10 +101,10 @@ export function coordinateManagerManagedServiceMutations(input: {
                 const receipt = await peer.request('managed-service-state', request)
                 return attachmentEqual(receipt, { ...request, confirmed: true })
               }))
-              return results.every(Boolean) && origin.isCurrent()
+              return results.every(Boolean) && current()
             }
             if (!await confirm('prepare', authentication.expectedSequence)) {
-              if (!origin.release()) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+              if (!release()) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
               return { requestId, ok: false, code: 'owner-unavailable' }
             }
             const result = await prepared.dispatch()
@@ -99,10 +127,11 @@ export function coordinateManagerManagedServiceMutations(input: {
             } else if (outcome.status !== 'denied') {
               throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
             }
-            if (!origin.isCurrent() || !origin.release()) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+            if (!release()) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
             return result
           } catch {
             origin.fence()
+            clients?.fence()
             throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
           }
         },
