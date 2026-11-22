@@ -1,9 +1,19 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { prepareApprovalReviewCatalog } from '../launcher/approval-review-catalog.js'
+import os from 'node:os'
+import { installConfiguredSkills } from '../launcher/configured-skills.js'
 import { randomUUID } from 'node:crypto'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import { mcpServersForApp } from '../config/home-config-mcp.js'
+import { mergeHomeEnvironment } from '../config/home-config-environment.js'
+import { prepareClaudeMcp, projectMcpToCodex } from '../launcher/mcp-projection.js'
+import { codexHome } from './run-support.js'
+import type { HomeConfig } from '../config/home-config.js'
 import { MODEL_SERVICE_HEADER_ENV_PREFIX } from '../config/model-service-runtime-options.js'
 import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
@@ -11,6 +21,7 @@ import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
 import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-layer.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
+import { checkTerminalClient, terminalClientName, terminalClientStartupError } from './terminal-client-check.js'
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
@@ -117,14 +128,25 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   }
   let request: ((input: TerminalProviderRequest) => Promise<TerminalProviderResult>) | undefined
+  let host: { homeDir: string; profileId: string } | undefined
   let shared: ReturnType<typeof prepareSharedTerminalService>
   let declared: ReturnType<typeof sharedTerminalServices> = []
+  let homeConfig: HomeConfig | undefined
+  const configPath = resolveHomeConfigPath({
+    env: environment,
+    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+  })
+  try {
+    await lstat(configPath)
+    homeConfig = await loadHomeConfig(configPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (!invocation.list && homeConfig) {
+    Object.assign(environment, mergeHomeEnvironment(environment, homeConfig.environmentVariables))
+  }
   if (invocation.service || invocation.list || invocation.profile) {
-    const configPath = resolveHomeConfigPath({
-      env: environment,
-      ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-    })
-    const config = await loadHomeConfig(configPath)
+    const config = homeConfig ?? await loadHomeConfig(configPath)
     declared = sharedTerminalServices(config, client)
     if (invocation.service && invocation.model) {
       shared = prepareSharedTerminalService(config, client, invocation.service, invocation.model, environment)
@@ -138,14 +160,21 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
     if (!shared && (invocation.service || invocation.list)) {
-      try {
-        request = await connectExistingTerminalProvider({ homeDir: path.dirname(configPath), profileId })
-      } catch {
-        if (!invocation.list) {
-          throw new Error(
-            'CordisX plugin service selection requires an already-running compatible Host; no App was started',
-          )
-        }
+      host = { homeDir: path.dirname(configPath), profileId }
+    }
+  }
+  const executable = invocation.list ? undefined : await (runtime.internalCheckTerminalClient ?? checkTerminalClient)(
+    invocation.executable ?? (client === 'codex' ? 'codex' : 'claude'),
+    { cwd, env: environment, client, ...(runtime.internalSignal ? { signal: runtime.internalSignal } : {}) },
+  )
+  if (host) {
+    try {
+      request = await connectExistingTerminalProvider(host)
+    } catch {
+      if (!invocation.list) {
+        throw new Error(
+          'CordisX plugin service selection requires an already-running compatible Host; no App was started',
+        )
       }
     }
   }
@@ -165,9 +194,26 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     )
     return
   }
+  const nativeInspection = invocation.codexArgs.some(arg => ['--help', '-h', '--version', '-V'].includes(arg))
+    || ['mcp', 'help', 'list'].includes(invocation.codexArgs[0] ?? '')
+  if (homeConfig?.skills?.length && !nativeInspection) {
+    const home = runtime.homedir ?? environment.HOME ?? os.homedir()
+    const clientRoot = client === 'claude-code'
+      ? (environment.CLAUDE_CONFIG_DIR || path.join(home, '.claude'))
+      : path.join(home, '.agents')
+    await installConfiguredSkills({
+      sources: homeConfig.skills,
+      cacheDir: path.join(path.dirname(configPath), 'cache', 'skills'),
+      skillsDir: path.join(clientRoot, 'skills'),
+      report: stdout,
+      env: environment,
+    })
+  }
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
   let child: ChildProcess | undefined
+  let reviewCatalog: Awaited<ReturnType<typeof prepareApprovalReviewCatalog>>
   let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
+  let claudeMcp: Awaited<ReturnType<typeof prepareClaudeMcp>> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
   let renewing = false, failure: Error | undefined
   try {
@@ -238,22 +284,75 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     const effectiveShared = nativeLayer && sharedCodex
       ? { ...sharedCodex, provider: nativeLayer.provider }
       : sharedCodex
+    if (!nativeInspection) {
+      const managed = Object.keys(mcpServersForApp(homeConfig?.mcp, client)).length > 0
+      if (
+        managed && client === 'claude-code'
+        && invocation.codexArgs.some(arg =>
+          arg === '--strict-mcp-config' || arg === '--mcp-config' || arg.startsWith('--mcp-config=')
+        )
+      ) throw new Error('CordisX MCP cannot be combined with native --mcp-config or --strict-mcp-config')
+      if (managed && client === 'codex') {
+        for (let index = 0; index < invocation.codexArgs.length; index++) {
+          const arg = invocation.codexArgs[index]!
+          const raw = arg === '-c' || arg === '--config'
+            ? invocation.codexArgs[++index]
+            : arg.startsWith('--config=')
+            ? arg.slice(9)
+            : arg.startsWith('-c')
+            ? arg.slice(2)
+            : undefined
+          const key = raw?.split('=')[0]?.replace(/["'\s]/gu, '')
+          if (key === 'mcp_servers' || key?.startsWith('mcp_servers.')) {
+            throw new Error('Codex MCP overrides cannot replace CordisX-managed servers')
+          }
+        }
+      }
+      if (client === 'codex') await projectMcpToCodex(homeConfig?.mcp, codexHome(environment), environment)
+      else claudeMcp = await prepareClaudeMcp(homeConfig?.mcp, environment, cwd)
+    }
+    if (client === 'codex' && !nativeInspection && homeConfig) {
+      const app = homeConfig.apps.codex
+      const profile = app?.profiles[invocation.profile ?? app.defaultProfile]
+      const settings = profile?.approvalReview?.settings
+      if (settings) {
+        if (invocation.service !== settings.providerId) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+        if (!invocation.model) throw new Error('REVIEW_PARENT_MODEL_REQUIRED')
+        if (invocation.codexArgs.some(arg => arg === '--profile' || arg.startsWith('--profile=') || /^-p/u.test(arg))) {
+          throw new Error('REVIEW_NATIVE_PROFILE_UNSUPPORTED')
+        }
+        const version = await promisify(execFile)(executable!, ['--version'], { env: environment, timeout: 5000 })
+        reviewCatalog = await prepareApprovalReviewCatalog({
+          settings,
+          configPath,
+          nativeVersion: version.stdout.trim().replace(/^codex-cli\s+/u, ''),
+        })
+        if (invocation.model && !reviewCatalog?.modelIds.includes(invocation.model)) {
+          throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+        }
+      }
+    }
     const args = client === 'codex'
       ? terminalCodexArguments(invocation, prepared ?? effectiveShared, instructionsFile, nativeLayer?.name)
       : [
         ...terminalClaudeArguments(invocation, instructionsFile),
         ...(claudeSettings ? ['--settings', claudeSettings] : []),
+        ...(claudeMcp?.file ? ['--mcp-config', claudeMcp.file] : []),
       ]
-    child = (runtime.internalSpawnTerminal ?? spawn)(
-      invocation.executable ?? (client === 'codex' ? 'codex' : 'claude'),
-      [...args],
-      {
-        cwd,
-        env: environment,
-        stdio: 'inherit',
-        shell: false,
-      },
-    )
+    try {
+      child = (runtime.internalSpawnTerminal ?? spawn)(
+        executable!,
+        [...(reviewCatalog ? ['-c', `model_catalog_json=${toml(reviewCatalog.path)}`] : []), ...args],
+        {
+          cwd,
+          env: environment,
+          stdio: 'inherit',
+          shell: false,
+        },
+      )
+    } catch (error) {
+      throw terminalClientStartupError(client, executable!, error)
+    }
     if (prepared) {
       const leaseId = prepared.leaseId
       timer = setInterval(() => {
@@ -283,11 +382,18 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (runtime.internalSignal?.aborted) abort()
     try {
       const code = await new Promise<number>((resolve, reject) => {
-        child!.once('error', () => reject(new Error(`Could not start ${client} CLI; check --executable or PATH`)))
+        child!.once(
+          'error',
+          error => reject(terminalClientStartupError(client, executable!, error)),
+        )
         child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
       })
       if (failure) throw failure
-      if (code !== 0) throw Object.assign(new Error(`Codex CLI exited with status ${code}`), { exitCode: code })
+      if (code !== 0) {
+        throw Object.assign(new Error(`${terminalClientName(client)} CLI exited with status ${code}`), {
+          exitCode: code,
+        })
+      }
     } finally {
       process.off('SIGINT', interrupt)
       for (const signal of signals) process.off(signal, abort)
@@ -296,6 +402,8 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   } finally {
     clearInterval(timer)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
+    await reviewCatalog?.close()
     await nativeLayer?.close()
+    await claudeMcp?.close()
   }
 }

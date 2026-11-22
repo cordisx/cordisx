@@ -50,7 +50,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
-      let channel: Awaited<ReturnType<typeof startHeadlessService>>
+      let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let failure: unknown
@@ -142,12 +142,13 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           mode: 'service',
-          ...(channel === undefined
+          ...(channel?.channel === undefined
             ? {}
             : {
               channel: (operation: string, value: unknown, metadata?: unknown) =>
-                channel!.channel.tools.callLocal(operation, value, metadata),
+                channel!.channel!.tools.callLocal(operation, value, metadata),
             }),
+          ...(channel === undefined ? {} : { codex: channel.codex }),
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
         diagnostic({ event: 'service-ready' })

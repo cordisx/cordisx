@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createConfigBridgeHandler, parseConfigBindingRequest } from '../packages/cli/src/launcher/config-rpc.js'
 
 const token = 'a'.repeat(64)
@@ -16,6 +16,44 @@ const request = {
 }
 
 describe('config CDP request boundary', () => {
+  it('persists a configured archive under its verified HTTPS identity without borrowing activation authority', async () => {
+    const source = 'https://github.com/cordisx/example'
+    const stage = vi.fn(async () => ({ revision: 3 }))
+    const handler = createConfigBridgeHandler({
+      token,
+      profileId: 'work',
+      generation,
+      configPath: '/not-used/config.json',
+      configuredPluginConfig: { stage } as never,
+      composition: {
+        version: 1,
+        rootDir: '/',
+        codex: { debugPort: 9229 },
+        providers: [],
+        plugins: [{
+          id: 'example',
+          entry: '/immutable/module.js',
+          enabled: true,
+          config: {},
+          source,
+          distributionArtifact: { version: '1.0.0', integrity: `sha256:${'c'.repeat(64)}` },
+        }],
+      },
+    })
+    const parsed = parseConfigBindingRequest(
+      { ...request, identity: { source, pluginId: 'example' } },
+      token,
+      'work',
+      generation,
+    )
+    await expect(handler.handle(parsed)).resolves.toEqual({ revision: 3 })
+    expect(stage).toHaveBeenCalledTimes(1)
+    await expect(
+      handler.handle({ ...parsed, identity: { source: 'https://github.com/cordisx/spoofed', pluginId: 'example' } }),
+    )
+      .rejects.toThrow('identity is stale or spoofed')
+    expect(stage).toHaveBeenCalledTimes(1)
+  })
   it('accepts only the bound token, profile, and launcher generation', () => {
     expect(parseConfigBindingRequest(request, token, 'work', generation)).toMatchObject({
       operation: 'stage',

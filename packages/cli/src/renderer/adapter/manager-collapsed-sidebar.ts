@@ -91,11 +91,21 @@ export function resolveManagerCollapsedSidebarSeat(
   const endRect = ends[0]!.getBoundingClientRect()
   const controls = [...starts[0]!.querySelectorAll<HTMLElement>('button,a[href],input,select,textarea,[role="button"]')]
     .filter(element => element.getClientRects().length > 0 && view.getComputedStyle(element).visibility === 'visible')
+  // 26.1111 threads append a fourth 28px New chat action after the sidebar trigger.
+  const startRect = starts[0]!.getBoundingClientRect()
+  const extra = controls[3]
+  const threadCreateAction = controls.length === 4 && extra !== undefined && controls[2] === trigger
+    && header.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll'
+    && extra.tagName === 'BUTTON' && Boolean(extra.getAttribute('aria-label')?.trim())
+    && !extra.hasAttribute('aria-controls')
+    && near(startRect.left, 0) && near(startRect.width, 224)
+    && near(extra.getBoundingClientRect().left, 190) && near(extra.getBoundingClientRect().width, 28)
+    && near(extra.getBoundingClientRect().height, 28)
   if (
-    controls.length !== 3 || !controls.includes(trigger)
+    (controls.length !== 3 && !threadCreateAction) || !controls.includes(trigger)
     || controls.some(element => {
       const rect = element.getBoundingClientRect()
-      return element.tagName !== 'BUTTON' || rect.left < 80 || rect.right > 190
+      return element.tagName !== 'BUTTON' || rect.left < 80 || rect.right > (threadCreateAction ? 218 : 190)
         || rect.width < 24 || rect.width > 36 || rect.height < 24 || rect.height > 36
         || view.getComputedStyle(element).pointerEvents !== 'auto'
         || region(view.getComputedStyle(element)) !== 'no-drag'
@@ -105,7 +115,7 @@ export function resolveManagerCollapsedSidebarSeat(
     || !near(endRect.right, headerRect.right)
   ) return undefined
   // The native start slot expands to fit its controls even though the content
-  // starts beside the 52px rail. Clip Host chrome after all three controls.
+  // starts beside the 52px rail. Clip Host chrome after the verified native controls.
   const left = Math.max(slotRect.left, ...controls.map(element => element.getBoundingClientRect().right + 16))
   const right = Math.min(slotRect.right, endRect.left)
   const children = [...slot.children]

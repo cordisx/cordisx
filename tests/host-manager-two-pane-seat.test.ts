@@ -47,6 +47,29 @@ function nativeTwoPane() {
 }
 
 describe('26.924 Manager paired sidebar and card seat', () => {
+  it('recognizes the 26.1111 direct separator and preserves it through Host hide/restore', () => {
+    const f = nativeTwoPane()
+    f.resizer.setAttribute('role', 'separator')
+    f.resizer.setAttribute('aria-orientation', 'vertical')
+    f.resizer.innerHTML = '<div aria-hidden="true"></div>'
+    const before = f.document.body.innerHTML
+    expect(resolveManagerTwoPaneSeat(f.document)?.sidebar.resizer).toBe(f.resizer)
+    expect(f.document.body.innerHTML).toBe(before)
+    f.resizer.style.visibility = 'hidden'
+    f.resizer.inert = true
+    expect(resolveManagerTwoPaneSeat(f.document)?.sidebar.resizer).toBe(f.resizer)
+    const duplicate = f.resizer.cloneNode(true) as HTMLElement
+    f.aside.append(duplicate)
+    f.setRect(duplicate, f.rect(282, 44, 16, 937))
+    expect(resolveManagerTwoPaneSeat(f.document)).toBeUndefined()
+    duplicate.remove()
+    f.resizer.setAttribute('aria-orientation', 'horizontal')
+    expect(resolveManagerTwoPaneSeat(f.document)).toBeUndefined()
+    f.resizer.setAttribute('aria-orientation', 'vertical')
+    f.resizer.firstElementChild!.removeAttribute('aria-hidden')
+    expect(resolveManagerTwoPaneSeat(f.document)).toBeUndefined()
+  })
+
   it('keeps the overlapping native resize wrapper identified while Host hides it', () => {
     const fixture = nativeTwoPane()
     const { aside, resizer: wrapper } = fixture

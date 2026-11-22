@@ -1,5 +1,12 @@
 import { PlatformAuthorizationV2Broker } from './platform-authorization-v2.js'
 import {
+  assertBundlePolicyDecision,
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  deferValidatedV1PermissionPlan,
+  withBundlePolicyIntent,
+} from '../../permission-deferral.js'
+import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
 } from '../../contracts.js'
@@ -58,6 +65,55 @@ import { materializeValidatedRuntimeExactScope } from './platform-runtime-exact-
 import { materializeChannelExactScope } from './channel-exact-scope.js'
 
 export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV2Broker {
+  override async authorizeActivationV7(
+    identity: CordisXPluginIdentity,
+    authorization: DeferredPermissionDecision,
+    operation: 'install' | 'update' | 'enable' = 'enable',
+    view?: PluginGenerationView,
+    bundlePolicySelections?: Readonly<Record<string, 'allow' | 'deny'>>,
+  ): Promise<void> {
+    const registration = this.registration(identity, view)
+    if (registration === undefined || registration.manifest.schemaVersion !== 1) {
+      return await super.authorizeActivationV7(identity, authorization, operation, view, bundlePolicySelections)
+    }
+    const plan = deferValidatedV1PermissionPlan(
+      this.authorizationPlan(identity, operation, view),
+      authorization.binding,
+    )
+    if (bundlePolicySelections === undefined) assertDeferredPermissionDecision(plan, authorization)
+    else {assertBundlePolicyDecision(
+        withBundlePolicyIntent(plan, new Set(Object.keys(bundlePolicySelections))),
+        authorization,
+        bundlePolicySelections,
+      )}
+    const records: CordisXPermissionPolicyRecordV1[] = []
+    for (const selected of authorization.decisions) {
+      if (selected.decision !== 'allow-persistent' && selected.decision !== 'deny-persistent') continue
+      const declaration = registration.declarations.get(selected.capability as CordisXPlatformCapability)
+      if (declaration === undefined) throw new Error('legacy permission decision is undeclared')
+      records.push(createPermissionPolicyRecord({
+        profileId: this.profileId,
+        identity,
+        capability: declaration.name,
+        scope: declaration.scope,
+        policy: selected.decision === 'allow-persistent' ? 'allow' : 'deny',
+      }))
+    }
+    if (records.length > 0) {
+      await this.store.write(records)
+      for (const record of records) this.policyRecords.set(permissionRecordKey(record), record)
+    }
+    const binding = this.binding(registration, `${this.generation}:${identity.id}`)
+    this.onceV2.clearOperation(binding.operationId)
+    for (const selected of authorization.decisions) {
+      if (selected.decision !== 'allow-once') continue
+      const declaration = registration.declarations.get(selected.capability as CordisXPlatformCapability)
+      if (declaration === undefined) throw new Error('legacy permission decision is undeclared')
+      this.onceV2.issue(this.legacyAuthorizationKey(registration, declaration), binding)
+    }
+    this.changed()
+  }
+
   /** Channel is a v2 permission family, not a legacy platform capability cast. */
   async authorizeChannel(
     identity: CordisXPluginIdentity,

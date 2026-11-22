@@ -5,8 +5,51 @@ import { describe, expect, it } from 'vitest'
 import { harness } from './fixtures/native-intermediary-harness.js'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { ChatExecutionPreferences } from '../packages/cli/src/launcher/chat-execution-preferences.js'
+import { CodexChatConfiguration } from '../packages/cli/src/launcher/codex-chat-configuration.js'
 
 describe('native execution and provider routing composition', () => {
+  it('production intermediary carries model defaults and explicit Fast false through the authenticated control port', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'native-model-defaults-')),
+      configPath = path.join(root, 'config.json')
+    await ensureHomeConfig(configPath)
+    const preferences = await ChatExecutionPreferences.open({
+      file: path.join(root, 'execution.json'),
+      configPath,
+      appId: 'codex',
+      profileId: 'default',
+    })
+    await preferences.setCreationDefaults({ providerId: 'openai', model: 'official', fast: true }, 0)
+    const h = await harness()
+    await CodexChatConfiguration.open({
+      preferences,
+      file: path.join(root, 'settings.json'),
+      catalog: async () => [{
+        providerId: 'openai',
+        pluginId: 'codex',
+        models: [{ id: 'official', label: 'Official', aliases: [], supportsFastMode: true }],
+      }],
+      request: (method, params) => h.server.nativeRequest(method, params),
+    })
+    h.server.bindChatExecution(preferences)
+    try {
+      h.send({ id: 'defaults', method: 'thread/start', params: { cwd: root } })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        modelProvider: 'openai',
+        model: 'official',
+        serviceTier: 'priority',
+      })
+      h.send({
+        id: 'explicit',
+        method: 'thread/start',
+        params: { cwd: root, modelProvider: 'openai', model: 'official', serviceTier: null },
+      })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({ serviceTier: null })
+    } finally {
+      await h.close()
+      await preferences.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('applies creation preferences without losing the exact managed provider, token, effort or input', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'native-execution-routing-'))
     const configPath = path.join(root, 'config.json')

@@ -22,13 +22,13 @@ export class TaskSource {
   readonly ast: SyntaxNode
   readonly functions: SyntaxNode[] = []
   readonly edits: SourceEdit[] = []
-  constructor(readonly source: string, ast?: SyntaxNode) {
+  constructor(readonly source: string, ast?: SyntaxNode, allowOwnTaskBindings = false) {
     this.ast = ast ?? parseNativeSource(source)
     visitSyntax(this.ast, node => {
       if (isFunction(node)) this.functions.push(node)
     })
     if (
-      this.nodes(
+      !allowOwnTaskBindings && this.nodes(
         this.ast,
         node =>
           node.type === 'Identifier'
@@ -86,9 +86,12 @@ export class TaskSource {
       }`,
     )
   }
-  declaration(name: string): SyntaxNode {
+  declaration(name: string, scope: SyntaxNode = this.ast): SyntaxNode {
     return one(
-      this.functions.filter(fn => fn.type === 'FunctionDeclaration' && fn.id?.name === name),
+      this.functions.filter(fn =>
+        fn.type === 'FunctionDeclaration' && fn.id?.name === name
+        && fn.start >= scope.start && fn.end <= scope.end
+      ),
       `task-helper-${name}`,
     )
   }

@@ -17,7 +17,7 @@ export class ChannelTaskSettingsPump {
       isBound(threadId: string): boolean
       bound(event: ChannelEventRef, threadId: string): boolean
       allowed(event: ChannelEventRef, patch: ChannelTaskPatch, selection: ChannelTaskPatch): boolean
-      validate(patch: ChannelTaskPatch): Promise<ChannelTaskPatch>
+      validate(patch: ChannelTaskPatch, threadId?: string): Promise<ChannelTaskPatch>
       card(request: ChannelTaskRequest): Promise<void>
     },
   ) {}
@@ -100,7 +100,7 @@ export class ChannelTaskSettingsPump {
         let actual: ChannelTaskPatch
         try {
           actual = await native.taskSelection(threadId)
-          await this.input.validate(record.pending)
+          await this.input.validate(record.pending, threadId)
         } catch {
           await this.finish(
             threadId,
@@ -138,8 +138,8 @@ export class ChannelTaskSettingsPump {
           claimed = true
         })
         if (!claimed) return
-        const revalidate = async () => {
-          await this.input.validate(record.pending!)
+        const revalidate = async (applied: ChannelTaskPatch = {}) => {
+          await this.input.validate(record.pending!, threadId)
           const observed = await native.taskSelection(threadId)
           const state = this.input.store.snapshot(), latest = state.taskSettings[threadId]
           if (
@@ -154,7 +154,7 @@ export class ChannelTaskSettingsPump {
               || !this.input.allowed(current.approvedBy, current.patch, current.selection)
             ) return false
           }
-          return channelTaskSelectionMatches(observed, record.baseSelection!)
+          return channelTaskSelectionMatches(observed, { ...record.baseSelection!, ...applied })
         }
         let result: Record<string, unknown>
         try {
@@ -162,7 +162,10 @@ export class ChannelTaskSettingsPump {
         } catch {
           result = { status: 'reconciliation-required' }
         }
-        if (result.status === 'rejected' && ['selection-busy', 'thread-not-idle'].includes(String(result.reason))) {
+        if (
+          result.status === 'rejected' && (['selection-busy', 'thread-not-idle'].includes(String(result.reason))
+            || ['THREAD_NOT_IDLE', 'CHAT_SETTINGS_BUSY'].includes(String(result.code)))
+        ) {
           await this.input.store.mutate(state => {
             const latest = state.taskSettings[threadId]
             if (latest?.revision !== record.revision || latest.application !== 'applying') return
@@ -182,7 +185,11 @@ export class ChannelTaskSettingsPump {
             actual,
             result.status === 'rejected' ? 'applied' : 'unknown',
             request,
-            result.status === 'rejected' ? 'NATIVE_SELECTION_REJECTED' : 'NATIVE_EFFECT_UNCERTAIN',
+            result.status === 'rejected'
+              ? result.reason === 'provider-switch-unavailable'
+                ? 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE'
+                : 'NATIVE_SELECTION_REJECTED'
+              : 'NATIVE_EFFECT_UNCERTAIN',
             result.status === 'rejected' ? 'denied' : 'unknown',
           )}
       }))

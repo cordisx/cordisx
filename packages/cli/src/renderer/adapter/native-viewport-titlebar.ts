@@ -1,3 +1,5 @@
+import { isManager1117ThreadHeader } from './manager-1117-thread.js'
+
 export interface NativeViewportTitlebarOwner {
   readonly position: 'fixed' | 'absolute'
   readonly surface?: HTMLElement
@@ -19,7 +21,8 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
   if (
     surface === null || surface === undefined || frame === null || frame === undefined
     || surface.getAttribute('data-app-shell-page-surface') !== 'true'
-    || !['titlebar', 'page'].includes(surface.getAttribute('data-app-shell-header-placement') ?? '')
+    || (!['titlebar', 'page'].includes(surface.getAttribute('data-app-shell-header-placement') ?? '')
+      && !isManager1117ThreadHeader(header))
     || view.getComputedStyle(surface).display !== 'contents'
     || view.getComputedStyle(frame).position !== 'relative'
     || header.getClientRects().length === 0 || frame.getClientRects().length === 0
@@ -39,7 +42,10 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
     const row = owner?.parentElement
     if (
       page === null || owner === null || owner === undefined || row === null || row === undefined
-      || page.getAttribute('data-app-shell-active-page') !== 'true'
+      || (page.getAttribute('data-app-shell-active-page') !== 'true'
+        && !(isManager1117ThreadHeader(header)
+          && page.getAttribute('data-app-shell-shared-local-frame') === 'true'
+          && page.getAttribute('data-app-shell-active-page') === null))
       || view.getComputedStyle(page).display !== 'contents'
       || owner.getAttribute('data-app-shell-workspace') !== 'true'
       || row.getAttribute('data-app-shell-workspace-row') !== 'true' || row.parentElement !== frame
@@ -49,7 +55,19 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
     ) return undefined
     const ownerRect = owner.getBoundingClientRect()
     const rowRect = row.getBoundingClientRect()
-    const gutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' ? 4 : 0
+    // 26.1111 threads retain the 4px workspace gutter when their collapsed
+    // sidebar switches the outer frame's compact-page marker off.
+    const collapsedThreadGutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'false'
+      && frame.getAttribute('data-app-shell-sidebar-open') === 'false'
+      && frame.getAttribute('data-app-shell-page-sidebar') === 'false'
+      && surface.getAttribute('data-app-shell-compact-page-gutter') === 'false'
+      && surface.getAttribute('data-app-shell-unified-tab-strip') === 'false'
+      && header.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll'
+    const gutter = isManager1117ThreadHeader(header)
+      ? 0
+      : frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' || collapsedThreadGutter
+      ? 4
+      : 0
     if (
       !near(rowRect.left, ownerRect.left) || !near(rowRect.top, ownerRect.top)
       || !near(rowRect.right, ownerRect.right) || !near(rowRect.bottom, ownerRect.bottom)

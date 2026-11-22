@@ -78,6 +78,7 @@ test('bundled Skill content selects documentation plus shipped Skill checks', ()
   assert.equal(result.full, 'false')
   assert.equal(result.docs_only, 'true')
   assert.equal(result.skill_changed, 'true')
+  assert.equal(result.cli_only, 'false')
 })
 
 for (
@@ -142,6 +143,7 @@ test('deleting a Skill asset still runs its package completeness checks', () => 
   })
   assert.equal(result.skill_changed, 'true')
   assert.equal(result.full, 'false')
+  assert.equal(result.cli_only, 'false')
 })
 
 for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa']) {
@@ -150,8 +152,17 @@ for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa']) {
     assert.equal(result.skill_changed, 'true')
     assert.equal(result.full, 'false')
     assert.equal(result.docs_only, 'true')
+    assert.equal(result.cli_only, 'false')
   })
 }
+
+test('a nested Skill reference prepares every workspace required by package validation', () => {
+  const result = classify({ changes: { 'skills/cordisx/references/channel.md': '# Channel\n' } })
+  assert.equal(result.skill_changed, 'true')
+  assert.equal(result.docs_only, 'true')
+  assert.equal(result.full, 'false')
+  assert.equal(result.cli_only, 'false')
+})
 
 test('whitespace and newline paths remain single records', () => {
   assert.equal(classify({ changes: { '.agents/docs/two words\nlauncher.md': '# Guide\n' } }).docs_only, 'true')

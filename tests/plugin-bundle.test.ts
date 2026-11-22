@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -256,6 +256,84 @@ async function inspectAndInstall(coordinator: PluginBundleCoordinator, directory
 }
 
 describe('Host plugin bundle coordinator', () => {
+  it('serializes simultaneous bundle requests and rejects a stale policy revision', async () => {
+    const { root, coordinator } = await harness()
+    const first = await bundleFixture({ root, id: 'concurrent-one' })
+    const second = await bundleFixture({ root, id: 'concurrent-two' })
+    const snapshot = await coordinator.snapshot()
+    const make = (id: string, directory: string) => ({
+      $schema: CORDISX_PLUGIN_BUNDLE_LIFECYCLE_OPERATION_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      requestId: id,
+      profileId: snapshot.profileId,
+      expectedRevision: snapshot.revision,
+      expectedPluginRevision: snapshot.pluginRevision,
+      runtimeGeneration: snapshot.runtimeGeneration,
+      operation: {
+        kind: 'inspect-source' as const,
+        source: { kind: 'local-directory' as const, location: pathToFileURL(directory).href },
+      },
+    })
+    const [one, two] = await Promise.all([
+      coordinator.handle(make('concurrent-first', first)),
+      coordinator.handle(make('concurrent-second', second)),
+    ])
+    expect(one.outcome).toBe('planned')
+    expect(two).toMatchObject({ outcome: 'conflict', error: { code: 'stale-revision' } })
+  })
+  it.each(['ask', 'allow', 'deny'] as const)(
+    'defers unchosen bundle authority and retains the explicit %s choice',
+    async policy => {
+      const { root, runtime, coordinator } = await harness()
+      const directory = await bundleFixture({ root, id: `optional-${policy}`, requiredCapability: true })
+      const memberDirectory = path.join(directory, 'plugins', 'notes')
+      const runtimePath = path.join(memberDirectory, 'runtime.json')
+      const manifest = JSON.parse(await readFile(runtimePath, 'utf8'))
+      manifest.capabilities[0].required = false
+      manifest.capabilities.push({
+        name: 'tasks.catalog.read',
+        required: false,
+        reason: { key: 'tasks', fallback: 'List tasks' },
+        scope: {},
+      })
+      const text = `${JSON.stringify(manifest, null, 2)}\n`
+      await writeFile(runtimePath, text)
+      const packagePath = path.join(memberDirectory, 'cordisx-package.json')
+      const metadata = JSON.parse(await readFile(packagePath, 'utf8'))
+      metadata.runtimeManifest.digest = `sha256:${createHash('sha256').update(text).digest('hex')}`
+      await writeFile(packagePath, `${JSON.stringify(metadata, null, 2)}\n`)
+      const inspected = await request(coordinator, {
+        kind: 'inspect-source',
+        source: { kind: 'local-directory', location: pathToFileURL(directory).href },
+      })
+      const selected = inspected.plan!.permissionRequests.find(item => item.capability === 'models.read')!
+      const applied = await request(coordinator, {
+        kind: 'install',
+        candidateId: inspected.candidateId!,
+        impactToken: inspected.impactToken!,
+        bundlePermissions: [{ permissionId: selected.permissionId, policy }],
+        pluginOverrides: [],
+      })
+      expect(applied.outcome).toBe('applied')
+      const mutation = runtime.staged.find(item => item.targetId === 'notes')!
+      expect(mutation.authorizationDecision).toMatchObject({
+        schemaVersion: 7,
+        origin: policy === 'ask' ? 'host-no-decision' : 'bundle-policy',
+        decisions: policy === 'ask'
+          ? []
+          : [
+            expect.objectContaining({
+              capability: 'models.read',
+              decision: expect.stringMatching(new RegExp(`^${policy}`)),
+            }),
+          ],
+      })
+      expect(mutation.authorizationDecision?.decisions.some(item => item.capability === 'tasks.catalog.read')).toBe(
+        false,
+      )
+      expect(mutation.bundlePolicySelections).toEqual(policy === 'ask' ? {} : { 'models.read': policy })
+    },
+  )
   it('classifies a single-plugin directory as not a bundle without hiding malformed bundles', async () => {
     const { root, coordinator } = await harness()
     const directory = path.join(root, 'single-plugin')

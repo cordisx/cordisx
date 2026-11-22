@@ -156,5 +156,6 @@ export async function harness(
   if (transport === undefined) throw new Error('transport unavailable')
   transports.add(transport)
   await settle()
+  await settle()
   return { ...control, dom, requests, transport, channel }
 }

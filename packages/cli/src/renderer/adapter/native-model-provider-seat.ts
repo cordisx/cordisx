@@ -124,7 +124,8 @@ export function locateNativeModelProviderMountSeat(
 ): NativeModelProviderSeat | undefined {
   const candidates = [...document.querySelectorAll<HTMLElement>(
     'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"],'
-      + 'button[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort][aria-haspopup="menu"]',
+      + 'button[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort][aria-haspopup="menu"],'
+      + 'button[data-composer-navigation-target="reasoning"][aria-busy="true"][disabled]',
   )].flatMap(trigger => {
     const composer = trigger.closest<HTMLElement>('[data-codex-composer-root][data-composer-placement]')
     const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')
@@ -132,7 +133,10 @@ export function locateNativeModelProviderMountSeat(
     if (!visible(trigger) || !visible(composer) || !visible(footer)) return []
     // The current reasoning trigger also owns the unified model menu. A plain
     // reasoning-only control must never be replaced by the provider selector.
-    if (trigger.dataset.codexIntelligenceTrigger !== 'true' && !locateNativeModelSelectionControl(trigger)) return []
+    const loading = trigger.getAttribute('aria-busy') === 'true' && trigger.hasAttribute('disabled')
+    if (
+      trigger.dataset.codexIntelligenceTrigger !== 'true' && !loading && !locateNativeModelSelectionControl(trigger)
+    ) return []
     return [{ trigger, footer }]
   })
   if (candidates.length !== 1) return undefined
@@ -164,6 +168,11 @@ export function currentNativeComposerThreadId(document: Document, owner?: Elemen
     '[data-codex-composer-root][data-composer-placement]',
   )
   if (!composer) return undefined
+  return nativeComposerThreadId(composer)
+}
+
+/** Read an explicitly owned composer without requiring a model-control seat. */
+export function nativeComposerThreadId(composer: Element): string | undefined {
   const values = new Set(
     [...composer.querySelectorAll('[data-above-composer-conversation-id]')]
       .filter(element => element.closest('[data-codex-composer-root][data-composer-placement]') === composer)
@@ -183,7 +192,10 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
     const selectModel = props?.onSelectModel
     if (
       props?.showReasoningEffortControls === true
-      && props.menuView === 'simple'
+      // Codex 26.1117 uses the same unified picker in advanced mode when the
+      // selected model has fewer than two power choices. The owner callbacks
+      // and model data remain identical in both modes.
+      && (props.menuView === 'simple' || props.menuView === 'advanced')
       && typeof props.open === 'boolean'
       && typeof model === 'string' && model !== ''
       && typeof reasoningEffort === 'string' && reasoningEffort !== ''

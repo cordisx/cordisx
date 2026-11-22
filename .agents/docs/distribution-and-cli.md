@@ -160,6 +160,61 @@ default; `--untrusted` opts out. HTTP loopback and query-bearing HTTPS sources
 remain available for discovery but do not become trust roots, and explicitly
 marking either form trusted is rejected.
 
+## Shared MCP servers
+
+Edit the private home configuration shown by `cordisx config` and add an
+`mcp` object. The same declarations apply to Codex and the `claude-code`
+terminal client; `apps` replaces a whole named entry for one client, and `null`
+excludes it. Existing native servers remain independently configured.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "local-tools": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/path/to/server.js"],
+        "cwd": "/path/to/project",
+        "env": { "TOKEN": { "env": "MY_MCP_TOKEN" } }
+      },
+      "remote-tools": {
+        "type": "http",
+        "url": "https://example.com/mcp",
+        "headers": { "Authorization": { "env": "MY_MCP_AUTHORIZATION" } }
+      }
+    },
+    "apps": { "claude-code": { "local-tools": null } }
+  }
+}
+```
+
+Merge this object into the existing configuration; it is not a complete
+configuration file. `cordisx config` prints the path and a redacted summary.
+String values are literal; `{ "env": "NAME" }` reads a nonempty variable
+from the actual launch environment for `env`, `url`, or `headers`. A missing
+reference stops startup with its variable name, without printing its value.
+Use environment references for secrets. An environment-referenced URL must be
+resolved for Codex, so its value is saved in its private `config.toml`. Claude Code HTTP URL and
+header references are resolved in its private, temporary adapter file.
+
+Only stdio and streamable HTTP are supported; SSE, WebSocket, OAuth settings,
+and additional native-specific fields are not projected. For a stdio server,
+`cwd` and renamed environment references use a Node subprocess wrapper. CordisX
+synchronizes an integrity-marked block in the effective Codex home before native
+initialization, preserving other tables; a native server with the same name or
+an edited managed block stops the launch for manual resolution. Removing a
+server removes only its intact managed entry at the next launch. Claude Code
+receives a private per-session `--mcp-config` file alongside its normal settings;
+it is removed when the session ends. Its server names use the `cordisx_` prefix
+so ordinary same-name native servers remain available. A collision with a user
+or project server using that exact prefixed name stops the launch. Managed and
+plugin-provided servers remain subject to Claude Code's native precedence. This
+adapter is for Claude Code, not Claude Desktop. When CordisX MCP servers are enabled, native `--mcp-config`,
+`--strict-mcp-config`, and Codex `-c mcp_servers...` overrides are rejected
+to avoid silently replacing the managed adapter. Help, listing, dry-run and
+attach operations do not synchronize MCP configuration.
+
 ## Home configuration
 
 The canonical configuration is `${homedir}/.cordisx/config.json`. It is user
@@ -231,10 +286,19 @@ Profile fragment:
 
 The first generated configuration always uses `plugins: []`. CordisX itself is
 host infrastructure, not a bundled demo plugin, and setup must not silently
-activate `slot-showcase` or any other example. Version 1 may load explicitly
-configured trusted local plugin entries, but package installation, dependency
-resolution, signatures, and marketplace activation remain later authority
-work.
+activate `slot-showcase` or any other example. Version 1 loads explicitly
+configured trusted local plugin entries. Package management uses the separate
+Host-owned lifecycle authority.
+
+From beta.70, a configured `plugins[].entry` may also point to a local `.tgz`
+or `.tar.gz` package. The launcher hashes the actual archive, validates its
+package/runtime manifests, and loads an immutable staged graph. The verified
+archive digest, version and canonical source reach the PermissionBroker so an
+exact Marketplace certification can apply to Manager rendering. An unpacked
+JS entry does not acquire archive certification from its manifest. Configured
+packages remain separate from Marketplace activation records and reserve their
+plugin ids; the archive path does not create a lifecycle install or grant other
+permissions.
 
 The persisted document is versioned and strictly validated. Writes use a
 same-directory temporary file, fsync where available, atomic rename, and user-
@@ -261,6 +325,53 @@ path.
 Resolution precedence is CLI option, named profile, app default, global
 default, then adapter default. Every resolved launch plan is inspectable through
 `cordisx doctor` without starting the host.
+
+## Configured Git Skills
+
+Add portable Git references to the top-level `skills` array in the CordisX home
+`config.json` (see `cordisx config` for its location). For example:
+
+```json
+{
+  "skills": [
+    "https://example.com/team/skills.git#main@review",
+    "https://example.com/team/other.git@skills/check"
+  ]
+}
+```
+
+These are excerpts to add to an existing version-1 configuration, not a complete
+config file. Each source is a Git URL, optionally followed by `#ref` and
+`@skill`. The selector matches a directory name or repository-relative path;
+without one, every discovered directory containing `SKILL.md` is installed.
+Ambiguous names require a path. SSH Git URLs are supported; authenticate through
+Git's normal credential or SSH mechanisms rather than embedding credentials in
+URLs. Non-Git registries and DYAI object declarations are not supported.
+
+A named Codex Desktop launch installs configured Skills into its effective
+`HOME/.agents/skills` before the Host starts, including isolated profiles.
+`cordisx start --mode cli codex` uses the user's `.agents/skills`; Claude Code
+uses `~/.claude/skills` (or `$CLAUDE_CONFIG_DIR/skills`). Claude Desktop is a
+separate application. Help, list, dry-run and attach do not install Skills.
+
+Run `cordisx skills install` for all configured sources or
+`cordisx skills install 'https://example.com/team/skills.git#main@review'`
+for a one-off source. Add `--client codex` or `--client claude-code` to target
+one client; the default is both. `cordisx skills update` fetches configured
+sources again, and accepts the same optional source and client options. One-off
+installs do not modify the configuration.
+
+The first install clones the source and caches a checked-out copy under the
+CordisX home. Starts and `install` reuse that snapshot, so they work offline;
+`update` refreshes it. If refresh fails, the previous snapshot remains usable,
+a warning is emitted and the explicit command exits unsuccessfully. Sources
+without a cache report an error and do not prevent the client from launching.
+The installed files are real copies, avoiding reliance on cross-client symlink
+discovery; source Skills containing symlinks are rejected. CordisX records an
+ownership marker and content digest, refuses to replace unmarked, differently
+owned or locally modified directories, and reports conflicts. Removing a source
+from configuration does not delete installed files. Only use repositories whose
+instructions and scripts you trust.
 
 ## Bundled Skills
 

@@ -7,7 +7,7 @@ import type { PluginController } from '../packages/cli/src/renderer/runtime-shar
 const storeDigest = `sha256:${'a'.repeat(64)}` as const
 const artifactIntegrity = `sha256:${'b'.repeat(64)}` as const
 
-function register(artifactIntegrityValue?: `sha256:${string}`, development = false) {
+function register(artifactIntegrityValue?: `sha256:${string}`, development = false, configured = false) {
   const permissionRegister = vi.fn(() => () => undefined)
   const extensionPointRegister = vi.fn(() => () => undefined)
   const scope = {
@@ -42,13 +42,15 @@ function register(artifactIntegrityValue?: `sha256:${string}`, development = fal
       config: {},
       revision: 0,
       manifest,
-      package: {
-        version: '1.2.3',
-        digest: storeDigest,
-        ...(artifactIntegrityValue === undefined ? {} : { artifactIntegrity: artifactIntegrityValue }),
-        moduleGeneration: 'module-1',
-        dependencies: [],
-      },
+      ...(configured ? { distributionArtifact: { version: '1.2.3', integrity: artifactIntegrityValue } } : {
+        package: {
+          version: '1.2.3',
+          digest: storeDigest,
+          ...(artifactIntegrityValue === undefined ? {} : { artifactIntegrity: artifactIntegrityValue }),
+          moduleGeneration: 'module-1',
+          dependencies: [],
+        },
+      }),
       ...(development
         ? { development: { origin: 'local-dev', pluginId: 'demo', sourcePath: '/tmp/demo.ts', state: 'ready' } }
         : {}),
@@ -59,6 +61,11 @@ function register(artifactIntegrityValue?: `sha256:${string}`, development = fal
 }
 
 describe('renderer artifact certification provenance', () => {
+  it('registers configured distribution provenance without requiring package activation', () => {
+    const permissionRegister = register(artifactIntegrity, false, true)
+    expect(permissionRegister.mock.calls[0]?.[4]).toEqual({ version: '1.2.3', integrity: artifactIntegrity })
+    expect(permissionRegister.mock.calls[0]?.[5]).toBe(false)
+  })
   it('registers an exact downloaded artifact digest instead of the normalized store digest', () => {
     const permissionRegister = register(artifactIntegrity)
     expect(permissionRegister.mock.calls[0]?.[4]).toEqual({ version: '1.2.3', integrity: artifactIntegrity })

@@ -249,6 +249,20 @@ export class HostServiceConfigNarrowApi {
     })
   }
 
+  /** Launcher-only read for credential recovery; never expose this method through the renderer bridge. */
+  async privateConfiguration(): Promise<{ revision: number; configuration: JsonValue }> {
+    this.assertActive()
+    if (!await this.authorized('read') || !await this.authorized('write')) throw new Error('PERMISSION_DENIED')
+    const state = await this.persistence.read({
+      profileId: this.options.profileId,
+      pluginId: this.identity.pluginId,
+      serviceId: this.identity.serviceId,
+      initialConfig: this.initialConfiguration,
+    }, this.options.configPath)
+    this.assertActive()
+    return { revision: state.revision, configuration: this.options.contract.parseStored(state.config) }
+  }
+
   async mutate(request: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> {
     const base = {
       contract: 'cordisx.service-config-result/v1' as const,

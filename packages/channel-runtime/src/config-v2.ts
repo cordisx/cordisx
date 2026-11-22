@@ -1,4 +1,5 @@
 import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig } from './config.js'
+import type { ChannelServiceConfigV3 } from './config-v3.js'
 
 export type ChannelReceiveSelector = 'direct' | 'group' | 'mentions' | 'replies'
 export interface ChannelServiceConnectionConfigV2 extends ChannelServiceConnectionConfig {
@@ -66,7 +67,7 @@ export function parseChannelConfigV2(
 
 /** Explicit adapter input projection; never writes a downgraded document to storage. */
 export function channelServiceInputV1(
-  configuration: ChannelServiceConfigV1 | ChannelServiceConfigV2,
+  configuration: ChannelServiceConfigV1 | ChannelServiceConfigV2 | ChannelServiceConfigV3,
 ): ChannelServiceConfigV1 {
   return {
     contract: 'cordisx.channel-service-config/v1',
