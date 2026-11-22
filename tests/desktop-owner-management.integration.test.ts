@@ -32,7 +32,7 @@ import { startPluginGenerationArtifactServer } from '../packages/cli/src/launche
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
-import { decision, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
+import { decision, FormalRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
 
 const secret = () => randomBytes(32).toString('hex')
 
@@ -251,7 +251,11 @@ it('attaches the real management composition to one existing Desktop owner and r
       { status: 'ok', value: { accepted: true } },
     )
     expect(await admit).toEqual({ status: 'ok', value: { admitted: true } })
-    const sourceDirectory = await localPackage({ root: homeDir, id: 'unsupported-live-install' })
+    const sourceDirectory = await localPackage({
+      root: homeDir,
+      id: 'unsupported-live-install',
+      requiredCapability: true,
+    })
     const planned = await coordinator.handle({
       ...request({ kind: 'inspect-local', sourceDirectory }, 0, generation),
       profileId,
@@ -314,3 +318,62 @@ it('attaches the real management composition to one existing Desktop owner and r
     await rm(homeDir, { recursive: true, force: true })
   }
 }, 90_000)
+
+it.each([false, true])(
+  'admits an existing Desktop package only when its browser graph is supported: capability %s',
+  async requiredCapability => {
+    const root = await mkdtemp('/tmp/cx-desktop-owner-package-')
+    const homeDir = path.join(root, 'home')
+    const configPath = path.join(homeDir, 'config.json')
+    const profileId = 'work'
+    const generation = 'runtime-1'
+    await mkdir(homeDir, { mode: 0o700 })
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    const seed = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId,
+      runtimeGeneration: generation,
+      permissionPolicies: [],
+      runtime: new FormalRuntime(),
+      headless: true,
+    })
+    const artifactServer = await startPluginGenerationArtifactServer()
+    let owner: Awaited<ReturnType<typeof createDesktopManagerOwnerIfEligible>>
+    try {
+      const sourceDirectory = await localPackage({ root, id: 'installed-fixture', requiredCapability })
+      const planned = await seed.handle(request({ kind: 'inspect-local', sourceDirectory }, 0, generation))
+      const installed = await seed.handle(request(
+        {
+          kind: 'install',
+          candidateId: planned.candidateId!,
+          authorizationDecision: decision(planned.authorizationPlan!),
+        },
+        0,
+        generation,
+      ))
+      expect(installed).toMatchObject({ outcome: 'applied' })
+      const store = new PluginActivationStore(homeDir, profileId, generation)
+      owner = await createDesktopManagerOwnerIfEligible({
+        homeDir,
+        configPath,
+        appId: 'codex',
+        profileId,
+        generation,
+        cdp: new CdpPluginLifecycleRuntime(),
+        artifactServer,
+        store,
+        ownerVerified: true,
+        attach: false,
+        configuredPlugins: [],
+      })
+      expect(Boolean(owner)).toBe(!requiredCapability)
+    } finally {
+      await owner?.close()
+      await artifactServer.close()
+      const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
+      await Promise.all(digests.map(async digest => await removeStagedPluginPackage(homeDir, `sha256:${digest}`)))
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+  90_000,
+)

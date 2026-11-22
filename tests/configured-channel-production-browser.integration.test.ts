@@ -8,10 +8,16 @@ import { expect, it } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
+import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 
 const exec = promisify(execFile)
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
@@ -127,8 +133,19 @@ it.skipIf(
         throw new Error('Channel navigation did not register: ' + JSON.stringify({ text, diagnostics }))
       }
       await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
-      await expect.poll(() => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
-        .toBe(true)
+      try {
+        await expect.poll(() => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
+          .toBe(true)
+      } catch {
+        const state = await page.evaluate(`({
+          text: document.body.innerText.slice(0, 600),
+          ready: document.documentElement.dataset.cordisxReady,
+          statusHidden: document.querySelector('p[role=status]')?.hidden,
+          content: Boolean(document.querySelector('[data-manager-content-page]')),
+          navigation: document.querySelector('[data-settings-navigation-item^=channel]')?.textContent,
+        })`)
+        throw new Error('Channel collection did not load: ' + JSON.stringify(state))
+      }
       await expect.poll(() =>
         page.evaluate(
           'document.body.textContent.includes("Simulator") || document.body.textContent.includes("模拟器")',
@@ -199,6 +216,21 @@ it.skipIf(
       await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), 'dir')
       expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
         .toMatchObject({ status: 'ready', mode: 'service' })
+      const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+      const duplicate = await localPackage({ root, id: 'channel' })
+      const planned = await requestPluginManagementRpc(paths, endpoint, {
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory: duplicate },
+      }) as any
+      expect(planned.status).toBe('planned')
+      expect(
+        await requestPluginManagementRpc(paths, endpoint, {
+          kind: 'execute',
+          request: planned.executionRequest,
+          expectedRevision: planned.snapshot.revision,
+        }),
+      ).toMatchObject({ status: 'rejected', error: { code: 'operation-unavailable' } })
       const firstUrl = await open()
       const launched = launchChrome(chrome!, browserProfile)
       browser = launched.browser
@@ -246,6 +278,12 @@ it.skipIf(
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
       await showChannel(second)
+      for (const page of [first, second]) {
+        await expect.poll(
+          () => page.evaluate('document.querySelector("p[role=status]")?.hidden === true'),
+          { timeout: 20_000 },
+        ).toBe(true)
+      }
       await expect.poll(() => second.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
       await expect.poll(
         () => second.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
@@ -264,6 +302,57 @@ it.skipIf(
         return event.defaultPrevented
       })()`)
       ).toBe(true)
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate(
+            'Boolean(globalThis.__fixtureManagerContent = document.querySelector("[data-cordisx-manager-content-seat]")?.firstElementChild)',
+          ),
+        ).toBe(true)
+      }
+      const neighbor = await localPackage({
+        root,
+        id: 'channel-neighbor-fixture',
+        code: 'export function apply() { globalThis.__channel_neighbor_fixture = true }',
+      })
+      const neighborPlan = await requestPluginManagementRpc(paths, endpoint, {
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory: neighbor },
+      }) as any
+      expect(neighborPlan.status).toBe('planned')
+      expect(
+        await requestPluginManagementRpc(paths, endpoint, {
+          kind: 'execute',
+          request: neighborPlan.executionRequest,
+          expectedRevision: neighborPlan.snapshot.revision,
+        }),
+      ).toMatchObject({ status: 'applied' })
+      for (const page of [first, second]) {
+        expect(await page.evaluate('globalThis.__channel_neighbor_fixture === true')).toBe(true)
+        expect(
+          await page.evaluate(
+            'document.querySelector("[data-cordisx-manager-content-seat]")?.firstElementChild === globalThis.__fixtureManagerContent',
+          ),
+        ).toBe(true)
+        expect(
+          await page.evaluate(`new Promise((resolve, reject) => {
+          const requestId = 'after-neighbor-' + crypto.randomUUID();
+          const previous = globalThis.__cordisxChannelActionsReceiveV1;
+          const timer = setTimeout(() => { globalThis.__cordisxChannelActionsReceiveV1 = previous; reject(new Error('snapshot timeout')); }, 8000);
+          globalThis.__cordisxChannelActionsReceiveV1 = payload => {
+            const value = JSON.parse(payload);
+            if (value.requestId !== requestId) return previous?.(payload);
+            clearTimeout(timer);
+            globalThis.__cordisxChannelActionsReceiveV1 = previous;
+            resolve({ ok: value.ok, status: value.value?.status });
+          };
+          globalThis.__cordisxChannelActionsRequestV1(JSON.stringify({
+            version: 1, token: 'renderer-binding-placeholder', requestId, action: 'snapshot'
+          }));
+        })`),
+        ).toEqual({ ok: true, status: 'applied' })
+      }
+      expect(await second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'))
+        .toBe('Second page draft')
       expect(await first.evaluate('typeof globalThis.__cordisxChannelCredentialRequestV1')).toBe('function')
       await expect.poll(() => first.evaluate(openRow(['Feishu', '飞书', 'cli_fixture']))).toBe(true)
       await expect.poll(() =>

@@ -8,7 +8,11 @@ import { attachmentEqual, attachmentHomeDigest } from '../launcher/renderer-life
 import { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
-import { createServiceRendererProjector, loadServiceConfiguredChannelArchive } from './service-renderer-projection.js'
+import {
+  createServiceRendererProjector,
+  loadServiceConfiguredChannelArchive,
+  loadServiceRendererPackage,
+} from './service-renderer-projection.js'
 import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { supportsReadonlyConfiguredChannel } from './readonly-headless-channel.js'
@@ -129,14 +133,19 @@ export async function createDesktopManagerOwnerIfEligible(
     readonly configuredPlugins: readonly CordisXConfigPlugin[]
   },
 ): Promise<ReturnType<typeof createDesktopManagerOwner> | undefined> {
-  if (
-    !input.ownerVerified || input.attach || (await input.store.loadActive()).plugins.length !== 0
-  ) return undefined
+  if (!input.ownerVerified || input.attach) return undefined
+  const active = await input.store.loadActive()
+  try {
+    for (const plugin of active.plugins) await loadServiceRendererPackage(input.homeDir, plugin)
+  } catch {
+    return undefined
+  }
   let configuredChannel: CordisXConfigPlugin | undefined
   if (input.configuredPlugins.length !== 0) {
     const plugin = input.configuredPlugins[0]
     if (
       input.configuredPlugins.length !== 1 || !plugin || !supportsReadonlyConfiguredChannel(plugin)
+      || active.plugins.some(item => item.id === plugin.id)
       || process.platform !== 'darwin' && process.platform !== 'linux'
     ) return undefined
     try {

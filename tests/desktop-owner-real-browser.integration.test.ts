@@ -4,6 +4,7 @@ import { accessSync, constants } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import { createDesktopManagerOwnerIfEligible } from '../packages/cli/src/cli/desktop-manager-owner.js'
@@ -23,6 +24,11 @@ import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { dispatchCodexSettings } from '../packages/cli/src/launcher/codex-settings-dispatch.js'
 import { nativeCodexSettings } from '../packages/cli/src/launcher/native-codex-settings-composition.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
@@ -34,6 +40,7 @@ import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-p
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
+import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 
 const chrome = [
   process.env.CHROME_PATH,
@@ -117,6 +124,11 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
   })
   const artifactServer = await startPluginGenerationArtifactServer()
   const cdp = new CdpPluginLifecycleRuntime()
+  if (archive !== undefined && !review) {
+    // This fixture supplies CDP documents; native launch graph promotion is a separate boundary.
+    cdp.markBrowserGraphTransportReady()
+    cdp.setBrowserGraphBootstrapRefresh(async () => {})
+  }
   const store = new PluginActivationStore(homeDir, profileId, generation)
   const settings = nativeCodexSettings({
     configPath,
@@ -158,6 +170,7 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
     runtimeGeneration: generation,
     permissionPolicies: policies,
     runtime: managed,
+    pluginGenerationArtifactServer: artifactServer,
   })
   let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
   let web: { url: string; issueUrl(): string; close(): Promise<void> } | undefined
@@ -264,7 +277,12 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
     unregister = cdp.register(desktop as never)
     const managerOwner = await openManagerOwner(profileId, { CORDISX_HOME: homeDir })
     // Built assets are used by the same sidecar module shipped in the package.
-    const sidecar = await import('../packages/cli/dist/src/cli/manager-web.js')
+    const fixturePackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+    const sidecar = await import(
+      fixturePackage === undefined
+        ? '../packages/cli/dist/src/cli/manager-web.js'
+        : pathToFileURL(path.join(fixturePackage, 'dist/src/cli/manager-web.js')).href
+    )
     web = await sidecar.startManagerWeb(managerOwner, { rendererGateway: gateway })
     const url = (value: string) => {
       const result = new URL(value)
@@ -424,6 +442,59 @@ async function exerciseDesktopOwner(archive?: string, review = false) {
           plugin.id === 'channel' ? { ...plugin, config: { changed: true } } : plugin
         ),
       }), configPath)).rejects.toThrow('plugin configuration is in use')
+
+      const readChannel = async (page: CdpClient) =>
+        await page.evaluate(`new Promise((resolve, reject) => {
+        const requestId = 'fixture-snapshot-' + crypto.randomUUID();
+        const previous = globalThis.__cordisxChannelActionsReceiveV1;
+        const timer = setTimeout(() => { globalThis.__cordisxChannelActionsReceiveV1 = previous; reject(new Error('snapshot timeout')); }, 8000);
+        globalThis.__cordisxChannelActionsReceiveV1 = payload => {
+          const value = JSON.parse(payload);
+          if (value.requestId !== requestId) return previous?.(payload);
+          clearTimeout(timer);
+          globalThis.__cordisxChannelActionsReceiveV1 = previous;
+          resolve(value);
+        };
+        globalThis.__cordisxChannelActionsRequestV1(JSON.stringify({
+          version: 1, token: 'renderer-binding-placeholder', requestId, action: 'snapshot'
+        }));
+      })`)
+      for (const page of [first, second]) {
+        expect(await readChannel(page)).toMatchObject({ ok: true, value: { status: 'applied' } })
+        expect(
+          await page.evaluate(
+            'Boolean(globalThis.__fixtureChannelShell = document.querySelector("[data-channel-manager]"))',
+          ),
+        ).toBe(true)
+      }
+      const sourceDirectory = await localPackage({
+        root,
+        id: 'channel-neighbor-fixture',
+        code: 'export function apply() { globalThis.__channel_neighbor_fixture = true }',
+      })
+      const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', profileId)
+      const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
+      const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory },
+      }) as any
+      const installed = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'execute',
+        request: planned.executionRequest,
+        expectedRevision: planned.snapshot.revision,
+      }) as any
+      expect(installed.status).toBe('applied')
+      for (const page of [desktop, first, second]) {
+        expect(await page.evaluate('globalThis.__channel_neighbor_fixture === true')).toBe(true)
+      }
+      for (const page of [first, second]) {
+        expect(await readChannel(page)).toMatchObject({ ok: true, value: { status: 'applied' } })
+        expect(
+          await page.evaluate(
+            'document.querySelector("[data-channel-manager]") === globalThis.__fixtureChannelShell',
+          ),
+        ).toBe(true)
+      }
     }
     for (const page of [first, second]) {
       await page.evaluate(`(() => {

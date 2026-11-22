@@ -40,6 +40,7 @@ type Entry = {
   readonly checks: Set<Promise<boolean>>
   readonly unsubscribe: () => void
   stale: boolean
+  bootstrapConfirmed: boolean
   snapshot?: Snapshot
   config?: CordisXConfig
   plugins?: readonly CordisXConfigPlugin[]
@@ -206,6 +207,18 @@ export class ServiceRendererBootstrap {
     })
   }
 
+  /**
+   * Bootstrap must use its exact package snapshot. Once that snapshot is
+   * confirmed, package transactions are synchronized by the lifecycle; the
+   * configured Channel is reserved separately and remains bound to the
+   * owner-selected config, policies, graph and service generation.
+   */
+  private async channelAuthorityCurrent(rendererId: string, entry: Entry): Promise<boolean> {
+    return entry.bootstrapConfirmed
+      ? await this.configurationCurrent(rendererId, entry)
+      : await this.unchanged(rendererId, entry)
+  }
+
   private retire(rendererId: string, entry: Entry): void {
     // A session can disconnect while an asynchronous lease is being created.
     // Drain this entry even if it has already been removed from the map.
@@ -266,8 +279,8 @@ export class ServiceRendererBootstrap {
   }> {
     const entry = this.entries.get(context.rendererId)
     if (
-      !entry?.configuredChannel || entry.channelTransition || !this.current(context.rendererId, entry)
-      || !await this.unchanged(context.rendererId, entry)
+      !entry?.configuredChannel || !entry.bootstrapConfirmed || entry.channelTransition
+      || !this.current(context.rendererId, entry) || !await this.channelAuthorityCurrent(context.rendererId, entry)
     ) throw new Error('renderer-configured-channel-unavailable')
     return entry.configuredChannel.serviceIdentity(context, alias)
   }
@@ -402,7 +415,7 @@ export class ServiceRendererBootstrap {
     const unsubscribe = peer.onDisconnect(() => {
       if (entry !== undefined) this.retire(rendererId, entry)
     })
-    entry = { peer, leases, checks: new Set(), unsubscribe, stale: false }
+    entry = { peer, leases, checks: new Set(), unsubscribe, stale: false, bootstrapConfirmed: false }
     this.entries.set(rendererId, entry)
     if (peer.closed) {
       this.retire(rendererId, entry)
@@ -494,7 +507,7 @@ export class ServiceRendererBootstrap {
             allowConfiguration: this.input.experimentalChannelServiceConfig === true,
             server: await this.input.lifecycle.artifactServer(),
             current: () => this.current(rendererId, entry),
-            unchanged: async () => await this.unchanged(rendererId, entry),
+            unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),
             retire: () => entry.peer.close(),
           })
           entry.configuredChannel = configured
@@ -653,6 +666,7 @@ export class ServiceRendererBootstrap {
         ) throw new Error('renderer-bootstrap-unavailable')
         entry.configuredChannel?.bind(context)
         this.input.participants.confirmBootstrap(rendererId, snapshot)
+        entry.bootstrapConfirmed = true
         return result
       } catch (error) {
         this.retire(rendererId, entry)

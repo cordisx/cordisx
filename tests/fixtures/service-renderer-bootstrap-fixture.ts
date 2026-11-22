@@ -209,6 +209,7 @@ export async function fixture(
     permissionPolicies: [],
     runtime: managed,
     headless: true,
+    reservedPluginIds: configuredChannel === undefined ? [] : [configuredChannel.plugin.id],
   })
   await coordinator.recover()
   lifecycle.initialize(await store.bindRuntimeGeneration())

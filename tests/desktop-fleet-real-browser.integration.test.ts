@@ -4,11 +4,9 @@ import { accessSync, constants } from 'node:fs'
 import { createServer } from 'node:http'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
-import type { OwnerRendererLifecycle } from '../packages/cli/src/cli/owner-renderer-lifecycle.js'
-import { ServiceRendererBootstrap } from '../packages/cli/src/cli/service-renderer-bootstrap.js'
-import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
-import { createServiceRendererProjector } from '../packages/cli/src/cli/service-renderer-projection.js'
+import { createDesktopManagerOwnerIfEligible } from '../packages/cli/src/cli/desktop-manager-owner.js'
 import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
 import { openManagerOwner } from '../packages/cli/src/cli/manager-owner.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
@@ -23,8 +21,6 @@ import {
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
-import { DesktopRendererLifecycle } from '../packages/cli/src/launcher/desktop-renderer-lifecycle.js'
-import { attachmentHomeDigest } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
@@ -109,7 +105,7 @@ it.skipIf(chrome === undefined)(
     let stageEntered = () => {}
     const stageBlocked = new Promise<void>(resolve => stageEntered = resolve)
     const stageRelease = new Promise<void>(resolve => releaseStage = resolve)
-    const managerPeers: Array<{ readonly closed: boolean }> = []
+    const managerPeers: Array<{ readonly closed: boolean; readonly identity: { readonly rendererId: string } }> = []
     const cdpStage = cdp.stage.bind(cdp)
     vi.spyOn(cdp, 'stage').mockImplementation(async (mutation, token) => {
       try {
@@ -121,40 +117,26 @@ it.skipIf(chrome === undefined)(
     })
     const store = new PluginActivationStore(homeDir, profileId, generation)
     const active = await store.bindRuntimeGeneration()
-    const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
-    const participants = new ServiceRendererParticipants(scope)
-    const lifecycle = new DesktopRendererLifecycle({
-      scope,
-      cdp,
-      active,
-      registryEpoch: 0,
-      projectManagerMutation: createServiceRendererProjector({
-        homeDir,
-        profileId,
-        generation,
-        isLive: identity => participants.isLive(identity),
-      }),
-    })
-    const facade: OwnerRendererLifecycle = {
-      snapshot: () => lifecycle.snapshot(),
-      attach: async peer => await lifecycle.attach(peer),
-      artifactServer: async () => artifactServer,
-      onActivationFinalized: listener => lifecycle.onActivationFinalized(listener),
-    }
-    participants.bind(facade)
-    const bootstrap = new ServiceRendererBootstrap({
+    const productionOwner = await createDesktopManagerOwnerIfEligible({
       homeDir,
       configPath,
       appId: 'codex',
       profileId,
       generation,
-      lifecycle: facade,
-      participants,
+      cdp,
+      artifactServer,
       store,
+      ownerVerified: true,
+      attach: false,
+      configuredPlugins: [],
     })
+    if (!productionOwner) throw new Error('Desktop owner is unavailable')
+    productionOwner.initialize(active, false)
+    const lifecycle = productionOwner.lifecycle
+    const originalParticipant = productionOwner.managementOptions.rendererParticipant
     const participant = {
-      create: (input: Parameters<typeof participants.participant.create>[0]) => {
-        const peer = participants.participant.create(input)
+      create: (input: Parameters<typeof originalParticipant.create>[0]) => {
+        const peer = originalParticipant.create(input)
         managerPeers.push(peer)
         const request = peer.request.bind(peer)
         vi.spyOn(peer, 'request').mockImplementation(async (method, payload) => {
@@ -171,23 +153,15 @@ it.skipIf(chrome === undefined)(
         })
         return peer
       },
-      attach: participants.participant.attach,
+      attach: originalParticipant.attach,
     }
     const owner = {
       lifecycle,
       managementOptions: {
+        ...productionOwner.managementOptions,
         rendererParticipant: participant,
-        rendererBootstrap: bootstrap.channel(),
-        rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
-        rendererWriteLifetimes: bootstrap.writeLifetimes,
-        rendererReadLifetimes: bootstrap.readLifetimes,
       },
-      close() {
-        const closing = bootstrap.close()
-        participants.close()
-        lifecycle.close()
-        return closing
-      },
+      close: () => productionOwner.close(),
     }
     // No launcher page-replacement transport exists in this browser fixture.
     // Existing documents use real CDP; future-document refresh is a substitute.
@@ -218,6 +192,7 @@ it.skipIf(chrome === undefined)(
     let secondDesktop: CdpClient | undefined
     let first: CdpClient | undefined
     let second: CdpClient | undefined
+    let third: CdpClient | undefined
     let unregister: (() => void) | undefined
     let unregisterSecond: (() => void) | undefined
     try {
@@ -275,7 +250,12 @@ it.skipIf(chrome === undefined)(
       unregister = cdp.register(desktop as never)
       const managerOwner = await openManagerOwner(profileId, { CORDISX_HOME: homeDir })
       // Built assets are used by the same sidecar module shipped in the package.
-      const sidecar = await import('../packages/cli/dist/src/cli/manager-web.js')
+      const fixturePackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+      const sidecar = await import(
+        fixturePackage === undefined
+          ? '../packages/cli/dist/src/cli/manager-web.js'
+          : pathToFileURL(path.join(fixturePackage, 'dist/src/cli/manager-web.js')).href
+      )
       web = await sidecar.startManagerWeb(managerOwner, { rendererGateway: gateway })
       const url = (value: string) => {
         const result = new URL(value)
@@ -397,6 +377,23 @@ it.skipIf(chrome === undefined)(
       await verifyAll([true, false])
       await change('plugin-enable', 'dependent-fixture')
       await verifyAll([true, true])
+      // A Manager joining after packages are active must bootstrap the same
+      // owner-selected graphs, not an empty or independently rebuilt registry.
+      const thirdTarget = await desktop.send('Target.createTarget', { url: url(web.issueUrl()) }) as {
+        targetId: string
+      }
+      third = await connect(thirdTarget.targetId)
+      await ready(third)
+      expect(await snapshot(third)).toEqual(await snapshot(desktop))
+      expect(await third.evaluate('globalThis.__base_fixture === true && globalThis.__dependent_fixture === true'))
+        .toBe(true)
+      await desktop.send('Target.closeTarget', { targetId: thirdTarget.targetId })
+      await third.close().catch(() => {})
+      third = undefined
+      await vi.waitFor(() => expect(managerPeers[2]?.closed).toBe(true), { timeout: 10_000 })
+      expect(await productionOwner.managementOptions.rendererRetirement(managerPeers[2]!.identity.rendererId)).toBe(
+        true,
+      )
       // Disconnect one real Manager after the participants are frozen and
       // another participant can have received the stage command.
       const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
@@ -424,7 +421,7 @@ it.skipIf(chrome === undefined)(
       const interrupted = await pending
       expect(interrupted.status).toBe('rejected')
       expect(interrupted.error?.code ?? interrupted.lifecycle?.error?.code).toBe('rollback-failed')
-      expect(lifecycle.requiresReconciliation).toBe(true)
+      expect(() => lifecycle.snapshot()).toThrow()
       await vi.waitFor(async () => {
         const status = await second!.evaluate<{ hidden: boolean; text: string }>(`({
           hidden: document.querySelector('p[role=status]')?.hidden,
@@ -437,6 +434,7 @@ it.skipIf(chrome === undefined)(
       releaseStage()
       await first?.close().catch(() => {})
       await second?.close().catch(() => {})
+      await third?.close().catch(() => {})
       await web?.close().catch(() => {})
       await composition?.close().catch(() => {})
       await owner.close()

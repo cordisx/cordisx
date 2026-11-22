@@ -67,9 +67,7 @@ export class DesktopOwnerRendererLifecycle implements PluginLifecycleRuntime, Ow
   }
 
   snapshot() {
-    const snapshot = this.ready().snapshot()
-    if (snapshot.active.plugins.length !== 0) throw new Error('Desktop Manager plugin projection is unavailable')
-    return snapshot
+    return this.ready().snapshot()
   }
   async attach(peer: AttachedRendererPeer): Promise<void> {
     try {
@@ -91,9 +89,7 @@ export class DesktopOwnerRendererLifecycle implements PluginLifecycleRuntime, Ow
   }
 
   async preflight(input: PluginRuntimePreflight): Promise<void> {
-    const lifecycle = this.ready()
-    if (lifecycle.hasManagerParticipants) throw new Error('Desktop Manager plugin mutation is unavailable')
-    await lifecycle.preflight(input)
+    await this.ready().preflight(input)
   }
   prepare(id: string) {
     return this.ready().prepare(id)

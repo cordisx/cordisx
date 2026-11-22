@@ -126,6 +126,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           headless: true,
           permissionPolicies: await loadPolicies(),
           loadPermissionPolicies: loadPolicies,
+          // A configured plugin and an installed package cannot share an id
+          // in the same profile, including when the configured entry is disabled.
+          reservedPluginIds: config.plugins.map(plugin => plugin.id),
           ...(certified === undefined ? {} : {
             certifiedPermissionForArtifact: async artifact =>
               (await certified?.lookup(artifact).catch(() => undefined))?.projection as

@@ -223,4 +223,142 @@ describe('Manager navigation v4 Host config body', () => {
     await new Promise(resolve => setImmediate(resolve))
     dom.window.close()
   })
+
+  it('retains an unrelated page while retiring a replaced page generation', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><main id="manager"></main></body></html>', {
+      url: 'https://host.test/',
+    })
+    Object.assign(globalThis, {
+      window: dom.window,
+      document: dom.window.document,
+      HTMLElement: dom.window.HTMLElement,
+      Element: dom.window.Element,
+      Node: dom.window.Node,
+      MutationObserver: dom.window.MutationObserver,
+    })
+    const plugin = (id: string, moduleGeneration: string) => ({
+      id,
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}` as const,
+      moduleGeneration,
+      enabled: true,
+      dependencies: [],
+    })
+    const active = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      recordKind: 'active' as const,
+      profileId: 'default',
+      revision: 1,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
+      plugins: [plugin('demo', 'demo-g1')],
+    }
+    const visibility = new GenerationVisibilityCoordinator(active)
+    const pages = new PageRegistry(visibility)
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(
+      pages,
+      outlets,
+      fakeI18n(),
+      new TestCodexRouteHistory(),
+      new HostContextStore(),
+    )
+    const container = dom.window.document.getElementById('manager')!
+    outlets.declare({
+      schemaVersion: 1,
+      id: 'manager.content',
+      authority: 'host-adapter',
+      scope: 'manager',
+      preferredPlacement: 'absolute',
+      contextPolicy: 'generation',
+      presentationGroup: 'manager',
+    }, {
+      getSnapshot: () => ({ available: true, container, placement: 'absolute' }),
+      subscribe: () => () => {},
+      show: () => {},
+      hide: () => {},
+    }, value => value.startsWith('/manager/extensions/'))
+    const register = (context: Context, label: string) => {
+      pages.register(context, {
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'settings',
+        title: { key: 'title', fallback: 'Settings' },
+        description: { key: 'description', fallback: 'Settings' },
+        icon: 'host:settings',
+        chrome: 'standard',
+      }, ({ container: seat }) => {
+        const input = seat.ownerDocument.createElement('input')
+        input.value = label
+        seat.append(input)
+        return () => input.remove()
+      })
+      navigation.register(context, {
+        $schema: CORDISX_ROUTE_SCHEMA_V2,
+        schemaVersion: 2,
+        id: 'settings',
+        path: '/manager/extensions/demo/settings',
+        outlet: 'manager.content',
+        page: 'settings',
+        title: { key: 'title', fallback: 'Settings' },
+        description: { key: 'description', fallback: 'Settings' },
+      })
+    }
+    try {
+      register(new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-g1' }), 'draft')
+      const mount = await navigation.mountManagerContent('demo', { id: 'settings' }, 'demo:settings', container)
+      await navigation.settled()
+      const candidate = {
+        ...active,
+        recordKind: 'candidate' as const,
+        transactionId: 'install-neighbor',
+        revision: 2,
+        plugins: [...active.plugins, plugin('neighbor', 'neighbor-g1')],
+      }
+      const handle = visibility.begin('install-neighbor', active, candidate)
+      const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+      await navigation.settled()
+      expect(mount.signal.aborted).toBe(false)
+      expect(container.querySelector('input')?.value).toBe('draft')
+      visibility.completeLastGood(publication)
+
+      const previous = visibility.snapshot()
+      const replacement = {
+        ...previous,
+        recordKind: 'candidate' as const,
+        transactionId: 'replace-demo',
+        revision: 3,
+        lastGoodRevision: 2,
+        plugins: previous.plugins.map(item => item.id === 'demo' ? plugin('demo', 'demo-g2') : item),
+      }
+      const next = visibility.begin('replace-demo', previous, replacement)
+      register(
+        new Context().extend({
+          [CORDISX_PLUGIN_ID]: 'demo',
+          [CORDISX_PLUGIN_GENERATION]: 'demo-g2',
+          ...visibility.context(next, 'demo'),
+        }),
+        'replacement',
+      )
+      visibility.publish(visibility.preparePublish(next, visibility.confirmReadiness(next)))
+      await navigation.settled()
+      expect(mount.signal.aborted).toBe(true)
+      expect(container.querySelector('input')).toBeNull()
+      const replacementMount = await navigation.mountManagerContent(
+        'demo',
+        { id: 'settings' },
+        'demo:settings',
+        container,
+      )
+      expect(container.querySelector('input')?.value).toBe('replacement')
+      await replacementMount.dispose()
+    } finally {
+      await navigation.dispose()
+      pages.dispose()
+      outlets.dispose()
+      await new Promise(resolve => setImmediate(resolve))
+      dom.window.close()
+    }
+  })
 })

@@ -9,6 +9,120 @@ const secret = () => randomBytes(32).toString('hex')
 const token = 'renderer-binding-placeholder'
 
 it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'keeps Channel reads and configuration writes available after a coordinated plugin install',
+  async () => {
+    const f = await fixture({
+      channelArchive: archive,
+      channelUiGrant: true,
+      protectProfileInputs: true,
+      channelServiceConfig: true,
+    })
+    let pump: Promise<void> | undefined
+    try {
+      const alias = await bootConfiguredChannelManager(f)
+      let staged: any
+      pump = (async () => {
+        while (true) {
+          const response = await f.sessions.poll(f.invocation, 2_000) as any
+          if (response.status !== 'ok') return
+          const command = response.value.command
+          if (!command) continue
+          const payload = command.payload
+          let value: unknown
+          if (command.method === 'prepare') value = payload
+          else if (command.method === 'stage') {
+            staged = payload
+            value = {
+              transactionId: payload.transactionId,
+              transactionEpoch: payload.transactionEpoch,
+              expectedRegistryEpoch: payload.expectedRegistryEpoch,
+              afterRegistryEpoch: payload.afterRegistryEpoch,
+              observation: payload.candidate,
+              affectedPluginIds: payload.affectedPluginIds,
+            }
+          } else if (command.method === 'publish') {
+            value = {
+              transactionId: staged.transactionId,
+              transactionEpoch: staged.transactionEpoch,
+              registryEpoch: staged.afterRegistryEpoch,
+              active: staged.candidate,
+            }
+          } else if (command.method === 'complete') {
+            value = {
+              transactionId: staged.transactionId,
+              transactionEpoch: staged.transactionEpoch,
+              registryEpoch: staged.afterRegistryEpoch,
+              active: staged.candidate,
+              disposedAfter: staged.previous,
+            }
+          } else if (command.method === 'finalize') value = { transactionId: payload.transactionId }
+          else throw new Error('unexpected lifecycle command')
+          await f.sessions.acknowledge(f.invocation, { id: command.id, sequence: command.sequence, ok: true, value })
+        }
+      })()
+      expect(await f.install('channel-neighbor')).toMatchObject({ outcome: 'applied', revision: 1 })
+      const request = (requestId: string, operation: Record<string, unknown>) =>
+        JSON.stringify({ version: 1, token, requestId, ...operation })
+      expect(await f.sessions.call(f.invocation, 'channel-actions', request('after-install', { action: 'snapshot' })))
+        .toMatchObject({ status: 'ok', value: { value: { status: 'applied' } } })
+      const listed = await f.sessions.call(
+        f.invocation,
+        'service-config',
+        request('list-after-install', {
+          operation: 'list',
+          pluginId: 'channel',
+          scope: { profileId: f.profileId, generation: f.generation },
+        }),
+      ) as any
+      expect(listed).toMatchObject({ status: 'ok', value: { ok: true, value: [expect.any(Object)] } })
+      const descriptor = listed.value.value[0]
+      expect(descriptor.identity.source).toBe(alias)
+      const configuration = structuredClone(descriptor.configuration)
+      configuration.connections[0].displayName = 'Updated after install'
+      const saved = await f.sessions.call(
+        f.invocation,
+        'service-config',
+        request('save-after-install', {
+          operation: 'mutate',
+          mutation: {
+            contract: 'cordisx.service-config-mutation/v1',
+            schemaVersion: 1,
+            identity: descriptor.identity,
+            scope: descriptor.scope,
+            expectedRevision: descriptor.revision,
+            configuration,
+          },
+        }),
+      )
+      expect(saved).toMatchObject({ status: 'ok', value: { value: { status: 'applied', revision: 2 } } })
+      const readback = await f.sessions.call(
+        f.invocation,
+        'channel-actions',
+        request('after-save', { action: 'snapshot' }),
+      )
+      expect(readback).toMatchObject({ status: 'ok', value: { value: { status: 'applied' } } })
+      expect(
+        await readServiceConfigState({
+          profileId: f.profileId,
+          pluginId: 'channel',
+          serviceId: 'runtime',
+          initialConfig: {},
+        }, f.configPath),
+      ).toMatchObject({
+        revision: 2,
+        config: { connections: [expect.objectContaining({ displayName: 'Updated after install' })] },
+      })
+      expect(JSON.stringify([listed, saved, readback])).not.toContain(f.configuredChannel!.plugin.source!)
+      expect(JSON.stringify([listed, saved, readback])).not.toContain('fixture-private-reference')
+    } finally {
+      await f.close()
+      await pump
+    }
+  },
+  60_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
   'hands a committed service configuration to both admitted Managers before acknowledging the write',
   async () => {
     const f = await fixture({
