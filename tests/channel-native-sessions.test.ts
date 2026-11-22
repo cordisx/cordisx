@@ -383,7 +383,10 @@ describe('Channel native task delivery', () => {
     expect(prompt).toContain('channel_reply_mode')
     expect(prompt).toContain('"operationId":"incoming-operation"')
     expect(prompt).toContain('"fallbackMode":"reply"')
-    expect(prompt).toContain('first select none')
+    expect(prompt).toContain('Only after an explicit manual terminal result has a confirmed sent receipt, select none')
+    expect(prompt).toContain('A progress message must NOT select none')
+    expect(prompt).toContain('Multiple sends in one turn are allowed')
+    expect(prompt).not.toContain('first select none')
     expect(nativeRequest.mock.calls.every(([method]) => method === 'thread/read')).toBe(true)
   })
   it('instructs default turns to send only through the exact scoped Host CLI and keeps local text local', async () => {
@@ -403,6 +406,9 @@ describe('Channel native task delivery', () => {
     expect(prompt).toContain("CORDISX_HOME='/tmp/Channel user'\\''s home'")
     expect(prompt).toContain(cli.entry)
     expect(prompt).toContain('"enabled":false')
+    expect(prompt).toContain('Multiple sends in one turn are allowed')
+    expect(prompt).toContain('never blindly retry')
+    expect(prompt).toContain('does not schedule a wakeup')
     expect(prompt).not.toContain('Reply to the sender in your final response')
   })
   it.each(['completed', 'interrupted', 'inProgress'])(
@@ -426,6 +432,9 @@ describe('Channel native task delivery', () => {
             { turnId: 'newer', item: { type: 'agentMessage', phase: 'final_answer', text: 'other' } },
             { turnId: 'turn', item: { type: 'agentMessage', phase: 'final_answer', text: 'reply' } },
             { turnId: 'turn', item: { type: 'agentMessage', phase: 'commentary', text: 'commentary' } },
+            { turnId: 'turn', item: { type: 'agentMessage', phase: 'analysis', text: 'private reasoning' } },
+            { turnId: 'turn', item: { type: 'reasoning', text: 'private summary' } },
+            { turnId: 'turn', item: { type: 'commandExecution', output: 'private tool output' } },
           ],
         }
     )
