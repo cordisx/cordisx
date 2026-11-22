@@ -10,7 +10,12 @@ export interface ChannelConversationConsumerInput {
   readonly logicalRecoveryRequired?: boolean
   readonly profileId: string
   readonly access: () => ChannelConversationAccess | undefined
-  readonly native: () => Pick<ChannelNativeSessions, 'exists' | 'start' | 'completion' | 'reconcile'> | undefined
+  readonly native: () =>
+    | (
+      & Pick<ChannelNativeSessions, 'exists' | 'start' | 'completion' | 'reconcile'>
+      & Partial<Pick<ChannelNativeSessions, 'liveTurnControl'>>
+    )
+    | undefined
   readonly report?: (code: string) => void
 }
 

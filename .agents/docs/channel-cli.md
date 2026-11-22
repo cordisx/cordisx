@@ -16,7 +16,53 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 
 `local-bindings` is a local management CLI read, not an Agent tool. It lists profile binding IDs, sessions, channel identities, states and modes at one revision and service generation, without messages or credentials. An empty input lists the profile; a conversation filter requires the complete account identity. Older running Hosts do not implement this operation; use a matching Host runtime.
 
-### Pair a direct-chat administrator
+### Task reception feedback
+
+Feishu/Lark tasks accepted by the existing wake, binding and dispatch rules
+receive best-effort feedback. Default behavior attempts an `OnIt` reaction on
+the input message, then sends one waiting message after 30 seconds if the task
+has not replied or finished. Group chatter that does not wake the bot and
+Host slash commands do not trigger task feedback. Reaction failure does not
+block native work. Feedback is separate from automatic final-response forwarding.
+
+Configure `channel-feedback.json` beside the selected profile's
+`channel-conversations.json` (under `CORDISX_HOME/apps/codex/profiles/PROFILE/`):
+
+```json
+{
+  "reaction": { "enabled": true, "emojiType": "OnIt" },
+  "wait": {
+    "enabled": true,
+    "delaySeconds": 30,
+    "texts": [
+      "已收到，正在处理。",
+      "还在处理中，请稍候。",
+      "任务正在进行，我会继续处理。"
+    ]
+  }
+}
+```
+
+Reaction and waiting hints can be disabled independently. Delay is an integer
+from 1 to 86400 seconds; the text list contains 1–50 nonempty strings of at most
+1000 characters each. One entry is chosen randomly per attempted hint. A legacy
+single `wait.text` remains supported; `texts` takes precedence. A file at
+`CORDISX_HOME/channel-feedback.json` is the legacy fallback when the profile
+file is absent. Settings are reread for new inputs and at the hint deadline;
+no App restart is needed. Invalid configuration disables feedback for that
+input and records a diagnostic, without blocking the task.
+
+Feedback uses the existing account SDK connection and the configured reply
+route. Reserved attempts are not replayed after restart. An observed authorized
+Channel reply or question attempt conservatively cancels all waiting hints for
+the same account and destination, including hints for concurrent tasks there;
+a failed/uncertain send can therefore suppress a hint. Sends outside the Channel
+transport cannot be correlated. Unknown native turn state suppresses the hint.
+Task completion and cancellation are rechecked before sending, but an HTTP
+request already issued cannot be withdrawn atomically with task completion.
+Hints are auxiliary notices and do not represent final task results.
+
+## Pair a direct-chat administrator
 
 On a running Host with a resolved, ready Feishu/Lark connection and enabled Channel policy, a local user can issue a five-minute, one-use code:
 

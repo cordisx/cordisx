@@ -1,6 +1,5 @@
 import type { ChannelChatBinding, ChannelConversationState } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
-import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import { parseChannelConversationPolicy } from './channel-conversation-policy.js'
 import type { ChannelConversationStore } from './channel-conversation-store.js'
 
@@ -46,22 +45,4 @@ export async function channelBindingNavigation(
   if (!binding || !native || signal.aborted || !await native.exists(binding.sessionId)) return undefined
   if (signal.aborted || bindings().find(item => item.id === id)?.sessionId !== binding.sessionId) return undefined
   return binding.sessionId
-}
-export async function channelBindingLabels(
-  bindings: readonly ChannelChatBinding[],
-  native: ChannelNativeSessions | undefined,
-  access: () => ChannelConversationAccess | undefined,
-  ids?: readonly string[],
-) {
-  return Promise.all(
-    bindings.filter(binding => ids === undefined || ids.includes(binding.id)).map(async binding => {
-      const event = { ...binding.channel, eventId: 'display' }
-      const conversationName = await access()?.name?.(event).catch(() => undefined)
-      return {
-        bindingId: binding.id,
-        sessionName: await native?.label(binding.sessionId).catch(() => undefined) ?? 'Codex 对话',
-        conversationName: conversationName ?? (binding.channel.kind === 'direct' ? '私聊' : '群聊'),
-      }
-    }),
-  )
 }

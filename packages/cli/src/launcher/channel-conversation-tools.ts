@@ -19,6 +19,13 @@ import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 export interface ChannelConversationAccess {
   readonly generation: string
   readonly runtime: ChannelRuntime
+  feedbackReact?(event: import('@cordisx/channel-runtime').ChannelEventRef, emojiType: string): Promise<void>
+  feedbackWait?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    target: ChannelThreadRef,
+    text: string,
+    recordId: string,
+  ): Promise<void>
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
