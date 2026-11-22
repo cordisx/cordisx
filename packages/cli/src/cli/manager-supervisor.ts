@@ -95,7 +95,9 @@ function fingerprint(owner: Awaited<ReturnType<typeof openManagerOwner>>): strin
   return effectiveConfigFingerprint({ appId: owner.appId, generation: owner.generation })
 }
 
-async function activeState(paths: SupervisorPaths): Promise<SupervisorState | undefined> {
+async function inspectActiveState(
+  paths: SupervisorPaths,
+): Promise<{ state: SupervisorState; reachable: boolean } | undefined> {
   const result = await readSupervisorStateResult(paths)
   if (result.status === 'missing') return undefined
   if (result.status !== 'valid') throw new Error('MANAGER_STATE_INVALID')
@@ -103,57 +105,97 @@ async function activeState(paths: SupervisorPaths): Promise<SupervisorState | un
   const identity = await processIdentityStatus(state.pid, state.processStartedAt)
   if (identity === 'unknown') throw new Error('MANAGER_PROCESS_UNVERIFIABLE')
   if (identity === 'dead') return undefined
-  if (!await requestSupervisorPing(paths.socket, state.instanceToken)) throw new Error('MANAGER_CONTROL_UNAVAILABLE')
-  return state
+  return { state, reachable: await requestSupervisorPing(paths.socket, state.instanceToken) }
+}
+
+async function activeState(paths: SupervisorPaths): Promise<SupervisorState | undefined> {
+  const active = await inspectActiveState(paths)
+  if (active && !active.reachable) throw new Error('MANAGER_CONTROL_UNAVAILABLE')
+  return active?.state
+}
+
+async function waitForManagerExit(state: SupervisorState, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await processIdentityStatus(state.pid, state.processStartedAt) === 'dead') return true
+    await wait(50)
+  }
+  return false
 }
 
 /** Start or reuse exactly one private manager for the currently selected profile owner. */
 export async function ensureManager(profile?: string): Promise<{ paths: SupervisorPaths; state: SupervisorState }> {
   if (process.platform === 'win32') throw new Error('MANAGER_PRIVATE_ENTRY_UNSUPPORTED')
   const { paths, profileId } = await managerPaths(profile)
-  const release = await lock(paths)
-  try {
-    const owner = await openManagerOwner(profileId)
-    const existing = await activeState(paths)
-    if (existing) {
-      if (existing.phase !== 'ready') throw new Error('MANAGER_NOT_READY')
-      if (existing.effectiveConfig !== fingerprint(owner)) throw new Error('MANAGER_OWNER_CHANGED')
-      return { paths, state: existing }
-    }
-    await removeSupervisorState(paths)
-    await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
-    await chmod(path.dirname(paths.socket), 0o700)
-    const key = randomBytes(32).toString('hex')
-    await writeFile(paths.bootstrapToken, key, { flag: 'wx', mode: 0o600 })
-    await chmod(paths.bootstrapToken, 0o600)
-    const entry = process.argv[1]
-    if (!entry) throw new Error('MANAGER_ENTRY_UNAVAILABLE')
-    const child = spawn(process.execPath, [...process.execArgv, entry, 'manager', '__serve', '--profile', profileId], {
-      detached: true,
-      stdio: 'ignore',
-      env: managerChildEnvironment(process.env, key),
-      windowsHide: true,
-    })
-    let spawnFailed = false
-    child.once('error', () => {
-      spawnFailed = true
-    })
-    const childIdentity = child.pid ? await processStartIdentity(child.pid) : undefined
-    child.unref()
-    const deadline = Date.now() + 12_000
-    while (Date.now() < deadline) {
-      const state = await activeState(paths)
-      if (state?.phase === 'ready' && state.pid === child.pid && state.effectiveConfig === fingerprint(owner)) {
-        return { paths, state }
+  let handoffs = 0
+  for (;;) {
+    const release = await lock(paths)
+    let retiring: SupervisorState | undefined
+    try {
+      const owner = await openManagerOwner(profileId)
+      const active = await inspectActiveState(paths)
+      const existing = active?.state
+      if (existing) {
+        if (existing.phase !== 'ready') throw new Error('MANAGER_NOT_READY')
+        if (existing.effectiveConfig === fingerprint(owner)) {
+          if (!active?.reachable) throw new Error('MANAGER_CONTROL_UNAVAILABLE')
+          return { paths, state: existing }
+        }
+        if (
+          handoffs !== 0 || existing.appId !== 'manager' || existing.profileId !== profileId
+          || !await owner.isCurrent()
+        ) throw new Error('MANAGER_OWNER_CHANGED')
+        // The old sidecar's watchdog owns shutdown. Release the startup lock
+        // before waiting so it can finish retiring sessions and remove state.
+        retiring = existing
+        handoffs++
+      } else {
+        await removeSupervisorState(paths)
+        await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
+        await chmod(path.dirname(paths.socket), 0o700)
+        const key = randomBytes(32).toString('hex')
+        await writeFile(paths.bootstrapToken, key, { flag: 'wx', mode: 0o600 })
+        await chmod(paths.bootstrapToken, 0o600)
+        const entry = process.argv[1]
+        if (!entry) throw new Error('MANAGER_ENTRY_UNAVAILABLE')
+        const child = spawn(process.execPath, [
+          ...process.execArgv,
+          entry,
+          'manager',
+          '__serve',
+          '--profile',
+          profileId,
+        ], {
+          detached: true,
+          stdio: 'ignore',
+          env: managerChildEnvironment(process.env, key),
+          windowsHide: true,
+        })
+        let spawnFailed = false
+        child.once('error', () => {
+          spawnFailed = true
+        })
+        const childIdentity = child.pid ? await processStartIdentity(child.pid) : undefined
+        child.unref()
+        const deadline = Date.now() + 12_000
+        while (Date.now() < deadline) {
+          const state = await activeState(paths)
+          if (state?.phase === 'ready' && state.pid === child.pid && state.effectiveConfig === fingerprint(owner)) {
+            return { paths, state }
+          }
+          if (spawnFailed || child.exitCode !== null || child.signalCode !== null) {
+            throw new Error('MANAGER_START_FAILED')
+          }
+          await wait(50)
+        }
+        // Node's kill ultimately targets a PID: fence it against process reuse.
+        await terminateCreatedManagerChild(child, childIdentity)
+        throw new Error('MANAGER_START_TIMEOUT')
       }
-      if (spawnFailed || child.exitCode !== null || child.signalCode !== null) throw new Error('MANAGER_START_FAILED')
-      await wait(50)
+    } finally {
+      await release()
     }
-    // Node's kill ultimately targets a PID: fence it against process reuse.
-    await terminateCreatedManagerChild(child, childIdentity)
-    throw new Error('MANAGER_START_TIMEOUT')
-  } finally {
-    await release()
+    if (!retiring || !await waitForManagerExit(retiring, 10_000)) throw new Error('MANAGER_STOP_UNCONFIRMED')
   }
 }
 

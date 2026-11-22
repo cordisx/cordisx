@@ -27,7 +27,10 @@ The profile owner must already be running. The manager does not silently start
 or replace an App or service owner. Current App and service modes still acquire
 exclusive profile ownership; this page does not claim concurrent App attachment
 or infer that an adapter is connected. If the owner disappears or is replaced,
-the manager sidecar shuts down. Starting it again requires the new owner.
+the manager sidecar shuts down. Opening it against a replacement owner waits
+briefly for the previous sidecar to exit; its browser sessions are not reused.
+If that exit cannot be confirmed, opening fails rather than starting another
+sidecar. A new owner must already be running.
 
 An experimental `host=1` query on the manager entry loads the existing Host
 Manager and plugin registration instead of the default preview pages. It is not

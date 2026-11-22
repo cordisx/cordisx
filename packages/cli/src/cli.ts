@@ -16,6 +16,8 @@ if (argv[0] === 'manager') {
         ? ' To open locally without a graphical launcher, run manager open --print-url in a trusted terminal.'
         : code === 'MANAGER_OWNER_CHANGED'
         ? ' The profile owner changed. Wait for the old manager to stop, then reopen it.'
+        : code === 'MANAGER_STOP_UNCONFIRMED'
+        ? ' The previous manager has not confirmed shutdown. Reopen it after it exits.'
         : code === 'MANAGER_PRIVATE_ENTRY_UNSUPPORTED'
         ? ' The independent manager is not available on Windows until private entry ACLs are supported.'
         : ''

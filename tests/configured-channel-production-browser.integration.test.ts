@@ -735,14 +735,6 @@ it.skipIf(
           timeout: 30_000,
         }).toBe(true)
       }
-      // A page losing its owner precedes the sidecar's own shutdown receipt.
-      await expect.poll(async () => {
-        try {
-          return JSON.parse((await run('manager', 'status', '--profile', 'default')).stdout).status
-        } catch {
-          return 'stopping'
-        }
-      }, { timeout: 20_000, interval: 250 }).toBe('stopped')
       expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
         .toMatchObject({ status: 'ready', mode: 'service' })
       const recoveredUrl = await open()
