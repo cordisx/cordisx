@@ -1,5 +1,5 @@
 import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
-import { isManager1117ThreadHeader, isManager1117UnderHeaderThread } from './manager-1117-thread.js'
+import { isManager1117UnderHeaderThread, isManager1117WorkspaceHeader } from './manager-1117-workspace.js'
 import { clippedTabSpan, resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 import { type NativeViewportTitlebarOwner, resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
@@ -199,7 +199,7 @@ export function captureManagerTitlebarLease(
   const viewportOwner = resolveNativeViewportTitlebarOwner(header)
   const headerStyle = view.getComputedStyle(header)
   const titleStyle = view.getComputedStyle(title)
-  const markerLightControls = (kind === 'split' || kind === 'native') && isManager1117ThreadHeader(header)
+  const markerLightControls = (kind === 'split' || kind === 'native') && isManager1117WorkspaceHeader(header)
     && controls.filter(({ element }) => start.contains(element)).length >= 1
     && controls.some(({ element }) =>
       start.contains(element)

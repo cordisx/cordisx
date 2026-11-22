@@ -31,6 +31,9 @@ import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
 import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
 import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
+import { availableHeadlessModelServices, prepareHeadlessModelServices } from '../launcher/headless-model-services.js'
+import { declarationCatalogEntry, projectModelServicesToCodex } from '../launcher/model-service-projection.js'
+import { modelServiceRuntimeEnvironment } from '../launcher/model-service-runtime.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -153,12 +156,22 @@ export async function startHeadlessService(input: {
       >[0]['initialConfig'],
     }, input.configPath)
     const channelConfiguration = parseChannelServiceConfig(state.config)
-    const backendEnvironment = withoutLauncherSecrets(input.environment, [
+    const homeConfig = await loadHomeConfig(input.configPath)
+    const modelServices = prepareHeadlessModelServices(homeConfig, input.environment)
+    const credentialEnvironment = withoutLauncherSecrets(modelServices.environment, [
       ...channelConfiguration.connections.map(connection => connection.secretRef),
       ...(channelConfiguration.schemaVersion === 3
         ? channelConfiguration.pendingConnections.map(connection => connection.secretRef)
         : []),
     ])
+    const availableServices = availableHeadlessModelServices(modelServices, credentialEnvironment, input.report)
+    const backendEnvironment = { ...modelServiceRuntimeEnvironment(availableServices, credentialEnvironment) }
+    if (availableServices.length > 0) {
+      const projection = await projectModelServicesToCodex(availableServices, input.codexHome)
+      if (projection.providerIds.length !== availableServices.length) {
+        throw new Error('HEADLESS_MODEL_SERVICE_PROJECTION_FAILED')
+      }
+    }
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
@@ -207,7 +220,7 @@ export async function startHeadlessService(input: {
       environment: backendEnvironment,
     })
     if (catalog) cleanup.push(catalog.close)
-    const profileConfig = (await loadHomeConfig(input.configPath)).apps.codex?.profiles[input.profileId]
+    const profileConfig = homeConfig.apps.codex?.profiles[input.profileId]
     if (catalog && profileConfig?.approvalReview?.settings) throw new Error('REVIEW_CATALOG_BUDGET_CONFLICT')
     const reviewCatalog = await prepareApprovalReviewCatalog({
       settings: profileConfig?.approvalReview?.settings ?? undefined,
@@ -225,6 +238,7 @@ export async function startHeadlessService(input: {
       codexHome: input.codexHome,
       home: input.userHome,
       environment: backendEnvironment,
+      declaredProviders: availableServices.map(service => declarationCatalogEntry(service, 'codex')),
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
       ...(reviewCatalog ? { modelCatalogPath: reviewCatalog.path, modelCatalogPreserveProvider: true } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),

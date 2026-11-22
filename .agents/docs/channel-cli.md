@@ -314,11 +314,33 @@ defaults. `channel_reply_mode({operationId, mode})`, or CLI
 selects that exact running automatic-final turn’s route without sending anything.
 Only with forwarding explicitly enabled does the Agent leave its external
 reply in the final response for one consumer delivery.
-It can select `none` before an explicitly requested manual send; it must not
-also send the same automatic final. MCP defaults the chat from native caller
+Agent guidance prefers meaningful explicit progress and completion sends, with
+multiple sends allowed. Each intended message uses its own stable operationId;
+receipt queries keep that same ID. Progress never disables final fallback.
+Only after a manual terminal result has a confirmed `sent` receipt should the
+Agent select `none` for the incoming operation to avoid a duplicate final.
+Failed, pending, missing, partial, or unknown receipts retain fallback: inspect
+the receipt, never blindly resend through a new ID or route. Explicit user
+silence/manual-only requests may select `none` without changing profile settings.
+MCP defaults the chat from native caller
 metadata, checks the turn when available, and cannot choose another chat’s job.
 Finished/reserved jobs reject late choices. Policy changes and retries preserve
 an already reserved outbox target and delivery ID rather than retargeting it.
+
+This is guidance using existing public send, receipt, and per-turn reply-mode
+capabilities, not atomic terminal-send detection. Manual delivery IDs are derived
+from caller/account/send operationId; consumer final deliveries use the incoming
+job/event. There is no public progress/terminal field or receipt-to-job terminal
+link. A confirmed manual result followed by a failed/late `none` selection can
+still duplicate the final. Automatic receipt-linked suppression needs a Protocol
+owner contract before implementation; the Host does not infer intent from text
+or suppress a final merely because any manual send exists.
+
+Only agent-selected outward text is sent; private reasoning, tool output, and
+commentary are not indiscriminately forwarded. Background notification requires
+a supported lifecycle to return the result to an active authorized turn. Prompt
+guidance alone creates neither a scheduler nor a guaranteed wakeup; no new
+background-result integration is implemented here.
 
 ## Commands in platform chats
 
@@ -502,15 +524,31 @@ path outside that sandbox. Fresh continuation retains its existing
 confirmed configuration/cwd flow; native sidebar project membership inheritance
 has not been established by this change.
 
-For headless deployments with provider configuration external to the native
-model catalog, an operator can supply `CORDISX_HEADLESS_PROVIDER_ID` and
+Headless service startup merges every enabled shared `model-service` declaration
+that supports Codex Responses and has Codex model IDs. There is no two-provider
+limit. Save these services through the normal Model Services configuration or
+`cordisx models services save`, then restart that service instance. Startup
+projects their provider tables into the selected Codex home without changing
+the native default provider or model. Only saved environment variables needed
+by these services' API keys and headers are added to the native app-server
+environment; Channel credentials remain excluded. A missing key/header keeps
+that declaration out of the admitted catalog and records
+`HEADLESS_MODEL_SERVICE_CREDENTIAL_UNAVAILABLE:<provider-id>` without its value.
+Disabled services, other-client-only services and empty Codex catalogs are omitted.
+
+For headless deployments with provider configuration external to shared
+declarations, an operator can still supply `CORDISX_HEADLESS_PROVIDER_ID` and
 `CORDISX_HEADLESS_MODEL_ID`, plus the optional pair
 `CORDISX_HEADLESS_EXTRA_PROVIDER` and comma-separated
-`CORDISX_HEADLESS_EXTRA_MODELS`. These variables declare the admitted IDs; they
-do not configure provider authentication or prove model capabilities. Only
-native catalog metadata establishes supported reasoning efforts. A loaded chat
-cannot switch providers through this path unless the underlying app-server
-supports and confirms that change; an unsupported switch is rejected.
+`CORDISX_HEADLESS_EXTRA_MODELS`. The legacy primary/extra entries are merged
+with shared declarations and retain their default model and ordering. These
+variables declare the admitted IDs; they do not configure provider authentication
+or prove model capabilities. Only native catalog metadata establishes supported
+reasoning efforts. An existing chat, including a `notLoaded` chat, cannot switch
+providers through this path unless the underlying app-server supports and
+confirms that change; an unsupported switch is rejected. Catalog availability
+permits new conversations with the requested provider, not cross-provider replay
+of an existing conversation.
 
 Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
 response, final-message delivery reads the exact completed turn with
