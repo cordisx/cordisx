@@ -1,6 +1,8 @@
 import { sha256Hex } from '../permission-model-v2.js'
 import { marketplacePackageNamespace } from '../marketplace-package-name.js'
 
+declare const __CORDISX_STANDALONE_PUBLIC_TRUST__: boolean | undefined
+
 const PUBLIC_TRUST_AUTHORITY = 'cordisx.marketplace.codeowners/v1'
 const INTERNAL_TRUST_AUTHORITY = 'byted.cordisx-marketplace.codeowners/v1'
 type MarketplaceTrustAuthority = typeof PUBLIC_TRUST_AUTHORITY | typeof INTERNAL_TRUST_AUTHORITY
@@ -62,7 +64,7 @@ const PUBLIC_TRUST_PROFILE: MarketplaceTrustProfile = Object.freeze({
   evidence: PUBLIC_EVIDENCE_PATTERN,
 })
 
-const INTERNAL_TRUST_PROFILE: MarketplaceTrustProfile = Object.freeze({
+const INTERNAL_TRUST_PROFILE: MarketplaceTrustProfile = /* @__PURE__ */ Object.freeze({
   authority: INTERNAL_TRUST_AUTHORITY,
   recordVersion: 2,
   officialSchema:
@@ -555,7 +557,10 @@ function certificationRecord(
     throw new Error(`${label} revokedAt 缺失或超出有效区间`)
   }
   const canonicalSource = canonicalHttpsUrl(identityValue.canonicalSource, `${label}.identity.canonicalSource`)
-  if (profile.recordVersion === 2 && canonicalSource !== INTERNAL_SOURCE) {
+  if (
+    !(typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+    && profile.recordVersion === 2 && canonicalSource !== INTERNAL_SOURCE
+  ) {
     throw new Error(`${label}.identity.canonicalSource 不是 CordisX internal source`)
   }
   const common = {
@@ -578,7 +583,13 @@ function certificationRecord(
     canonicalSource,
     integrity: string(identityValue.integrity, `${label}.identity.integrity`, DIGEST_PATTERN, 71),
   }
-  if (profile.recordVersion === 1) return { ...common, schemaVersion: 1, identity }
+  if (
+    (typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+    || profile.recordVersion === 1
+  ) {
+    if (profile.recordVersion !== 1) throw new Error('Marketplace trust profile is unavailable')
+    return { ...common, schemaVersion: 1, identity }
+  }
   return {
     ...common,
     schemaVersion: 2,
@@ -632,7 +643,11 @@ function createMarketplaceCertifiedPermissionProjection(
     kind: 'protected-marketplace-review' as const,
     reference: record.reviewer.evidenceRef,
   })
-  if (profile.recordVersion === 1) {
+  if (
+    (typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+    || profile.recordVersion === 1
+  ) {
+    if (profile.recordVersion !== 1) throw new Error('Marketplace trust profile is unavailable')
     if (record.schemaVersion !== 1) throw new Error('public trust profile requires Certification v1')
     if (feed.authority !== PUBLIC_TRUST_AUTHORITY) throw new Error('public trust profile authority mismatch')
     const feedIdentity = Object.freeze({
@@ -719,6 +734,8 @@ export function evaluateMarketplaceTrust(
   ], 'feed.trust')
   const profile = trust.authority === PUBLIC_TRUST_AUTHORITY
     ? PUBLIC_TRUST_PROFILE
+    : typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__
+    ? undefined
     : trust.authority === INTERNAL_TRUST_AUTHORITY
     ? INTERNAL_TRUST_PROFILE
     : undefined

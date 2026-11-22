@@ -20,6 +20,7 @@ import { resolveOwningPackageVersion } from './package-version.js'
 import { resourceRegistryInstallSource } from './plugin-generation-artifact-server.js'
 import { isStandaloneRuntimeGraph } from './standalone-runtime-graph.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
+import { createStandaloneMarketplaceTrustFilter } from './standalone-marketplace-trust.js'
 
 /** Owner-private, per-session admission; never populated from a browser request. */
 export interface StandaloneOwnerAttachment {
@@ -718,6 +719,10 @@ export async function buildRendererBundle(
   const runtimeExtension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
   const runtimeImport = fileURLToPath(new URL(`../renderer/runtime.${runtimeExtension}`, import.meta.url))
   const { source } = await buildRendererCompositionSource(config, options, { runtimeImport })
+  const trustFilter = options.standaloneOwner === undefined ? undefined : createStandaloneMarketplaceTrustFilter([
+    fileURLToPath(new URL('../renderer/marketplace-trust.' + runtimeExtension, import.meta.url)),
+    fileURLToPath(new URL('../permission-model-v4.' + runtimeExtension, import.meta.url)),
+  ])
 
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'cordisx-composition.ts' },
@@ -735,10 +740,12 @@ export async function buildRendererBundle(
     // Native mount/recovery diagnostics deliberately retain function names.
     minifyIdentifiers: false,
     legalComments: 'inline',
+    ...(trustFilter === undefined ? {} : { plugins: [trustFilter.plugin] }),
     loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
     write: false,
     logLevel: 'silent',
   })
+  if (trustFilter && !trustFilter.applied()) throw new Error('Standalone Marketplace trust projection is unavailable')
   const output = result.outputFiles[0]
   if (output === undefined) throw new Error('esbuild produced no renderer bundle')
   if (options.standaloneOwner !== undefined) await assertStandaloneOwner(config, options)

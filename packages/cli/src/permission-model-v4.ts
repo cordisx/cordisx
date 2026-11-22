@@ -2,7 +2,6 @@ import type { HostDomModifyOperation, HostDomOperation, HostDomReadOperation } f
 import {
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2,
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PERMISSION_CAPABILITIES_V2,
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
@@ -12,9 +11,7 @@ import {
   type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
-  type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationKeyV4,
-  type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionCapabilityV4,
   type CordisXPermissionCapabilityV5,
   type CordisXPermissionPolicyRecordV4,
@@ -50,6 +47,10 @@ import {
   PROJECTION_LOCAL_ID,
   uniqueSortedStrings,
 } from './permission-model-v4-validation.js'
+
+export { assertPermissionAuthorizationDecisionV4 } from './permission-authorization-decision-v4.js'
+
+declare const __CORDISX_STANDALONE_PUBLIC_TRUST__: boolean | undefined
 
 const FINGERPRINT = /^sha256:[a-f0-9]{64}$/u
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
@@ -155,6 +156,8 @@ export function normalizeCertifiedPermissionProjectionV1(
       authority: 'cordisx.marketplace.codeowners/v1' as const,
       evidence: /^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u,
     }
+    : typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__
+    ? undefined
     : input.schemaVersion === 2 && input.$schema === CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2
     ? {
       schema: CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2,
@@ -213,7 +216,9 @@ export function normalizeCertifiedPermissionProjectionV1(
     || input.pluginId !== identity.pluginId
     || input.version !== artifact.version
     || input.integrity !== artifact.integrity
-    || !isHttpsUri(source) || (profile.version === 2 && source !== INTERNAL_MARKETPLACE_SOURCE)
+    || !isHttpsUri(source)
+    || (!(typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+      && profile.version === 2 && source !== INTERNAL_MARKETPLACE_SOURCE)
     || typeof input.pluginId !== 'string' || !PROJECTION_LOCAL_ID.test(input.pluginId)
     || !isSemanticVersion(input.version)
     || typeof input.integrity !== 'string' || !FINGERPRINT.test(input.integrity)
@@ -261,7 +266,8 @@ export function normalizeCertifiedPermissionProjectionV1(
     || !/^sha256:[a-f0-9]{64}$/u.test(input.fingerprint)
   ) return undefined
   if (
-    profile.version === 2 && (
+    !(typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+    && profile.version === 2 && (
       typeof input.packageName !== 'string' || !INTERNAL_PACKAGE.test(input.packageName)
       || !isHttpsUri(input.downloadUrl) || (input.downloadUrl as string).includes('?')
       || (input.downloadUrl as string).includes('#')
@@ -305,7 +311,8 @@ export function normalizeCertifiedPermissionProjectionV1(
       authority: feed.authority as typeof profile.authority,
     },
   }
-  const payload = profile.version === 1
+  const payload = (typeof __CORDISX_STANDALONE_PUBLIC_TRUST__ !== 'undefined' && __CORDISX_STANDALONE_PUBLIC_TRUST__)
+      || profile.version === 1
     ? { source: source as string, ...common }
     : {
       canonicalSource: INTERNAL_MARKETPLACE_SOURCE,
@@ -950,46 +957,6 @@ export function hostDomPermissionAuthorizationKeyV4(input: {
     scope: declaration.scope,
     securityFingerprint: permissionSecurityFingerprintV4(input.catalogVersion, declaration),
   })
-}
-
-/** Validates an explicit-user decision against exactly the items that still require review. */
-export function assertPermissionAuthorizationDecisionV4(
-  plan: CordisXPermissionAuthorizationPlanV4,
-  decision: CordisXPermissionAuthorizationDecisionV4,
-): void {
-  if (
-    decision === null || typeof decision !== 'object'
-    || decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
-    || decision.schemaVersion !== 4
-    || decision.origin !== 'explicit-user'
-    || decision.planId !== plan.planId
-    || decision.operation !== plan.operation
-    || decision.profileId !== plan.profileId
-    || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
-    || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
-    || !Array.isArray(decision.decisions)
-  ) {
-    throw new Error('permission v4 decision does not match the exact plan')
-  }
-  const expected = new Map(
-    plan.declarations
-      .filter(item => item.decisionRequired)
-      .map(item => [item.capability, item]),
-  )
-  const seen = new Set<string>()
-  for (const selected of decision.decisions) {
-    const item = expected.get(selected.capability)
-    if (
-      item === undefined || seen.has(selected.capability)
-      || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
-      || selected.securityFingerprint !== item.securityFingerprint
-      || !item.allowedDecisions.includes(selected.decision)
-    ) {
-      throw new Error('permission v4 decision exceeds or does not match the exact plan')
-    }
-    seen.add(selected.capability)
-  }
-  if (seen.size !== expected.size) throw new Error('permission v4 decision is incomplete')
 }
 
 export function isLegacyPermissionCapabilityV4(capability: CordisXPermissionCapabilityV4): boolean {

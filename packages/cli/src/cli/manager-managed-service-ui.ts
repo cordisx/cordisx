@@ -226,6 +226,7 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly allowLogout?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
+    waitForInitialManagedServiceUI?(signal: AbortSignal): Promise<void>
     reserveManagedServiceUIContinuity?(): { finish(): number | undefined; cancel(): boolean }
     readonly managedServiceUI: {
       handleBindingValue(value: string, signal?: AbortSignal): Promise<Record<string, unknown>>
@@ -238,7 +239,25 @@ export function createManagerManagedServiceUIBridge(input: {
   const usedObservationIds = new Set<string>()
   const retirements = new Map<string, Promise<boolean>>()
   const gate = new ManagerManagedServiceUIGate()
+  const lifetime = new AbortController()
   let disposed = false
+
+  async function waitForInitialReadiness(signal: AbortSignal): Promise<void> {
+    const current = () => {
+      try {
+        return !disposed && gate.open && !signal.aborted && input.ownerCurrent()
+      } catch {
+        return false
+      }
+    }
+    if (!current()) throw unavailable()
+    try {
+      await input.runtime.waitForInitialManagedServiceUI?.(AbortSignal.any([signal, lifetime.signal]))
+    } catch {
+      throw unavailable()
+    }
+    if (!current() || lifetime.signal.aborted) throw unavailable()
+  }
 
   function fence(): number {
     try {
@@ -790,6 +809,7 @@ export function createManagerManagedServiceUIBridge(input: {
   }
 
   return {
+    waitForInitialReadiness,
     projectInitial,
     reserveTransition,
     /** Abort one owner-issued projection if its bootstrap cannot complete. */
@@ -811,6 +831,7 @@ export function createManagerManagedServiceUIBridge(input: {
     channel,
     dispose(): void {
       disposed = true
+      lifetime.abort()
       gate.close()
       for (const id of sessions.keys()) retire(id)
       usedRenderers.clear()

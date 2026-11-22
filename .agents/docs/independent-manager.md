@@ -49,7 +49,9 @@ Manager's adoption. Secrets and other field types remain unavailable. A Desktop
 seat change retires pages using this projection, and a new page requires a fresh
 proof. Each Manager receives only matching existing Manager UI permissions.
 Managed-service reads and subscriptions are available; the service owner can
-coordinate an explicit login across admitted Managers.
+coordinate an explicit login across admitted Managers. When initial service
+sources are still being adopted, the owner waits before taking the Manager's
+profile fences; admission remains bounded and stops when the page disconnects.
 Desktop login and dynamic changes to those managed packages remain unavailable.
 The service owner and an eligible Desktop owner can change an unrelated
 capability-free v1 package while admitted Manager pages retain their projected
@@ -159,6 +161,11 @@ background login flow. That process does not expose its standard streams, so
 login methods needing terminal input or a displayed terminal code are not
 supported here. A synthetic service verifies the bridge; a real provider login is
 not yet verified.
+
+The independent Host renderer evaluates public Marketplace trust records only.
+Other trust authorities remain unavailable there until the owner can project
+their verified results without exposing private source identities. Existing
+owner-approved plugin permissions are not changed by this restriction.
 
 For a running Channel service with a verified profile owner, the sidecar's
 existing credential API supports an active package or a configured archive

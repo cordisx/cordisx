@@ -54,6 +54,10 @@ import {
 } from './managed-service-ui-rpc.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { safeDiagnosticMessage } from './diagnostic-redaction.js'
+import {
+  trackManagedServiceUIInitialReadiness,
+  waitForManagedServiceUIInitialReadiness,
+} from './managed-service-ui-readiness.js'
 
 export interface ManagedServicePluginLifecycleOptions {
   readonly runtime: PluginLifecycleRuntime
@@ -93,10 +97,6 @@ function ownerKey(owner: ManagedServiceUIOwner): string {
   return `${owner.pluginId}\u0000${owner.pluginGeneration}`
 }
 
-function safeMessage(error: unknown): string {
-  return safeDiagnosticMessage(error)
-}
-
 /** Adds managed-backend fleets to the durable plugin generation transaction. */
 export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly runtime: PluginLifecycleRuntime
@@ -114,6 +114,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private uiFenceBusy = 0
   private uiFenceFailed = false
   private uiFenceSourceObservationFailed = false
+  private initialUIReady: Promise<void> | undefined
   private uiFenceSources: readonly ManagedServiceUISourceSnapshot[] | undefined
   private readonly uiFencePending = new Map<string, number>()
   private readonly uiFenceRecovery = new Map<string, ManagedServiceUIRecovery>()
@@ -185,19 +186,25 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       const session = await this.initializeNow(activation)
       // A progressive startup can return the observation session before source
       // adoption. The owner cannot issue a stable UI fence until both settle.
-      void Promise.all([session.coreReady, session.adopted]).then(
-        () => this.endUIFenceBoundary(),
-        () => {
-          this.uiFenceFailed = true
-          this.endUIFenceBoundary()
-        },
-      )
+      this.initialUIReady = trackManagedServiceUIInitialReadiness([session.coreReady, session.adopted], failed => {
+        if (failed) this.uiFenceFailed = true
+        this.endUIFenceBoundary()
+      })
       return session
     } catch (error) {
       this.uiFenceFailed = true
       this.endUIFenceBoundary()
       throw error
     }
+  }
+
+  /** Wait only for initial adoption; later lifecycle transitions keep their existing fence. */
+  waitForInitialManagedServiceUI(signal: AbortSignal): Promise<void> {
+    return waitForManagedServiceUIInitialReadiness(
+      this.initialUIReady,
+      AbortSignal.any([signal, this.lifecycle.signal]),
+      () => !this.disposed && !this.uiFenceFailed,
+    )
   }
 
   private async initializeNow(activation: CordisXPluginActivationRecordV1): Promise<ManagedServiceStartupSession> {
@@ -448,12 +455,12 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       managedServiceUICapabilities: transaction.newCapabilities,
     }).catch(error => {
       if (activationFailure !== undefined) {
-        throw new Error(`managed service candidate activation failed: ${safeMessage(activationFailure)}`)
+        throw new Error(`managed service candidate activation failed: ${safeDiagnosticMessage(activationFailure)}`)
       }
       throw error
     })
     if (activationFailure !== undefined) {
-      throw new Error(`managed service candidate activation failed: ${safeMessage(activationFailure)}`)
+      throw new Error(`managed service candidate activation failed: ${safeDiagnosticMessage(activationFailure)}`)
     }
     return staged
   }
@@ -822,7 +829,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     } catch (error) {
       const terminated = envelope === undefined ? undefined : this.startupTombstones.result(envelope)
       if (terminated !== undefined) return { requestId, ok: true, value: terminated }
-      const message = safeMessage(error)
+      const message = safeDiagnosticMessage(error)
       const code = message.includes('not declared')
         ? 'service-not-declared'
         : message.includes('binding') && message.includes('replaced')

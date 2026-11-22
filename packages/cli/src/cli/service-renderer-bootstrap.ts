@@ -40,6 +40,7 @@ import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-ha
 import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
+import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
 import {
   type DesktopConfigProjector,
   desktopPackageConfigBundleOptions,
@@ -52,6 +53,7 @@ import type {
   ServiceRendererSnapshot as Snapshot,
 } from './service-renderer-bootstrap-state.js'
 const MAX_INITIAL_GRAPHS = 256
+const MANAGED_STARTUP_WAIT_MS = 45_000
 /**
  * Owner-only, two-phase bootstrap. Phase one creates and retains immutable
  * leases; phase two accepts only the authenticated sidecar's same-origin
@@ -287,6 +289,7 @@ export class ServiceRendererBootstrap {
     } catch {
       entry.cleanupFailed = true
     }
+    entry.startupAbort.abort()
     entry.unsubscribe()
     const writes = this.writeLifetimes.retire(rendererId)
     const reads = this.readLifetimes.retire(rendererId)
@@ -494,6 +497,7 @@ export class ServiceRendererBootstrap {
       leases,
       checks: new Set(),
       unsubscribe,
+      startupAbort: new AbortController(),
       stale: false,
       bootstrapConfirmed: false,
       ...(this.input.protectProfileInputs && this.input.restrictedManagement
@@ -507,6 +511,12 @@ export class ServiceRendererBootstrap {
     }
     entry.preparing = (async () => {
       try {
+        if (this.managedServiceUI) {
+          await this.managedServiceUI.waitForInitialReadiness(
+            AbortSignal.any([entry.startupAbort.signal, AbortSignal.timeout(MANAGED_STARTUP_WAIT_MS)]),
+          )
+          if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
+        }
         if (this.permissionFence) {
           const release = await this.permissionFence.acquire()
           if (!this.current(rendererId, entry)) {
@@ -926,30 +936,14 @@ export class ServiceRendererBootstrap {
             dispatch: async () => {
               const peer = this.input.participants.peer(context.rendererId)
               if (!peer) throw new Error('renderer-bootstrap-unavailable')
-              const entry = this.entries.get(context.rendererId)
-              if (entry?.lifecycleTransition) {
-                const current = this.current(context.rendererId, entry) && entry.lifecycleTransition.isCurrent()
-                if (!current) entry.peer.close()
-                return { status: 'ok', current }
-              }
-              if (entry?.channelTransition) {
-                const current = this.current(context.rendererId, entry) && entry.channelTransition.isCurrent()
-                if (!current) entry.peer.close()
-                return { status: 'ok', current }
-              }
-              if (entry?.config && !await this.configurationCurrent(context.rendererId, entry)) {
-                entry.stale = true
-                entry.peer.close()
-                return { status: 'ok', current: false }
-              }
-              if (entry?.managedContext) {
-                try {
+              return await serviceRendererBootstrapStatus({
+                entry: this.entries.get(context.rendererId),
+                current: entry => this.current(context.rendererId, entry),
+                configurationCurrent: async entry => await this.configurationCurrent(context.rendererId, entry),
+                projectManagedServiceUI: () => {
                   this.managedServiceUI?.projectInitial(context)
-                } catch {
-                  return { status: 'ok', current: false }
-                }
-              }
-              return { status: 'ok', current: true }
+                },
+              })
             },
           }
         }

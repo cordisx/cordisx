@@ -29,6 +29,7 @@ export type ServiceRendererBootstrapEntry = {
   readonly leases: PluginGenerationGraphLease[]
   readonly checks: Set<Promise<boolean>>
   readonly unsubscribe: () => void
+  readonly startupAbort: AbortController
   stale: boolean
   bootstrapConfirmed: boolean
   snapshot?: ServiceRendererSnapshot

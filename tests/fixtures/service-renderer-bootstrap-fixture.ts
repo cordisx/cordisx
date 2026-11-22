@@ -54,6 +54,7 @@ export async function fixture(
     delayLease?: boolean
     managedBackend?: boolean
     managedUiVersion?: 14 | 15
+    managedUiSource?: string
     managedUiGrant?: boolean
     managedStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
     protectProfileInputs?: boolean
@@ -151,12 +152,13 @@ export async function fixture(
     }
   }
   if (options.managedBackend || options.managedUiVersion) {
+    const managedSource = options.managedUiSource ?? 'https://example.test/fixtures'
     await stageServiceModePlugin(
       root,
       homeDir,
       profileId,
       true,
-      'https://example.test/fixtures',
+      managedSource,
       `export const inject = ['managedServices'];
        export async function apply(ctx) {
          const result = await ctx.managedServices.get({ serviceId: 'gateway' });
@@ -176,7 +178,7 @@ export async function fixture(
         pointIds: ['manager.settings.navigation-items', 'manager.content', 'workspace.toolbar.items'],
       }]).map(policy => ({
         ...policy,
-        key: { ...policy.key, identity: { ...policy.key.identity, source: 'https://example.test/fixtures' } },
+        key: { ...policy.key, identity: { ...policy.key.identity, source: managedSource } },
       }))
       await persistPermissionPolicies({ configPath }, policies)
     }

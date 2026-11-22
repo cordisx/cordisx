@@ -223,8 +223,20 @@ describe('managed-service owner UI lifecycle fence', () => {
     const session = await runtime.initialize(activation(1, 'old'))
     expect(runtime.capabilities()).toHaveLength(1)
     expect(runtime.readManagedServiceUIFence()).toBeUndefined()
+    const waiting = runtime.waitForInitialManagedServiceUI(new AbortController().signal)
+    let settled = false
+    void waiting.then(() => {
+      settled = true
+    })
+    const canceled = new AbortController()
+    const canceledWait = runtime.waitForInitialManagedServiceUI(canceled.signal)
+    canceled.abort()
+    await expect(canceledWait).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(settled).toBe(false)
     finish()
     await Promise.all([session.adopted, session.coreReady])
+    await waiting
+    expect(settled).toBe(true)
     await vi.waitFor(() => expect(runtime.readManagedServiceUIFence()).toEqual(expect.any(Number)))
     await runtime.dispose()
   })
