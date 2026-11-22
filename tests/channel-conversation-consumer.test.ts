@@ -204,6 +204,7 @@ describe('persistent Channel chat consumer', () => {
     f.consumer.setNativeExtras(() =>
       ({
         ...f.native,
+        setPersonaRegistry: vi.fn(),
         label: async () => '飞书 · 卡片群',
         approvalEvents: (callback: typeof listener) => {
           listener = callback
