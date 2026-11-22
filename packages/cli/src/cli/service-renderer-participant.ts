@@ -9,9 +9,15 @@ import {
 } from '../launcher/renderer-lifecycle-peer.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import { ServiceRendererLifecycleProjection } from './service-renderer-lifecycle-projection.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
-type Entry = { readonly peer: ManagerRendererCommandPeer; bootstrap?: Snapshot; readOnlyIdentity?: boolean }
+type Entry = {
+  readonly peer: ManagerRendererCommandPeer
+  bootstrap?: Snapshot
+  readOnlyIdentity?: boolean
+  identityProjection?: ServiceRendererLifecycleProjection
+}
 
 /**
  * Owner-private participant registry. Session IDs, renderer IDs and process
@@ -91,7 +97,12 @@ export class ServiceRendererParticipants {
   }
 
   /** Used only by an owner bootstrap after the exact composition is built. */
-  confirmBootstrap(rendererId: string, snapshot: Snapshot, projected?: Snapshot): void {
+  confirmBootstrap(
+    rendererId: string,
+    snapshot: Snapshot,
+    projected?: Snapshot,
+    resolve?: (alias: string, pluginId: string) => { readonly source: string; readonly digest: string },
+  ): void {
     const entry = this.entries.get(rendererId)
     if (
       this.closed || this.fenced || this.quiescence !== undefined || !entry || entry.peer.closed || !this.lifecycle
@@ -99,22 +110,16 @@ export class ServiceRendererParticipants {
     ) throw new Error('renderer-bootstrap-stale')
     const ownerSnapshot = structuredClone(snapshot)
     if (projected !== undefined) {
-      const rendererSnapshot = structuredClone(projected)
-      entry.peer.bindOwnerProjection((method, payload) => {
-        if (method === 'quiesce' || method === 'channel-configuration' || method === 'managed-service-state') {
-          return { payload }
-        }
-        if (method !== 'synchronize' || !attachmentEqual(payload, ownerSnapshot)) {
-          throw new Error('renderer-read-only-identity-unavailable')
-        }
-        return {
-          payload: rendererSnapshot,
-          receipt: value => {
-            if (!attachmentEqual(value, rendererSnapshot)) throw new Error('renderer-identity-receipt-invalid')
-            return ownerSnapshot
-          },
-        }
+      if (!resolve) throw new Error('renderer-bootstrap-stale')
+      const projection = new ServiceRendererLifecycleProjection({
+        owner: ownerSnapshot,
+        renderer: projected,
+        rendererId,
+        current: () => !this.closed && !this.fenced && this.entries.get(rendererId) === entry && !entry.peer.closed,
+        resolve,
       })
+      entry.peer.bindOwnerProjection(projection.project)
+      entry.identityProjection = projection
       entry.readOnlyIdentity = true
     }
     entry.bootstrap = ownerSnapshot

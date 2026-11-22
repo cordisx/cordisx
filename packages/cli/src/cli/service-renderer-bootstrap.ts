@@ -783,7 +783,14 @@ export class ServiceRendererBootstrap {
           || !await this.unchanged(rendererId, entry)
         ) throw new Error('renderer-bootstrap-unavailable')
         entry.configuredChannel?.bind(context)
-        this.input.participants.confirmBootstrap(rendererId, snapshot, projectedSnapshot)
+        this.input.participants.confirmBootstrap(
+          rendererId,
+          snapshot,
+          projectedSnapshot,
+          entry.identity === undefined
+            ? undefined
+            : (alias, pluginId) => entry.identity!.resolveLifecycle(context, alias, pluginId),
+        )
         entry.bootstrapConfirmed = true
         return result
       } catch (error) {
