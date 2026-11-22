@@ -12,6 +12,15 @@ to discover on-demand `write`, `organize` and `recall` guidance. `navigate` and
 `search-page` return byte-bounded paged cards; `batch` loads selected IDs under a
 separate budget. These operations do not establish style profiles or grants.
 
+Every scoped business turn receives memory instructions, including accounts
+without a configured persona and later turns whose unchanged persona capsule is
+suppressed. At meaningful milestones, verified progress, decisions, corrections
+and handoffs, the model should save concise useful task knowledge. It searches
+before writing and updates a matching assertion with its exact revision.
+Questions about earlier conversations or project progress should first retrieve
+authorized memory. Use short supplied subject names rather than entire questions;
+retained memory is dated evidence, so live progress still needs task readback.
+
 `cordisx channel memory remember|get|search|update|forget|index` reuses the
 running Host and requires `--context <incoming-context>` and optional
 `--profile <id>`. Use `--input <JSON>`: remember takes `record` (kind, title,
@@ -20,8 +29,13 @@ takes `query` and optional `entity`; update takes `id`, `revision`, `record`;
 forget takes `id`, `revision`; index takes `{}` and rebuilds only the caller's
 current-conversation records. Read `cordisx channel help memory` for details.
 
-This is not automatic ingestion or platform history access. Direct-chat own
-recall needs no administrator. Group own-topic requests derive from actual
+This is selective model-driven maintenance, not automatic transcript ingestion
+or platform history access. It never configures a persona or widens sharing.
+Direct-chat own
+recall needs no administrator. The verified owner can also find their own
+records in the same source group without a special recall phrase, allowing
+ordinary progress messages to update an existing record. Across groups,
+own-topic requests derive from actual
 accepted incoming text; grant/revoke/grant-list use configured actor/source
 authority, not claimed admin. Two-account identity-challenge/identity-confirm
 use verified second-account requests with expiry/replay checks. Caller
@@ -137,6 +151,11 @@ The exact running-runtime CLI's ordinary reads and policy-allowed source replies
 receive one-time native approval automatically. This does not approve arbitrary
 shell commands, binding/policy mutations or sends to another conversation.
 Commands that cannot be verified retain normal approval behavior.
+Scoped `memory guide/navigate/search-page/search/get/batch/grant-list` are
+ordinary reads only when their exact runtime and current incoming context are
+verified. The memory endpoint still filters by owner and grants. `remember`,
+`update`, `forget`, index rebuild, sharing and identity changes retain normal
+native approval behavior; memory is never blanket-approved as a subcommand.
 
 `conversations` returns `complete: true` when the platform group directory was
 fully read. A missing permission, transport failure or pagination limit returns

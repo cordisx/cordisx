@@ -61,7 +61,7 @@ export function memoryReadable(
     || bindings[actor] !== undefined && bindings[actor] === bindings[record.owner]
   const topic = [record.title, record.summary, record.keywords, ...(record.tags ?? [])].join(' ').toLowerCase()
   if (
-    own && (authority.kind === 'direct' || authority.ownDisclosure === true
+    own && (authority.kind === 'direct' || record.scopeId === destination || authority.ownDisclosure === true
       || authority.ownTopic?.some(word => topic.includes(word)))
   ) return true
   return grants.some(grant =>

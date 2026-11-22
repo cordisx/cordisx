@@ -15,6 +15,7 @@ it('real native start injects bound persona, pins session and suppresses repeate
     const prompts: string[] = []
     const native = new ChannelNativeSessions({
       cwd: root,
+      cli: { node: process.execPath, entry: path.join(root, 'cli.js'), home: root, profile: 'test' },
       nativeRequest: async () => ({ thread: { id: 'session', status: { type: 'idle' } } }),
       bridge: () =>
         ({
@@ -39,6 +40,12 @@ it('real native start injects bound persona, pins session and suppresses repeate
     expect(prompts[0]).toContain('Atlas')
     expect((await native.start('job-two', message, 'session')).state).toBe('running')
     expect(prompts[1]).not.toContain('"personaId"')
+    for (const prompt of prompts) {
+      expect(prompt).toContain('channel memory')
+      expect(prompt).toContain('proactively retain useful concise task knowledge')
+      expect(prompt).toContain('first retrieve authorized memory')
+      expect(prompt).toContain("--profile 'test' --context")
+    }
     native.resetPersonaContext('session')
     await native.start('reset-job', message, 'session')
     expect(prompts.pop()).toContain('Atlas')
@@ -53,6 +60,41 @@ it('real native start injects bound persona, pins session and suppresses repeate
     await personas.contextSettings('atlas', 'A', { language: 'Chinese', tone: 'normal' }, currentRevision)
     await native.start('job-style', message, 'session')
     expect(prompts[4]).toContain('Chinese')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('unbound accounts receive memory guidance without creating a persona or task binding', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-memory-unbound-'))
+  try {
+    const registry = new ChannelMemoryPersonas(root),
+      account = { adapterId: 'feishu', accountId: 'bot', tenantId: 'tenant' }
+    let prompt = ''
+    const native = new ChannelNativeSessions({
+      cwd: root,
+      cli: { node: process.execPath, entry: path.join(root, 'cli.js'), home: root, profile: 'test' },
+      bridge: () =>
+        ({
+          call: async (_provider: string, _operation: string, args: { prompt: string }) => {
+            prompt = args.prompt
+            return { status: 'started', sessionId: 'session', turnId: 'turn' }
+          },
+        }) as never,
+    })
+    native.setPersonaRegistry(registry)
+    const result = await native.start('job', {
+      source: {
+        event: { ...account, conversationId: 'A', actor: { userId: 'alice' }, kind: 'direct', messageId: 'one' },
+      },
+      receivedAt: new Date().toISOString(),
+      content: [{ type: 'text', text: 'Recall Cedar progress' }],
+    } as never)
+    expect(result.state).toBe('running')
+    expect(prompt).toContain('channel memory')
+    expect(prompt).toContain('first retrieve authorized memory')
+    expect(prompt).not.toContain('"personaId"')
+    expect(await registry.taskConfigured('session', account)).toBe(false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
