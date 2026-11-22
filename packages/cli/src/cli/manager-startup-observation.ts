@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { StartupUIRequest } from '../launcher/startup-ui-rpc.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import type { ManagerManagedServiceUICapability } from './manager-managed-service-ui.js'
+import { awaitObservationOrAbort } from './manager-observation-abort.js'
 
 interface Alias {
   readonly public: ManagerManagedServiceUICapability
@@ -65,7 +66,10 @@ export class ManagerStartupObservation {
       ...request,
     }
     try {
-      const result = await this.input.invoke(JSON.stringify(envelope), signal)
+      const invocation = this.input.invoke(JSON.stringify(envelope), signal)
+      const result = request.operation === 'startupNext'
+        ? await awaitObservationOrAbort(invocation, signal)
+        : await invocation
       return this.input.sanitize(result, request.requestId)
     } catch {
       throw unavailable()

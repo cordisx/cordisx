@@ -148,10 +148,10 @@ it.skipIf(chrome === undefined)(
       expect(rejected?.ok).toBe(false)
       expect(
         await second.evaluate(
-          `globalThis.__fixtureManagedService.subscribe().then(() => 'unexpected', e => e.message)`,
+          `globalThis.__fixtureManagedService.subscribe().then(async value => value.status === 'subscribed'
+          ? (await value.subscription.unsubscribe()).reason : value.status)`,
         ),
-      )
-        .toBe('unsupported')
+      ).toBe('explicit')
       await first.evaluate("dispatchEvent(new Event('pagehide'))")
       await expect.poll(() => first.evaluate('typeof globalThis.__cordisxManagedServiceUIRequestV1'), {
         timeout: 10_000,

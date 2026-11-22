@@ -10,6 +10,7 @@ import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 import { ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
+import { ManagerObservationPolls } from './manager-observation-polls.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
@@ -85,6 +86,18 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
+function observationRequestId(channel: string, payload: string): string | undefined {
+  if (channel !== 'managed-service-ui') return undefined
+  try {
+    const value = object(JSON.parse(payload))
+    if (
+      value && ['next', 'pull', 'closed', 'startupNext'].includes(String(value.operation))
+      && typeof value.requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/u.test(value.requestId)
+    ) return value.requestId
+  } catch { /* The owner will reject a malformed request. */ }
+  return undefined
+}
+
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
 export async function startManagerWeb(owner: ManagerOwner, options: {
   /** Private supervisor identity; it must never be supplied by the browser. */
@@ -106,6 +119,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     rendererBootstrap?: ReturnType<typeof createManagerRendererBootstrap>
     rendererBundle?: Promise<Awaited<ReturnType<ReturnType<typeof createManagerRendererBootstrap>['prepare']>>>
     resources?: Set<ServerResponse>
+    observations?: ManagerObservationPolls
   }
   const sessions = new Map<string, BrowserSession>()
   const resumes = new ManagerSessionResumeGrants()
@@ -119,6 +133,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     sessions.delete(token)
     clearTimeout(session.timer)
     session.controller.abort()
+    session.observations?.close()
     session.graphs?.close()
     for (const response of session.resources ?? []) response.destroy()
     void session.rendererBundle?.then(result => result.bundle.fill(0)).catch(() => undefined)
@@ -636,17 +651,30 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         }
         // The owner applies its own strict channel parser and capability
         // checks. A browser cannot choose a handle, gateway, or session ID.
-        const result = object(
-          await scopedRequest({
-            kind: 'manager-renderer',
-            action: 'call',
-            gateway: options.rendererGateway,
-            browserSessionId: session.id,
-            handle,
-            channel: input.channel,
-            payload: input.payload,
-          }, rendererWrite),
-        )
+        const operation: PluginManagementRpcOperation = {
+          kind: 'manager-renderer',
+          action: 'call',
+          gateway: options.rendererGateway,
+          browserSessionId: session.id,
+          handle,
+          channel: input.channel,
+          payload: input.payload,
+        }
+        const observationId = observationRequestId(input.channel, input.payload)
+        let result: Record<string, unknown> | undefined
+        if (observationId !== undefined) {
+          session.observations ??= new ManagerObservationPolls()
+          const polled = await session.observations.poll(
+            observationId,
+            input.payload,
+            async () => await scopedRequest(operation),
+          )
+          if (!activeSession()) return revoked()
+          if (polled.status === 'pending') return json(response, 202, { status: 'pending' })
+          result = object(polled.value)
+        } else {
+          result = object(await scopedRequest(operation, rendererWrite))
+        }
         if (rendererWrite && result?.status === 'unknown') {
           await retireSession(token)
           return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })

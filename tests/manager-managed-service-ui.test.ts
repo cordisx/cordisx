@@ -151,8 +151,6 @@ describe('manager managed-service UI bridge', () => {
     const token = bridge.projectInitial(a)[0]!.token
     for (
       const operation of [
-        'subscribe',
-        'next',
         'authenticate',
         'logout',
         'startOAuth',

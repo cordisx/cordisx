@@ -111,6 +111,23 @@ export interface PluginManagementRpcServer {
   close(): Promise<void>
 }
 
+/** Manager observation waits are bounded by the owning renderer session, not the ordinary RPC deadline. */
+function managementRpcDeadline(operation: PluginManagementRpcOperation): number {
+  if (
+    operation.kind === 'manager-renderer' && operation.action === 'call'
+    && operation.channel === 'managed-service-ui' && typeof operation.payload === 'string'
+    && Buffer.byteLength(operation.payload) <= MAX_MANAGEMENT_REQUEST_BYTES
+  ) {
+    try {
+      const value = JSON.parse(operation.payload) as { operation?: unknown }
+      if (value && ['next', 'pull', 'closed', 'startupNext'].includes(String(value.operation))) {
+        return 8 * 60 * 60_000
+      }
+    } catch { /* Malformed requests retain the ordinary deadline. */ }
+  }
+  return operation.kind === 'execute' ? 180_000 : 60_000
+}
+
 export function managementMailboxRoot(paths: PluginManagementRpcPaths): string {
   return path.join(paths.socketDirectory, `${path.basename(paths.socket, '.sock')}-mailbox`)
 }
@@ -495,8 +512,7 @@ export async function requestPluginManagementRpc(
       options.signal?.removeEventListener('abort', abort)
       operation()
     }
-    // Executing an install/update can download and stage a large package.
-    const normalDeadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const normalDeadline = managementRpcDeadline(operation)
     const deadline = options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
       ? normalDeadline
       : Math.max(1, Math.min(normalDeadline, options.timeoutMs))

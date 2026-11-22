@@ -9,6 +9,80 @@ import { managerRendererGraphFixture } from './fixtures/manager-renderer-graph.j
 
 const secret = () => randomBytes(32).toString('hex')
 
+it('yields observation HTTP requests while retaining one authenticated owner call', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  let release!: () => void
+  const pending = new Promise<void>(resolve => {
+    release = resolve
+  })
+  let calls = 0
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['managed-service-ui', {
+        prepare(payload) {
+          const request = JSON.parse(String(payload)) as { requestId: string }
+          return {
+            mode: 'read',
+            longLivedRead: true,
+            dispatch: async () => {
+              calls++
+              await pending
+              return { requestId: request.requestId, ok: true, value: 'event' }
+            },
+          }
+        },
+      }],
+    ]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+    const input = { channel: 'managed-service-ui', payload: JSON.stringify({ requestId: 'watch', operation: 'next' }) }
+    expect((await post('/api/renderer/binding', input, token)).status).toBe(202)
+    expect((await post('/api/renderer/binding', input, token)).status).toBe(202)
+    expect(calls).toBe(1)
+    expect(
+      (await post('/api/renderer/binding', {
+        ...input,
+        payload: JSON.stringify({ requestId: 'watch', operation: 'closed' }),
+      }, token)).status,
+    ).toBe(503)
+    release()
+    const completed = await post('/api/renderer/binding', input, token)
+    expect(completed.status).toBe(200)
+    expect(await completed.json()).toEqual({ requestId: 'watch', ok: true, value: 'event' })
+    expect(calls).toBe(1)
+  } finally {
+    release()
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)
+
 it('bootstraps two authenticated renderer sessions without exposing private graphs or grants', async () => {
   const fixture = await managerRendererGraphFixture()
   const lease = await fixture.lease('generation')

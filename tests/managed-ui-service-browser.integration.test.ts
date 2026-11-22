@@ -80,7 +80,20 @@ const fixture = [
   "  }, { route: { id: 'manager' }, navigationGroup: { id: 'external-accounts' } })",
   "  const result = await ctx.managedServices.get({ serviceId: 'gateway' })",
   '  globalThis.__fixtureManagedStatus = result.status',
-  "  if (result.status === 'available') globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status",
+  "  if (result.status === 'available') {",
+  '    globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status',
+  '    const observed = await result.service.subscribe()',
+  '    globalThis.__fixtureServiceStatus = observed.status',
+  "    if (observed.status === 'subscribed') {",
+  '      globalThis.__fixtureServiceSubscription = observed.subscription',
+  '      globalThis.__fixtureServicePublicId = observed.subscription.descriptor.subscriptionId',
+  '      const pages = observed.subscription.pages[Symbol.asyncIterator]()',
+  '      void pages.next().then(async page => {',
+  "        globalThis.__fixtureServicePage = page.done ? 'closed' : 'page'",
+  '        if (!page.done) await pages.next()',
+  "      }).catch(() => { globalThis.__fixtureServicePage = 'error' })",
+  '    }',
+  '  }',
   '  globalThis.__fixtureStartup = ctx.startup',
   '  globalThis.__fixtureStartupSnapshot = await ctx.startup.read()',
   '  globalThis.__fixtureStartupEvents = []',
@@ -129,8 +142,26 @@ it.skipIf(
         .toBe('true')
       await expect.poll(() => page.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 20_000 })
         .toBe('available')
-      await expect.poll(() => page.evaluate('globalThis.__fixtureStartupSubscribed'), { timeout: 20_000 })
-        .toBe(true)
+      await expect.poll(() => page.evaluate('globalThis.__fixtureServiceStatus'), { timeout: 20_000 })
+        .toBe('subscribed')
+      await expect.poll(() => page.evaluate('globalThis.__fixtureServicePage'), { timeout: 20_000 })
+        .toBe('page')
+      await expect.poll(() =>
+        page.evaluate(
+          'globalThis.__fixtureTransport.filter(item => item.operation === "next" && item.status === "started").length >= 2',
+        ), { timeout: 20_000 }).toBe(true)
+      try {
+        await expect.poll(() => page.evaluate('globalThis.__fixtureStartupSubscribed'), { timeout: 20_000 })
+          .toBe(true)
+      } catch (cause) {
+        const state = await page.evaluate<unknown>(
+          '({ service: globalThis.__fixtureServiceStatus, page: globalThis.__fixtureServicePage,'
+            + ' startup: !!globalThis.__fixtureStartup, startupSnapshot: !!globalThis.__fixtureStartupSnapshot,'
+            + ' transport: globalThis.__fixtureTransport?.slice(-30),'
+            + ' plugins: globalThis.__cordisxRuntime?.snapshot().plugins.map(({ id, status }) => ({ id, status })) })',
+        )
+        throw new Error('Fixture startup observation did not become ready: ' + JSON.stringify(state), { cause })
+      }
       await expect.poll(() =>
         page.evaluate('globalThis.__fixtureTransport.some(item => item.operation === "startupNext")')
       ).toBe(true)
@@ -216,6 +247,9 @@ it.skipIf(
         return page
       }
       const second = await newPage()
+      const firstServiceId = await first.evaluate<string>('globalThis.__fixtureServicePublicId')
+      const secondServiceId = await second.evaluate<string>('globalThis.__fixtureServicePublicId')
+      expect(firstServiceId !== secondServiceId).toBe(true)
       const alias = async (page: CdpClient) =>
         await page.evaluate<string>(
           'globalThis.__cordisxRuntime.activePluginGeneration().plugins[0].canonicalSource',

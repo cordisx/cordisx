@@ -103,7 +103,7 @@ describe('manager managed-service UI bridge with the real managed runtime', () =
         projection: { auth: { state: 'authenticated' } },
       })
       expect(await renderer.nativeProviders()).toEqual([])
-      await expect(service.service.subscribe()).rejects.toThrow('unsupported')
+      await expect(service.service.authenticate({} as never)).rejects.toThrow('unsupported')
       expect(snapshot).toHaveBeenCalledOnce()
       expect(subscribe).not.toHaveBeenCalled()
       expect(authenticate).not.toHaveBeenCalled()

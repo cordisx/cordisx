@@ -8,12 +8,17 @@ import type { ManagedServiceUICapabilityMutation } from '../launcher/plugin-life
 import type { StartupUIRequest } from '../launcher/startup-ui-rpc.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { ManagerStartupObservation } from './manager-startup-observation.js'
+import {
+  ManagerManagedServiceObservation,
+  type ManagerManagedServiceObservationRequest,
+} from './manager-managed-service-observation.js'
 
 const secret = /^[a-f0-9]{64}$/u
 const localId = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 const opaqueId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
 const readOperations = new Set(['get', 'snapshot', 'readCatalog', 'nativeProviders'])
 const startupOperations = new Set(['startupRead', 'startupSubscribe', 'startupNext', 'startupClose'])
+const observationOperations = new Set(['subscribe', 'next', 'pull', 'closed', 'unsubscribe'])
 const errorCodes = new Set([
   'service-not-declared',
   'binding-replaced',
@@ -43,6 +48,7 @@ interface Session {
   readonly aliases: ReadonlyMap<string, Alias>
   readonly capabilities: readonly OwnerCapability[]
   readonly startup: ManagerStartupObservation
+  readonly observation: ManagerManagedServiceObservation
   readonly onAbort: () => void
 }
 
@@ -172,7 +178,7 @@ export function createManagerManagedServiceUIBridge(input: {
   const sessions = new Map<string, Session>()
   const usedRenderers = new Set<string>()
   const usedAliases = new Set<string>()
-  const usedStartupIds = new Set<string>()
+  const usedObservationIds = new Set<string>()
   const retirements = new Map<string, Promise<boolean>>()
   let disposed = false
 
@@ -191,7 +197,11 @@ export function createManagerManagedServiceUIBridge(input: {
     if (!session) return
     sessions.delete(id)
     session.context.signal.removeEventListener('abort', session.onAbort)
-    retirements.set(id, session.startup.retire())
+    retirements.set(
+      id,
+      Promise.all([session.startup.retire(), session.observation.retire()])
+        .then(results => results.every(Boolean)).catch(() => false),
+    )
   }
 
   function validContext(context: ManagerRendererChannelContext): boolean {
@@ -261,27 +271,32 @@ export function createManagerManagedServiceUIBridge(input: {
       aliases.set(token, { public: projected, ownerToken: owner.token })
     }
     let session!: Session
-    const startup = new ManagerStartupObservation({
+    const allocateId = () => {
+      if (usedObservationIds.size >= 16_384) throw unavailable()
+      let id: string
+      do id = randomBytes(32).toString('hex')
+      while (usedObservationIds.has(id) || usedAliases.has(id) || capabilities.some(item => item.token === id))
+      usedObservationIds.add(id)
+      return id
+    }
+    const observationInput = {
       context,
       runtimeGeneration: input.runtimeGeneration,
-      allocateId: () => {
-        if (usedStartupIds.size >= 16_384) throw unavailable()
-        let id: string
-        do id = randomBytes(32).toString('hex')
-        while (usedStartupIds.has(id) || usedAliases.has(id) || capabilities.some(item => item.token === id))
-        usedStartupIds.add(id)
-        return id
-      },
+      allocateId,
       assertCurrent: () => assertCurrent(session, context),
-      invoke: async (value, signal) => await input.runtime.managedServiceUI.handleBindingValue(value, signal),
-      sanitize: (value, requestId) => sanitize(session, value, requestId),
-    })
+      invoke: async (value: string, signal?: AbortSignal) =>
+        await input.runtime.managedServiceUI.handleBindingValue(value, signal),
+      sanitize: (value: unknown, requestId: string) => sanitize(session, value, requestId),
+    }
+    const startup = new ManagerStartupObservation(observationInput)
+    const observation = new ManagerManagedServiceObservation(observationInput)
     session = {
       context,
       fence: currentFence,
       aliases,
       capabilities,
       startup,
+      observation,
       onAbort: () => retire(context.rendererId),
     }
     usedRenderers.add(context.rendererId)
@@ -318,6 +333,14 @@ export function createManagerManagedServiceUIBridge(input: {
           const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
           if (!startupOperations.has(parsed.operation)) throw unavailable()
           return session.startup.prepare(parsed as StartupUIRequest, alias)
+        }
+        if (observationOperations.has(request.operation)) {
+          const forwarded = { ...request, token: alias.ownerToken }
+          const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
+          const validation = validator(alias.ownerToken, input.profileId, input.runtimeGeneration)
+          const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
+          if (!observationOperations.has(parsed.operation)) throw unavailable()
+          return session.observation.prepare(parsed as ManagerManagedServiceObservationRequest, alias)
         }
         if (!readOperations.has(request.operation)) {
           return {
@@ -417,7 +440,7 @@ export function createManagerManagedServiceUIBridge(input: {
       for (const id of sessions.keys()) retire(id)
       usedRenderers.clear()
       usedAliases.clear()
-      usedStartupIds.clear()
+      usedObservationIds.clear()
     },
   }
 }

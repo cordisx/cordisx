@@ -119,7 +119,7 @@ it('waits for admission for a Channel snapshot while keeping it safe to refresh'
   }
 })
 
-it('allows refresh while renderer-owned startup observation requests are pending', async () => {
+it('allows refresh while renderer-owned observation requests are pending', async () => {
   const fetch = vi.fn((_path: string, options: RequestInit) =>
     new Promise<Response>((_, reject) => {
       options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
@@ -136,13 +136,25 @@ it('allows refresh while renderer-owned startup observation requests are pending
   const binding = (browser as unknown as { __cordisxManagedServiceUIRequestV1: (value: string) => void })
     .__cordisxManagedServiceUIRequestV1
   try {
-    for (const operation of ['startupRead', 'startupSubscribe', 'startupNext', 'startupClose']) {
+    for (
+      const operation of [
+        'startupRead',
+        'startupSubscribe',
+        'startupNext',
+        'startupClose',
+        'subscribe',
+        'next',
+        'pull',
+        'closed',
+        'unsubscribe',
+      ]
+    ) {
       binding(JSON.stringify({ requestId: operation, operation }))
     }
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(9))
     expect(dispose.canResume()).toBe(true)
     binding(JSON.stringify({ requestId: 'write', operation: 'authenticate' }))
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(10))
     expect(dispose.canResume()).toBe(false)
   } finally {
     dispose()

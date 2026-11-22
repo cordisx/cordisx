@@ -4,6 +4,49 @@ import { installIndependentHostBindings } from '../packages/cli/src/independent-
 type TestWindow = Window & Record<string, any>
 const token = 'a'.repeat(64)
 
+it('reuses one observation request while the sidecar yields browser connections', async () => {
+  const receive = vi.fn()
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 202 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 202 }))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ requestId: 'watch', ok: true, value: 'event' }), { status: 200 }),
+    )
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+  })
+  try {
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'watch', operation: 'next' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(new Set(fetch.mock.calls.map(([, options]) => options.body)).size).toBe(1)
+    expect(JSON.parse(receive.mock.calls[0]![0])).toEqual({ requestId: 'watch', ok: true, value: 'event' })
+    expect(dispose.canResume()).toBe(true)
+  } finally {
+    dispose()
+  }
+})
+
+it('stops an observation retry when the renderer closes', async () => {
+  const receive = vi.fn()
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ status: 'pending' }), { status: 202 }))
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+  })
+  target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'watch', operation: 'closed' }))
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+  dispose()
+  await new Promise(resolve => setTimeout(resolve, 150))
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(receive).toHaveBeenCalledOnce()
+})
+
 it('forwards only owner-granted bindings with a session header and correlates existing response envelopes', async () => {
   const receiveConfig = vi.fn()
   const receiveLifecycle = vi.fn()

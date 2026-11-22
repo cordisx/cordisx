@@ -33,6 +33,24 @@ const MAX_PAYLOAD_CHARS = 8 * 1024 * 1024
 // in bytes, before dispatching to the owner.
 const MAX_WIRE_BYTES = 1_048_576
 
+async function yieldObservation(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw new Error('independent-host-session-revoked')
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    const timer = setTimeout(finish, 100)
+    const abort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      reject(new Error('independent-host-session-revoked'))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+  })
+}
+
 function requestId(payload: string): string {
   if (payload.length > MAX_PAYLOAD_CHARS) throw new Error('independent-host-request-too-large')
   let value: unknown
@@ -132,6 +150,9 @@ export function installIndependentHostBindings(input: {
       const receiver = host[receiverName]
       if (typeof receiver !== 'function') throw new Error('independent-host-receiver-unavailable')
       const controller = new AbortController()
+      const operation = (JSON.parse(payload) as { operation?: unknown }).operation
+      const observationWait = channel === 'managed-service-ui'
+        && ['next', 'pull', 'closed', 'startupNext'].includes(String(operation))
       const request: Pending = {
         requestId: id,
         receiverName,
@@ -151,6 +172,11 @@ export function installIndependentHostBindings(input: {
               'snapshot',
               'readCatalog',
               'nativeProviders',
+              'subscribe',
+              'next',
+              'pull',
+              'closed',
+              'unsubscribe',
               'startupRead',
               'startupSubscribe',
               'startupNext',
@@ -173,16 +199,24 @@ export function installIndependentHostBindings(input: {
         }
         if (controller.signal.aborted) throw new Error('independent-host-session-revoked')
         request.dispatched = true
-        return input.window.fetch('/api/renderer/binding', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
-          body,
-          cache: 'no-store',
-          credentials: 'omit',
-          redirect: 'error',
-          referrerPolicy: 'no-referrer',
-          signal: controller.signal,
-        })
+        for (;;) {
+          const response = await input.window.fetch('/api/renderer/binding', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
+            body,
+            cache: 'no-store',
+            credentials: 'omit',
+            redirect: 'error',
+            referrerPolicy: 'no-referrer',
+            signal: controller.signal,
+          })
+          if (!observationWait || response.status !== 202) return response
+          const status = await response.json() as { status?: unknown }
+          if (status?.status !== 'pending' || Object.keys(status).length !== 1) {
+            throw new Error('independent-host-response-invalid')
+          }
+          await yieldObservation(controller.signal)
+        }
       }).then(async response => {
         if (response.status === 401 && !closed) {
           const uncertain = [...pending.values()].some(request => request.dispatched && !request.readOnly)

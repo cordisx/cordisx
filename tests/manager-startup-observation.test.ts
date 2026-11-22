@@ -199,8 +199,15 @@ it('fences an unconfirmed cleanup and does not grant startup observation without
         renderer,
       ).dispatch(),
     ).toMatchObject({ ok: true })
+    const pending = f.bridge.channel.prepare(
+      request(token, 'startupNext', 'pending', { subscriptionId: 'stream' }),
+      renderer,
+    ).dispatch()
+    const rejected = expect(pending).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    await vi.waitFor(() => expect(f.calls.some(call => call.operation === 'startupNext')).toBe(true))
     controller.abort()
     expect(await f.bridge.waitForRetirement(renderer.rendererId)).toBe(false)
+    await rejected
   } finally {
     controller.abort()
     f.bridge.dispose()
