@@ -33,6 +33,18 @@ const WRITES = new Set([
   'task-config-set',
   'question-cancel',
 ])
+const MEMORY_READS = new Set(['guide', 'navigate', 'search-page', 'search', 'get', 'batch', 'grant-list'])
+const MEMORY_WRITES = new Set([
+  'remember',
+  'update',
+  'forget',
+  'index',
+  'grant',
+  'revoke',
+  'identity-unbind',
+  'identity-challenge',
+  'identity-confirm',
+])
 export function channelCliOperationKind(operation: string): ChannelCliOperationKind | undefined {
   return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask'].includes(operation)
     ? 'send'
@@ -116,11 +128,12 @@ export function configuredChannelApprovalOperation(
   if (!operation) return undefined
   if (operation === 'help' && words.length <= 7) return { operation, kind: 'read', input: {} }
   const helpTopic = operation === 'help' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
-  if (helpTopic && !channelCliOperationKind(helpTopic)) return undefined
+  if (helpTopic && helpTopic !== 'memory' && !channelCliOperationKind(helpTopic)) return undefined
+  const memoryAction = operation === 'memory' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
   const kind = channelCliOperationKind(operation)
-  if (!kind) return undefined
+  if (!kind && operation !== 'memory') return undefined
   const options = new Map<string, string>()
-  for (let i = helpTopic ? 7 : 6; i < words.length; i += 2) {
+  for (let i = helpTopic || memoryAction ? 7 : 6; i < words.length; i += 2) {
     const flag = words[i], value = words[i + 1]
     if (!flag || !['--profile', '--input', '--context'].includes(flag) || value === undefined || options.has(flag)) {
       return undefined
@@ -131,10 +144,21 @@ export function configuredChannelApprovalOperation(
   try {
     const input: unknown = JSON.parse(options.get('--input') ?? '{}')
     if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+    const record = input as Record<string, unknown>
+    let selectedKind = kind
+    if (operation === 'memory') {
+      if (!options.get('--context') || memoryAction && 'action' in record) return undefined
+      const action = memoryAction ?? record.action
+      if (typeof action !== 'string') return undefined
+      selectedKind = MEMORY_READS.has(action) ? 'read' : MEMORY_WRITES.has(action) ? 'write' : undefined
+      if (!selectedKind) return undefined
+      record.action = action
+    }
+    if (!selectedKind) return undefined
     return {
       operation,
-      kind,
-      input: input as Record<string, unknown>,
+      kind: selectedKind,
+      input: record,
       ...(options.has('--context') ? { context: options.get('--context')! } : {}),
     }
   } catch {
