@@ -1,4 +1,4 @@
-import { isManager1117ThreadHeader } from './manager-1117-thread.js'
+import { isManager1117WorkspaceHeader } from './manager-1117-workspace.js'
 
 export interface NativeViewportTitlebarOwner {
   readonly position: 'fixed' | 'absolute'
@@ -22,7 +22,7 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
     surface === null || surface === undefined || frame === null || frame === undefined
     || surface.getAttribute('data-app-shell-page-surface') !== 'true'
     || (!['titlebar', 'page'].includes(surface.getAttribute('data-app-shell-header-placement') ?? '')
-      && !isManager1117ThreadHeader(header))
+      && !isManager1117WorkspaceHeader(header))
     || view.getComputedStyle(surface).display !== 'contents'
     || view.getComputedStyle(frame).position !== 'relative'
     || header.getClientRects().length === 0 || frame.getClientRects().length === 0
@@ -43,7 +43,7 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
     if (
       page === null || owner === null || owner === undefined || row === null || row === undefined
       || (page.getAttribute('data-app-shell-active-page') !== 'true'
-        && !(isManager1117ThreadHeader(header)
+        && !(isManager1117WorkspaceHeader(header)
           && page.getAttribute('data-app-shell-shared-local-frame') === 'true'
           && page.getAttribute('data-app-shell-active-page') === null))
       || view.getComputedStyle(page).display !== 'contents'
@@ -63,7 +63,7 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
       && surface.getAttribute('data-app-shell-compact-page-gutter') === 'false'
       && surface.getAttribute('data-app-shell-unified-tab-strip') === 'false'
       && header.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll'
-    const gutter = isManager1117ThreadHeader(header)
+    const gutter = isManager1117WorkspaceHeader(header)
       ? 0
       : frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' || collapsedThreadGutter
       ? 4
