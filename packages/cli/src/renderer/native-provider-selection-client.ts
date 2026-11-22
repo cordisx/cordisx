@@ -91,6 +91,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
     input: Readonly<{ scope: NativeSubmissionScope; expectedRevision: number }>,
   ): Promise<NativeProviderSelectionProjection>
   logicalPrevious?(input: Readonly<{ scope: NativeSubmissionScope }>): Promise<string | null>
+  logicalNext?(input: Readonly<{ scope: NativeSubmissionScope }>): Promise<string | null>
   logicalSourceNavigation?(input: Readonly<{ scope: NativeSubmissionScope; sessionId: string }>): Promise<boolean>
   submissionPrepare(
     input: Readonly<{

@@ -1,5 +1,5 @@
 import { logicalSubmissionConfirmation, prepareLogicalConfirmation } from './native-logical-submission-confirmation.js'
-import { desktopLogicalNavigation, desktopLogicalPrevious } from './desktop-logical-navigation.js'
+import { desktopLogicalNavigation, desktopLogicalNeighbors } from './desktop-logical-navigation.js'
 import { nativeSubmissionConfirmation } from './native-submission-confirmation.js'
 import type { RemotePreparedProvider } from './remote-terminal-provider-client.js'
 import { nativeProviderConfig, nativeProviderRequestConfig } from './native-provider-config.js'
@@ -641,7 +641,7 @@ export function createNativeSubmissionController(
       migration: options.logicalMigration,
       disposed: () => disposed,
     }),
-    logicalPrevious: desktopLogicalPrevious({
+    ...desktopLogicalNeighbors({
       runtime: options.runtime,
       migration: options.logicalMigration,
       disposed: () => disposed,

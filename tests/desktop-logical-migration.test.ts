@@ -31,6 +31,56 @@ it('admits an explicit target effort only when the selected model advertises it'
   expect(await allowed('provider', 'supported', 'high')).toBe(false)
 })
 
+it('reopens a committed destination only while account, state and both fences remain current', async () => {
+  const ref = (sessionId: string) => ({ hostId: 'local', appId: 'codex', profileId: 'profile', sessionId })
+  const logical = {
+    relations: {
+      operation: {
+        operationId: 'operation',
+        source: ref('source'),
+        destination: ref('destination'),
+        logicalConversationId: 'logical',
+        mode: 'linked',
+      },
+    },
+    intents: { operation: { state: 'applied', actor: { principal: 'account', scope: 'desktop:codex:profile' } } },
+  }
+  const fenced = new Set<string>()
+  const identity = vi.fn(async () => 'account')
+  const owner = {
+    store: { snapshot: () => structuredClone({ logicalContinuations: logical }), hasCommitBarrier: () => true },
+    fence: { isMigrating: (sessionId: string) => fenced.has(sessionId) },
+  }
+  const migration = desktopLogicalMigration({
+    owner: owner as never,
+    control: {} as never,
+    native: () => undefined,
+    profileId: 'profile',
+    identity,
+    targetAllowed: async () => true,
+    historyReady: () => true,
+  })
+  const scope = { targetId: 'target', rendererGeneration: 'renderer', navigationGeneration: 1, threadId: 'source' }
+  expect(await migration.next(scope)).toBe('destination')
+  expect(await migration.canNavigate(scope, 'destination')).toBe(true)
+  identity.mockResolvedValue('other')
+  expect(await migration.next(scope)).toBeUndefined()
+  expect(await migration.canNavigate(scope, 'destination')).toBe(false)
+  identity.mockResolvedValue('account')
+  fenced.add('destination')
+  expect(await migration.next(scope)).toBeUndefined()
+  expect(await migration.canNavigate(scope, 'destination')).toBe(false)
+  fenced.clear()
+  Object.assign(logical.intents, { unknown: { state: 'unknown', request: { source: ref('source') } } })
+  expect(await migration.next(scope)).toBeUndefined()
+  Reflect.deleteProperty(logical.intents, 'unknown')
+  identity.mockResolvedValueOnce('account').mockImplementationOnce(async () => {
+    logical.relations.operation.destination.sessionId = 'changed'
+    return 'account'
+  })
+  expect(await migration.next(scope)).toBeUndefined()
+})
+
 it('recommends fork only when compatible and applies the saved profile mode without granting history', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'desktop-logical-preference-'))
   const store = await ChannelConversationStore.open(path.join(dir, 'state.json'))

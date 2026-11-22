@@ -655,6 +655,8 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
         }
         expect(await migration.canNavigate({ ...scope, threadId: destination }, source)).toBe(true)
         expect(await migration.previous({ ...scope, threadId: destination })).toBe(source)
+        expect(await migration.next(scope)).toBe(destination)
+        expect(await migration.canNavigate(scope, destination)).toBe(true)
         const ticket = 'desktop-first-send-fixture-token'
         if (mode !== 'fork') expect(await composition.preparation!.attach(scope, destination, ticket)).toBe(true)
         h.consume.mockResolvedValueOnce({

@@ -8,9 +8,12 @@ it('authorizes source navigation through the current Desktop scope', async () =>
     h.setLive(scope)
     expect(await h.channel.logicalPrevious({ scope })).toBe('source')
     expect(h.controller.logicalPrevious).toHaveBeenCalledWith(scope)
+    expect(await h.channel.logicalNext({ scope })).toBe('destination')
+    expect(h.controller.logicalNext).toHaveBeenCalledWith(scope)
     expect(await h.channel.logicalSourceNavigation({ scope, sessionId: 'source' })).toBe(true)
     expect(h.controller.logicalSourceNavigation).toHaveBeenCalledWith(scope, 'source')
     h.setLive({ ...scope, threadId: 'another' })
+    await expect(h.channel.logicalNext({ scope })).rejects.toThrow()
     await expect(h.channel.logicalSourceNavigation({ scope, sessionId: 'source' })).rejects.toThrow()
   } finally {
     await h.installed.dispose()

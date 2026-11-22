@@ -92,6 +92,7 @@ export async function harness(options: Readonly<{
   const controller = {
     logicalSourceNavigation: vi.fn<NativeSubmissionController['logicalSourceNavigation']>(async () => true),
     logicalPrevious: vi.fn<NativeSubmissionController['logicalPrevious']>(async () => 'source'),
+    logicalNext: vi.fn<NativeSubmissionController['logicalNext']>(async () => 'destination'),
     confirmLogicalSubmission: vi.fn<NativeSubmissionController['confirmLogicalSubmission']>(async () => ({
       kind: 'reject',
       reason: 'provider-switch-reconciliation-required',

@@ -95,6 +95,7 @@ export interface ProviderSelectionTransport {
   ): void
   openLogicalSource?(sessionId: string): Promise<'accepted' | 'unavailable'>
   logicalPrevious?(threadId: string): Promise<string | undefined>
+  logicalNext?(threadId: string): Promise<string | undefined>
 }
 
 export { selectionModelForProvider } from './model-provider-selection.js'
@@ -134,18 +135,25 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const native = useSyncExternalStore(listener => transport.subscribe(listener), () => transport.getSnapshot())
   const [open, setOpen] = useState<'provider' | 'model'>()
   const [previous, setPrevious] = useState<string | undefined>()
+  const [next, setNext] = useState<string | undefined>()
   useEffect(() => {
     let live = true
     setPrevious(undefined)
+    setNext(undefined)
     if (native.threadId && transport.logicalPrevious) {
       void transport.logicalPrevious(native.threadId).then(source => {
         if (live) setPrevious(source)
       }).catch(() => {})
     }
+    if (native.threadId && transport.logicalNext) {
+      void transport.logicalNext(native.threadId).then(destination => {
+        if (live) setNext(destination)
+      }).catch(() => {})
+    }
     return () => {
       live = false
     }
-  }, [native.threadId, transport])
+  }, [native.threadId, native.busy, native.submissionError, native.confirmation?.confirmationId, transport])
   const [providerQuery, setProviderQuery] = useState('')
   const [modelQuery, setModelQuery] = useState('')
   const [modelExpanded, setModelExpanded] = useState(false)
@@ -538,6 +546,22 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
             }}
           >
             {locale.toLowerCase().startsWith('zh') ? '此前对话' : 'Earlier conversation'}
+          </button>
+        )
+        : null}
+      {next && transport.openLogicalSource
+        ? (
+          <button
+            type="button"
+            className="cxmp-trigger cxmp-previous-trigger"
+            disabled={suspended || native.busy}
+            onClick={() => {
+              void transport.openLogicalSource!(next).then(result => {
+                if (result !== 'accepted') feedback.show('source.failed')
+              }).catch(() => feedback.show('source.failed'))
+            }}
+          >
+            {locale.toLowerCase().startsWith('zh') ? '后续对话' : 'Later conversation'}
           </button>
         )
         : null}

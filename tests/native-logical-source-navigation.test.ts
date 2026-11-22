@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import {
   createNativeLogicalNavigation,
   openNativeLogicalSource,
+  readNativeLogicalNext,
   readNativeLogicalPrevious,
 } from '../packages/cli/src/renderer/native-logical-source-navigation.js'
 
@@ -22,6 +23,23 @@ it('discards an earlier boundary when the composer changes during the read', asy
   expect(await readNativeLogicalPrevious(input)).toBeUndefined()
 })
 
+it('discards a later boundary when its composer changes during the read', async () => {
+  const scope = { targetId: 'window', rendererGeneration: 'generation', navigationGeneration: 1, threadId: 'source' }
+  let current = scope
+  const input = {
+    scope,
+    current: () => current,
+    connected: () => true,
+    channel: {
+      logicalNext: async () => {
+        current = { ...scope, threadId: 'other' }
+        return 'destination'
+      },
+    } as never,
+  }
+  expect(await readNativeLogicalNext(input)).toBeUndefined()
+})
+
 it('does not read an earlier boundary for a stale displayed thread', async () => {
   const scope = { targetId: 'window', rendererGeneration: 'generation', navigationGeneration: 1, threadId: 'new' }
   const read = vi.fn(async () => 'source')
@@ -32,6 +50,7 @@ it('does not read an earlier boundary for a stale displayed thread', async () =>
     navigate: () => undefined,
   })
   expect(await navigation.previous('old')).toBeUndefined()
+  expect(await navigation.next('old')).toBeUndefined()
   expect(read).not.toHaveBeenCalled()
 })
 

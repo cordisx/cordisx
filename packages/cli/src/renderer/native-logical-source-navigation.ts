@@ -7,7 +7,7 @@ export function nativeLogicalComposerConnected(disposed: boolean, composer?: HTM
   return !disposed && (composer ?? trigger?.closest<HTMLElement>('[data-codex-composer-root]'))?.isConnected === true
 }
 
-/** Bind the two navigation operations to the current composer at call time. */
+/** Bind navigation operations to the current composer at call time. */
 export function createNativeLogicalNavigation(input: {
   channel(): NativeProviderSelectionCommandChannel
   scope(): NativeSubmissionScope
@@ -26,20 +26,27 @@ export function createNativeLogicalNavigation(input: {
       const current = context()
       return current.scope.threadId === threadId ? readNativeLogicalPrevious(current) : Promise.resolve(undefined)
     },
+    next: (threadId: string) => {
+      const current = context()
+      return current.scope.threadId === threadId ? readNativeLogicalNext(current) : Promise.resolve(undefined)
+    },
     open: (sessionId: string) => openNativeLogicalSource(context(), sessionId),
   }
 }
 
-/** Do not retain an earlier boundary after the active composer changes. */
-export async function readNativeLogicalPrevious(input: {
+type NeighborInput = {
   channel: NativeProviderSelectionCommandChannel
   scope: NativeSubmissionScope
   current(): NativeSubmissionScope
   connected(): boolean
-}): Promise<string | undefined> {
-  if (!input.scope.threadId || !input.channel.logicalPrevious || !input.connected()) return undefined
+}
+
+/** Do not retain a boundary after the active composer changes. */
+async function readNativeLogicalNeighbor(input: NeighborInput, direction: 'logicalPrevious' | 'logicalNext') {
+  const read = input.channel[direction]
+  if (!input.scope.threadId || !read || !input.connected()) return undefined
   try {
-    const source = await input.channel.logicalPrevious({ scope: input.scope })
+    const source = await read({ scope: input.scope })
     return input.connected() && JSON.stringify(input.scope) === JSON.stringify(input.current())
         && typeof source === 'string' && source.length > 0 && source.length <= 512 && !/[\0\r\n]/u.test(source)
       ? source
@@ -48,6 +55,9 @@ export async function readNativeLogicalPrevious(input: {
     return undefined
   }
 }
+
+export const readNativeLogicalPrevious = (input: NeighborInput) => readNativeLogicalNeighbor(input, 'logicalPrevious')
+export const readNativeLogicalNext = (input: NeighborInput) => readNativeLogicalNeighbor(input, 'logicalNext')
 
 /** Recheck the exact active composer after the Host authorizes one source. */
 export async function openNativeLogicalSource(input: {

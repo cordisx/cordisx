@@ -561,11 +561,14 @@ export function createNativeSubmissionCdpAuthority(options: {
           if (scope.threadId && agentSelections.has(scope.threadId) && envelope.operation !== 'selectionRead') {
             throw new Error('Agent provider selection is in progress')
           }
-          if (envelope.operation === 'logicalPrevious') {
-            const previous = await controller!.logicalPrevious(scope)
+          if (envelope.operation === 'logicalPrevious' || envelope.operation === 'logicalNext') {
+            const read = envelope.operation === 'logicalPrevious'
+              ? controller!.logicalPrevious
+              : controller!.logicalNext
+            const neighbor = await read(scope)
             const current = await liveScope(scope)
             if (!current || key(current) !== key(scope) || owner.disposed) throw new Error('Stale native document')
-            const confirmed = previous && await controller!.logicalPrevious(scope) === previous ? previous : null
+            const confirmed = neighbor && await read(scope) === neighbor ? neighbor : null
             const after = await liveScope(scope)
             if (!after || key(after) !== key(scope) || owner.disposed) throw new Error('Stale native document')
             await respond(requestId, confirmed)
@@ -925,7 +928,7 @@ export function createNativeSubmissionCdpAuthority(options: {
         options.modelServices
           ? "modelServicesRead:()=>call('modelServicesRead',{generation}),modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
           : ''
-      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),logicalPrevious:input=>call('logicalPrevious',input),logicalSourceNavigation:input=>call('logicalSourceNavigation',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionConfirmLogical:input=>call('submissionConfirmLogical',input),submissionCancel:input=>call('submissionCancel',input)});
+      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),logicalPrevious:input=>call('logicalPrevious',input),logicalNext:input=>call('logicalNext',input),logicalSourceNavigation:input=>call('logicalSourceNavigation',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionConfirmLogical:input=>call('submissionConfirmLogical',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined

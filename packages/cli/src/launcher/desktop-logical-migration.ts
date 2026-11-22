@@ -4,10 +4,11 @@ import type { NativeSubmissionScope } from './native-submission-controller-contr
 import type { ProfileLogicalConversationOwner } from './profile-logical-conversation-owner.js'
 import type { NativeSubmissionControlServer } from './native-submission-control-server.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
+import { ChannelConversationStore } from './channel-conversation-store.js'
 import type { LogicalContinuationRequest } from './logical-continuation-control.js'
 import { startDesktopLogicalContinuation } from './desktop-logical-continuation.js'
 import { logicalPreferenceRevision, resolveLogicalContinuationPreference } from './logical-continuation-preferences.js'
-import { desktopLogicalChain } from './desktop-logical-chain.js'
+import { desktopLogicalChain, desktopLogicalNext } from './desktop-logical-chain.js'
 import { jointHistoryPotential } from './channel-joint-history.js'
 import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
@@ -24,6 +25,12 @@ export function desktopLogicalMigration(input: {
   targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
   historyReady(): boolean
 }) {
+  const navigationUnprotected = (source: string, destination: string) => {
+    const state = input.owner.store.snapshot()
+    return !input.owner.fence.isMigrating(source) && !input.owner.fence.isMigrating(destination)
+      && !ChannelConversationStore.logicalSessionFenced(state, source)
+      && !ChannelConversationStore.logicalSessionFenced(state, destination)
+  }
   return {
     async previous(scope: NativeSubmissionScope) {
       if (!scope.threadId || !input.owner.store.hasCommitBarrier()) return undefined
@@ -38,6 +45,21 @@ export function desktopLogicalMigration(input: {
       ) return undefined
       return chain.links.at(-1)?.source
     },
+    async next(scope: NativeSubmissionScope) {
+      if (!scope.threadId || !input.owner.store.hasCommitBarrier()) return undefined
+      const identity = await input.identity(scope)
+      if (!identity) return undefined
+      const source = { hostId: 'local', appId: 'codex', profileId: input.profileId, sessionId: scope.threadId }
+      const logical = input.owner.store.snapshot().logicalContinuations
+      const next = desktopLogicalNext(logical, source, identity)
+      if (
+        !next || !navigationUnprotected(scope.threadId, next)
+        || !input.owner.store.hasCommitBarrier() || await input.identity(scope) !== identity
+        || !isDeepStrictEqual(input.owner.store.snapshot().logicalContinuations, logical)
+        || !navigationUnprotected(scope.threadId, next)
+      ) return undefined
+      return next
+    },
     async canNavigate(scope: NativeSubmissionScope, sessionId: string) {
       if (!scope.threadId || !sessionId || sessionId === scope.threadId || !input.owner.store.hasCommitBarrier()) {
         return false
@@ -47,9 +69,12 @@ export function desktopLogicalMigration(input: {
       const source = { hostId: 'local', appId: 'codex', profileId: input.profileId, sessionId: scope.threadId }
       const logical = input.owner.store.snapshot().logicalContinuations
       const chain = desktopLogicalChain(logical, source, identity)
-      return chain.links.some(link => link.source === sessionId) && input.owner.store.hasCommitBarrier()
+      return (chain.links.some(link => link.source === sessionId)
+        || desktopLogicalNext(logical, source, identity) === sessionId)
+        && navigationUnprotected(scope.threadId, sessionId) && input.owner.store.hasCommitBarrier()
         && await input.identity(scope) === identity
         && isDeepStrictEqual(input.owner.store.snapshot().logicalContinuations, logical)
+        && navigationUnprotected(scope.threadId, sessionId)
     },
     async suggest(
       scope: NativeSubmissionScope,

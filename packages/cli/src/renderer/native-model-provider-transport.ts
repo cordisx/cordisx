@@ -376,6 +376,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     navigate: () => this.navigateContinuation,
   })
   logicalPrevious = (threadId: string) => this.logicalNavigation.previous(threadId)
+  logicalNext = (threadId: string) => this.logicalNavigation.next(threadId)
   openLogicalSource = (sessionId: string) => this.logicalNavigation.open(sessionId)
 
   private currentSubmissionScope(): NativeSubmissionScope {

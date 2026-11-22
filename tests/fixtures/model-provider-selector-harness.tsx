@@ -43,6 +43,7 @@ export async function setup(model = 'shared', busy = false, options?: {
   readonly secondDefaultModelId?: string
   readonly draft?: boolean
   readonly previous?: string
+  readonly next?: () => string | undefined
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference']
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
@@ -171,6 +172,7 @@ export async function setup(model = 'shared', busy = false, options?: {
           confirmLogicalSubmission,
           openLogicalSource,
           logicalPrevious: async () => options?.previous,
+          logicalNext: async () => options?.next?.(),
         }}
       />,
     )

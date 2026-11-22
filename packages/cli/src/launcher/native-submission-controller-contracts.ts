@@ -267,6 +267,7 @@ export interface NativeSubmissionController {
   ): Promise<NativeSubmissionConfirmation>
   logicalSourceNavigation(scope: NativeSubmissionScope, sessionId: string): Promise<boolean>
   logicalPrevious(scope: NativeSubmissionScope): Promise<string | undefined>
+  logicalNext(scope: NativeSubmissionScope): Promise<string | undefined>
   consumeMarkedRequest(request: NativeMarkedRequest): Promise<NativeMarkedRequestConsumption>
   authorizeMarkedRequest(request: NativeReservedRequest): Promise<boolean>
   completeMarkedRequest(

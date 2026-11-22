@@ -40,3 +40,24 @@ export function desktopLogicalChain(
   }
   throw new Error('LOGICAL_CHAIN_UNAVAILABLE')
 }
+
+/** An applied boundary can be reopened only by the Desktop account that approved it. */
+export function desktopLogicalNext(
+  logical: LogicalContinuationState | undefined,
+  source: LogicalSessionRef,
+  identity: string,
+): string | undefined {
+  const matches = Object.values(logical?.relations ?? {}).filter(relation =>
+    relation.mode !== 'fresh' && isDeepStrictEqual(relation.source, source)
+  )
+  if (matches.length !== 1) return undefined
+  const relation = matches[0]!, intent = logical?.intents[relation.operationId], destination = relation.destination
+  if (
+    !intent || intent.state !== 'applied' || !isDeepStrictEqual(intent.actor, {
+      principal: identity,
+      scope: `desktop:${source.appId}:${source.profileId}`,
+    }) || destination.hostId !== source.hostId || destination.appId !== source.appId
+    || destination.profileId !== source.profileId || destination.sessionId === source.sessionId
+  ) return undefined
+  return destination.sessionId
+}

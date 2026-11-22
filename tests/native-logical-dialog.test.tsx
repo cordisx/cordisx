@@ -12,6 +12,19 @@ describe('logical continuation confirmation', () => {
     await act(async () => button.click())
     expect(openLogicalSource).toHaveBeenCalledWith('earlier')
   })
+  it('offers the committed destination after a continuation send is interrupted', async () => {
+    let destination: string | undefined
+    const { update, openLogicalSource } = await setup('shared', false, { next: () => destination })
+    expect(document.body.textContent).not.toContain('Later conversation')
+    destination = 'committed-destination'
+    await update({ submissionError: 'provider-switch-reconciliation-required' })
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item =>
+      item.textContent === 'Later conversation'
+    )!
+    expect(button).toBeDefined()
+    await act(async () => button.click())
+    expect(openLogicalSource).toHaveBeenCalledWith('committed-destination')
+  })
   it('requires separate history consent and resets it when the mode changes', async () => {
     const { update, confirmLogicalSubmission } = await setup()
     await update({
