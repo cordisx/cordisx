@@ -172,6 +172,23 @@ defaults to the conversation and `semantics` defaults to `conversation`.
 when the bound chat is idle. Binding cardinality is unrestricted. Message
 history starts at each binding’s creation sequence and survives restart.
 
+When a task is running, an accepted follow-up from the same verified sender and
+exact account/conversation/topic is inserted into that native turn with
+`expectedTurnId`. The task is not interrupted or restarted. Other senders,
+different conversations, unaddressed group messages and active migrations do
+not use this path; normal wake, policy and queue rules still apply. Multiple
+follow-ups retain input order and carry their own sender, references, CLI
+context and supported attachments. They do not produce a second automatic final
+reply for the same turn.
+
+The Host persists the submission before calling native `turn/steer`. A definite
+native "no active turn" or exact-turn mismatch returns the message to the queue
+for a later turn, without repeatedly trying the same rejected turn. A timeout,
+transport loss or ambiguous response remains `NATIVE_STEER_UNCERTAIN`; it is not
+retried or silently queued again. Limited positive history readback can confirm
+that input was accepted. `clientUserMessageId` is a correlation field, not a
+native deduplication guarantee. Idle chats continue to start normal new turns.
+
 ### Questions for a Channel user
 
 A Channel-triggered Agent should ask through the exact configured CLI when it

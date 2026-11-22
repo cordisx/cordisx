@@ -12,6 +12,7 @@ import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-serv
 import { loadConfig } from '../launcher/config.js'
 import { CHANNEL_SERVICE_CONFIG_INITIAL, createLocalChannelService } from '../launcher/channel-service.js'
 import { ChannelNativeSessions } from '../launcher/channel-native-sessions.js'
+import { channelSteerNotActive } from '../launcher/channel-native-steer-error.js'
 import { configuredChannelCliContext } from '../launcher/channel-cli-context.js'
 import { configuredPluginDocuments } from '../launcher/plugin-documents.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
@@ -259,7 +260,10 @@ export async function startHeadlessService(input: {
         } catch (error) {
           // An RPC error can follow an effect. Keep this writer fence until
           // the owner closes unless the failure happened before dispatch.
-          if (!effectPossible) settled = true
+          if (
+            !effectPossible || method === 'turn/steer' && typeof params.expectedTurnId === 'string'
+              && channelSteerNotActive(error, params.expectedTurnId)
+          ) settled = true
           throw error
         } finally {
           if (settled) release?.()

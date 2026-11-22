@@ -116,6 +116,11 @@ export interface ChannelConversationJob {
     | 'cancelled'
   sessionId?: string
   turnId?: string
+  /** An input inserted into this existing turn; it must never emit a second final reply. */
+  steeredInto?: string
+  steerParent?: string
+  steerRejectedTurn?: string
+  steerReadbackAt?: number
   deliveryId?: string
   /** Captured before native dispatch; a later opt-in must not export an earlier local-only turn. */
   finalDeliveryEnabled?: boolean

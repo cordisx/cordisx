@@ -12,6 +12,7 @@ export const BRIDGE_NATIVE_METHODS = new Set([
   'thread/name/set',
   'thread/metadata/update',
   'turn/start',
+  'turn/steer',
   'turn/interrupt',
   'threadSection/list',
   'threadSection/create',
@@ -63,6 +64,22 @@ export function dispatchNativeBridgeRequest(message, ports) {
     message.logicalSourceThreadId,
   )
     .then(value => write(control, { id: message.id, ok: true, value }))
-    .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+    .catch(error => {
+      const native = error?.nativeError
+      const expected = params.expectedTurnId
+      const rejected = message.method === 'turn/steer' && native?.code === -32600
+        && typeof native.message === 'string' && typeof expected === 'string'
+        && (native.message === 'no active turn to steer'
+          || native.message.startsWith(
+            'expected active turn id ' + String.fromCharCode(96) + expected
+              + String.fromCharCode(96) + ' but found ',
+          ))
+      return write(
+        control,
+        rejected
+          ? { id: message.id, ok: true, value: { cordisxSteerRejected: true } }
+          : { id: message.id, ok: false },
+      ).catch(stop)
+    })
   return true
 }

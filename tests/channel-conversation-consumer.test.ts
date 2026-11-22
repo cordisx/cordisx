@@ -729,6 +729,112 @@ describe('persistent Channel chat consumer', () => {
     expect(f.runtime.notifyOnce).not.toHaveBeenCalled()
     expect(f.consumer.status(a).jobs.every(job => job.state === 'cancelled' || job.state === 'completed')).toBe(true)
   })
+  it('inserts a same-sender follow-up into the active turn and sends its final answer once', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true, autoReply: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
+    f.native.completion.mockResolvedValue({ state: 'running' } as never)
+    const steer = vi.fn(async (..._args: unknown[]) => ({ state: 'accepted' as const }))
+    Object.assign(f.native, { steer })
+    await f.consumer.receive('inbox:initial', message('om_initial', 'first'))
+    await settle(f.consumer)
+    await f.consumer.receive('inbox:adjustment', message('om_adjustment', 'change direction'))
+    await settle(f.consumer)
+    expect(f.native.start).toHaveBeenCalledTimes(1)
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect(steer).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ content: [{ type: 'text', text: 'change direction' }] }),
+      a,
+      'turn-1',
+      expect.any(AbortSignal),
+      expect.any(Object),
+      expect.any(Object),
+    )
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    const inserted = Object.values(store.snapshot().jobs).find(job => job.recordId === 'inbox:adjustment')
+    expect(inserted).toMatchObject({ state: 'running', steeredInto: 'turn-1', finalDeliveryEnabled: false })
+    f.native.completion.mockResolvedValue({ state: 'completed', text: 'one reply' })
+    await settle(f.consumer)
+    expect(f.runtime.notifyOnce).toHaveBeenCalledTimes(1)
+    expect(Object.values(store.snapshot().jobs).every(job => job.state === 'completed')).toBe(true)
+  })
+  it('never repeats an uncertain insertion and lets later work proceed after its parent finishes', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)
+    f.native.completion.mockResolvedValue({ state: 'running' } as never)
+    const steer = vi.fn(async (..._args: unknown[]) => ({
+      state: 'reconciliation-required' as const,
+      code: 'NATIVE_STEER_UNCERTAIN',
+    }))
+    const steerObserved = vi.fn(async () => false)
+    Object.assign(f.native, { steer, steerObserved })
+    await f.consumer.receive('inbox:initial', message('om_initial'))
+    await settle(f.consumer)
+    await f.consumer.receive('inbox:uncertain', message('om_uncertain', 'do not duplicate'))
+    await settle(f.consumer)
+    await settle(f.consumer)
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect(steerObserved).toHaveBeenCalledTimes(1)
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    expect(Object.values(store.snapshot().jobs).find(job => job.recordId === 'inbox:uncertain'))
+      .toMatchObject({ state: 'reconciliation-required', code: 'NATIVE_STEER_UNCERTAIN', steeredInto: 'turn-1' })
+    f.native.completion.mockResolvedValue({ state: 'completed' } as never)
+    await settle(f.consumer)
+    await f.consumer.receive('inbox:later', message('om_later', 'new work'))
+    await settle(f.consumer)
+    expect(f.native.start).toHaveBeenCalledTimes(2)
+    expect(steer).toHaveBeenCalledTimes(1)
+  })
+  it('keeps another sender and another Channel conversation queued without overtaking them', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)
+    await f.consumer.bind({ channel: channel('oc_other'), mode: 'deliver' }, a)
+    f.native.completion.mockResolvedValue({ state: 'running' } as never)
+    const steer = vi.fn(async (..._args: unknown[]) => ({ state: 'accepted' as const }))
+    Object.assign(f.native, { steer })
+    await f.consumer.receive('inbox:initial', message('om_initial'))
+    await settle(f.consumer)
+    const originalBob = message('om_bob', 'another sender')
+    const bob = {
+      ...originalBob,
+      source: {
+        ...originalBob.source,
+        event: {
+          ...originalBob.source.event,
+          actor: { ...account, userId: 'bob' },
+        },
+      },
+    }
+    await f.consumer.receive('inbox:bob', bob)
+    await f.consumer.receive('inbox:other', message('om_other', 'another chat', channel('oc_other')))
+    await f.consumer.receive('inbox:alice', message('om_alice', 'later same sender'))
+    await settle(f.consumer)
+    expect(steer).not.toHaveBeenCalled()
+    expect(f.native.start).toHaveBeenCalledTimes(1)
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    expect(Object.values(store.snapshot().jobs).filter(job => job.state === 'queued')).toHaveLength(3)
+  })
+  it('queues a positively rejected insertion and starts it after the original turn ends', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)
+    f.native.completion.mockResolvedValue({ state: 'running' } as never)
+    const steer = vi.fn(async (..._args: unknown[]) => {
+      f.native.completion.mockResolvedValue({ state: 'completed' } as never)
+      return { state: 'rejected' as const }
+    })
+    Object.assign(f.native, { steer })
+    await f.consumer.receive('inbox:initial', message('om_initial'))
+    await settle(f.consumer)
+    await f.consumer.receive('inbox:late', message('om_late', 'arrived at completion'))
+    await settle(f.consumer)
+    await settle(f.consumer)
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect(f.native.start).toHaveBeenCalledTimes(2)
+  })
   it('does not export an earlier local-only turn after opt-in, but lets later turns use the enabled mode', async () => {
     const f = await fixture()
     await f.consumer.policySet({ enabled: true }, 0)
