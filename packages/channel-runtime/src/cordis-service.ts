@@ -138,8 +138,10 @@ export class CordisXChannelService extends Service implements CordisXChannel {
 
   get messages(): CordisXChannelMessages {
     return Object.freeze({
-      send: async (notification: ChannelNotification) =>
-        await runtimeFor(this).notify(notification, identityFrom(this.ctx)),
+      send: async (notification: ChannelNotification) => {
+        if (notification.media !== undefined) throw new Error('CHANNEL_MEDIA_PROTOCOL_UNAVAILABLE')
+        return await runtimeFor(this).notify(notification, identityFrom(this.ctx))
+      },
       subscribe: async (filter: ChannelSubscriptionFilter, listener: ChannelMessageListener) => {
         const dispose = await runtimeFor(this).subscribe(identityFrom(this.ctx), filter, listener)
         this.ctx.effect(

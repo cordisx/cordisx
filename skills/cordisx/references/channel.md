@@ -1,5 +1,22 @@
 # Configured Channel operations
 
+## Media and reaction discovery
+
+Check the running CLI's `channel help reaction`. Images/post images use native
+local-image inputs where supported; audio/file/video are accessible attachment
+descriptions, not transcription, synthesis or video understanding. Public media
+send CLI remains unavailable: never invent path/URL arguments.
+
+Use the exact incoming CLI/profile/context. Candidate syntax:
+`channel reaction --profile PROFILE --context INCOMING_CONTEXT --input
+'{"action":"add","emojiType":"OnIt"}'`. Remove only your returned ID with
+`--input '{"action":"remove","reactionId":"RETURNED_REACTION_ID"}'`. Only the
+authorized source message is targeted. Unknown outcomes are not success; do not
+blindly repeat. Processing and optional configured completion emoji differ;
+never assume `done`. Completion requires real task completion, not waiting,
+failure or progress. Human reactions carry known bot-message/original context
+for a reply decision; bot self-events are ignored. Older releases may lack this.
+
 Use the running profile's `channel_*` MCP tools when present. The CLI has the
 equivalent request shapes through `cordisx channel <operation> --input '<JSON>'`; question cards are CLI-only.
 For fields and compatibility, read the owning [CLI reference](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/channel-cli.md).

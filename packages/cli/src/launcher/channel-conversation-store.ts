@@ -77,6 +77,15 @@ export interface ChannelChatBinding {
   state: 'active' | 'archived'
 }
 export interface ChannelConversationInput {
+  feedback?: {
+    since: number
+    reactionAttempted: boolean
+    waitAttempted: boolean
+    replyObserved: boolean
+    reaction?: import('./channel-feedback.js').ChannelReactionReceipt
+    completionAttempted?: boolean
+    completion?: import('./channel-feedback.js').ChannelReactionReceipt
+  }
   readonly recordId: string
   readonly input: ChannelUserInput
   readonly mentionedBot: boolean
@@ -85,7 +94,6 @@ export interface ChannelConversationInput {
   readonly addressing?: ChannelCommandAddressing
   accepted: boolean
   routed: boolean
-  feedback?: { since: number; reactionAttempted: boolean; waitAttempted: boolean; replyObserved: boolean }
 }
 export interface ChannelConversationJob {
   readonly id: string

@@ -170,3 +170,117 @@ npm run check
 The full architectural contract, official platform feasibility, UI plan, PR
 boundaries, and validation matrix are in
 `.agents/docs/channel-runtime.md`.
+
+# Outbound media candidate
+
+Launcher-private outbound deliveries may carry one `media` descriptor and empty
+`text`. Descriptors contain an opaque `media:` handle, format, byte size, SHA-256,
+and optional audio duration in milliseconds. Image support is deliberately limited
+to PNG/JPEG (10,000,000 bytes); audio to existing Ogg Opus (30,000,000 bytes).
+No synthesis, conversion, local paths, URLs, or arbitrary fetching is provided.
+Question cards and text cannot be combined with media. Existing text-only store
+rows remain compatible; media rows are validated on reopen. Dedup comparisons
+include the complete descriptor, and receipts retain the existing delivery ID.
+
+## Integration gates
+
+This is an isolated implementation candidate, not an operational media feature.
+Adapters must explicitly set `supportsOutboundMedia: true` after implementing the
+media send path; otherwise the runtime refuses media before calling `send`.
+The public Cordis messages facade refuses media with
+`CHANNEL_MEDIA_PROTOCOL_UNAVAILABLE`. Configured CLI `send`/`send-many` remains
+text-only. Diagnostic binding CLI accepts `--media <descriptor-json>` instead of
+`--text`, but returns `media-authority-unavailable` without reading or uploading
+anything. Neither CLI mode grants filesystem access.
+
+The pinned Protocol revision
+`a474700a998ca4fe2a61eba2776dbcdfebdb7fa6` must gain a versioned outbound media
+contract before exposing media through plugins or configured Channel tools.
+Required definitions include descriptor validation, source/caller-scoped handle
+authorization, expiry and revocation, permission semantics, and explicit
+unsupported-media responses. No public schema or capability is changed here.
+
+## Minimal parent adapter patch
+
+In `packages/cli/src/launcher/feishu-adapter.ts`:
+
+1. Add a launcher-private optional `FeishuMediaAuthority` dependency; never derive
+   it from a remote event, renderer path, or URL. Its `resolve(handle, target,
+   maximumBytes)` must check the full account/tenant/conversation/thread and
+   owning caller grant, expiry/revocation, and enforce the byte bound **before**
+   allocation/read. Resolve only previously authorized quarantined handles.
+2. Set connection `supportsOutboundMedia` only when that authority and the
+   authenticated raw SDK client are available.
+3. Inside the existing same-tenant/stopped guards and raw-client branch, call
+   `prepareFeishuOutboundMedia(delivery.media, delivery.target, authority, {
+   image: data => channel.rawClient.im.v1.image.create({ data }),
+   file: data => channel.rawClient.im.v1.file.create({ data }) })` when media exists.
+   Use its `msg_type` and `content`; otherwise keep the Markdown worker's text/card
+   preparation unchanged. Reject media explicitly in the non-raw-client fallback.
+4. Keep the existing SHA-256-derived delivery UUID, create/reply selection,
+   `reply_in_thread`, message-ID checks, and receipt/recall mapping unchanged.
+   Retry may reupload resources, but message sends must reuse that UUID. Do not
+   retry with a new identity after an unknown send outcome.
+5. Verify SDK argument typing, source-authority rejection, image/audio create and
+   reply, unsupported fallback, retry UUID stability, and receipts in adapter
+   composition tests before enabling the flag. No adapter edit is included here.
+
+Primary API references: [upload image](https://open.larksuite.com/document/server-docs/im-v1/image/create.md),
+[upload file](https://open.larksuite.com/document/server-docs/im-v1/file/create.md),
+and [message content](https://open.larksuite.com/document/server-docs/im-v1/message-content-description/create_json.md).
+Upload requires bot capability and resource upload permission; sending requires
+the appropriate message permission. Header checks are preliminary format checks,
+not complete image/audio decoding or malware scanning.
+
+## Inbound media repair candidate
+
+Outbound adapter wiring now uses the same quarantine authority. A launcher owner
+may call `grantOutbound(attachmentHandle, sourceEvent, target)` only for a live,
+owned attachment and the identical source thread. The resulting random `media:`
+grant is checked again before bounded file reading/upload, expires with its
+resource, and is revoked on stop. PNG/JPEG and existing Opus audio are supported;
+no raw path registration or remote URL is accepted. The adapter retains its
+existing UUID, reply routing and receipt handling. Public plugin/configured CLI
+media remains gated pending the outbound Protocol contract; this is a working
+launcher-private resend path, not a published universal media API.
+
+SDK 1.73.0 already emits resource descriptors. The adapter discarded them,
+persisting Markdown/XML-like text; the native consumer also dropped attachment
+blocks. This is not an SDK image-normalization bug.
+
+The candidate uses authenticated `im.v1.messageResource.get` with the source
+message ID. Existing Protocol v1 blocks carry opaque handles, never raw paths.
+Source-matched, one-use launcher tickets compose actual app-server `localImage`
+inputs, or local attachment descriptions with explicit capability limitations.
+
+| Type                         | Received             | Downloaded               | Native delivery                         | Model understands                                       |
+| ---------------------------- | -------------------- | ------------------------ | --------------------------------------- | ------------------------------------------------------- |
+| Text                         | SDK text             | N/A                      | Text/source/context                     | Text                                                    |
+| Image                        | SDK resource         | PNG/JPEG/WebP, 10 MB cap | Actual `localImage` plus text           | Requires image-capable model; no live claim             |
+| Rich post                    | Text/embedded images | Same image policy        | Text plus `localImage`                  | Same image caveat                                       |
+| Audio/voice                  | SDK resource         | 30 MB cap                | Accessible local attachment description | Requires tools; no transcription or synthesis claimed   |
+| File                         | SDK resource         | 30 MB cap                | Accessible local attachment description | Requires parser/tools and sandbox access                |
+| Video/media                  | SDK resource         | 30 MB cap                | Accessible local attachment description | No visual video interpretation/frame extraction claimed |
+| Card/location/system/unknown | SDK normalized text  | No embedded fetch        | Explicit text-only fallback             | Available text only; no actions claimed                 |
+| Sticker                      | SDK descriptor       | Refused                  | Explicit unavailable fallback           | Not delivered as image                                  |
+
+Bounds: 16 resources/message, four concurrent streams/account instance, 128
+handles, 100 MB retained byte budget, 30-second stream timeout, one-hour expiry,
+cleanup on adapter stop. No URLs, guessed credentials, conversion, or execution.
+Format checks are preliminary, not complete decoding/security scanning. Keys are
+replaced in text; stable source/resource handles preserve successful replay
+fingerprints. Failed downloads remain explicit unavailable descriptions.
+
+Parent overlaps: merge inbound imports, resource lifecycle, empty-content filter,
+and `feishuInboundContent` call in `feishu-adapter.ts`; keep the Markdown worker's
+outbound branch. Native integration touches `channel-native-sessions.ts` and
+`agent-bridge.ts`, not memory consumer files. Existing inbound Protocol v1 covers
+these blocks; no public schema/API is invented. Public handle-resolution API,
+durable quarantine restart recovery, and provider capability negotiation remain
+gaps. Restarted/revoked/expired handles fail explicitly rather than reconstructing
+paths. Native sandbox accessibility and actual selected-model interpretation need
+separate deployment evidence.
+
+Synthetic tests cover official SDK normalization through Channel blocks into the
+real Codex bridge `turn/start` request. No live upload, restart, or model vision
+claim is made.

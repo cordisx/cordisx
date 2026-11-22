@@ -453,6 +453,10 @@ export class ChannelConversationConsumer {
       await Promise.all(selected.map(async job => {
         try {
           await this.advance(job)
+          this.feedback.jobUpdated(job.recordId)
+          await this.feedback.completed(job.recordId).catch(() =>
+            this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
+          )
         } catch {
           await this.store.mutate(state => {
             const current = state.jobs[job.id]
@@ -464,6 +468,7 @@ export class ChannelConversationConsumer {
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
+      await this.feedback.catchup()
       await this.continuation.pumpLive()
     })().catch(error =>
       this.input.report?.(
@@ -553,6 +558,7 @@ export class ChannelConversationConsumer {
     await this.store.mutate(state => {
       state.inputs[record.recordId]!.routed = true
     })
+    await this.feedback.routed(record.recordId)
   }
   private async command(
     record: Conversation.ChannelConversationInput,

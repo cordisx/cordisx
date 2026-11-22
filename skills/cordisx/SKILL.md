@@ -29,7 +29,8 @@ The bundled revision and owning source for this entry are recorded in
   verification, read
   [cordisx-plugin-development](../cordisx-plugin-development/SKILL.md).
 - For Channel connection listing, chat bindings, message listening/history, or
-  sending through a configured account, read [the Channel guide](references/channel.md).
+  sending through a configured account, inbound image/audio/file/video handling,
+  or bot-owned reactions, read [the Channel guide](references/channel.md).
 - For reproducible Channel memory/persona model validation, read
   [the Host-owned methodology](https://github.com/cordisx/cordisx/blob/main/.agents/docs/channel-memory-model-validation.md#durable-methodology-and-scenario-matrix).
   Separate persona core, style delivery and project CI/Protocol release evidence;

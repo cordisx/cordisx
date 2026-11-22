@@ -37,6 +37,7 @@ const preservedRendererStyles = [
 
 verifyEmptyStateAssets(source)
 await mkdir(destination, { recursive: true })
+await mkdir(fileURLToPath(new URL('../dist/src/launcher', import.meta.url)), { recursive: true })
 await cp(source, destination, { recursive: true, force: true })
 verifyEmptyStateAssets(destination)
 // TypeScript preserves CSS imports used by the installed renderer graph. Keep

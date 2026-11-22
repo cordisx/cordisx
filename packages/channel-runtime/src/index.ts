@@ -1,4 +1,5 @@
 export * from './types.js'
+export * from './outbound-media.js'
 export type { ChannelTransportActivity } from './conversation-readback.js'
 export * from './config.js'
 export * from './runtime.js'
