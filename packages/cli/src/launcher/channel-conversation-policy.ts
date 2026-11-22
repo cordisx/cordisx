@@ -19,6 +19,13 @@ export const channelSameScope = (left: ChannelPolicyScope, right: ChannelPolicyS
   ['adapterId', 'accountId', 'tenantId', 'conversationId'].every(field =>
     left[field as keyof ChannelPolicyScope] === right[field as keyof ChannelPolicyScope]
   )
+export const channelCommandScope = (event: ChannelEventRef, global: boolean): ChannelPolicyScope =>
+  global ? {} : {
+    adapterId: event.adapterId,
+    accountId: event.accountId,
+    tenantId: event.tenantId,
+    conversationId: event.conversationId,
+  }
 export interface ChannelUserGroup {
   readonly id: string
   readonly name: string
@@ -339,6 +346,23 @@ export function channelPolicyAllows(
       )
   }
   return [...buckets.values()].every(bucket => bucket.some(rule => matches(rule, policy, event, command)))
+}
+
+/** A global mutation requires a global grant as well as permission at the actual source. */
+export function channelGlobalCommandAllowed(
+  policy: ChannelConversationPolicy,
+  event: ChannelEventRef,
+  command: string,
+): boolean {
+  if (!channelPolicyAllows(policy, 'command', event, command)) return false
+  // An empty scope cannot match a configured exact scope: channelText rejects
+  // empty scope values. Thus scoped rules or scoped group memberships alone
+  // cannot authorize mutation of the whole profile.
+  const globalEvent = { ...event, adapterId: '', accountId: '', tenantId: '', conversationId: '' }
+  return policy.rules.some(rule =>
+    rule.action === 'command' && rule.effect === 'allow'
+    && SCOPES.every(key => rule[key] === undefined) && matches(rule, policy, globalEvent, command)
+  ) && channelPolicyAllows(policy, 'command', globalEvent, command)
 }
 
 /** The most specific configured prefix set wins; there is no implicit response to unrelated group chatter. */

@@ -4,6 +4,68 @@ import type { MarketplaceCatalogPlugin } from '../packages/cli/src/renderer/mark
 import { useMarketplaceInstaller } from '../packages/cli/src/renderer/manager/model/use-marketplace-installer.js'
 import { installNotificationHost } from '../packages/cli/src/renderer/notifications/host.js'
 import { managerModel, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
+import { buildDeferredPermissionPlan } from '../packages/cli/src/permission-deferral.js'
+
+it('installs an optional-only Marketplace candidate without opening permission review', async () => {
+  const fixture = reactManagerFixture()
+  const source = 'https://example.test/plugin'
+  const plan = buildDeferredPermissionPlan({
+    planId: 'install-example',
+    operation: 'install',
+    profileId: 'test',
+    identity: { source, pluginId: 'example' },
+    binding: { operationId: 'install-example', runtimeGeneration: 'test', requestId: 'candidate' },
+    declarations: [{ name: 'models.read', required: false, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const snapshot = managerSnapshot({
+    pluginLifecycle: { profileId: 'test', revision: 0, runtimeGeneration: 'test', operationsAvailable: true },
+  })
+  const apply = vi.fn().mockResolvedValue({ outcome: 'applied' })
+  const manager = managerModel(snapshot, {
+    inspectMarketplaceArtifact: vi.fn().mockResolvedValue({
+      outcome: 'planned',
+      operation: 'install',
+      candidateId: 'candidate',
+      package: { id: 'example', version: '1.0.0', canonicalSource: source },
+    }),
+    requestPluginLifecycle: vi.fn(),
+    permissionLifecycleReviewPlanV7: vi.fn().mockResolvedValue(plan),
+    applyPermissionLifecycleReviewV7: apply,
+  })
+  const plugin = {
+    id: 'example',
+    identity: 'example@1.0.0',
+    version: '1.0.0',
+    schemaVersion: 7,
+    source,
+    artifact: {
+      packageName: '@example/plugin',
+      packageNamespace: '@example',
+      publisherIdentity: 'npm:@example',
+      downloadUrl: 'https://registry.example/plugin.tgz',
+      integrity: `sha256:${'a'.repeat(64)}`,
+    },
+  } as MarketplaceCatalogPlugin
+  let installer!: ReturnType<typeof useMarketplaceInstaller>
+  function Installer() {
+    installer = useMarketplaceInstaller(manager, snapshot, { failed: 'Failed', succeeded: 'Installed' })
+    return null
+  }
+  try {
+    await fixture.render(<Installer />)
+    await act(async () => installer.run(plugin, 'Example'))
+    expect(fixture.document.querySelector('[data-permission-authorization]')).toBeNull()
+    expect(apply).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      schemaVersion: 7,
+      origin: 'host-no-decision',
+      decisions: [],
+    }))
+  } finally {
+    await fixture.dispose()
+  }
+})
 
 it('keeps failed installation feedback visible, allows retry, and does not report cancellation as failure', async () => {
   const fixture = reactManagerFixture()

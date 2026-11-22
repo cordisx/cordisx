@@ -126,7 +126,7 @@ export function channelApprovalSummary(method: unknown, command: unknown): strin
     ? command
     : ''
   const operation =
-    /\bchannel\s+(send-many|send|ask|question-cancel|connections|conversations|remote-history|history|listen|receipt|model-list|task-settings-set|task-settings|task-config-set|task-config|bind|unbind)\b/u
+    /\bchannel\s+(send-many|send|ask|question-cancel|connections|conversations|remote-history|message-get|history|listen|receipt|model-list|task-settings-set|task-settings|task-config-set|task-config|bind|unbind)\b/u
       .exec(text)?.[1]
   const labels: Record<string, string> = {
     send: '发送频道消息',
@@ -137,6 +137,7 @@ export function channelApprovalSummary(method: unknown, command: unknown): strin
     conversations: '查询频道对话',
     history: '查询本地监听记录',
     'remote-history': '查询远端频道历史',
+    'message-get': '读取引用消息',
     listen: '监听频道消息',
     receipt: '查询发送回执',
     'model-list': '查询可用模型',

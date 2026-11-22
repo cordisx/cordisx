@@ -98,7 +98,7 @@ import {
 } from './plugin-generation-loader.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 
-import { PluginLifecycleCoordinatorTransaction } from './plugin-lifecycle-transaction.js'
+import { PluginLifecycleCoordinatorDeferred } from './plugin-lifecycle-deferred-operations.js'
 import {
   allowedDecision,
   allowedDecisionV2,
@@ -137,7 +137,7 @@ import {
   withGenerations,
 } from './plugin-lifecycle-model.js'
 
-export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransaction {
+export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorDeferred {
   /** Bundle coordinator-only path; claim enforcement remains active for ordinary Manager operations. */
   async handleBundleOperation(request: CordisXPluginLifecycleRequestV1): Promise<CordisXPluginLifecycleResultV1> {
     return await this.handleRequest(request, true)
@@ -205,7 +205,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     )
   }
 
-  /** Host-private manifest-v5 through manifest-v14 review on the same lifecycle authority. */
+  /** Host-private manifest-v5 through manifest-v16 review on the same lifecycle authority. */
   async permissionReviewPlanV4(
     input: HostPermissionLifecycleReviewV4Request,
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
@@ -391,100 +391,6 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     }
     try {
       await this.options.runtime.stage(mutation)
-    } catch {
-      await this.store.abortCandidate(candidateId)
-      throw new LifecycleFailure('readiness-failed', safeError('readiness-failed'), 'rolled-back')
-    }
-    let committed: CordisXPluginActivationRecordV1
-    try {
-      committed = await this.store.commitCandidate(candidateId)
-    } catch {
-      await this.options.runtime.abort(candidateId).catch(() => undefined)
-      await this.store.abortCandidate(candidateId)
-      throw new LifecycleFailure('activation-failed', safeError('activation-failed'), 'rolled-back')
-    }
-    await this.options.runtime.commit(candidateId).catch(() => undefined)
-    return {
-      ...resultBase(request, committed, 'enable'),
-      outcome: 'applied',
-      scope: 'plugin-generation',
-      affectedPluginIds: affected,
-      transactionId: candidateId,
-    }
-  }
-
-  protected async applyStateMutationV4(
-    request: Pick<CordisXPluginLifecycleRequestV1, 'requestId' | 'profileId' | 'runtimeGeneration'> & {
-      readonly operation: { readonly kind: CordisXPluginLifecycleResultV1['operation'] }
-    },
-    active: CordisXPluginActivationRecordV1,
-    candidateId: string,
-    decision: CordisXPermissionAuthorizationDecisionV4,
-  ): Promise<CordisXPluginLifecycleResultV1> {
-    const pluginId = decision.identity.pluginId
-    const candidate = await this.store.loadCandidate(candidateId).catch(() => {
-      throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
-    })
-    const before = active.plugins.find(plugin => plugin.id === pluginId)
-    const after = candidate.plugins.find(plugin => plugin.id === pluginId)
-    if (
-      candidate.lastGoodRevision !== active.revision || before === undefined || before.enabled
-      || after?.enabled !== true
-      || before.digest !== after.digest || before.version !== after.version
-      || before.moduleGeneration === after.moduleGeneration
-      || candidate.plugins.length !== active.plugins.length
-      || active.plugins.some(item =>
-        item.id !== pluginId
-        && JSON.stringify(item) !== JSON.stringify(candidate.plugins.find(next => next.id === item.id))
-      )
-    ) {
-      throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
-    }
-    const staged = await loadStagedPluginPackage(this.options.homeDir, after.digest).catch(error => {
-      throw classify(error)
-    })
-    const plan = authorizationPlanV4(
-      staged,
-      'enable',
-      this.options.profileId,
-      this.options.runtimeGeneration,
-      after.moduleGeneration,
-      candidateId,
-      await this.permissionPoliciesV2(),
-      await this.permissionPoliciesV4(),
-      await this.certifiedPermission(staged),
-    )
-    validateDecisionV4(plan, decision)
-    const affected = [pluginId]
-    const formalCommitted = await this.activateWithAuthority({
-      operation: 'enable',
-      active,
-      candidate,
-      targetId: pluginId,
-      staged,
-      authorizationPlan: plan,
-      authorizationDecision: decision,
-    })
-    if (formalCommitted !== undefined) {
-      return {
-        ...resultBase(request, formalCommitted, 'enable'),
-        outcome: 'applied',
-        scope: 'plugin-generation',
-        affectedPluginIds: affected,
-        transactionId: candidateId,
-      }
-    }
-    try {
-      await this.options.runtime.stage({
-        transactionId: candidateId,
-        operation: 'enable',
-        previous: active,
-        candidate,
-        targetId: pluginId,
-        affectedPluginIds: affected,
-        package: staged,
-        authorizationDecision: decision,
-      })
     } catch {
       await this.store.abortCandidate(candidateId)
       throw new LifecycleFailure('readiness-failed', safeError('readiness-failed'), 'rolled-back')

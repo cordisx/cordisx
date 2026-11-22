@@ -24,7 +24,7 @@ const syntaxes = new WeakMap<readonly NativeScriptResource[], ReadonlyMap<Native
 export const bundle: AdapterBundle = {
   apiVersion: 1,
   relayContract: 1,
-  version: '0.1.0-beta.3',
+  version: '0.1.0-beta.4',
   resourceHints: [
     ['submitTarget', 'options', 'openingPromptForHistory'],
     ['context', 'configOverrides', 'requiresThreadReferences'],
@@ -37,6 +37,7 @@ export const bundle: AdapterBundle = {
     ['accessInputs', 'readAccountInfo'],
     ['accountInfo', 'readAccountInfo'],
     ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
+    ['startWithoutFirstTurn', 'onBeforeWorktreeCreate'],
     ['browser-use-session-route-capture', 'addStreamRoleStateCallback'],
     ['sideConversationParentNavigationPath', 'attachToSource'],
   ],
@@ -65,7 +66,9 @@ export const bundle: AdapterBundle = {
           transforms,
           syntaxes.get(resources),
         )
-        if (!result.available) throw new Error('Native task creation structure unavailable')
+        if (!result.available) {
+          throw new Error(`Native task creation structure unavailable: ${result.reason ?? 'unknown'}`)
+        }
         return { transforms: result.transforms }
       },
     },

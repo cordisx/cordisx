@@ -89,6 +89,46 @@ function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: strin
 }
 
 describe('Codex side of the agent bridge', () => {
+  it('confirms project sandbox and membership before the first model turn, and stops on uncertainty', async () => {
+    const codex = fakeCodex(), order: string[] = []
+    const request = codex.nativeRequest
+    codex.prepareProject = async id => {
+      expect(id).toBe('repo')
+      order.push('project')
+      return {
+        cwd: '/repo',
+        sandbox: 'workspace-write',
+        runtimeWorkspaceRoots: ['/repo'],
+        permissions: null,
+        config: { 'sandbox_workspace_write.writable_roots': ['/repo'] },
+      }
+    }
+    let confirmed = true
+    codex.bindCreatedProject = async (thread, project) => {
+      expect([thread, project]).toEqual(['new-thread', 'repo'])
+      order.push('bound')
+      return confirmed
+    }
+    codex.nativeRequest = async (method, params) => {
+      order.push(method)
+      return request(method, params)
+    }
+    const handler = createCodexBridgeHandler(codex, '/outside')
+    expect(await handler('start_session', { operationId: 'project-ok', projectId: 'repo', prompt: 'work' }))
+      .toMatchObject({ status: 'started' })
+    expect(order).toEqual(['project', 'thread/start', 'bound', 'turn/start'])
+    expect(codex.calls[0]!.params).toMatchObject({
+      cwd: '/repo',
+      sandbox: 'workspace-write',
+      runtimeWorkspaceRoots: ['/repo'],
+    })
+    expect(codex.calls[0]!.params.permissions).toBeNull()
+    confirmed = false
+    order.length = 0
+    expect(await handler('start_session', { operationId: 'project-uncertain', projectId: 'repo', prompt: 'work' }))
+      .toMatchObject({ status: 'failed', sessionId: 'new-thread' })
+    expect(order).toEqual(['project', 'thread/start', 'bound'])
+  })
   it('answers list_model_providers in the same shape the Claude plugin uses', async () => {
     expect(await createCodexBridgeHandler(fakeCodex())('list_model_providers', {})).toEqual({
       providers: [{

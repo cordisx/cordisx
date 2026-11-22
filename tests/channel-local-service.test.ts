@@ -17,6 +17,32 @@ afterEach(async () => {
 })
 
 describe('built-in local Channel service', () => {
+  it('retains an authenticated pending account without registering it in the tenant runtime', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-pending-channel-'))
+    temporary.add(root)
+    const service = createLocalChannelService({
+      artifactDirectory: channelArtifactDirectory,
+      dataDir: path.join(root, 'runtime'),
+      source: pathToFileURL(channelEntry).href,
+    })
+    try {
+      await service.start({
+        contract: 'cordisx.channel-service-config/v3',
+        schemaVersion: 3,
+        connections: SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+        pendingConnections: [{
+          account: { adapterId: 'feishu', accountId: 'cli_pending' },
+          adapterKind: 'feishu',
+          secretRef: 'host-secret:channel/test/draft-a',
+          displayName: 'Pending',
+        }],
+      })
+      expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({ adapterKind: 'simulator' })])
+      expect(JSON.stringify(service.snapshot())).not.toContain('cli_pending')
+    } finally {
+      await service.dispose()
+    }
+  })
   it('starts and restart-fences the simulator without accepting an official adapter', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-'))
     temporary.add(root)

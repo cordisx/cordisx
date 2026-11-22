@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { noDeferredPermissionDecision } from '../permission-deferral.js'
+import { deferredLifecycleReview } from '../launcher/plugin-lifecycle-deferred.js'
 import { type FSWatcher, watch } from 'node:fs'
 import path from 'node:path'
 import { createDefaultHomeConfig, loadHomeConfig } from '../config/home-config.js'
@@ -348,7 +350,7 @@ export async function openPluginManagementService(
     result: CordisXPluginLifecycleResultV1,
   ): Promise<PluginManagementPermissionPlan | undefined> => {
     const direct = permissionPlan(result)
-    if (direct !== undefined || result.candidateId === undefined) return direct
+    if (result.candidateId === undefined) return direct
     const lifecycle = await coordinator()
     const active = await lifecycle.store.loadActive()
     const target = request.kind === 'plugin-enable'
@@ -361,7 +363,9 @@ export async function openPluginManagementService(
       expectedRevision: active.revision,
       target,
     }
-    return await lifecycle.permissionReviewPlanV4(common)
+    return await deferredLifecycleReview(lifecycle, common)
+      ?? direct
+      ?? await lifecycle.permissionReviewPlanV4(common)
       ?? await lifecycle.permissionReviewPlanV2(common)
   }
 
@@ -573,7 +577,23 @@ export async function openPluginManagementService(
         }
         const active = await (await coordinator()).store.loadActive()
         const requestId = `management-apply-${randomUUID()}`
-        if (permission.schemaVersion === 4) {
+        if (permission.schemaVersion === 7) {
+          if (permission.declarations.some(item => item.required && item.policy === 'deny-persistent')) {
+            return {
+              status: 'rejected',
+              request: planned.request,
+              snapshot: await query(),
+              error: { code: 'permission-denied', message: 'A required plugin capability was denied.' },
+            }
+          }
+          lifecycle = await (await coordinator()).applyPermissionReviewV7({
+            requestId,
+            profileId: options.profileId,
+            runtimeGeneration,
+            expectedRevision: active.revision,
+            decision: noDeferredPermissionDecision(permission),
+          })
+        } else if (permission.schemaVersion === 4) {
           lifecycle = await (await coordinator()).applyPermissionReviewV4({
             requestId,
             profileId: options.profileId,

@@ -12,6 +12,8 @@ export interface ChannelTaskPatch {
   readonly providerId?: string
   readonly model?: string
   readonly effort?: string
+  readonly fast?: boolean
+  readonly projectId?: string
 }
 export interface ChannelTaskScope extends ChannelPolicyScope {
   readonly kinds?: readonly ('direct' | 'group')[]
@@ -29,6 +31,8 @@ export interface ChannelTaskPermission extends ChannelTaskScope {
   readonly providerIds?: readonly string[]
   readonly models?: readonly { readonly providerId: string; readonly model: string }[]
   readonly efforts?: readonly string[]
+  readonly fastModes?: readonly boolean[]
+  readonly projectIds?: readonly string[]
 }
 export interface ChannelTaskConfig {
   readonly defaults: ChannelTaskPatch
@@ -37,13 +41,17 @@ export interface ChannelTaskConfig {
 }
 export const CHANNEL_TASK_CONFIG_INITIAL: ChannelTaskConfig = { defaults: {}, scopes: [], permissions: [] }
 const scopeFields = ['adapterId', 'accountId', 'tenantId', 'conversationId'] as const
-const fields = ['providerId', 'model', 'effort'] as const
+const fields = ['providerId', 'model', 'effort', 'fast', 'projectId'] as const
 export function parseChannelTaskPatch(value: unknown): ChannelTaskPatch {
   const patch = channelRecord(value)
   channelExact(patch, fields)
-  const output: Record<string, string> = {}
+  const output: Record<string, string | boolean> = {}
   for (const field of fields) {
-    if (patch[field] !== undefined) output[field] = channelText(patch[field], field === 'providerId' ? 128 : 512)
+    if (patch[field] === undefined) continue
+    if (field === 'fast') {
+      if (typeof patch.fast !== 'boolean') throw new Error('INVALID_TASK_CONFIGURATION')
+      output.fast = patch.fast
+    } else output[field] = channelText(patch[field], field === 'providerId' ? 128 : 512)
   }
   if (output.effort) parseChatExecutionSettings({ effort: output.effort })
   return output
@@ -91,6 +99,8 @@ export function parseChannelTaskConfig(value: unknown): ChannelTaskConfig {
       'providerIds',
       'models',
       'efforts',
+      'fastModes',
+      'projectIds',
     ])
     if (!['allow', 'deny'].includes(String(item.effect))) throw new Error('INVALID_TASK_CONFIGURATION')
     const selectedFields = strings(item.fields)
@@ -105,7 +115,16 @@ export function parseChannelTaskConfig(value: unknown): ChannelTaskConfig {
       throw new Error('INVALID_TASK_CONFIGURATION')
     }
     if (models && !models.length) throw new Error('INVALID_TASK_CONFIGURATION')
-    const providerIds = strings(item.providerIds), efforts = strings(item.efforts)
+    const providerIds = strings(item.providerIds),
+      efforts = strings(item.efforts),
+      projectIds = strings(item.projectIds)
+    const fastModes = item.fastModes
+    if (
+      fastModes !== undefined && (!Array.isArray(fastModes) || !fastModes.length
+        || fastModes.some(value => typeof value !== 'boolean') || new Set(fastModes).size !== fastModes.length)
+    ) {
+      throw new Error('INVALID_TASK_CONFIGURATION')
+    }
     for (const providerId of providerIds ?? []) channelText(providerId, 128)
     for (const model of models ?? []) channelText(model.model, 512)
     for (const effort of efforts ?? []) parseChatExecutionSettings({ effort })
@@ -117,6 +136,8 @@ export function parseChannelTaskConfig(value: unknown): ChannelTaskConfig {
       ...(providerIds ? { providerIds } : {}),
       ...(models ? { models } : {}),
       ...(efforts ? { efforts } : {}),
+      ...(fastModes ? { fastModes: fastModes as boolean[] } : {}),
+      ...(projectIds ? { projectIds } : {}),
     }
   })
   for (const entries of [scopes, permissions]) {
@@ -146,7 +167,7 @@ export function channelTaskDefaults(
   policy: ChannelConversationPolicy,
   event: ChannelEventRef,
 ): ChannelTaskPatch {
-  const value: Record<string, string> = { ...config.defaults }
+  const value: Record<string, string | boolean> = { ...config.defaults }
   const ranked = config.scopes.filter(rule => channelTaskScopeMatches(rule, policy, event)).map(rule => ({
     rule,
     rank: scopeFields.filter(field => rule[field] !== undefined).length * 4 + (rule.kinds ? 1 : 0)
@@ -181,6 +202,8 @@ export function channelTaskChangeAllowed(
       && (!rule.models
         || rule.models.some(model => model.providerId === selection.providerId && model.model === selection.model))
       && (!rule.efforts || !!selection.effort && rule.efforts.includes(selection.effort))
+      && (!rule.fastModes || selection.fast !== undefined && rule.fastModes.includes(selection.fast))
+      && (!rule.projectIds || !!selection.projectId && rule.projectIds.includes(selection.projectId))
     if (
       relevant.some(rule =>
         rule.effect === 'deny' && channelTaskScopeMatches(rule, policy, event) && valueMatches(rule)
@@ -201,6 +224,10 @@ export function channelTaskChangeAllowed(
 /** Model authority may still use a legacy command deny, but never a coarse allow as a field grant. */
 export function channelTaskFields(patch: ChannelTaskPatch): readonly string[] {
   return Object.keys(patch).map(field =>
-    field === 'providerId' ? 'provider' : field === 'model' ? 'model' : 'work-mode'
+    field === 'providerId' ? 'provider' : field === 'model' ? 'model' : field === 'fast'
+      ? 'fast'
+      : field === 'projectId'
+      ? 'project'
+      : 'work-mode'
   )
 }

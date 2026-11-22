@@ -1,5 +1,5 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
-import { channelFeedbackOutbound, createFeedbackSdkAccess, instrumentFeedbackRuntime } from './channel-feedback.js'
+import { channelMessageRead } from './channel-message-read.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -31,6 +31,7 @@ import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 import { bindDiagnosticContext } from '../diagnostics/context.js'
 import { updateFeishuCard } from './feishu-card-update.js'
+import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -75,6 +76,15 @@ export interface LocalChannelService {
   observeCardActions(
     listener: (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>,
   ): () => void
+  setPairingHandler(
+    handler:
+      | ((
+        ref: ChannelTenantRef,
+        generation: string,
+        message: import('@larksuiteoapi/node-sdk').NormalizedMessage,
+      ) => Promise<{ accepted: boolean; reply: boolean }>)
+      | undefined,
+  ): void
   dispose(): Promise<void>
 }
 
@@ -97,7 +107,7 @@ export function projectLocalChannelManager(input: {
     JSON.stringify([connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId]),
     connection.ref,
   ]))
-  const connections = configuration.connections.map(connection => {
+  const connections: ChannelManagerProjectionV1['connections'][number][] = configuration.connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
       connection.ref.adapterId,
       connection.ref.accountId,
@@ -115,6 +125,17 @@ export function projectLocalChannelManager(input: {
         ?? (connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const),
     }
   })
+  if (configuration.schemaVersion === 3) {
+    connections.push(...configuration.pendingConnections.map(connection => ({
+      ref: { ...connection.account, tenantId: '' },
+      pendingTenant: true as const,
+      displayName: connection.displayName,
+      adapterKind: connection.adapterKind,
+      enabled: false,
+      transportMode: 'websocket',
+      secretState: 'unavailable' as const,
+    })))
+  }
   const accounts = connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
       connection.ref.adapterId,
@@ -126,7 +147,11 @@ export function projectLocalChannelManager(input: {
       ...input.identity?.(connection.ref),
       implementationStatus: runtime?.implementationStatus
         ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
-      connectionState: runtime?.connectionState ?? (connection.enabled ? 'starting' as const : 'disabled' as const),
+      connectionState: runtime?.connectionState ?? (connection.pendingTenant
+        ? 'unavailable' as const
+        : connection.enabled
+        ? 'starting' as const
+        : 'disabled' as const),
       generation: runtime?.generation ?? 0,
       inbound: runtime?.inbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
       outbound: runtime?.outbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
@@ -174,12 +199,16 @@ function localPermissions() {
  */
 export function createLocalChannelService(input: {
   readonly artifactDirectory: string
+  /** Immutable package services use their stored module; direct source entries retain service.mjs. */
+  readonly runtimeEntry?: './services/runtime.mjs'
   readonly dataDir: string
   readonly source: string
   /** Effective launcher environment; never project it or any resolved secret. */
   readonly environment?: NodeJS.ProcessEnv
+  readonly homeDir?: string
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
+  const runtimeEntry = input.runtimeEntry ?? './service.mjs'
   const updateCard = bindDiagnosticContext(updateFeishuCard)
   let active: ActiveRuntime | undefined
   let managementOwner: HostServiceCapabilityOwner | undefined
@@ -189,6 +218,7 @@ export function createLocalChannelService(input: {
   let mutationTail: Promise<unknown> = Promise.resolve()
   let pendingConfiguration: string | undefined
   let conversationManager: Parameters<LocalChannelService['setConversationManager']>[0] | undefined
+  let pairingHandler: Parameters<LocalChannelService['setPairingHandler']>[0] | undefined
   const listeners = new Set<
     (
       recordId: string,
@@ -202,7 +232,7 @@ export function createLocalChannelService(input: {
     (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>
   >()
   const key = (ref: ChannelTenantRef) => JSON.stringify([ref.adapterId, ref.accountId, ref.tenantId])
-  const feedbackAccess = new WeakMap<ActiveRuntime, ReturnType<typeof createFeedbackSdkAccess>>()
+  const feedbackAccess = new WeakMap<ActiveRuntime, ReturnType<typeof channelFeedbackSdk>>()
   const caller = (generation: string) => ({ source: input.source, pluginId: 'channel', generation })
   const definitions = (configuration: ReturnType<typeof parseChannelServiceConfig>, current: ActiveRuntime) =>
     feishuDefinitionsForConfig(configuration, {
@@ -210,6 +240,13 @@ export function createLocalChannelService(input: {
       configurationRevision: sequence,
       identities: current.identities,
       channelConnected: (ref, channel) => current.directory.connected(ref, channel),
+      onPairingInput: async (ref, message) => {
+        const generation = current.generation
+        const result = await pairingHandler?.(ref, generation, message)
+        return !disposed && active === current && current.generation === generation
+          ? result ?? { accepted: false, reply: false }
+          : { accepted: false, reply: false }
+      },
       onCardAction: async (ref, event) => {
         for (const listener of cardListeners) await listener(ref, event)
       },
@@ -220,7 +257,10 @@ export function createLocalChannelService(input: {
         )
       },
       readConnection: ref => activeConfiguration?.connections.find(connection => key(connection.ref) === key(ref)),
-      ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
+      secretResolver: {
+        ...(input.environment === undefined ? {} : { environment: input.environment }),
+        ...(input.homeDir === undefined ? {} : { homeDir: input.homeDir }),
+      },
     })
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const task = mutationTail.then(operation)
@@ -245,7 +285,6 @@ export function createLocalChannelService(input: {
       storePath: path.join(input.dataDir, 'transport.json'),
     })
     const host = new LauncherChannelServiceHost(runtime)
-    instrumentFeedbackRuntime(runtime)
     const identities = new ChannelAccountIdentityStore()
     const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
     display.retainAccounts(configuration.connections.map(connection => connection.ref))
@@ -254,7 +293,7 @@ export function createLocalChannelService(input: {
     const directory = new ChannelLiveDirectory(display, senders)
     sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
     try {
-      const serviceSource = path.join(artifactDirectory, 'service.mjs')
+      const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
       const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
       const service = await host.activate({
         packageIdentity: { pluginId: 'channel', version: 'development', integrity },
@@ -264,7 +303,7 @@ export function createLocalChannelService(input: {
         configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
         configurationRevision: sequence,
         artifactDirectory,
-        runtimeEntry: './service.mjs',
+        runtimeEntry,
       }, simulatorConfiguration(configuration))
       // The official adapter is deliberately launcher-owned: it gets an
       // opaque secret reference only, resolves it privately, and publishes
@@ -349,7 +388,7 @@ export function createLocalChannelService(input: {
       }
       if (simulatorChanged) {
         await current.service.dispose()
-        const serviceSource = path.join(artifactDirectory, 'service.mjs')
+        const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
         const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
         current.service = await current.host.activate({
           packageIdentity: { pluginId: 'channel', version: 'development', integrity },
@@ -359,7 +398,7 @@ export function createLocalChannelService(input: {
           configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
           configurationRevision: sequence,
           artifactDirectory,
-          runtimeEntry: './service.mjs',
+          runtimeEntry,
         }, simulatorConfiguration(value))
       }
       activeConfiguration = value
@@ -499,18 +538,13 @@ export function createLocalChannelService(input: {
       if (!current || disposed) return undefined
       let feedback = feedbackAccess.get(current)
       if (!feedback) {
-        feedback = createFeedbackSdkAccess(
-          event => current.directory.channel(event),
-          () => active === current && !disposed,
-        )
+        feedback = channelFeedbackSdk(event => current.directory.channel(event), () => !disposed && active === current)
         feedbackAccess.set(current, feedback)
       }
       return {
-        feedbackReact: feedback.react,
-        feedbackRemove: feedback.remove,
-        feedbackWait: feedback.wait,
         generation: current.generation,
         runtime: current.runtime,
+        ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
             ref: connection.ref,
@@ -522,6 +556,13 @@ export function createLocalChannelService(input: {
           })),
         conversations: ref => current.directory.conversations(ref),
         remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
+        readMessage: async (event, messageId) => {
+          const channel = current.directory.channel(event)
+          const result = await channelMessageRead(event, messageId, channel)
+          return current.directory.channel(event) === channel
+            ? result
+            : { status: 'unavailable', code: 'CHANNEL_MESSAGE_UNAVAILABLE' }
+        },
         displayConversations: ref => current.directory.displayConversations(ref),
         conversationDisplay: ref => current.directory.conversationDisplay(ref),
         users: event => current.directory.users(event),
@@ -531,7 +572,6 @@ export function createLocalChannelService(input: {
         conversationIdentity: event => current.directory.conversationIdentity(event),
         replyCapabilities: event => current.directory.replyCapabilities(event),
         sendCard: async (event, card) => {
-          channelFeedbackOutbound(event)
           const channel = current.directory.channel(event)
           if (!channel) throw new Error('CHANNEL_CARD_UNAVAILABLE')
           return (await channel.send(event.conversationId, { card })).messageId
@@ -551,6 +591,9 @@ export function createLocalChannelService(input: {
       return () => {
         listeners.delete(listener)
       }
+    },
+    setPairingHandler: handler => {
+      pairingHandler = handler
     },
     observeCardActions: listener => {
       cardListeners.add(listener)

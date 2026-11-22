@@ -9,6 +9,12 @@ const HELP: Readonly<Record<string, string>> = {
   'bind-status': 'Read bindings and jobs for a chat. Input: {sessionId}.',
   'local-bindings':
     'Local CLI only: list profile bindings, optionally filtered. Input: {account?:{adapterId,accountId,tenantId},conversationId?:string}.',
+  'admin-pair-begin':
+    'Local user only: issue a five-minute single-use pairing code. Input: {account:{adapterId,accountId,tenantId}}. Send /pair <code> privately to that bot; keep the code secret.',
+  'admin-pair-status': 'Local user only: inspect a pairing candidate before confirmation. Input: {pairingId}.',
+  'admin-pair-confirm':
+    'Local user only: confirm the displayed user and direct chat. Input: {pairingId}. This grants scoped management commands, not task dispatch.',
+  'admin-pair-cancel': 'Local user only: cancel a pending pairing. Input: {pairingId}.',
   'continuation-policy': 'Local user only: read continuation policy and checkpoint state. Input: {sessionId}.',
   'continuation-policy-set':
     'Local user only: configure best-effort idle-boundary continuation. Input: {sessionId,policy:{enabled:boolean,threshold:number,reserveTokens:integer,maxAgeMs:integer}}. Disabled by default; no guarantee against compaction.',
@@ -23,6 +29,8 @@ const HELP: Readonly<Record<string, string>> = {
     'Retrieve accepted messages from all the chat bindings. Input: {sessionId,afterSequence?:number,limit?:number}.',
   'remote-history':
     'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
+  'message-get':
+    'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
   listen:
     'Wait for messages in multiple conversations. Input: {account,conversationIds:[string],afterCursor?:string,timeoutSeconds?:0..60}.',
   send:
@@ -51,7 +59,7 @@ const HELP: Readonly<Record<string, string>> = {
   'task-settings':
     'Read one Channel task model settings. Input: {sessionId?}. Incoming tasks retain --context from the prompt.',
   'task-settings-set':
-    'Request an exact task change. Input: {sessionId?,settings:{providerId?,model?,effort?},expectedRevision?}. Authorized users change directly; others receive an approval-required receipt. Idle application never interrupts the active turn.',
+    'Request an exact task change. Input: {sessionId?,settings:{providerId?,model?,effort?,fast?:boolean,projectId?},expectedRevision?}. Authorized users change directly; others receive an approval-required receipt. Idle application never interrupts the active turn. Native project IDs come from model-list.',
   'task-config': 'Read Channel-scoped creation defaults and field/provider/model permission rules. Input: {}.',
   'task-config-set':
     'Local-user CAS replacement of Channel task config. Input: {config:{defaults,scopes,permissions},expectedRevision}. Agent context cannot change global permission rules.',

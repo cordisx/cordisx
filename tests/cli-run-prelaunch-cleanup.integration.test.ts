@@ -126,3 +126,77 @@ setInterval(() => {}, 1_000)
     }
   })
 })
+
+it('installs configured Skills before the production prelaunch decision', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { mkdir, readFile } = await import('node:fs/promises')
+  const { pathToFileURL } = await import('node:url')
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-skill-prelaunch-'))
+  const repo = path.join(root, 'fixture.git')
+  const home = path.join(root, 'host-home')
+  await mkdir(path.join(repo, 'review'), { recursive: true })
+  await writeFile(path.join(repo, 'review', 'SKILL.md'), 'fixture')
+  for (
+    const args of [
+      ['init', '-q'],
+      ['config', 'user.email', 'test@example.invalid'],
+      ['config', 'user.name', 'Test'],
+      ['add', '.'],
+      ['commit', '-qm', 'fixture'],
+    ]
+  ) execFileSync('git', ['-C', repo, ...args])
+  const config = { ...createDefaultHomeConfig(), skills: [`${pathToFileURL(repo).href}@review`] }
+  const configPath = path.join(root, 'config.json')
+  await writeFile(configPath, JSON.stringify(config))
+  const invocation = parseCordisXCli(['run', 'codex'])
+  if (invocation.action !== 'run') throw new Error('expected run')
+  const target = path.join(home, '.agents', 'skills', 'review', 'SKILL.md')
+  const inspector = vi.spyOn(dock, 'supportsOwnedMainInspector').mockImplementation(async () => {
+    expect(await readFile(target, 'utf8')).toBe('fixture')
+    return false
+  })
+  let prepared: Awaited<ReturnType<typeof prepareProductionHostBootstrap>> | undefined
+  try {
+    prepared = await prepareProductionHostBootstrap(
+      {
+        invocation: { ...invocation, action: 'launch' },
+        stdout: () => {},
+        environment: process.env,
+        configPath,
+        appId: 'codex',
+        selection: {
+          config,
+          appId: 'codex',
+          profileId: 'default',
+          profile: { dataMode: 'shared' },
+          dataMode: 'shared',
+          created: false,
+        },
+        adapter: {
+          id: 'codex',
+          displayName: 'Fixture',
+          prepareLaunch: async () => {},
+          resolveLaunchPlan: async () => ({
+            version: 1,
+            appId: 'codex',
+            appName: 'Fixture',
+            profileId: 'default',
+            dataMode: 'shared',
+            executable: process.execPath,
+            environment: {},
+            sharedDataRoots: [{ name: 'HOME', path: home, managed: false }],
+            isolatedDataRoots: [],
+          }),
+        },
+      },
+      {},
+      { prelaunch: true, prepareNativeSubmission: false, mainInspector: true, markHostLaunched: async () => {} },
+    )
+    expect(inspector).toHaveBeenCalled()
+  } finally {
+    await prepared?.profileLease?.release()
+    inspector.mockRestore()
+    const { rm } = await import('node:fs/promises')
+    await rm(root, { recursive: true, force: true })
+  }
+})

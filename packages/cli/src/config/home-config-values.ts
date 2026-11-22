@@ -11,6 +11,19 @@ export function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+export function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const allowedKeys = new Set(allowed)
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key))
+  if (unknown !== undefined) throw new Error(`${label}.${unknown} is not supported`)
+}
+
+export function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`${label} must be a non-empty string`)
+  }
+  return value.trim()
+}
+
 export function jsonValue(value: unknown, label: string, seen = new Set<object>()): JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') {

@@ -1,3 +1,4 @@
+import { approvalReviewCatalogEnvironment } from './approval-review-catalog.js'
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
 import type { ModelProviderDisplay } from '../model-provider-display.js'
 import { createNativeCliEntry } from './native-cli-entry.js'
@@ -47,13 +48,21 @@ import type { NativeResourceTransform } from './native-predispatch-interception.
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import { nativeManagedModelList } from './native-managed-model-list.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
 import { callerThreadId } from './agent-bridge-context.js'
 import { startModelApiServer } from './model-api-server.js'
-import { ChatExecutionPreferences } from './chat-execution-preferences.js'
-import { nativeProviderConfig } from './native-provider-config.js'
+import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import {
+  nativeCodexSettings,
+  openNativeCodexConfiguration,
+  openNativeCodexExecution,
+} from './native-codex-settings-composition.js'
+import type { CodexChatSettingsGuard } from './codex-chat-settings.js'
+import { nativeApiProviderRequest } from './native-api-provider-request.js'
+import { codexCreationSelection } from './codex-creation-selection.js'
 import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
@@ -92,6 +101,7 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly chatExecution?: ChatExecutionPreferences
   readonly channelSession?: import('./channel-native-sessions.js').ChannelNativeSessions
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
@@ -116,6 +126,7 @@ export class NativeSubmissionCompatibilityError extends Error {
   }
 }
 export interface NativeSubmissionCatalogOptions {
+  readonly chatSettingsGuard?: CodexChatSettingsGuard
   readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
@@ -124,6 +135,7 @@ export interface NativeSubmissionCatalogOptions {
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
   readonly defaultModelId?: string
+  readonly launchSelection?: { providerId: string; model?: string }
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
   readonly nativeModelDiscovery?: boolean
@@ -217,6 +229,7 @@ export async function prepareNativeSubmissionBootstrap(
     signal?: AbortSignal
     remoteTerminalProvider?: ExistingTerminalProviderSource
     staticCatalog?: DesktopStaticCatalogLease
+    reviewCatalog?: Awaited<ReturnType<typeof import('./approval-review-catalog.js').prepareApprovalReviewCatalog>>
   }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   options.signal?.throwIfAborted()
@@ -281,6 +294,7 @@ export async function prepareNativeSubmissionBootstrap(
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
   let agentBridge: AgentBridge | undefined
+  let chatConfiguration: Awaited<ReturnType<typeof openNativeCodexConfiguration>> | undefined
   let chatExecution: ChatExecutionPreferences | undefined
   let contextObserver: import('./native-context-observer.js').NativeContextObserver | undefined
   let unsubscribeContext: (() => void) | undefined
@@ -298,6 +312,7 @@ export async function prepareNativeSubmissionBootstrap(
       apiAgentCredentials.forEach(lease => lease.dispose())
       apiAgentCredentials.clear()
       await agentBridge?.close()
+      await chatConfiguration?.close()
       await chatExecution?.close()
       await agentModels.close()
       await taskRouting?.close()
@@ -319,7 +334,9 @@ export async function prepareNativeSubmissionBootstrap(
             try {
               await control.close()
             } finally {
-              await nativeEntry.close().finally(() => options.staticCatalog?.close())
+              await nativeEntry.close().finally(() => options.staticCatalog?.close()).finally(() =>
+                options.reviewCatalog?.close()
+              )
             }
           }
         }
@@ -336,6 +353,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_NODE_PATH: node,
     CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
     ...desktopContext.desktopStaticCatalogEnvironment(options.staticCatalog),
+    ...approvalReviewCatalogEnvironment(options.reviewCatalog),
   }
   return {
     environment,
@@ -614,6 +632,9 @@ export async function prepareNativeSubmissionBootstrap(
             const defaultModelId = models.find(model => model.id === provider.defaultModelId)?.id ?? models[0]!.id
             return [{ ...provider, models, defaultModelId }]
           })
+        control.bindManagedModelList(
+          nativeManagedModelList({ catalog, owns: id => id !== 'openai' && providerSources.source(id) === 'managed' }),
+        )
         if (remote) {
           control.bindUnmarkedProviderGuard(nativeRemoteUnmarkedGuard({
             localSource: id => {
@@ -703,6 +724,15 @@ export async function prepareNativeSubmissionBootstrap(
           catalog,
           isStartupProvider: id => startupAuthority?.hasProvider(id) === true,
           isThreadIdle: id => control.isThreadIdle(id),
+          defaults: async () => {
+            const defaults = (await chatExecution?.creationDefaults())?.settings ?? {}
+            if (!Object.keys(defaults).length) return completeOptions.launchSelection ?? {}
+            return codexCreationSelection(
+              defaults,
+              completeOptions.launchSelection ?? {},
+              await chatConfiguration?.catalog() ?? await catalog(),
+            )
+          },
           ...(completeOptions.defaultProviderId === undefined
             ? {}
             : { defaultProviderId: completeOptions.defaultProviderId }),
@@ -756,6 +786,7 @@ export async function prepareNativeSubmissionBootstrap(
         lifetime.signal.throwIfAborted()
         control.bindTaskRouting(taskRouting)
         agentTasks = new NativeAgentTasks({
+          creationDefaults: async () => (await chatExecution?.creationDefaults())?.settings ?? {},
           ...(startup === undefined ? {} : { startup }),
           directory: path.join(
             completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
@@ -765,7 +796,7 @@ export async function prepareNativeSubmissionBootstrap(
             completeOptions.managedCatalog?.profileId ?? 'default',
             'agent-task-intents',
           ),
-          catalog,
+          catalog: () => chatConfiguration?.catalog() ?? catalog(),
           routing: taskRouting,
           sourceConfiguration: threadId => cdp.sourceConfiguration(threadId),
           available: () => cdp.taskCreationAvailable(),
@@ -775,82 +806,39 @@ export async function prepareNativeSubmissionBootstrap(
         terminalProviderDisplays = () => cdp.providerDisplays()
         if (completeOptions.managedCatalog !== undefined) {
           const managedHome = completeOptions.managedCatalog
-          chatExecution = await ChatExecutionPreferences.open({
-            file: path.join(
-              managedHome.homeDir,
-              'apps',
-              'codex',
-              'profiles',
-              managedHome.profileId,
-              'chat-execution.json',
-            ),
-            configPath: path.join(managedHome.homeDir, 'config.json'),
-            appId: 'codex',
-            profileId: managedHome.profileId,
-          })
+          chatExecution = await openNativeCodexExecution(managedHome)
           control.bindChatExecution(chatExecution)
+          chatConfiguration = await openNativeCodexConfiguration({
+            execution: chatExecution,
+            ...managedHome,
+            catalog,
+            control,
+            options: completeOptions,
+          })
           // The agent bridge lets Claude Code sessions read and start threads in this
           // app-server, and lets this app's agents reach Claude. Failing to start it
           // only leaves the cross-app tools unavailable.
           agentBridge = await startAgentBridge({
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
             codex: {
-              catalog,
+              catalog: () => chatConfiguration!.catalog(),
+              prepareProject: (projectId, readOnly) => chatConfiguration!.prepareProject(projectId, readOnly),
+              bindCreatedProject: (threadId, projectId) => chatConfiguration!.bindCreatedProject(threadId, projectId),
               observedDispatch: (operationId, threadId, turnId) =>
                 channelSession?.observedDispatch(operationId, threadId, turnId),
-              nativeRequest: async (method, params) => {
-                let providerId = typeof params.modelProvider === 'string' ? params.modelProvider : undefined
-                if (method === 'turn/start' && typeof params.threadId === 'string') {
-                  const persisted = await control.nativeRequest('thread/read', {
-                    threadId: params.threadId,
-                    includeTurns: false,
-                  }) as { thread?: { modelProvider?: string } }
-                  providerId = persisted.thread?.modelProvider
-                }
-                if (!['thread/start', 'turn/start'].includes(method) || !providerId) {
-                  const result = await control.nativeRequest(method, params)
-                  if (method === 'thread/read' && typeof params.threadId === 'string') {
-                    const status = (result as { thread?: { status?: { type?: string } } }).thread?.status?.type
-                    if (status && status !== 'active') {
-                      apiAgentCredentials.get(params.threadId)?.dispose()
-                      apiAgentCredentials.delete(params.threadId)
-                    }
-                  }
-                  return result
-                }
-                let config: Readonly<Record<string, unknown>>
-                let lease: { dispose(): void } | undefined
-                if (managed?.owns(providerId) || hasPluginProvider(providerId)) {
-                  const broker = nativeSubmissionCredentialBroker({
+              nativeRequest: nativeApiProviderRequest({
+                request: (method, params, overrides) => control.nativeRequest(method, params, overrides),
+                prepareStart: params => chatConfiguration!.prepare('thread/start', params),
+                managed: id => managed?.owns(id) === true || hasPluginProvider(id),
+                prepareManaged: id =>
+                  nativeSubmissionCredentialBroker({
                     credentials: credentials!,
                     resolveEndpoint: resolveConnection,
                     routeEndpoint: encryptedReplay!.route,
-                  })
-                  const prepared = await broker.prepare(providerId)
-                  lease = prepared
-                  config = { [`model_providers.${providerId}`]: nativeProviderConfig(prepared) }
-                } else {
-                  const configuredProvider = await prepareConfiguredProvider(providerId)
-                  return await control.nativeRequest(method, params, configuredProvider)
-                }
-                try {
-                  const result = await control.nativeRequest(method, {
-                    ...params,
-                    config: { ...params.config as Record<string, unknown>, ...config },
-                  })
-                  const threadId = method === 'thread/start'
-                    ? (result as { thread?: { id?: string } }).thread?.id
-                    : params.threadId
-                  if (typeof threadId === 'string' && lease) {
-                    apiAgentCredentials.get(threadId)?.dispose()
-                    apiAgentCredentials.set(threadId, lease)
-                    lease = undefined
-                  }
-                  return result
-                } finally {
-                  lease?.dispose()
-                }
-              },
+                  }).prepare(id),
+                prepareConfigured: prepareConfiguredProvider,
+                leases: apiAgentCredentials,
+              }),
             },
             codexProfileId: completeOptions.managedCatalog.profileId,
             // Recorded for `integration_status`: which service this launch was started on.
@@ -959,6 +947,14 @@ export async function prepareNativeSubmissionBootstrap(
               : await agentBridge.status(input),
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
+          taskCreationStatus: () => cdp.taskCreationStatus(),
+          ...nativeCodexSettings({
+            execution: chatExecution,
+            configuration: chatConfiguration,
+            configPath: homeConfigPath,
+            options: completeOptions,
+            control,
+          }),
           ...cdp.agentSelection,
           switchThread: async input => {
             if (closePromise !== undefined) throw new Error('Native model tools were closed')
@@ -974,9 +970,11 @@ export async function prepareNativeSubmissionBootstrap(
           bridge: () => agentBridge,
           control,
           execution: chatExecution,
+          configuration: chatConfiguration,
           models: modelHandler,
         })
         return {
+          codex: (operation, input, metadata) => agentModels.call(operation, input, metadata),
           ...(chatExecution === undefined ? {} : { chatExecution }),
           terminalProvider: request => terminalProviders!.request(request),
           channelSession,

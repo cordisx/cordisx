@@ -10,6 +10,15 @@ const provider = (models = ['model-default', 'model-chosen', 'model-next']) => (
 })
 
 describe('last explicit model for a new native conversation', () => {
+  it('refreshes persistent defaults between drafts while preserving a newer explicit user choice', async () => {
+    let defaults = { providerId: 'provider-b', model: 'model-default' }
+    const memory = new NativeDraftModelPreference({ catalog: async () => [provider()], defaults: async () => defaults })
+    expect(await memory.read()).toMatchObject({ model: 'model-default' })
+    defaults = { providerId: 'provider-b', model: 'model-next' }
+    expect(await memory.read()).toMatchObject({ model: 'model-next' })
+    memory.remember({ providerId: 'provider-b', model: 'model-chosen' })
+    expect(await memory.read()).toMatchObject({ model: 'model-chosen' })
+  })
   it('uses the latest explicit choice when an earlier catalog read finishes late', async () => {
     let finish!: (value: readonly ReturnType<typeof provider>[]) => void
     const memory = new NativeDraftModelPreference({

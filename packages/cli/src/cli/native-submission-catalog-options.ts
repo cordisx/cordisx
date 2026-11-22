@@ -55,6 +55,12 @@ export function nativeSubmissionCatalogOptions(
     ...(profile.selectorIcons === undefined ? {} : { selectorIcons: profile.selectorIcons }),
     ...(profile.providerBindings === undefined ? {} : { providerBindings: profile.providerBindings }),
     ...(declared.length === 0 ? {} : { declaredProviders: providers }),
-    ...(launch?.service ? { defaultProviderId: launch.service, defaultModelId: launch.model } : {}),
+    ...(launch?.service
+      ? {
+        defaultProviderId: launch.service,
+        defaultModelId: launch.model,
+        launchSelection: { providerId: launch.service, ...(launch.model ? { model: launch.model } : {}) },
+      }
+      : {}),
   }
 }

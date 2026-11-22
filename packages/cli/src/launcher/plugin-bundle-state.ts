@@ -60,7 +60,17 @@ import {
 } from './plugin-bundle-model.js'
 
 export class PluginBundleCoordinator extends PluginBundleCoordinatorInstall {
+  private operationTail: Promise<void> = Promise.resolve()
+
   async handle(request: CordisXPluginBundleLifecycleRequestV1): Promise<CordisXPluginBundleLifecycleResultV1> {
+    const operation = this.operationTail.then(() => this.handleSerialized(request))
+    this.operationTail = operation.then(() => undefined, () => undefined)
+    return await operation
+  }
+
+  private async handleSerialized(
+    request: CordisXPluginBundleLifecycleRequestV1,
+  ): Promise<CordisXPluginBundleLifecycleResultV1> {
     await this.ready
     const [state, active] = await Promise.all([this.store.load(), this.options.pluginLifecycle.store.loadActive()])
     if (request.profileId !== this.options.profileId || request.runtimeGeneration !== this.options.runtimeGeneration) {

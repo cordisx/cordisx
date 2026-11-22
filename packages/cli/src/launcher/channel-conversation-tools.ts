@@ -6,12 +6,15 @@ import type {
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
+import type { ChannelMessageReadResult } from './channel-message-read.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 import type { ChannelDirectoryReadback } from './channel-live-directory.js'
 import type { ChannelCommandUserReadback } from './channel-command-users.js'
 import { type ChannelReplyCapabilities, channelReplyMode, channelReplyTarget } from './channel-reply-routing.js'
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
+import type { ChannelAdminPairing } from './channel-admin-pairing.js'
+import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 
 export interface ChannelConversationAccess {
   feedbackReact?(
@@ -33,6 +36,10 @@ export interface ChannelConversationAccess {
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
+  readMessage?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    messageId: string,
+  ): Promise<ChannelMessageReadResult>
   /** Display-only cache-first directory. Never use for permissions or command target resolution. */
   displayConversations?(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   conversationDisplay?(
@@ -82,7 +89,55 @@ export class ChannelConversationTools {
     private readonly consumer?: ChannelConversationConsumer,
     private readonly documents?: (input: unknown) => Promise<unknown>,
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
+    private readonly pairing?: ChannelAdminPairing,
   ) {}
+
+  /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
+  async executionGuard(operation: string, args: Record<string, unknown>, metadata?: unknown) {
+    const caller = callerThreadId(metadata)
+    const meta = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+    if (
+      meta['cordisx/channelContext'] !== undefined
+      || caller && this.consumer?.taskSettings.isBound(caller)
+      || this.consumer?.agentAccess.preparation(metadata)
+    ) {
+      if (['fast', 'fast-set', 'project', 'project-set', 'model-defaults', 'model-defaults-set'].includes(operation)) {
+        const scoped = this.consumer?.agentAccess.caller(metadata)
+        if (meta['cordisx/channelContext'] !== undefined && !scoped) {
+          return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        }
+        const session = scoped?.threadId ?? caller
+        const source = scoped?.source
+          ?? (session ? this.consumer?.agentAccess.source(session, callerTurnId(metadata)) : undefined)
+        if (!source || !session) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        const target = typeof args.sessionId === 'string' ? args.sessionId : session
+        if (
+          !operation.startsWith('model-defaults') && target !== session
+          && !this.consumer?.taskSettings.boundTo(source, target)
+        ) {
+          return { status: 'rejected', code: 'CHANNEL_TARGET_NOT_BOUND' }
+        }
+        if (this.consumer?.agentAccess.preparation(metadata)) {
+          return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+        }
+        if (operation === 'model-defaults-set') {
+          return { status: 'rejected', code: 'PROFILE_SETTINGS_REQUIRE_LOCAL_USER' }
+        }
+        if (operation.endsWith('-set')) {
+          const allowed = operation === 'fast-set'
+            ? ['sessionId', 'fast', 'expectedRevision']
+            : ['sessionId', 'projectId', 'expectedRevision']
+          if (Object.keys(args).some(key => !allowed.includes(key))) {
+            return { status: 'rejected', code: 'INVALID_REQUEST' }
+          }
+          return this.consumer!.taskSettings.configurationRequest(operation, source, target, args)
+        }
+        return undefined
+      }
+      return this.call(operation, args, metadata)
+    }
+    return undefined
+  }
 
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
@@ -91,6 +146,16 @@ export class ChannelConversationTools {
       && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
     ) {
       return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+    }
+    if (['admin-pair-begin', 'admin-pair-status', 'admin-pair-confirm', 'admin-pair-cancel'].includes(operation)) {
+      return channelAdminPairingOperation({
+        operation,
+        value,
+        metadata,
+        access: this.access(),
+        consumer: this.consumer,
+        pairing: this.pairing,
+      })
     }
     if (['continuation-policy', 'continuation-policy-set', 'continuation-start'].includes(operation)) {
       try {
@@ -395,6 +460,45 @@ export class ChannelConversationTools {
         if (Object.keys(input).some(key => key !== 'account')) throw new Error('INVALID_REQUEST')
         const directory = await current.conversations(ref)
         return { status: directory.complete ? 'ok' : 'partial', generation: current.generation, ...directory }
+      }
+      if (operation === 'message-get') {
+        if (Object.keys(input).some(key => !['account', 'conversationId', 'kind', 'messageId'].includes(key))) {
+          throw new Error('INVALID_REQUEST')
+        }
+        const conversationId = text(input.conversationId), kind = input.kind, messageId = text(input.messageId)
+        if (
+          !/^oc_[A-Za-z0-9_]+$/u.test(conversationId) || !['direct', 'group'].includes(String(kind))
+          || !/^om_[A-Za-z0-9_]+$/u.test(messageId)
+        ) throw new Error('INVALID_TARGET')
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        if (source && (!sameAccount(source, ref) || source.conversationId !== conversationId || source.kind !== kind)) {
+          throw new Error('CHANNEL_SOURCE_SCOPE_MISMATCH')
+        }
+        if (!current.readMessage) return { status: 'unavailable', code: 'CHANNEL_MESSAGE_UNAVAILABLE' }
+        const event = source ?? {
+          ...ref,
+          conversationId,
+          kind: kind as 'direct' | 'group',
+          threadId: conversationId,
+          semantics: 'conversation' as const,
+          eventId: messageId,
+        }
+        // An incoming Channel agent can only walk its own source's parent chain.
+        let candidate = source ? source.messageId : messageId
+        const seen = new Set<string>()
+        for (let depth = 0; candidate && depth < 16 && !seen.has(candidate); depth++) {
+          seen.add(candidate)
+          const result = await current.readMessage(event, candidate)
+          if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+            throw new Error('CHANNEL_GENERATION_CHANGED')
+          }
+          if (result.status !== 'ok') return result
+          if (candidate === messageId) return result
+          candidate = result.message.parentId
+        }
+        return { status: 'rejected', code: 'CHANNEL_MESSAGE_NOT_IN_REPLY_CHAIN' }
       }
       if (operation === 'remote-history') {
         if (

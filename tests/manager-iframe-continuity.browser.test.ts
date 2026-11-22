@@ -103,7 +103,7 @@ it.skipIf(!executable)(
         await exit
       }
       await new Promise<void>(resolve => server.close(() => resolve()))
-      await rm(profile, { recursive: true, force: true })
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   },
 )

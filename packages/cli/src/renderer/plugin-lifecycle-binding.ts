@@ -10,6 +10,7 @@ import type {
   CordisXPermissionAuthorizationPlanV2,
   CordisXPermissionAuthorizationPlanV4,
 } from '../permission-contracts.js'
+import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
 import {
   CORDISX_PLUGIN_BUNDLE_LIFECYCLE_OPERATION_SCHEMA_V1,
   type CordisXPluginBundleLifecycleOperationV1,
@@ -175,6 +176,45 @@ export class BrowserPluginLifecycleBridge {
       token: this.token,
       privateRequest: {
         kind: 'permission-review-apply-v4',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        decision,
+      },
+    })
+  }
+
+  permissionReviewPlanV7(
+    expectedRevision: number,
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
+  ): Promise<DeferredPermissionPlan | undefined> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-plan-v7',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
+        expectedRevision,
+        target,
+      },
+    })
+  }
+
+  applyPermissionReviewV7(
+    expectedRevision: number,
+    decision: DeferredPermissionDecision,
+  ): Promise<CordisXPluginLifecycleResultV1> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'permission-review-apply-v7',
         requestId,
         profileId: this.profileId,
         runtimeGeneration: this.generation,

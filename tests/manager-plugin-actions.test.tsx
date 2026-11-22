@@ -1,6 +1,12 @@
 import React, { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { buildPermissionAuthorizationPlanV4 } from '../packages/cli/src/capability-risk-catalog.js'
+import {
+  buildDeferredPermissionPlan,
+  deferValidatedPermissionPlan,
+  deferValidatedV1PermissionPlan,
+} from '../packages/cli/src/permission-deferral.js'
+import { CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import type { ManagerPluginSnapshot } from '../packages/cli/src/renderer/manager.js'
 import { installNotificationHost } from '../packages/cli/src/renderer/notifications/host.js'
 import { managerModel, managerRouter, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
@@ -219,6 +225,135 @@ describe('React Manager plugin actions', () => {
         identity: { pluginId: 'demo', source: reviewedSource },
         binding: expect.objectContaining({ requestId: 'enable-candidate' }),
       }))
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('enables optional-only authority without displaying or granting a permission', async () => {
+    const fixture = reactManagerFixture()
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const plan = deferValidatedPermissionPlan(enablePlan('file:///installed/demo.js'))
+    const applyReview = vi.fn().mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['demo'] })
+    const state = managerSnapshot({
+      plugins: [{ ...plugin(), status: 'configured-disabled' as const }],
+      pluginLifecycle: { profileId: 'test', revision: 8, runtimeGeneration: 'runtime', operationsAvailable: true },
+    })
+    try {
+      await fixture.render(
+        <PluginsPage
+          model={managerModel(state, {
+            requestPluginLifecycle: vi.fn().mockResolvedValue({ outcome: 'planned' }),
+            permissionLifecycleReviewPlanV7: vi.fn().mockResolvedValue(plan),
+            applyPermissionLifecycleReviewV7: applyReview,
+          })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click('[aria-label="Enable plugin"]')
+      expect(fixture.document.querySelector('[data-permission-authorization]')).toBeNull()
+      expect(applyReview).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        schemaVersion: 7,
+        origin: 'host-no-decision',
+        decisions: [],
+      }))
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('asks only for required authority and leaves the optional capability undecided', async () => {
+    const fixture = reactManagerFixture()
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const plan = buildDeferredPermissionPlan({
+      planId: 'enable-demo',
+      operation: 'enable',
+      profileId: 'test',
+      identity: { pluginId: 'demo', source: 'file:///installed/demo.js' },
+      binding: { operationId: 'enable:demo', runtimeGeneration: 'runtime', requestId: 'candidate-1' },
+      declarations: [
+        { name: 'models.read', required: true, scope: {} },
+        { name: 'tasks.catalog.read', required: false, scope: {} },
+      ],
+      policiesV2: [],
+      policiesV4: [],
+    })
+    const applyReview = vi.fn().mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['demo'] })
+    const state = managerSnapshot({
+      plugins: [{ ...plugin(), status: 'configured-disabled' as const }],
+      pluginLifecycle: { profileId: 'test', revision: 8, runtimeGeneration: 'runtime', operationsAvailable: true },
+    })
+    try {
+      await fixture.render(
+        <PluginsPage
+          model={managerModel(state, {
+            requestPluginLifecycle: vi.fn().mockResolvedValue({ outcome: 'planned' }),
+            permissionLifecycleReviewPlanV7: vi.fn().mockResolvedValue(plan),
+            applyPermissionLifecycleReviewV7: applyReview,
+          })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click('[aria-label="Enable plugin"]')
+      const dialog = fixture.document.querySelector('[data-permission-authorization="enable-demo"]')!
+      expect(dialog.textContent).toContain('models.read')
+      expect(dialog.textContent).not.toContain('tasks.catalog.read')
+      await fixture.click('[data-permission-action="confirm"]')
+      expect(applyReview).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        schemaVersion: 7,
+        origin: 'explicit-user',
+        decisions: [expect.objectContaining({ capability: 'models.read' })],
+      }))
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('shows a legacy required reason as plugin-provided text', async () => {
+    const fixture = reactManagerFixture()
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const plan = deferValidatedV1PermissionPlan({
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+      schemaVersion: 1,
+      planId: 'enable-demo',
+      operation: 'enable',
+      profileId: 'test',
+      defaultDecision: 'allow',
+      identity: { pluginId: 'demo', source: 'file:///demo.js' },
+      declarations: [{
+        capability: 'models.read',
+        required: true,
+        reason: { key: 'legacy-reason', fallback: 'Legacy plugin explanation' },
+        scope: {},
+        policy: 'ask',
+        decisionRequired: true,
+      }],
+    }, { operationId: 'enable-demo', runtimeGeneration: 'runtime', requestId: 'candidate-1' })
+    const applyReview = vi.fn().mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['demo'] })
+    const state = managerSnapshot({
+      plugins: [{ ...plugin(), status: 'configured-disabled' as const }],
+      pluginLifecycle: { profileId: 'test', revision: 8, runtimeGeneration: 'runtime', operationsAvailable: true },
+    })
+    try {
+      await fixture.render(
+        <PluginsPage
+          model={managerModel(state, {
+            requestPluginLifecycle: vi.fn().mockResolvedValue({ outcome: 'planned' }),
+            permissionLifecycleReviewPlanV7: vi.fn().mockResolvedValue(plan),
+            applyPermissionLifecycleReviewV7: applyReview,
+          })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click('[aria-label="Enable plugin"]')
+      const dialog = fixture.document.querySelector('[data-permission-authorization="enable-demo"]')!
+      expect(dialog.textContent).toContain('Plugin-provided explanation')
+      expect(dialog.textContent).toContain('Legacy plugin explanation')
+      await fixture.click('[data-permission-action="confirm"]')
+      expect(applyReview).toHaveBeenCalledOnce()
     } finally {
       await fixture.dispose()
     }

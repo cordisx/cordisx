@@ -3,6 +3,52 @@ import { ChannelCredentialWorkflow } from '../packages/cli/src/renderer/channel-
 
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test' }
 describe('Host credential entry authorization timing', () => {
+  it('reuses the opaque connection target when a pending account is resolved', async () => {
+    const pending = { ...account, tenantId: '' }, order: string[] = []
+    const request = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED', ref: account, projection: {} }))
+    const flow = new ChannelCredentialWorkflow({
+      revision: () => 1,
+      advance: () => {
+        order.push('advance')
+      },
+      target: () => pending,
+      connectionToken: () => 'same-token',
+      available: () => true,
+      rekeyConnection: (before, after) => {
+        expect(before).toEqual(pending)
+        expect(after).toEqual(account)
+        order.push('rekey')
+      },
+      prompt: async () => false,
+      request,
+      adopt: () => {
+        order.push('adopt')
+      },
+    })
+    try {
+      await expect(
+        flow.resolveTenant({
+          owner: 'owner',
+          account: pending,
+          tenantId: '',
+          expectedServiceRevision: 4,
+          signal: new AbortController().signal,
+          live: () => true,
+          authorize: async () => true,
+        }),
+      ).resolves.toMatchObject({ status: 'applied' })
+      expect(order).toEqual(['rekey', 'adopt', 'advance'])
+      expect(request).toHaveBeenCalledWith({
+        operation: 'resolve-tenant',
+        owner: 'owner',
+        account: pending,
+        tenantId: '',
+        expectedRevision: 4,
+      })
+    } finally {
+      flow.dispose()
+    }
+  })
   it('can open/cancel an entry with no account yet, without a secret or transport effect', async () => {
     const request = vi.fn(), authorize = vi.fn(), prompt = vi.fn(async () => false)
     const flow = new ChannelCredentialWorkflow({

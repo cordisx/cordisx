@@ -53,7 +53,7 @@ export class ChannelTaskSettings {
       isBound: id => this.isBound(id),
       bound: (event, id) => this.bound(event, id),
       allowed: (event, patch, selection) => this.allowed(event, patch, selection),
-      validate: patch => this.validate(patch),
+      validate: (patch, threadId) => this.validate(patch, threadId),
       card: request => this.card(request),
     })
   }
@@ -64,7 +64,9 @@ export class ChannelTaskSettings {
     const native = this.input.native()
     if (!native) throw new Error('NATIVE_BACKEND_UNAVAILABLE')
     const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
-    return resolveChannelTaskSelection(catalog, native.creationSelection(), patch).selection
+    const selection = resolveChannelTaskSelection(catalog, await native.creationSelection(), patch).selection
+    await native.validateTaskConfiguration?.(selection)
+    return selection
   }
   isBound(threadId: string): boolean {
     return Object.values(this.input.store.snapshot().bindings).some(binding =>
@@ -113,17 +115,35 @@ export class ChannelTaskSettings {
       ...(stored?.code ? { code: stored.code } : {}),
     }
   }
-  async catalog() {
+  async catalog(caller?: string) {
     const native = this.input.native()
-    return native
-      ? { status: 'ok', ...object(await native.modelOperation('list', {})) }
-      : { status: 'unavailable', code: 'MODEL_CATALOG_UNAVAILABLE' }
+    if (!native) return { status: 'unavailable', code: 'MODEL_CATALOG_UNAVAILABLE' }
+    let projects: readonly { projectId: string; name: string }[] = [], projectAvailability = 'available'
+    try {
+      projects = await native.projects(caller)
+    } catch {
+      projectAvailability = 'unavailable'
+    }
+    return { status: 'ok', ...object(await native.modelOperation('list', {})), projects, projectAvailability }
   }
-  async validate(selection: ChannelTaskPatch): Promise<ChannelTaskPatch> {
-    return validateChannelTaskSelection(
+  async configurationRequest(
+    operation: string,
+    source: ChannelEventRef,
+    session: string,
+    args: Record<string, unknown>,
+  ) {
+    const native = this.input.native()
+    if (!native) throw new Error('NATIVE_BACKEND_UNAVAILABLE')
+    if (args.expectedRevision !== await native.configurationRevision(session)) throw new Error('REVISION_CONFLICT')
+    return this.request(source, session, operation === 'fast-set' ? { fast: args.fast } : { projectId: args.projectId })
+  }
+  async validate(selection: ChannelTaskPatch, threadId?: string): Promise<ChannelTaskPatch> {
+    const validated = validateChannelTaskSelection(
       channelTaskCatalog(await this.input.native()?.modelOperation('list', {})),
       selection,
     )
+    await this.input.native()?.validateTaskConfiguration?.(validated, threadId)
+    return validated
   }
   private allowed(event: ChannelEventRef, patch: ChannelTaskPatch, selection: ChannelTaskPatch): boolean {
     const state = this.input.store.snapshot()
@@ -148,6 +168,7 @@ export class ChannelTaskSettings {
       current.settings,
       requested,
     )
+    await this.validate(selection, threadId)
     const now = Date.now()
     const request: ChannelTaskRequest | undefined = event
       ? {
@@ -214,7 +235,7 @@ export class ChannelTaskSettings {
         && !channelPolicyAllows(this.input.store.snapshot().policy, 'command', event, 'task-deny')
     ) throw new Error('MODEL_CHANGE_PERMISSION_DENIED')
     if (decision === 'accept') {
-      await this.validate(request.selection)
+      await this.validate(request.selection, request.threadId)
       const current = await this.read(request.threadId)
       if (!channelTaskSelectionMatches(current.settings, request.baseSelection)) throw new Error('REVISION_CONFLICT')
     }
@@ -261,11 +282,19 @@ export class ChannelTaskSettings {
   }
   private async publishCard(request: ChannelTaskRequest) {
     const access = this.input.access()
-    const labels: Record<string, string> = { providerId: '服务商', model: '模型', effort: '强度' }
+    const labels: Record<string, string> = {
+      providerId: '服务商',
+      model: '模型',
+      effort: '强度',
+      fast: 'Fast',
+      projectId: '项目',
+    }
     const summary = Object.entries(request.patch).map(([key, value]) =>
-      `${labels[key] ?? key}：${channelApprovalPreview(value, '未知')}`
+      `${labels[key] ?? key}：${
+        typeof value === 'boolean' ? value ? '开启' : '关闭' : channelApprovalPreview(value, '未知')
+      }`
     ).join(' · ')
-    const reason = '请求调整对话模型配置，需要有对应字段和模型权限的用户批准。'
+    const reason = '请求调整对话任务配置，需要有对应字段和目标值权限的用户批准。'
     const status = request.state === 'pending'
       ? '等待批准'
       : request.state === 'queued'
@@ -315,7 +344,7 @@ export class ChannelTaskSettings {
       if (request.state === 'pending') {
         await this.input.notify?.(
           request.source,
-          `${summary}；等待模型权限批准。用 /task-approve ${request.id} 或 /task-deny ${request.id}。`,
+          `${summary}；等待任务配置权限批准。用 /task-approve ${request.id} 或 /task-deny ${request.id}。`,
           `task-approval:${request.id}:fallback`,
         ).catch(() => undefined)
       }
@@ -337,7 +366,7 @@ export class ChannelTaskSettings {
     }
     if (operation === 'model-list') {
       channelExact(args, [])
-      return this.catalog()
+      return this.catalog(caller?.threadId ?? metadataThread)
     }
     if (operation === 'task-config') {
       channelExact(args, [])
@@ -353,10 +382,14 @@ export class ChannelTaskSettings {
         if (!native) throw new Error('NATIVE_BACKEND_UNAVAILABLE')
         const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
         const base = Object.keys(config.defaults).length
-          ? resolveChannelTaskSelection(catalog, native.creationSelection(), config.defaults).selection
-          : native.creationSelection()
+          ? resolveChannelTaskSelection(catalog, await native.creationSelection(), config.defaults).selection
+          : await native.creationSelection()
+        await native.validateTaskConfiguration?.(base)
         for (const rule of config.scopes) {
-          if (Object.keys(rule.settings).length) resolveChannelTaskSelection(catalog, base, rule.settings)
+          if (Object.keys(rule.settings).length) {
+            const selected = resolveChannelTaskSelection(catalog, base, rule.settings).selection
+            await native.validateTaskConfiguration?.(selected)
+          }
         }
       }
       return this.input.store.mutate(state => {
@@ -400,10 +433,16 @@ export class ChannelTaskSettings {
   }
   async externalSelection(value: unknown, metadata: unknown): Promise<unknown | undefined> {
     const args = object(value), caller = this.caller(metadata)
+    if (object(metadata)['cordisx/channelContext'] !== undefined && !caller) {
+      return { status: 'rejected', reason: 'channel-context-required', tool: 'channel_task_settings_set' }
+    }
     if (caller) {
       return this.request(caller.source, channelText(args.threadId), { providerId: args.providerId, model: args.model })
     }
-    if (typeof args.threadId !== 'string' || !this.isBound(args.threadId)) return undefined
+    const callerId = callerThreadId(metadata)
+    if ((!callerId || !this.isBound(callerId)) && (typeof args.threadId !== 'string' || !this.isBound(args.threadId))) {
+      return undefined
+    }
     return { status: 'rejected', reason: 'channel-context-required', tool: 'channel_task_settings_set' }
   }
 }

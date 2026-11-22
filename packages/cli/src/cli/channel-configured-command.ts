@@ -3,7 +3,9 @@ import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
+  requestNamespacedManagementRpc,
   requestPluginManagementRpc,
+  usesNamespacedManagementRpc,
 } from '../launcher/management-rpc.js'
 import { processIdentityStatus } from './supervisor-state.js'
 
@@ -14,6 +16,10 @@ const OPERATIONS = [
   'unbind',
   'bind-status',
   'local-bindings',
+  'admin-pair-begin',
+  'admin-pair-status',
+  'admin-pair-confirm',
+  'admin-pair-cancel',
   'continuation-policy',
   'continuation-policy-set',
   'continuation-start',
@@ -24,6 +30,7 @@ const OPERATIONS = [
   'reply-mode',
   'history',
   'remote-history',
+  'message-get',
   'listen',
   'send',
   'send-many',
@@ -72,9 +79,12 @@ export async function runConfiguredChannelCommand(
     endpoint.appId !== appId || endpoint.profileId !== profileId
     || path.resolve(endpoint.configPath) !== path.resolve(configPath)
   ) throw new Error('CHANNEL_RUNTIME_SCOPE_MISMATCH')
-  const identity = await processIdentityStatus(endpoint.pid, endpoint.processStartedAt)
-  if (identity === 'unknown') throw new Error('CHANNEL_HOST_IDENTITY_UNVERIFIABLE')
-  if (identity !== 'alive') throw new Error('CHANNEL_HOST_IDENTITY_STALE')
+  const namespaced = await usesNamespacedManagementRpc(endpoint)
+  if (!namespaced) {
+    const identity = await processIdentityStatus(endpoint.pid, endpoint.processStartedAt)
+    if (identity === 'unknown') throw new Error('CHANNEL_HOST_IDENTITY_UNVERIFIABLE')
+    if (identity !== 'alive') throw new Error('CHANNEL_HOST_IDENTITY_STALE')
+  }
   let input: unknown
   try {
     input = options['--input'] === undefined ? {} : JSON.parse(options['--input'])
@@ -83,7 +93,7 @@ export async function runConfiguredChannelCommand(
   }
   let result: unknown
   try {
-    result = await requestPluginManagementRpc(paths, endpoint, {
+    result = await (namespaced ? requestNamespacedManagementRpc : requestPluginManagementRpc)(paths, endpoint, {
       kind: 'channel',
       operation,
       input,

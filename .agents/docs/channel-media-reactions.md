@@ -1,7 +1,8 @@
 # Channel media and reactions
 
 This candidate extends the existing Channel transport and the `ChannelFeedback`
-owner ported from the local feedback compatibility implementation. It is not yet
+owner maintained by the mainline TypeScript implementation, rather than a duplicate
+JavaScript compatibility controller. It is not yet
 a released capability; read the running CLI's help before using it. The packaged
 CordisX Skill routes agents to its Channel reference. Incoming turn instructions
 provide the exact CLI, profile and `--context`; do not substitute another service.

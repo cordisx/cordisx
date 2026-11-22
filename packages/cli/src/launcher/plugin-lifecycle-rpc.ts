@@ -4,6 +4,9 @@ import {
   type CordisXPluginLifecycleResultV1,
 } from '../plugin-lifecycle-contracts.js'
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
+import type { HostPermissionLifecycleApplyV7Request } from './plugin-lifecycle-model.js'
+import { deferredLifecycleReview } from './plugin-lifecycle-deferred.js'
+import type { DeferredPermissionPlan } from '../permission-deferral.js'
 import type {
   HostPermissionLifecycleApplyV2Request,
   HostPermissionLifecycleApplyV4Request,
@@ -71,6 +74,16 @@ export type PluginLifecycleBindingRequest =
     readonly kind: 'permission-review-apply-v4'
     readonly requestId: string
     readonly request: HostPermissionLifecycleApplyV4Request
+  }
+  | {
+    readonly kind: 'permission-review-plan-v7'
+    readonly requestId: string
+    readonly request: HostPermissionLifecycleReviewV4Request
+  }
+  | {
+    readonly kind: 'permission-review-apply-v7'
+    readonly requestId: string
+    readonly request: HostPermissionLifecycleApplyV7Request
   }
   | { readonly kind: 'bundle-snapshot-v1'; readonly requestId: string }
   | {
@@ -224,7 +237,10 @@ export function parsePluginLifecycleBindingRequest(
       return { kind: 'bundle-operation-v1', requestId: request.requestId, request: bundleRequest }
     }
     const scope = requestScope(request, handler)
-    if (request.kind === 'permission-review-plan-v2' || request.kind === 'permission-review-plan-v4') {
+    if (
+      request.kind === 'permission-review-plan-v2' || request.kind === 'permission-review-plan-v4'
+      || request.kind === 'permission-review-plan-v7'
+    ) {
       exactKeys(
         request,
         ['kind', 'requestId', 'profileId', 'runtimeGeneration', 'expectedRevision', 'target'],
@@ -279,6 +295,18 @@ export function parsePluginLifecycleBindingRequest(
         request: { ...scope, decision: request.decision as HostPermissionLifecycleApplyV4Request['decision'] },
       }
     }
+    if (request.kind === 'permission-review-apply-v7') {
+      exactKeys(
+        request,
+        ['kind', 'requestId', 'profileId', 'runtimeGeneration', 'expectedRevision', 'decision'],
+        'Host-private permission lifecycle request',
+      )
+      return {
+        kind: request.kind,
+        requestId: scope.requestId,
+        request: { ...scope, decision: request.decision as HostPermissionLifecycleApplyV7Request['decision'] },
+      }
+    }
     throw new Error('Host-private permission lifecycle request is unsupported')
   }
   const request = object(envelope.request, 'plugin lifecycle request')
@@ -306,6 +334,7 @@ export async function handlePluginLifecycleBindingRequest(
   | CordisXPluginLifecycleResultV1
   | CordisXPermissionAuthorizationPlanV2
   | CordisXPermissionAuthorizationPlanV4
+  | DeferredPermissionPlan
   | CordisXPluginBundleLifecycleResultV1
   | CordisXPluginBundleManagerSnapshotV1
   | undefined
@@ -315,8 +344,14 @@ export async function handlePluginLifecycleBindingRequest(
   if (input.kind === 'protocol-v1') return await handler.coordinator.handle(input.request)
   if (input.kind === 'permission-review-plan-v2') return await handler.coordinator.permissionReviewPlanV2(input.request)
   if (input.kind === 'permission-review-plan-v4') return await handler.coordinator.permissionReviewPlanV4(input.request)
+  if (input.kind === 'permission-review-plan-v7') {
+    return await deferredLifecycleReview(handler.coordinator, input.request)
+  }
   if (input.kind === 'permission-review-apply-v2') {
     return await handler.coordinator.applyPermissionReviewV2(input.request)
   }
-  return await handler.coordinator.applyPermissionReviewV4(input.request)
+  if (input.kind === 'permission-review-apply-v4') {
+    return await handler.coordinator.applyPermissionReviewV4(input.request)
+  }
+  return await handler.coordinator.applyPermissionReviewV7(input.request)
 }

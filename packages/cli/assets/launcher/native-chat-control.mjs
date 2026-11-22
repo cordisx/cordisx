@@ -24,6 +24,8 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
           'threadId',
           'model',
           'modelProvider',
+          'serviceTier',
+          'runtimeWorkspaceRoots',
           'cwd',
           'approvalPolicy',
           'sandbox',
@@ -38,18 +40,26 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       // Forward only execution configuration; provider credentials remain in the native transport.
       const executionConfig = object(params.config)
       const config = Object.fromEntries(
-        ['model_reasoning_effort', 'sandbox_workspace_write.network_access'].flatMap(field =>
-          executionConfig[field] === undefined ? [] : [[field, executionConfig[field]]]
-        ),
+        [
+          'model_reasoning_effort',
+          'sandbox_workspace_write.network_access',
+          'service_tier',
+          'sandbox_workspace_write.writable_roots',
+          'sandbox_workspace_write.exclude_tmpdir_env_var',
+          'sandbox_workspace_write.exclude_slash_tmp',
+        ].flatMap(field => executionConfig[field] === undefined ? [] : [[field, executionConfig[field]]]),
       )
       if (Object.keys(config).length) safe.config = config
       let prepared = object(await controlCall('execution-prepare', { method, params: safe }))
-      if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string' && readNative) {
+      if (
+        prepared.contextRequired && ['thread/resume', 'turn/start'].includes(method)
+        && typeof params.threadId === 'string' && readNative
+      ) {
         const context = {}
         const result = object(await readNative('thread/read', { threadId: params.threadId, includeTurns: false }))
         const thread = object(result.thread)
         if (thread.id !== params.threadId) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
-        for (const field of ['cwd', 'model', 'reasoningEffort']) {
+        for (const field of ['cwd', 'model', 'modelProvider', 'reasoningEffort']) {
           if (thread[field] !== undefined) context[field] = thread[field]
         }
         prepared = object(await controlCall('execution-prepare', { method, params: safe, context }))
@@ -60,7 +70,7 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
         params: {
           ...params,
           ...fields,
-          ...(fields.config ? { config: { ...object(fields.config), ...object(params.config) } } : {}),
+          ...(fields.config ? { config: { ...object(params.config), ...object(fields.config) } } : {}),
         },
         captureId: prepared.captureId,
       }

@@ -27,6 +27,149 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('enriches admitted desktop models with native Fast metadata without expanding admission', async () => {
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      cwd: '/repo',
+      nativeRequest: async () => ({}),
+      models: async () => ({ providers: [{ providerId: 'openai', models: [{ id: 'allowed' }] }] }),
+      configuration: {
+        catalog: async () => [{
+          providerId: 'openai',
+          defaultModelId: 'allowed',
+          models: [{ id: 'allowed', supportsFastMode: true }, { id: 'other', supportsFastMode: true }],
+        }],
+      } as never,
+    })
+    expect(await sessions.modelOperation('list', {})).toEqual({
+      providers: [{
+        providerId: 'openai',
+        defaultModelId: 'allowed',
+        models: [{ id: 'allowed', supportsFastMode: true }],
+      }],
+    })
+  })
+  it('retains requested effort after native model selection resets it', async () => {
+    let selection = { providerId: 'one', model: 'old', effort: 'high' }
+    const set = vi.fn(async () => ({}))
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      cwd: '/repo',
+      nativeRequest: async () => ({
+        thread: {
+          id: 'chat',
+          status: { type: 'idle' },
+          modelProvider: selection.providerId,
+          model: selection.model,
+          reasoningEffort: selection.effort,
+        },
+      }),
+      models: async () => {
+        selection = { providerId: 'two', model: 'new', effort: 'low' }
+        return { status: 'selected' }
+      },
+      execution: { read: () => ({ revision: 0, override: {} }), set } as never,
+    })
+    expect(await sessions.applyTaskSelection('chat', { providerId: 'two', model: 'new', effort: 'high' }))
+      .toMatchObject({ status: 'selected', application: 'saved' })
+    expect(set).toHaveBeenCalledWith('local', 'chat', { effort: 'high' }, 0)
+  })
+  it('reports native configuration failures instead of inventing an unbound project', async () => {
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      cwd: '/repo',
+      nativeRequest: async () => ({ thread: { id: 'chat' } }),
+      configuration: { call: async () => ({ status: 'rejected', code: 'CHAT_CONFIGURATION_UNAVAILABLE' }) } as never,
+    })
+    await expect(sessions.taskSelection('chat')).rejects.toThrow('CHAT_CONFIGURATION_UNAVAILABLE')
+  })
+  it('applies project and explicit Fast false before Channel first send, using the common creation layer', async () => {
+    const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
+    const validateProject = vi.fn(async () => {})
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      nativeRequest: async () => ({}),
+      cwd: '/outside',
+      configuration: { validateProject } as never,
+      execution: {
+        creationDefaults: async () => ({ settings: { providerId: 'openai', model: 'fast-model', fast: true } }),
+        defaults: async () => ({ settings: {} }),
+      } as never,
+    })
+    await sessions.start('configured-first', input, undefined, undefined, undefined, undefined, {
+      fast: false,
+      projectId: 'repo',
+    })
+    expect(validateProject).toHaveBeenCalledWith('repo', undefined)
+    expect(call).toHaveBeenCalledWith(
+      'codex',
+      'start_session',
+      expect.objectContaining({
+        providerId: 'openai',
+        model: 'fast-model',
+        serviceTier: null,
+        projectId: 'repo',
+      }),
+      undefined,
+    )
+  })
+  it('clears an old Fast tier before switching to a non-Fast provider and revalidates between effects', async () => {
+    let current = { providerId: 'one', model: 'old', fast: true }
+    const order: string[] = []
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      cwd: '/repo',
+      nativeRequest: async () => ({
+        thread: { id: 'chat', status: { type: 'idle' }, modelProvider: current.providerId, model: current.model },
+      }),
+      configuration: {
+        call: async () => ({ status: 'ok', revision: 0, effective: { fast: current.fast } }),
+        applyChannel: async (_operation: string, patch: { fast: boolean }, before: () => Promise<boolean>) => {
+          expect(await before()).toBe(true)
+          order.push('fast')
+          current.fast = patch.fast
+          return { status: 'applied' }
+        },
+      } as never,
+      models: async (_operation, patch, before) => {
+        expect(await before!()).toBe(true)
+        order.push('provider')
+        const selected = patch as { providerId: string; model: string }
+        current = { ...current, ...selected }
+        return { status: 'selected' }
+      },
+    })
+    expect(
+      await sessions.applyTaskSelection('chat', { providerId: 'two', model: 'new', fast: false }, async applied => {
+        const expected = { providerId: 'one', model: 'old', fast: true, ...applied }
+        return Object.entries(expected).every(([key, value]) => current[key as keyof typeof current] === value)
+      }),
+    ).toMatchObject({ status: 'selected', application: 'applied' })
+    expect(order).toEqual(['fast', 'provider'])
+  })
+  it('merges Channel creation selection over common defaults without carrying another provider model', async () => {
+    const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      nativeRequest: async () => ({}),
+      cwd: '/tmp',
+      execution: {
+        creationDefaults: async () => ({ settings: { providerId: 'base', model: 'base-model' } }),
+        defaults: async () => ({ settings: {} }),
+      } as never,
+      models: async () => ({
+        providers: [{ providerId: 'channel', defaultModelId: 'channel-model', models: [{ id: 'channel-model' }] }],
+      }),
+    })
+    expect(await sessions.creationSelection()).toEqual({ providerId: 'base', model: 'base-model' })
+    await sessions.start('selection', input, undefined, undefined, undefined, undefined, { providerId: 'channel' })
+    expect(call).toHaveBeenCalledWith(
+      'codex',
+      'start_session',
+      expect.objectContaining({ providerId: 'channel', model: 'channel-model' }),
+      undefined,
+    )
+  })
   it('expires only the global preparation fence while keeping the known target restricted', async () => {
     vi.useFakeTimers()
     try {
@@ -145,7 +288,12 @@ describe('Channel native task delivery', () => {
       sourceConfiguration: async () => live as never,
       models: async () => ({ status: 'selected' }),
     })
-    expect(await sessions.taskSelection('chat')).toEqual({ providerId: 'two', model: 'new', effort: 'low' })
+    expect(await sessions.taskSelection('chat')).toEqual({
+      providerId: 'two',
+      model: 'new',
+      effort: 'low',
+      fast: false,
+    })
     expect(await sessions.applyTaskSelection('chat', { providerId: 'two', model: 'new', effort: 'inherit' }))
       .toMatchObject({ status: 'selected' })
     expect(execution.set).toHaveBeenCalledWith('local', 'chat', { approval: 'never' }, 2)
@@ -224,6 +372,47 @@ describe('Channel native task delivery', () => {
     expect(nativeRequest.mock.calls.every(([, params]) => (params as { threadId: string }).threadId === 'chat')).toBe(
       true,
     )
+  })
+  it('falls back on old app-servers only for a missing item method and the exact completed turn', async () => {
+    const nativeRequest = vi.fn(async (method: string) => {
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: 'completed' }] }
+      if (method === 'thread/items/list') throw Object.assign(new Error('missing'), { rpcCode: -32601 })
+      if (method === 'thread/read') {
+        return {
+          thread: {
+            id: 'chat',
+            turns: [
+              {
+                id: 'other',
+                status: 'completed',
+                items: [{ type: 'agentMessage', phase: 'final_answer', text: 'wrong' }],
+              },
+              {
+                id: 'turn',
+                status: 'completed',
+                items: [
+                  { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
+                  { type: 'agentMessage', phase: 'final_answer', text: 'correct' },
+                ],
+              },
+            ],
+          },
+        }
+      }
+      throw new Error('unexpected')
+    })
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      nativeRequest: nativeRequest as never,
+      cwd: '/tmp',
+    })
+    await expect(sessions.completion('chat', 'turn', true)).resolves.toEqual({ state: 'completed', text: 'correct' })
+    expect(nativeRequest).toHaveBeenCalledWith('thread/read', { threadId: 'chat', includeTurns: true })
+    nativeRequest.mockImplementationOnce(async () => ({ data: [{ id: 'turn', status: 'completed' }] }))
+    nativeRequest.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('denied'), { rpcCode: -32000 })
+    })
+    await expect(sessions.completion('chat', 'turn', true)).rejects.toThrow('denied')
   })
   it('checks cancellation after async credential preparation and before creating a native thread', async () => {
     const lifetime = new AbortController()

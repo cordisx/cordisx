@@ -115,6 +115,39 @@ describe('26.924 Manager rail seat', () => {
     expect(resolveManagerRailSeat(document)).toBeUndefined()
   })
 
+  it.each([false, true])('preserves 26.1111 Images before Scheduled with Space enabled: %s', withSpace => {
+    const document = railDocument()
+    const automations = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:automations"]')!
+    automations.parentElement!.replaceWith(automations)
+    const image = document.createElement('button')
+    image.dataset.sidebarDestination = 'builtin:images'
+    image.getClientRects = () => ({ length: 1 }) as DOMRectList
+    automations.before(image)
+    const space = image.cloneNode() as HTMLButtonElement
+    space.dataset.sidebarDestination = 'builtin:space'
+    space.getClientRects = image.getClientRects
+    if (withSpace) automations.before(space)
+    const seat = resolveManagerRailSeat(document)!
+    expect(seat.before).toBe(image)
+    const nativeItems = [...seat.container.children]
+    const manager = document.createElement('div')
+    manager.dataset.cordisxManagerRailItem = 'true'
+    seat.container.insertBefore(manager, image)
+    expect(resolveManagerRailSeat(document)).toEqual(seat)
+    expect([...seat.container.children].filter(item => item !== manager)).toEqual(nativeItems)
+    manager.remove()
+    image.getClientRects = () => ({ length: 0 }) as DOMRectList
+    expect(resolveManagerRailSeat(document)).toBeUndefined()
+    image.getClientRects = () => ({ length: 1 }) as DOMRectList
+    const duplicate = image.cloneNode() as HTMLButtonElement
+    duplicate.getClientRects = image.getClientRects
+    image.after(duplicate)
+    expect(resolveManagerRailSeat(document)).toBeUndefined()
+    duplicate.remove()
+    automations.after(image)
+    expect(resolveManagerRailSeat(document)).toBeUndefined()
+  })
+
   it('rejects a changed order, hidden anchor, or legacy text-only rail', () => {
     const document = railDocument()
     const home = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!

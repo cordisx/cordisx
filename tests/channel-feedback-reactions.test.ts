@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ChannelFeedback, createFeedbackSdkAccess } from '../packages/cli/src/launcher/channel-feedback.js'
+import { ChannelFeedback } from '../packages/cli/src/launcher/channel-feedback.js'
+import { channelFeedbackSdk } from '../packages/cli/src/launcher/channel-feedback-sdk.js'
 import { channelReactionInput } from '../packages/cli/src/launcher/channel-reaction-input.js'
 import { channelCliHelp } from '../packages/cli/src/cli/channel-command-help.js'
 import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-conversation-tools.js'
@@ -22,14 +23,14 @@ describe('feedback reaction owner', () => {
     const create = vi.fn(async () => ({ code: 0, data: { reaction_id: 'own' } }))
     const remove = vi.fn(async () => ({ code: 0 }))
     const channel = { rawClient: { im: { v1: { messageReaction: { create, delete: remove } } } } }
-    const access = createFeedbackSdkAccess(() => channel, () => true)
-    expect(await access.react(event, 'OnIt')).toEqual({ reactionId: 'own', emojiType: 'OnIt' })
-    await expect(access.remove({ ...event, accountId: 'other' }, 'own')).rejects.toThrow('NOT_OWNED')
-    await expect(access.remove(event, 'human')).rejects.toThrow('NOT_OWNED')
-    await access.remove(event, 'own')
+    const access = channelFeedbackSdk(() => channel as never, () => true)
+    expect(await access.feedbackReact(event, 'OnIt')).toEqual({ reactionId: 'own', emojiType: 'OnIt' })
+    await expect(access.feedbackRemove({ ...event, accountId: 'other' }, 'own')).rejects.toThrow('NOT_OWNED')
+    await expect(access.feedbackRemove(event, 'human')).rejects.toThrow('NOT_OWNED')
+    await access.feedbackRemove(event, 'own')
     expect(remove).toHaveBeenCalledTimes(1)
     create.mockResolvedValue({ code: 0, data: {} } as never)
-    await expect(access.react(event, 'OnIt')).rejects.toThrow('UNKNOWN')
+    await expect(access.feedbackReact(event, 'OnIt')).rejects.toThrow('UNKNOWN')
   })
   it('a blank agent discovers help and invokes the authorized reaction seam', async () => {
     expect(channelCliHelp('reaction')).toContain('action:"add"')
@@ -57,7 +58,7 @@ describe('feedback reaction owner', () => {
   })
   it('requires actual completed jobs and an explicit completion mapping', async () => {
     const state: any = {
-      policy: { enabled: true },
+      policy: { enabled: true, rules: [{ action: 'dispatch', effect: 'allow' }, { action: 'send', effect: 'allow' }] },
       inputs: { source: { input: { source: { event } }, feedback: { reaction: { reactionId: 'processing' } } } },
       jobs: { job: { recordId: 'source', state: 'running' } },
     }
@@ -65,6 +66,7 @@ describe('feedback reaction owner', () => {
     let completion: string | undefined
     const feedback = new ChannelFeedback({
       store: { snapshot: () => structuredClone(state), mutate: async (run: any) => run(state) },
+      signal: new AbortController().signal,
       access: () => ({ feedbackReact: react, feedbackRemove: remove }),
       allows: () => true,
       settings: async () => ({ reaction: { enabled: true, completionEmojiType: completion } }),

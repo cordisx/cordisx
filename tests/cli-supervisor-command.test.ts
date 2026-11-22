@@ -1,13 +1,14 @@
 import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
-import { runSupervisorCommand } from '../packages/cli/src/cli/supervisor-command.js'
+import { runSupervisorCommand, waitForState } from '../packages/cli/src/cli/supervisor-command.js'
 import {
   acquireSupervisorStartLock,
   processStartIdentity,
@@ -367,6 +368,40 @@ describe('supervisor management commands', () => {
       } catch { /* already stopped */ }
     }
   }, 15_000)
+
+  it('reads the final diagnosis when the supervisor fails after the initial state snapshot', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-supervisor-exit-race-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' })
+    const exited = once(child, 'exit')
+    const failure = 'managed backend packages require a canonical HTTPS source'
+    try {
+      const startedAt = await processStartIdentity(child.pid!)
+      await writeSupervisorState(paths, {
+        schemaVersion: 1,
+        appId: 'codex',
+        profileId: 'default',
+        phase: 'starting',
+        pid: child.pid!,
+        processStartedAt: startedAt!,
+        hostPid: child.pid!,
+        hostProcessStartedAt: startedAt!,
+        instanceToken: 'a'.repeat(64),
+        createdAt: new Date().toISOString(),
+        version: cliVersion.version,
+        effectiveConfig: 'test',
+      })
+      await expect(waitForState(paths, 1_000, async state => {
+        await writeSupervisorState(paths, { ...state, phase: 'failed', failure })
+        child.kill()
+        await exited
+      })).rejects.toThrow(failure)
+    } finally {
+      child.kill()
+      await exited
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 
   it('reports startup-operation contention instead of renderer readiness timeout', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))

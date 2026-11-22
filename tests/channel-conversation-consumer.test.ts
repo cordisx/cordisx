@@ -91,6 +91,27 @@ async function settle(consumer: ChannelConversationConsumer) {
 }
 
 describe('persistent Channel chat consumer', () => {
+  it('does not let a conversation-scoped command grant mutate global policy', async () => {
+    const f = await fixture(), source = channel('oc_scoped', 'group')
+    const grant = { ...commandGrant, conversationId: source.conversationId, userIds: ['alice'] }
+    await f.consumer.policySet({ enabled: true, rules: [grant] }, 0)
+    await f.consumer.receive(
+      'inbox:global-denied',
+      message('om_global_denied', '/allow-user ou_bob --global', source),
+      true,
+    )
+    await settle(f.consumer)
+    expect(f.consumer.policy().policy.rules).toEqual([grant])
+    expect(f.runtime.notifyOnce.mock.calls[0]?.[0].text).toContain('没有修改全局策略的权限')
+    await f.consumer.receive('inbox:local-allowed', message('om_local_allowed', '/allow-user ou_bob', source), true)
+    await settle(f.consumer)
+    expect(f.consumer.policy().policy.rules).toContainEqual(expect.objectContaining({
+      action: 'dispatch',
+      effect: 'allow',
+      conversationId: source.conversationId,
+      userIds: ['ou_bob'],
+    }))
+  })
   it('replaces the terminal approval card after the topic receipt materializes its root snapshot', async () => {
     const f = await fixture(), source = channel('oc_cards', 'group')
     let listener!: (event: Record<string, unknown>) => void

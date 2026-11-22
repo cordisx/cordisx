@@ -1,10 +1,64 @@
+vi.mock(
+  '../packages/cli/src/config/home-config.js',
+  () => ({
+    loadHomeConfig: async () => ({
+      apps: {
+        codex: {
+          profiles: { test: { approvalReview: f.reviewSettings ? { settings: f.reviewSettings } : undefined } },
+        },
+      },
+    }),
+  }),
+)
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
+  ChatExecutionPreferences: class {
+    static async open() {
+      return { close: async () => {} }
+    }
+  },
+}))
+vi.mock('../packages/cli/src/launcher/codex-chat-configuration.js', () => ({
+  CodexChatConfiguration: class {
+    static async open() {
+      return { call: async () => ({}), close: async () => {} }
+    }
+  },
+}))
 
-const f = vi.hoisted(() => ({ events: [] as string[], failStart: false, enabled: true }))
+const f = vi.hoisted(() => ({
+  events: [] as string[],
+  failStart: false,
+  enabled: true,
+  packageMode: false,
+  packageReadCount: 0,
+  transportEnvironment: undefined as NodeJS.ProcessEnv | undefined,
+  backendEnvironment: undefined as NodeJS.ProcessEnv | undefined,
+  reviewSettings: undefined as undefined | { providerId: string },
+  backendReview: undefined as undefined | { modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
+}))
+vi.mock(
+  '../packages/cli/src/launcher/approval-review-catalog.js',
+  () => ({
+    prepareApprovalReviewCatalog: async (input: { settings?: unknown }) =>
+      input.settings
+        ? {
+          path: '/review/catalog.json',
+          providerId: 'gateway',
+          modelIds: ['work'],
+          close: async () => {
+            f.events.push('review-close')
+          },
+        }
+        : undefined,
+  }),
+)
 vi.mock(
   '../packages/cli/src/launcher/config.js',
   () => ({
-    loadConfig: async () => ({ plugins: [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs' }] }),
+    loadConfig: async () => ({
+      plugins: f.packageMode ? [] : [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs' }],
+    }),
   }),
 )
 vi.mock('../packages/cli/src/launcher/plugin-activation.js', () => ({
@@ -14,26 +68,68 @@ vi.mock('../packages/cli/src/launcher/plugin-activation.js', () => ({
     }
   },
 }))
-vi.mock('../packages/cli/src/launcher/plugin-composition.js', () => ({ loadPluginComposition: async () => [] }))
+vi.mock('../packages/cli/src/launcher/plugin-composition.js', () => ({
+  loadPluginComposition: async () =>
+    f.packageMode
+      ? [{ id: 'channel', enabled: f.enabled, entry: '/plugin/index.mjs', package: { version: '0.1.7' } }]
+      : [],
+}))
+vi.mock('../packages/cli/src/launcher/package-plugin-service-config.js', () => ({
+  PackagePluginServiceConfigStore: class {
+    persistence = {
+      read: async () => {
+        f.packageReadCount += 1
+        return {
+          config: {
+            contract: 'cordisx.channel-service-config/v2',
+            schemaVersion: 2,
+            connections: [],
+          },
+        }
+      },
+    }
+  },
+}))
 vi.mock(
   '../packages/cli/src/config/service-config.js',
-  () => ({ readServiceConfigState: async () => ({ config: {} }) }),
+  () => ({
+    readServiceConfigState: async () => ({
+      config: {
+        contract: 'cordisx.channel-service-config/v2',
+        schemaVersion: 2,
+        connections: [{
+          ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant' },
+          adapterKind: 'feishu',
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: 'host-secret:env/CHANNEL_KEY',
+        }],
+      },
+    }),
+  }),
 )
 vi.mock('../packages/cli/src/launcher/channel-service.js', () => ({
   CHANNEL_SERVICE_CONFIG_INITIAL: {},
-  createLocalChannelService: () => ({
-    conversationAccess: () => undefined,
-    start: async () => {
-      f.events.push('service-start')
-      if (f.failStart) throw new Error('start failed')
-    },
-    dispose: async () => {
-      f.events.push('service-close')
-    },
-  }),
+  createLocalChannelService: (input: { environment: NodeJS.ProcessEnv }) => {
+    f.transportEnvironment = input.environment
+    return ({
+      conversationAccess: () => undefined,
+      start: async () => {
+        f.events.push('service-start')
+        if (f.failStart) throw new Error('start failed')
+      },
+      dispose: async () => {
+        f.events.push('service-close')
+      },
+    })
+  },
 }))
 vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
-  startHeadlessCodexBackend: async () => {
+  startHeadlessCodexBackend: async (
+    input: { environment: NodeJS.ProcessEnv; modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
+  ) => {
+    f.backendEnvironment = input.environment
+    f.backendReview = input
     f.events.push('backend-start')
     return {
       call: async () => ({}),
@@ -64,7 +160,14 @@ vi.mock(
 )
 vi.mock('../packages/cli/src/launcher/headless-native-authority.js', () => ({
   createHeadlessNativeAuthority: async () => ({
-    authority: { request: () => ({}) },
+    authority: {
+      request: () => ({}),
+      execution: {
+        bindReviewProvider: (provider: string) => {
+          f.events.push(`review-bound:${provider}`)
+        },
+      },
+    },
     setReader: () => {},
     close: async () => {
       f.events.push('authority-close')
@@ -91,12 +194,34 @@ describe('headless service lifecycle', () => {
     f.events.length = 0
     f.failStart = false
     f.enabled = true
+    f.packageMode = false
+    f.packageReadCount = 0
+    f.reviewSettings = undefined
+    f.backendReview = undefined
+  })
+  it('passes profile review routing to the native backend before ingress and closes its snapshot', async () => {
+    f.reviewSettings = { providerId: 'gateway' }
+    const service = await startHeadlessService(input)
+    expect(f.backendReview).toMatchObject({
+      modelCatalogPath: '/review/catalog.json',
+      modelCatalogPreserveProvider: true,
+    })
+    expect(f.events.slice(0, 2)).toEqual(['review-bound:gateway', 'backend-start'])
+    await service.close()
+    expect(f.events).toContain('review-close')
   })
   it('attaches the consumer before ingress and disposes in reverse order once', async () => {
     const service = await startHeadlessService(input)
     expect(f.events).toEqual(['backend-start', 'consumer-attached', 'service-start'])
     await Promise.all([service!.close(), service!.close()])
     expect(f.events.slice(3)).toEqual(['consumer-close', 'service-close', 'backend-close', 'authority-close'])
+  })
+  it('loads lifecycle-installed Channel service configuration from its package store', async () => {
+    f.packageMode = true
+    const service = await startHeadlessService(input)
+    expect(f.packageReadCount).toBe(1)
+    expect(f.events).toContain('service-start')
+    await service.close()
   })
   it('cleans up every owner if startup fails', async () => {
     f.failStart = true
@@ -111,9 +236,26 @@ describe('headless service lifecycle', () => {
       'authority-close',
     ])
   })
+  it('keeps environment credentials in the transport and out of the Codex backend', async () => {
+    const environment = { PATH: '/bin', CHANNEL_KEY: 'fixture-only' }
+    const service = await startHeadlessService({ ...input, environment })
+    try {
+      expect(f.transportEnvironment).toEqual(environment)
+      expect(f.backendEnvironment).toEqual({ PATH: '/bin' })
+      expect(environment.CHANNEL_KEY).toBe('fixture-only')
+    } finally {
+      await service.close()
+    }
+  })
   it('does not start a backend for a disabled Channel plugin', async () => {
     f.enabled = false
-    expect(await startHeadlessService(input)).toBeUndefined()
+    const service = await startHeadlessService(input)
+    expect(service.channel).toBeUndefined()
+    expect(await service.codex('capabilities', {})).toMatchObject({
+      capabilities: { modelServices: true, providerCatalog: false, executionSettings: true },
+    })
     expect(f.events).toEqual([])
+    await service.close()
+    expect(await service.codex('capabilities', {})).toMatchObject({ code: 'CODEX_RUNTIME_UNAVAILABLE' })
   })
 })

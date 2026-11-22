@@ -42,8 +42,8 @@ export async function captureChannelCredential(input: {
       ? (input.account ? '更换飞书应用凭据' : '配置应用凭据')
       : (input.account ? 'Replace application credentials' : 'Configure application credentials'),
     description: zh
-      ? '填写应用的 App ID 和 App Secret（App Key），密钥保存在系统钥匙串。'
-      : 'Enter the application App ID and App Secret (App Key). The secret is stored in the system Keychain.',
+      ? '填写应用的 App ID 和 App Secret（App Key），密钥由 Host 私密保存：macOS 使用钥匙串，Linux 使用本机加密文件。'
+      : 'Enter the application App ID and App Secret (App Key). The Host stores it privately in macOS Keychain or encrypted local files on Linux.',
     closeOnBackdrop: false,
   }, ({ container, dialog }) => {
     container.classList.add('cxh-tdesign-root')

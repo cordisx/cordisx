@@ -1,3 +1,5 @@
+import { composerDiagnosticPhases, logComposerTiming } from './native-composer-diagnostics.js'
+
 export interface NativeMcpBridge {
   readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
 }
@@ -23,6 +25,9 @@ export class NativeMcpRequestClient {
 
   async request(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (this.disposed) throw new Error('Native model provider transport unavailable')
+    const startedAt = performance.now()
+    const phase = composerDiagnosticPhases.find(phase => phase === method)
+    let state: 'ready' | 'failed' | 'timeout' | 'disposed' = 'ready'
     const requestId = `cordisx-native-model-provider:${crypto.randomUUID()}`
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -49,7 +54,18 @@ export class NativeMcpRequestClient {
     } catch (error) {
       rejectSend(error)
     }
-    return await response
+    try {
+      return await response
+    } catch (error) {
+      state = this.disposed
+        ? 'disposed'
+        : error instanceof Error && error.message === `Codex Desktop ${method} timed out`
+        ? 'timeout'
+        : 'failed'
+      throw error
+    } finally {
+      if (phase) logComposerTiming(phase, state, startedAt)
+    }
   }
 
   receive(message: Record<string, unknown> | undefined): boolean {

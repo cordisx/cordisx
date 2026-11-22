@@ -5,7 +5,7 @@ export interface NativeSessionDisplay {
   readonly providerId: string
   readonly model: string
   readonly reasoningEffort?: string
-  readonly serviceTier: 'priority' | null
+  readonly serviceTier?: 'priority' | null
   readonly updatedAt: number
 }
 
@@ -17,12 +17,12 @@ const valid = (value: unknown): value is string =>
 export class NativeSessionDisplayCache {
   constructor(private readonly storage: Storage | undefined, private readonly now: () => number = Date.now) {}
 
-  private key(hostId: string, threadId: string): string {
-    return nativeSessionDisplayPrefix + JSON.stringify([hostId, threadId])
+  private key(hostId: string, threadId: string | undefined): string {
+    return nativeSessionDisplayPrefix + JSON.stringify([hostId, threadId ?? null])
   }
 
-  read(hostId: string, threadId: string): NativeSessionDisplay | undefined {
-    if (!valid(hostId) || !valid(threadId)) return undefined
+  read(hostId: string, threadId: string | undefined): NativeSessionDisplay | undefined {
+    if (!valid(hostId) || threadId !== undefined && !valid(threadId)) return undefined
     try {
       const value: unknown = JSON.parse(this.storage?.getItem(this.key(hostId, threadId)) ?? 'null')
       if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
@@ -30,14 +30,14 @@ export class NativeSessionDisplayCache {
       if (
         !valid(item.providerId) || !valid(item.model)
         || (item.reasoningEffort !== undefined && !isModelReasoningEffort(item.reasoningEffort))
-        || (item.serviceTier !== null && item.serviceTier !== 'priority')
+        || (item.serviceTier !== undefined && item.serviceTier !== null && item.serviceTier !== 'priority')
         || typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)
       ) return undefined
       return {
         providerId: item.providerId,
         model: item.model,
         ...(item.reasoningEffort === undefined ? {} : { reasoningEffort: item.reasoningEffort as string }),
-        serviceTier: item.serviceTier,
+        ...(item.serviceTier === undefined ? {} : { serviceTier: item.serviceTier as 'priority' | null }),
         updatedAt: item.updatedAt,
       }
     } catch {
@@ -47,36 +47,56 @@ export class NativeSessionDisplayCache {
 
   readSelection(hostId: string, state: import('./native-model-provider-state.js').SelectionSnapshot) {
     if (
-      !state.threadId
-      || state.available && isModelReasoningEffort(state.reasoningEffort) && state.serviceTier !== undefined
+      state.available && isModelReasoningEffort(state.reasoningEffort) && state.serviceTier !== undefined
     ) {
       return undefined
     }
     return this.read(hostId, state.threadId)
   }
 
-  /** Store only a fully observed tuple from an unlocked, bound selection. */
+  projectSelection(
+    hostId: string,
+    state: import('./native-model-provider-state.js').SelectionSnapshot,
+    locked: boolean,
+  ) {
+    const display = this.readSelection(hostId, state)
+    this.writeSelection(hostId, state, locked)
+    return display
+  }
+
+  /** Store confirmed labels independently of optional effort/Fast metadata. */
   writeSelection(
     hostId: string,
     state: import('./native-model-provider-state.js').SelectionSnapshot,
     locked: boolean,
   ): void {
     if (
-      locked || !state.available || !state.threadId || !state.modelProvider || !state.model
-      || !isModelReasoningEffort(state.reasoningEffort) || state.serviceTier === undefined
+      locked || !state.available || !state.modelProvider || !state.model
     ) return
+    const previous = this.read(hostId, state.threadId)
+    const sameTuple = previous?.providerId === state.modelProvider && previous.model === state.model
     this.write(hostId, state.threadId, {
       providerId: state.modelProvider,
       model: state.model,
-      reasoningEffort: state.reasoningEffort,
-      serviceTier: state.serviceTier,
+      ...(isModelReasoningEffort(state.reasoningEffort)
+        ? { reasoningEffort: state.reasoningEffort }
+        : sameTuple && previous.reasoningEffort !== undefined
+        ? { reasoningEffort: previous.reasoningEffort }
+        : {}),
+      ...(state.serviceTier !== undefined
+        ? { serviceTier: state.serviceTier }
+        : sameTuple && previous.serviceTier !== undefined
+        ? { serviceTier: previous.serviceTier }
+        : {}),
     })
   }
 
-  write(hostId: string, threadId: string, display: Omit<NativeSessionDisplay, 'updatedAt'>): void {
+  write(hostId: string, threadId: string | undefined, display: Omit<NativeSessionDisplay, 'updatedAt'>): void {
     if (
-      !valid(hostId) || !valid(threadId) || !valid(display.providerId) || !valid(display.model)
+      !valid(hostId) || threadId !== undefined && !valid(threadId) || !valid(display.providerId)
+      || !valid(display.model)
       || (display.reasoningEffort !== undefined && !isModelReasoningEffort(display.reasoningEffort))
+      || (display.serviceTier !== undefined && display.serviceTier !== null && display.serviceTier !== 'priority')
     ) return
     const old = this.read(hostId, threadId)
     if (

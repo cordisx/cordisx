@@ -44,7 +44,7 @@ export function modelProviderSelectionDisplay(
   copy: Readonly<{ choose: string; official: string; unknown: string }>,
 ) {
   // Cached values are projected only into this display function.
-  if (!native.available && native.cachedDisplay && native.threadId !== undefined) {
+  if (!native.available && native.cachedDisplay) {
     const sameTuple = native.modelProvider === native.cachedDisplay.providerId
       && native.model === native.cachedDisplay.model
     const {

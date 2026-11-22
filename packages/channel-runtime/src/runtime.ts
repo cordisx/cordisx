@@ -44,6 +44,7 @@ import type {
   ChannelRuntimeSnapshot,
   ChannelSubscriptionFilter,
   ChannelTenantRef,
+  ChannelThreadRef,
 } from './types.js'
 export { ChannelIntegrityError } from './runtime-validation.js'
 
@@ -154,6 +155,15 @@ export class ChannelRuntime {
     readonly listener: ChannelMessageListener
   }>()
   #disposed = false
+  readonly #outboundObservers = new Set<(target: ChannelThreadRef) => void>()
+
+  /** Launcher-only observation before enqueue; failures never change delivery. */
+  observeOutbound(listener: (target: ChannelThreadRef) => void): () => void {
+    this.#outboundObservers.add(listener)
+    return () => {
+      this.#outboundObservers.delete(listener)
+    }
+  }
 
   private constructor(options: ChannelRuntimeOptions, store: JsonChannelStore) {
     this.#permissions = options.permissions
@@ -393,6 +403,11 @@ export class ChannelRuntime {
       generation: adapter.generation,
       operationId: deliveryId,
     })
+    for (const listener of this.#outboundObservers) {
+      try {
+        listener(target)
+      } catch { /* ancillary feedback cannot affect delivery */ }
+    }
     const now = this.#now()
     await this.#store.transaction(state => {
       if (state.adapters[key]?.generation !== adapter.generation) throw new ChannelGenerationFencedError()
@@ -571,6 +586,7 @@ export class ChannelRuntime {
   async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
+    this.#outboundObservers.clear()
     this.#subscriptions.clear()
     const active = [...this.#connections.entries()]
     this.#connections.clear()

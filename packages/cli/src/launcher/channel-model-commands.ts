@@ -7,6 +7,17 @@ import { channelCommandHelp } from '../channel-command-registry.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+export const CHANNEL_MODEL_COMMANDS: readonly string[] = [
+  'model',
+  'provider',
+  'models',
+  'fast',
+  'project',
+  'task-settings',
+  'task-requests',
+  'task-approve',
+  'task-deny',
+]
 export class ChannelModelCommands {
   constructor(
     private readonly input: {
@@ -18,9 +29,7 @@ export class ChannelModelCommands {
     },
   ) {}
   async handle(event: ChannelEventRef, command: string, argument: string): Promise<string | undefined> {
-    if (
-      !['model', 'provider', 'models', 'task-settings', 'task-requests', 'task-approve', 'task-deny'].includes(command)
-    ) return undefined
+    if (!CHANNEL_MODEL_COMMANDS.includes(command)) return undefined
     if (this.input.denied(event, command)) return '当前用户没有执行此指令的权限；未修改配置。'
     const tasks = this.input.tasks
     if (!tasks) return '当前 Host 不支持 Channel 模型设置。'
@@ -46,6 +55,13 @@ export class ChannelModelCommands {
         ).join('\n')
         : '当前会话没有模型配置申请。'
     }
+    if (command === 'project' && argument.trim() === 'list') {
+      const result = object(await tasks.catalog())
+      if (result.projectAvailability === 'unavailable') return '当前运行环境没有可用的本地项目能力。'
+      return Array.isArray(result.projects) && result.projects.length
+        ? result.projects.map(object).map(project => `${project.name}（${project.projectId}）`).join('\n')
+        : '当前没有可用的本地项目目录。'
+    }
     if (command === 'task-approve' || command === 'task-deny') {
       if (!/^[a-f0-9]{8}$/u.test(argument.trim())) return channelCommandHelp(command)
       return tasks.answer(event, argument.trim(), command === 'task-deny' ? 'decline' : 'accept')
@@ -56,21 +72,33 @@ export class ChannelModelCommands {
     for (let i = 0; i < args.length; i++) {
       const item = args[i]!
       if (item === '--all') all = true
-      else if (['--target', '--provider', '--model', '--effort'].includes(item)) {
+      else if (['--target', '--provider', '--model', '--effort', '--fast', '--project'].includes(item)) {
         const value = args[++i]
         if (!value || value.startsWith('--')) throw new Error('INVALID_COMMAND_ARGUMENTS')
         if (item === '--target') {
           if (targetId) throw new Error('INVALID_COMMAND_ARGUMENTS')
           targetId = value
         } else {
-          const key = item === '--provider' ? 'providerId' : item.slice(2)
-          if (patch[key]) throw new Error('INVALID_COMMAND_ARGUMENTS')
-          patch[key] = value
+          const key = item === '--provider' ? 'providerId' : item === '--project' ? 'projectId' : item.slice(2)
+          if (patch[key] !== undefined) throw new Error('INVALID_COMMAND_ARGUMENTS')
+          if (key === 'fast' && !['true', 'false', 'on', 'off'].includes(value)) {
+            throw new Error('INVALID_COMMAND_ARGUMENTS')
+          }
+          patch[key] = key === 'fast' ? ['true', 'on'].includes(value) : value
         }
-      } else if (!item.startsWith('--') && ['model', 'provider'].includes(command)) {
-        const key = command === 'model' ? 'model' : 'providerId'
-        if (patch[key]) throw new Error('INVALID_COMMAND_ARGUMENTS')
-        patch[key] = item
+      } else if (!item.startsWith('--') && ['model', 'provider', 'fast', 'project'].includes(command)) {
+        const key = command === 'model'
+          ? 'model'
+          : command === 'provider'
+          ? 'providerId'
+          : command === 'project'
+          ? 'projectId'
+          : 'fast'
+        if (patch[key] !== undefined) throw new Error('INVALID_COMMAND_ARGUMENTS')
+        if (key === 'fast' && !['true', 'false', 'on', 'off'].includes(item)) {
+          throw new Error('INVALID_COMMAND_ARGUMENTS')
+        }
+        patch[key] = key === 'fast' ? ['true', 'on'].includes(item) : item
       } else throw new Error('INVALID_COMMAND_ARGUMENTS')
     }
     if (all && targetId) throw new Error('INVALID_COMMAND_ARGUMENTS')
@@ -103,7 +131,15 @@ export class ChannelModelCommands {
         results.push(
           `${target.name}：服务商 ${current.settings.providerId ?? '未知'}，模型 ${
             current.settings.model ?? '未知'
-          }，强度 ${current.settings.effort ?? '继承'}${current.pending ? '；有待应用配置' : ''}。`,
+          }，强度 ${current.settings.effort ?? '继承'}，Fast ${
+            current.settings.fast === undefined ? '未知' : current.settings.fast ? '开启' : '关闭'
+          }，项目 ${current.settings.projectId ?? '未绑定'}${current.pending ? '；有待应用配置' : ''}。${
+            current.code === 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE'
+              ? '当前对话不能切换服务商；可保留此对话，新建对话并选择目标服务商。'
+              : current.application === 'unknown'
+              ? '上次更改的结果尚未确认；请先核对实际状态，不要重复提交。'
+              : ''
+          }`,
         )
       } else {
         const result = object(await this.input.tasks.request(event, target.id, action.patch, current.revision))

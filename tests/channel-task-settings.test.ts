@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
 import { ChannelTaskSettings } from '../packages/cli/src/launcher/channel-task-settings.js'
 import { ChannelAgentAccess } from '../packages/cli/src/launcher/channel-agent-access.js'
-import { parseChannelTaskConfig } from '../packages/cli/src/launcher/channel-task-config.js'
+import { type ChannelTaskPatch, parseChannelTaskConfig } from '../packages/cli/src/launcher/channel-task-config.js'
 import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/channel-conversation-policy.js'
+import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-conversation-tools.js'
 
 const roots: string[] = [], stores: ChannelConversationStore[] = []
 afterEach(async () => {
@@ -48,7 +49,7 @@ async function fixture() {
       state: 'active',
     }
   })
-  let selection = { providerId: 'one', model: 'old', effort: 'low' }
+  let selection: ChannelTaskPatch = { providerId: 'one', model: 'old', effort: 'low' }
   let busy = false, observeEffort = true
   const cards: object[] = []
   const native = {
@@ -57,7 +58,7 @@ async function fixture() {
       providers: [
         {
           providerId: 'one',
-          models: [{ id: 'old', reasoningCapabilities: { efforts: ['low', 'high'] } }, {
+          models: [{ id: 'old', supportsFastMode: true, reasoningCapabilities: { efforts: ['low', 'high'] } }, {
             id: 'new',
             reasoningCapabilities: { efforts: ['low', 'high'] },
           }],
@@ -78,6 +79,13 @@ async function fixture() {
     sourceFor: (thread: string) => thread === 'chat' ? source : undefined,
     contextFor: (token: string) => token === 'current' ? { source, threadId: 'chat', turnId: 'turn' } : undefined,
     creationSelection: () => ({ providerId: 'one', model: 'old' }),
+    projects: async () => [{ projectId: 'repo', name: 'Repository' }],
+    validateTaskConfiguration: vi.fn(async (patch: ChannelTaskPatch) => {
+      if (patch.projectId && patch.projectId !== 'repo') throw new Error('PROJECT_UNAVAILABLE')
+    }),
+    configurationRevision: async () => 3,
+    hasPreparation: () => false,
+    isPreparing: () => false,
   }
   const tasks = new ChannelTaskSettings({
     store,
@@ -113,6 +121,109 @@ async function fixture() {
 }
 
 describe('exact Channel task changes', () => {
+  it('records a definitive provider refusal without leaving the chat uncertain', async () => {
+    const f = await fixture()
+    f.native.applyTaskSelection.mockResolvedValueOnce({
+      status: 'rejected',
+      reason: 'provider-switch-unavailable',
+    } as never)
+    await f.tasks.request(undefined, 'chat', { providerId: 'two', model: 'other' })
+    await f.tasks.pump()
+    expect(await f.tasks.read('chat')).toMatchObject({
+      application: 'applied',
+      code: 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE',
+      settings: { providerId: 'one', model: 'old' },
+    })
+    await f.tasks.pump()
+    expect(f.native.applyTaskSelection).toHaveBeenCalledOnce()
+  })
+  it('routes common configuration commands through the real actor approval workflow instead of applying directly', async () => {
+    const f = await fixture()
+    const tools = new ChannelConversationTools(
+      () => undefined,
+      {
+        taskSettings: f.tasks,
+        agentAccess: new ChannelAgentAccess(() => f.store.snapshot(), () => f.native as never),
+      } as never,
+    )
+    const metadata = { 'cordisx/channelContext': 'current', 'openai/threadId': 'chat', 'openai/turnId': 'turn' }
+    expect(await tools.executionGuard('fast-set', { sessionId: 'chat', fast: true, expectedRevision: 3 }, metadata))
+      .toMatchObject({ application: 'approval-required', settings: { fast: true } })
+    expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
+    expect(
+      await tools.executionGuard('fast-set', { sessionId: 'chat', fast: true, expectedRevision: 3 }, {
+        ...metadata,
+        'cordisx/channelContext': 'expired',
+      }),
+    ).toMatchObject({ code: 'CHANNEL_CONTEXT_UNAVAILABLE' })
+    expect(await tools.executionGuard('project', { sessionId: 'unbound' }, metadata))
+      .toMatchObject({ code: 'CHANNEL_TARGET_NOT_BOUND' })
+    expect(
+      await tools.executionGuard('project-set', {
+        sessionId: 'chat',
+        projectId: 'repo',
+        expectedRevision: 3,
+        cwd: '/extra',
+      }, metadata),
+    )
+      .toMatchObject({ code: 'INVALID_REQUEST' })
+    tools.dispose()
+  })
+  it('uses exact Fast/project grants and human approval, persists all fields across restart, and never retries a decision', async () => {
+    const f = await fixture()
+    await f.store.mutate(state => {
+      state.taskConfig = parseChannelTaskConfig({
+        permissions: [{
+          id: 'owner',
+          effect: 'allow',
+          userIds: ['alice'],
+          fields: ['fast', 'projectId'],
+          fastModes: [true],
+          projectIds: ['repo'],
+        }],
+      })
+    })
+    const result = await f.tasks.request(user('bob'), 'chat', { fast: true, projectId: 'repo' })
+    expect(result.application).toBe('approval-required')
+    expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
+    expect(JSON.stringify(f.cards[0])).toContain('Fast')
+    await expect(f.tasks.answer(user('bob'), result.requestId!, 'accept')).rejects.toThrow(
+      'MODEL_CHANGE_PERMISSION_DENIED',
+    )
+    await f.tasks.answer(source, result.requestId!, 'accept', 'om_card')
+    await f.tasks.pump()
+    expect(await f.tasks.read('chat')).toMatchObject({
+      application: 'applied',
+      settings: { fast: true, projectId: 'repo' },
+    })
+    const restored = await ChannelConversationStore.open(f.file)
+    stores.push(restored)
+    expect(restored.snapshot().taskSettings.chat!.settings).toMatchObject({ fast: true, projectId: 'repo' })
+    await f.tasks.answer(source, result.requestId!, 'accept')
+    await f.tasks.pump()
+    expect(f.native.applyTaskSelection).toHaveBeenCalledTimes(1)
+  })
+  it('does not let stale context or an inactive bound caller fall through to generic provider selection', async () => {
+    const f = await fixture()
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'cordisx/channelContext': 'expired',
+        'openai/threadId': 'ordinary',
+      }),
+    ).toMatchObject({ status: 'rejected', reason: 'channel-context-required' })
+    f.native.sourceFor = () => undefined as never
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'openai/threadId': 'chat',
+        'openai/turnId': 'inactive',
+      }),
+    ).toMatchObject({ status: 'rejected', reason: 'channel-context-required' })
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'openai/threadId': 'ordinary',
+      }),
+    ).toBeUndefined()
+  })
   it('persists intent before the native effect, waits for idle and applies an authorized user change once', async () => {
     const f = await fixture()
     f.setBusy(true)

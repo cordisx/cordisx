@@ -16,6 +16,7 @@ export function createChannelNativeSession(input: {
   bridge: () => AgentBridge | undefined
   control: Awaited<ReturnType<typeof startNativeSubmissionControlServer>>
   execution: ChatExecutionPreferences | undefined
+  configuration?: import('./codex-chat-configuration.js').CodexChatConfiguration | undefined
   models: (
     operation: string,
     value: unknown,
@@ -30,6 +31,7 @@ export function createChannelNativeSession(input: {
     sourceConfiguration: input.selection,
     nativeRequest: (method, params) => control.nativeRequest(method, params),
     ...(execution ? { execution } : {}),
+    ...(input.configuration ? { configuration: input.configuration } : {}),
     ...(options.contextObserver ? { contextObserver: options.contextObserver } : {}),
     ...(options.channelName ? { name: options.channelName } : {}),
     ...(options.channelSectionName ? { sectionName: options.channelSectionName } : {}),
