@@ -42,6 +42,12 @@ Generic requests such as "my project progress" without a subject do not disclose
 all private records in a group. Existing owner, identity and scoped-grant checks
 continue to filter every result.
 
+The verified owner may read their own retained records in the same source
+conversation without an explicit recall phrase, so ordinary progress messages
+can find and update existing assertions. This does not open other members'
+records, another account's records, or cross-group retrieval without the existing
+topic or grant checks.
+
 Tests exercise actual native start/bridge prompt assembly and real command
 grant/revoke/new-member/challenge/confirmation flows. Real-model corrected
 own-topic, admin grant/new-member and cross-platform confirmation runs passed.

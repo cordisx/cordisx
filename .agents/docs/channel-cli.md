@@ -32,7 +32,10 @@ current-conversation records. Read `cordisx channel help memory` for details.
 This is selective model-driven maintenance, not automatic transcript ingestion
 or platform history access. It never configures a persona or widens sharing.
 Direct-chat own
-recall needs no administrator. Group own-topic requests derive from actual
+recall needs no administrator. The verified owner can also find their own
+records in the same source group without a special recall phrase, allowing
+ordinary progress messages to update an existing record. Across groups,
+own-topic requests derive from actual
 accepted incoming text; grant/revoke/grant-list use configured actor/source
 authority, not claimed admin. Two-account identity-challenge/identity-confirm
 use verified second-account requests with expiry/replay checks. Caller

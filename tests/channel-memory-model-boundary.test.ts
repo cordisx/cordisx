@@ -150,3 +150,54 @@ it('Chinese owned project recall matches concise stored subjects without opening
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it('the verified owner can find and update a record in its source group without a recall phrase', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-group-update-'))
+  try {
+    const boundary = mockMemoryBoundary(root)
+    boundary.dispatch('alice', 'A', 'group', 'feishu', 'save', 'save-context', '青杉部署还有文档待完成')
+    const record = {
+      kind: 'fact',
+      title: '青杉',
+      summary: '部署进行中，文档待完成',
+      tags: ['青杉'],
+      entityRefs: [],
+      evidenceType: 'explicit',
+      confidence: 1,
+    }
+    const saved = await boundary.call({ action: 'remember', record }, 'save-context') as any
+    boundary.dispatch('alice', 'A', 'group', 'feishu', 'progress', 'progress-context', '青杉部署已完成')
+    expect(await boundary.call({ action: 'search-page', query: '青杉' }, 'progress-context')).toMatchObject({
+      result: { cards: [{ id: saved.result.id, revision: 1 }] },
+    })
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'progress-context')).toMatchObject({
+      status: 'ok',
+    })
+    expect(
+      await boundary.call({
+        action: 'update',
+        id: saved.result.id,
+        revision: 1,
+        record: { ...record, summary: '部署与文档已完成' },
+      }, 'progress-context'),
+    ).toMatchObject({ result: { revision: 2 } })
+    for (
+      const [actor, conversation, account] of [['bob', 'A', 'synthetic-bot'], ['alice', 'B', 'synthetic-bot'], [
+        'alice',
+        'A',
+        'other-bot',
+      ]]
+    ) {
+      boundary.dispatch(actor!, conversation!, 'group', 'feishu', 'denied', 'denied-context', '青杉部署已完成', account)
+      expect(await boundary.call({ action: 'search-page', query: '青杉' }, 'denied-context')).toMatchObject({
+        result: { cards: [] },
+      })
+      expect(await boundary.call({ action: 'get', id: saved.result.id }, 'denied-context')).toMatchObject({
+        status: 'rejected',
+      })
+    }
+    expect(await boundary.records()).toHaveLength(1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
