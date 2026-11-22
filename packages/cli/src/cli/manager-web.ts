@@ -688,6 +688,22 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           await retireSession(token)
           return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
         }
+        if (
+          input.channel === 'desktop-package-config' && result?.status === 'unavailable'
+          && Object.keys(result).length === 1
+        ) {
+          // The session authority returns unavailable only before this write
+          // reaches its handler. Preserve the draft instead of treating the
+          // owner's busy fence as an uncertain backend mutation.
+          let requestId: unknown
+          try {
+            requestId = object(JSON.parse(input.payload))?.requestId
+          } catch { /* Invalid requests remain unavailable. */ }
+          if (typeof requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/u.test(requestId)) {
+            mutationDispatched = false
+            return scopedReply({ requestId, ok: true, value: { status: 'rejected', reason: 'busy' } })
+          }
+        }
         if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })
         return scopedReply(result.value)
       }

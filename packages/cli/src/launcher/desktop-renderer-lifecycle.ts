@@ -493,12 +493,15 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     return await this.input.cdp.managerConfigProof(pluginId)
   }
 
-  /** Reserve one admitted Manager and one native seat for a coordinated config write. */
+  /** Reserve every admitted Manager and one native seat for a coordinated config write. */
   async reserveExternalMutation(peers: readonly AttachedRendererPeer[]): Promise<DesktopConfigurationReservation> {
+    const cohort = [...peers]
+    const matchesManagers = () =>
+      cohort.length > 0 && new Set(cohort).size === cohort.length && this.managers.size === cohort.length
+      && cohort.every(peer => this.managers.has(peer) && !peer.closed)
     if (
       this.failed || this.closed || this.reservation || this.externalConfig || this.joiningManagers > 0
-      || this.federation.requiresReconciliation || peers.length !== 1 || this.managers.size !== 1
-      || !this.managers.has(peers[0]!) || peers[0]!.closed
+      || this.federation.requiresReconciliation || !matchesManagers()
     ) throw new Error('Desktop configuration reservation is unavailable')
     const admission = this.input.cdp.beginSharedAdmission(`config-${randomUUID()}`)
     const marker: { fence?: () => void } = {}
@@ -511,13 +514,13 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
       const observed = await admission.readSnapshot()
       if (
         this.failed || this.closed || this.externalConfig !== marker || admission.closed
-        || this.managerRevision !== revision || peers[0]!.closed || !attachmentEqual(observed, snapshot)
+        || this.managerRevision !== revision || !matchesManagers() || !attachmentEqual(observed, snapshot)
       ) throw new Error('Desktop configuration reservation is unavailable')
       const reservation = createDesktopConfigurationReservation({
         admission,
         ownerCurrent: () =>
           !this.failed && !this.closed && this.externalConfig === marker && this.managerRevision === revision
-          && this.managers.size === 1 && this.managers.has(peers[0]!) && !peers[0]!.closed
+          && matchesManagers()
           && attachmentEqual(this.federation.snapshot(), snapshot),
         onEnd: () => {
           if (this.joinSnapshot?.admission === admission) this.joinSnapshot = undefined

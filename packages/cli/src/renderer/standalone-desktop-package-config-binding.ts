@@ -15,34 +15,62 @@ export interface StandaloneDesktopConfigAdoption {
   readonly pluginId: string
   readonly expectedRevision: number
   readonly revision: number
+  readonly origin: boolean
+  readonly operations: readonly ConfigMutationOperation[]
   readonly value: unknown
 }
 
-function equalJson(left: unknown, right: unknown, depth = 0): boolean {
+export function equalStandaloneConfigJson(left: unknown, right: unknown, depth = 0): boolean {
   if (depth > 64) return false
   if (left === right) return left !== undefined && (typeof left !== 'number' || Number.isFinite(left))
   if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false
   if (Array.isArray(left) || Array.isArray(right)) {
     return Array.isArray(left) && Array.isArray(right) && left.length === right.length
-      && left.every((value, index) => equalJson(value, right[index], depth + 1))
+      && left.every((value, index) => equalStandaloneConfigJson(value, right[index], depth + 1))
   }
   const a = left as Record<string, unknown>, b = right as Record<string, unknown>
   const keys = Object.keys(a).sort(), other = Object.keys(b).sort()
   return keys.length === other.length
-    && keys.every((key, index) => key === other[index] && equalJson(a[key], b[key], depth + 1))
+    && keys.every((key, index) => key === other[index] && equalStandaloneConfigJson(a[key], b[key], depth + 1))
+}
+
+/** Only the scalar operations admitted by the Desktop owner can cross this bridge. */
+export function isStandaloneConfigOperations(value: unknown): value is readonly ConfigMutationOperation[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 100 && value.every(item => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return false
+    const operation = item as Record<string, unknown>
+    const keys = Object.keys(operation)
+    if (
+      operation.op !== 'set' && operation.op !== 'unset'
+      || keys.length !== (operation.op === 'set' ? 3 : 2)
+      || keys.some(key => !['op', 'path', ...(operation.op === 'set' ? ['value'] : [])].includes(key))
+      || !Array.isArray(operation.path) || operation.path.length === 0 || operation.path.length > 32
+      || operation.path.some(part =>
+        typeof part !== 'string' || part.length === 0 || part.length > 128
+        || ['__proto__', 'prototype', 'constructor'].includes(part)
+      )
+    ) return false
+    return operation.op === 'unset' || Object.hasOwn(operation, 'value')
+        && (operation.value === null || ['string', 'boolean'].includes(typeof operation.value)
+          || typeof operation.value === 'number' && Number.isFinite(operation.value))
+  })
 }
 
 /** One owner-confirmed live update, adopted without replacing the Manager document. */
 export class BrowserStandaloneDesktopPackageConfigBridge {
   private disposed = false
+  private adoptingPeer = false
   private pending: {
     readonly requestId: string
     readonly pluginId: string
     readonly expectedRevision: number
+    readonly operations: readonly ConfigMutationOperation[]
     readonly candidate: ConfigCandidate
     readonly adopt: (revision: number) => void
     readonly resolve: () => void
     readonly reject: (error: Error) => void
+    readonly settled: Promise<void>
+    readonly settle: () => void
     readonly timer: ReturnType<typeof setTimeout>
     adopted: boolean
   } | undefined
@@ -60,13 +88,31 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
     adopt: (revision: number) => void,
   ): Promise<void> {
     const binding = globalThis[BINDING]
-    if (this.disposed || this.pending || typeof binding !== 'function') {
+    if (
+      this.disposed || this.pending || this.adoptingPeer || typeof binding !== 'function'
+      || !isStandaloneConfigOperations(operations)
+    ) {
       return Promise.reject(new Error('plugin configuration is unavailable'))
     }
     const requestId = crypto.randomUUID()
     return new Promise((resolve, reject) => {
+      let settle!: () => void
+      const settled = new Promise<void>(done => settle = done)
       const timer = setTimeout(() => this.unknown(), 75_000)
-      this.pending = { requestId, pluginId, expectedRevision, candidate, adopt, resolve, reject, timer, adopted: false }
+      this.pending = {
+        requestId,
+        pluginId,
+        expectedRevision,
+        operations: structuredClone(operations),
+        candidate,
+        adopt,
+        resolve,
+        reject,
+        settled,
+        settle,
+        timer,
+        adopted: false,
+      }
       try {
         binding(JSON.stringify({
           version: 1,
@@ -77,6 +123,7 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
       } catch {
         clearTimeout(timer)
         this.pending = undefined
+        settle()
         reject(new Error('plugin configuration is unavailable'))
       }
     })
@@ -85,9 +132,11 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
   adopt(value: StandaloneDesktopConfigAdoption): boolean {
     const pending = this.pending
     if (
-      this.disposed || !pending || pending.adopted || value.requestId !== pending.requestId
+      this.disposed || !value.origin || !pending || pending.adopted || value.requestId !== pending.requestId
       || value.pluginId !== pending.pluginId || value.expectedRevision !== pending.expectedRevision
-      || value.revision !== pending.expectedRevision + 1 || !equalJson(value.value, pending.candidate.raw)
+      || value.revision !== pending.expectedRevision + 1
+      || !equalStandaloneConfigJson(value.operations, pending.operations)
+      || !equalStandaloneConfigJson(value.value, pending.candidate.raw)
     ) return false
     pending.adopted = true
     try {
@@ -95,6 +144,23 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
       return true
     } catch {
       return false
+    }
+  }
+
+  /** Block new local saves while this page adopts an owner-confirmed peer write. */
+  async adoptPeer(value: StandaloneDesktopConfigAdoption, adopt: () => Promise<boolean>): Promise<boolean> {
+    if (this.disposed || value.origin || this.adoptingPeer) return false
+    this.adoptingPeer = true
+    try {
+      // The owner has already drained other dispatched writes, but a rejected
+      // response can still be in transit to this browser.
+      await this.pending?.settled
+      if (this.disposed || this.pending) return false
+      return await adopt() && !this.disposed
+    } catch {
+      return false
+    } finally {
+      this.adoptingPeer = false
     }
   }
 
@@ -106,6 +172,7 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
     this.pending = undefined
     if (pending) {
       clearTimeout(pending.timer)
+      pending.settle()
       pending.reject(new Error('plugin configuration result is unknown'))
     }
   }
@@ -115,6 +182,7 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
     if (!pending) return
     this.pending = undefined
     clearTimeout(pending.timer)
+    pending.settle()
     pending.reject(new Error('plugin configuration result is unknown'))
     try {
       this.onUnknown?.()
@@ -138,6 +206,7 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
     if (response.ok === true && value?.status === 'rejected' && !pending.adopted) {
       this.pending = undefined
       clearTimeout(pending.timer)
+      pending.settle()
       pending.reject(new Error('plugin configuration is unavailable or in use'))
       return
     }
@@ -150,6 +219,7 @@ export class BrowserStandaloneDesktopPackageConfigBridge {
     }
     this.pending = undefined
     clearTimeout(pending.timer)
+    pending.settle()
     pending.resolve()
   }
 }

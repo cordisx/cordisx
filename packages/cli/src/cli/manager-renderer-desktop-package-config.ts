@@ -58,6 +58,7 @@ export function createManagerRendererDesktopPackageConfig(input: {
               sessions: input.sessions(),
               participants: input.participants,
               lifecycle: input.lifecycle,
+              allowAdditionalManagers: true,
             })
           } catch {
             return rejectedUndispatchedRendererWrite(requestId, 'busy')
@@ -89,6 +90,13 @@ export function createManagerRendererDesktopPackageConfig(input: {
               current: () => handoff!.isCurrent() && reservation?.isCurrent() === true,
               run: async action => await handoff!.run(action),
             })
+            const confirmation = handoff.prepareRendererConfirmation(
+              requestId,
+              operation.expectedRevision,
+              write.expectedValue(),
+              operation.operations,
+            )
+            if (!confirmation) throw new Error('DESKTOP_PACKAGE_CONFIG_UNAVAILABLE')
             reservation = input.writes.begin(write)
             dispatched = true
             const result = await native.update(operation)
@@ -101,7 +109,7 @@ export function createManagerRendererDesktopPackageConfig(input: {
             const after = await native.proof(operation.pluginId)
             if (
               !await handoff.adopt(expected, after, applied) || !native.confirm()
-              || applied && !await handoff.confirmRenderer(requestId, operation.expectedRevision, expected)
+              || applied && !await confirmation.confirm()
               || !handoff.cancel() || !origin.release()
             ) throw new Error('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')
             reservation.release()

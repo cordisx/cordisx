@@ -3,6 +3,7 @@ import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-a
 import { normalizePluginActivation } from '../launcher/plugin-activation.js'
 import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import { normalizeProjection as normalizeChannelProjection } from '../renderer/channel-manager-projection.js'
+import { isStandaloneConfigOperations } from '../renderer/standalone-desktop-package-config-binding.js'
 import {
   createSessionPluginGraphProjection,
   type ProjectedGraphResponse,
@@ -355,9 +356,19 @@ export function createManagerRendererGraphSession(input: {
           }
         } else if (command.method === 'desktop-package-configuration') {
           if (
-            transaction !== undefined || Object.keys(payload).length !== 7
+            transaction !== undefined || Object.keys(payload).length !== 9
             || Object.keys(payload).some(key =>
-              !['rendererId', 'ownerGeneration', 'requestId', 'pluginId', 'expectedRevision', 'revision', 'value']
+              ![
+                'rendererId',
+                'ownerGeneration',
+                'requestId',
+                'pluginId',
+                'expectedRevision',
+                'revision',
+                'origin',
+                'operations',
+                'value',
+              ]
                 .includes(key)
             )
             || payload.rendererId !== input.rendererId || payload.ownerGeneration !== input.generation
@@ -365,6 +376,7 @@ export function createManagerRendererGraphSession(input: {
             || typeof payload.pluginId !== 'string' || !pluginId.test(payload.pluginId) || !active.has(payload.pluginId)
             || !Number.isSafeInteger(payload.expectedRevision) || Number(payload.expectedRevision) < 0
             || payload.revision !== Number(payload.expectedRevision) + 1
+            || typeof payload.origin !== 'boolean' || !isStandaloneConfigOperations(payload.operations)
           ) throw invalid()
         } else if (command.method === 'managed-service-state') {
           if (

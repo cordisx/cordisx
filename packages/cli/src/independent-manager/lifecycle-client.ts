@@ -1,7 +1,10 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
-import type { StandaloneDesktopConfigAdoption } from '../renderer/standalone-desktop-package-config-binding.js'
+import {
+  isStandaloneConfigOperations,
+  type StandaloneDesktopConfigAdoption,
+} from '../renderer/standalone-desktop-package-config-binding.js'
 
 type Method =
   | 'synchronize'
@@ -237,13 +240,24 @@ export function createManagerRendererLifecycleClient(input: {
     assertLive()
     if (method === 'desktop-package-configuration') {
       const item = record(payload)
-      exact(item, ['rendererId', 'ownerGeneration', 'requestId', 'pluginId', 'expectedRevision', 'revision', 'value'])
+      exact(item, [
+        'rendererId',
+        'ownerGeneration',
+        'requestId',
+        'pluginId',
+        'expectedRevision',
+        'revision',
+        'origin',
+        'operations',
+        'value',
+      ])
       if (
         item.rendererId !== scope.rendererId || item.ownerGeneration !== scope.generation
         || typeof item.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(item.requestId)
         || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
         || !Number.isSafeInteger(item.expectedRevision) || (item.expectedRevision as number) < 0
         || item.revision !== (item.expectedRevision as number) + 1
+        || typeof item.origin !== 'boolean' || !isStandaloneConfigOperations(item.operations)
         || !synchronized || transaction !== undefined || awaitingAdoption !== undefined
         || !input.onDesktopPackageConfiguration
       ) throw new Error('renderer-package-configuration-unavailable')
@@ -252,6 +266,8 @@ export function createManagerRendererLifecycleClient(input: {
         pluginId: item.pluginId,
         expectedRevision: item.expectedRevision as number,
         revision: item.revision as number,
+        origin: item.origin,
+        operations: item.operations,
         value: item.value,
       }
       if (!await input.onDesktopPackageConfiguration(adoption)) {

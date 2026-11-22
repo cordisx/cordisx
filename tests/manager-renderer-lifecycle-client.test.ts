@@ -62,6 +62,8 @@ it('acknowledges only the scoped pending Desktop configuration adoption', async 
     pluginId: 'demo',
     expectedRevision: 2,
     revision: 3,
+    origin: true,
+    operations: [{ op: 'set', path: ['label'], value: 'new' }],
     value: { label: 'new' },
   }
   try {
@@ -75,6 +77,8 @@ it('acknowledges only the scoped pending Desktop configuration adoption', async 
       pluginId: 'demo',
       expectedRevision: 2,
       revision: 3,
+      origin: true,
+      operations: [{ op: 'set', path: ['label'], value: 'new' }],
       value: { label: 'new' },
     })
     expect(await client.handle(command(3, 'desktop-package-configuration', { ...update, revision: 4 })))

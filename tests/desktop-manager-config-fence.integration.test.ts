@@ -61,7 +61,7 @@ async function fixture(onUpdate: () => Promise<void> = async () => {}) {
       prepare: () => ({
         mode: 'write' as const,
         dispatch: async () => {
-          const origin = await fenceManagerOrigin({ sessions, participants, lifecycle })
+          const origin = await fenceManagerOrigin({ sessions, participants, lifecycle, allowAdditionalManagers: true })
           try {
             expect(origin.desktopConfiguration?.seat).toBe(nativeSeat)
             expect(await sessions.open(gateway, secret())).toBeUndefined()
@@ -79,25 +79,31 @@ async function fixture(onUpdate: () => Promise<void> = async () => {}) {
       }),
     }]]),
   })
-  const browserSessionId = secret()
-  const handle = (await sessions.open(gateway, browserSessionId))!
-  const invocation = { gateway, browserSessionId, handle }
-  participants.confirmBootstrap(handle.rendererId, lifecycle.snapshot())
-  const pump = (async () => {
-    while (participants.peer(handle.rendererId)) {
-      const result = await sessions.poll(invocation, 100)
-      const command = result.status === 'ok' ? (result.value as { command?: any }).command : undefined
-      if (command) {
-        await sessions.acknowledge(invocation, {
-          id: command.id,
-          sequence: command.sequence,
-          ok: true,
-          value: command.payload,
-        })
+  const pumps: Promise<void>[] = []
+  const openManager = async () => {
+    const browserSessionId = secret()
+    const handle = (await sessions.open(gateway, browserSessionId))!
+    const invocation = { gateway, browserSessionId, handle }
+    participants.confirmBootstrap(handle.rendererId, lifecycle.snapshot())
+    pumps.push((async () => {
+      while (participants.peer(handle.rendererId)) {
+        const result = await sessions.poll(invocation, 100)
+        const command = result.status === 'ok' ? (result.value as { command?: any }).command : undefined
+        if (command) {
+          await sessions.acknowledge(invocation, {
+            id: command.id,
+            sequence: command.sequence,
+            ok: true,
+            value: command.payload,
+          })
+        }
       }
-    }
-  })()
-  expect(await sessions.admit(invocation)).toMatchObject({ status: 'ok' })
+    })())
+    expect(await sessions.admit(invocation)).toMatchObject({ status: 'ok' })
+    return invocation
+  }
+  const invocation = await openManager()
+  const handle = invocation.handle
   return {
     cdp,
     lifecycle,
@@ -106,12 +112,13 @@ async function fixture(onUpdate: () => Promise<void> = async () => {}) {
     gateway,
     invocation,
     handle,
+    openManager,
     close: async () => {
       sessions.dispose()
       participants.close()
       lifecycle.close()
       unregister()
-      await pump
+      await Promise.all(pumps)
     },
   }
 }
@@ -124,6 +131,29 @@ it('holds the authenticated Manager origin through a native configuration receip
       value: { status: 'ok', configuration: { revision: 1 } },
     })
     expect(await f.sessions.open(f.gateway, secret())).toBeDefined()
+  } finally {
+    await f.close()
+  }
+})
+
+it('reserves the complete Manager cohort and rejects missing or duplicated participants', async () => {
+  const f = await fixture()
+  try {
+    const second = await f.openManager()
+    const firstPeer = f.participants.peer(f.handle.rendererId)!
+    const secondPeer = f.participants.peer(second.handle.rendererId)!
+    await expect(f.lifecycle.reserveExternalMutation([firstPeer])).rejects.toThrow(
+      'Desktop configuration reservation is unavailable',
+    )
+    await expect(f.lifecycle.reserveExternalMutation([firstPeer, firstPeer])).rejects.toThrow(
+      'Desktop configuration reservation is unavailable',
+    )
+    expect(firstPeer.closed).toBe(false)
+    expect(secondPeer.closed).toBe(false)
+    expect(await f.sessions.call(f.invocation, 'fixture-write', {})).toMatchObject({
+      status: 'ok',
+      value: { status: 'ok', configuration: { revision: 1 } },
+    })
   } finally {
     await f.close()
   }
@@ -142,6 +172,29 @@ it('fences a dispatched native write when its Manager disconnects before the rec
     const writing = f.sessions.call(f.invocation, 'fixture-write', {})
     await started
     f.participants.peer(f.handle.rendererId)!.close()
+    finish()
+    expect(await writing).toEqual({ status: 'unknown' })
+    expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+  } finally {
+    finish()
+    await f.close()
+  }
+})
+
+it('fences a dispatched native write when another admitted Manager disconnects', async () => {
+  let entered!: () => void
+  let finish!: () => void
+  const started = new Promise<void>(resolve => entered = resolve)
+  const release = new Promise<void>(resolve => finish = resolve)
+  const f = await fixture(async () => {
+    entered()
+    await release
+  })
+  try {
+    const second = await f.openManager()
+    const writing = f.sessions.call(f.invocation, 'fixture-write', {})
+    await started
+    f.participants.peer(second.handle.rendererId)!.close()
     finish()
     expect(await writing).toEqual({ status: 'unknown' })
     expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()

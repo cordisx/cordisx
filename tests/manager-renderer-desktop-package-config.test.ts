@@ -69,6 +69,7 @@ function setup() {
     plugin,
     isCurrent: () => true,
     run: async <T>(action: () => Promise<T>) => await action(),
+    prepareRendererConfirmation: () => ({ confirm: async () => true }),
     cancel: vi.fn(() => true),
     fence: vi.fn(),
   }

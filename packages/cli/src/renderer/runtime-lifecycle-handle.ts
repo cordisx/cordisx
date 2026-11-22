@@ -208,6 +208,7 @@ import {
 } from './generation-visibility.js'
 import { type ChannelManagerProjectionV1, CordisXChannelManagerService } from './channel-manager.js'
 import { adoptStandaloneChannelProjection } from './channel-manager-owner-update.js'
+import { adoptStandaloneDesktopPackageConfig } from './standalone-desktop-package-config-adoption.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -773,9 +774,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
       revision,
     )
   },
-  adoptStandaloneDesktopPackageConfig: value =>
-    !runtimeScope.disposed && runtimeScope.metadata()!.hostKind === 'standalone'
-    && runtimeScope.standaloneDesktopPackageConfigBridge()?.adopt(value) === true,
+  adoptStandaloneDesktopPackageConfig: async value => await adoptStandaloneDesktopPackageConfig(runtimeScope, value),
   confirmStandaloneManagedServiceState: async input => {
     if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
     return await (runtimeScope.managedServiceBridge()?.confirmState(input) ?? Promise.resolve(false))

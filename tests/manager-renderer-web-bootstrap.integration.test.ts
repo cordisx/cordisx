@@ -138,6 +138,67 @@ it.each(['authenticate', 'logout'] as const)(
   },
 )
 
+it('returns a known Desktop configuration rejection when the owner blocks a write before dispatch', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  let writes = 0
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([['plugin-management', {
+      prepare: () => {
+        throw new Error('unused')
+      },
+    }], ['desktop-package-config', {
+      prepare: payload => ({
+        mode: 'write' as const,
+        dispatch: async () => {
+          writes++
+          const request = JSON.parse(String(payload)) as { requestId: string }
+          return { requestId: request.requestId, ok: true, value: { status: 'applied', revision: 2 } }
+        },
+      }),
+    }]]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+    const fence = await authority.suspendMutations()
+    const payload = { channel: 'desktop-package-config', payload: JSON.stringify({ requestId: 'config-1' }) }
+    const blocked = await post('/api/renderer/binding', payload, token)
+    expect(blocked.status).toBe(200)
+    expect(await blocked.json()).toEqual({
+      requestId: 'config-1',
+      ok: true,
+      value: { status: 'rejected', reason: 'busy' },
+    })
+    expect(writes).toBe(0)
+    expect(fence.release()).toBe(true)
+    const retried = await post('/api/renderer/binding', payload, token)
+    expect(retried.status).toBe(200)
+    expect(writes).toBe(1)
+  } finally {
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)
+
 it('bootstraps two authenticated renderer sessions without exposing private graphs or grants', async () => {
   const fixture = await managerRendererGraphFixture()
   const lease = await fixture.lease('generation')
@@ -359,54 +420,58 @@ it('retires a Manager when a credential write loses its browser response', async
   }
 }, 15_000)
 
-it('retires a Manager when the owner transport fails during a credential write', async () => {
-  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
-  const authority = new ManagerRendererSessions({
-    profileId: 'fixture',
-    ownerGeneration: 'generation',
-    ownerCurrent: () => true,
-    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
-    channels: new Map([
-      ['plugin-management', {
-        prepare: () => {
-          throw new Error('unused')
-        },
-      }],
-      ['channel-credentials', { prepare: () => ({ mode: 'write' as const, dispatch: async () => ({}) }) }],
-    ]),
-  })
-  const web = await startManagerWeb({
-    appId: 'codex',
-    profileId: 'fixture',
-    generation: 'generation',
-    isCurrent: async () => true,
-    request: async operation => {
-      if (operation.kind === 'manager-renderer' && operation.action === 'call') {
-        throw new Error('synthetic transport failure')
-      }
-      return await dispatchManagerRendererOperation(authority, operation)
-    },
-  }, { rendererGateway: gateway })
-  const origin = new URL(web.url).origin
-  const post = async (route: string, data: unknown, token?: string) =>
-    await fetch(`${origin}${route}`, {
-      method: 'POST',
-      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(data),
+it.each(['channel-credentials', 'desktop-package-config'] as const)(
+  'retires a Manager when the owner transport fails during a %s write',
+  async channel => {
+    const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+    const authority = new ManagerRendererSessions({
+      profileId: 'fixture',
+      ownerGeneration: 'generation',
+      ownerCurrent: () => true,
+      authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+      channels: new Map([
+        ['plugin-management', {
+          prepare: () => {
+            throw new Error('unused')
+          },
+        }],
+        [channel, { prepare: () => ({ mode: 'write' as const, dispatch: async () => ({}) }) }],
+      ]),
     })
-  try {
-    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
-    const token = (await session.json() as { token: string }).token
-    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
-    const result = await post('/api/renderer/binding', {
-      channel: 'channel-credentials',
-      payload: JSON.stringify({ requestId: 'commit', operation: 'commit' }),
-    }, token)
-    expect(result.status).toBe(503)
-    expect(await result.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
-    expect((await post('/api/renderer/session', {}, token)).status).toBe(401)
-  } finally {
-    authority.dispose()
-    await web.close()
-  }
-}, 15_000)
+    const web = await startManagerWeb({
+      appId: 'codex',
+      profileId: 'fixture',
+      generation: 'generation',
+      isCurrent: async () => true,
+      request: async operation => {
+        if (operation.kind === 'manager-renderer' && operation.action === 'call') {
+          throw new Error('synthetic transport failure')
+        }
+        return await dispatchManagerRendererOperation(authority, operation)
+      },
+    }, { rendererGateway: gateway })
+    const origin = new URL(web.url).origin
+    const post = async (route: string, data: unknown, token?: string) =>
+      await fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(data),
+      })
+    try {
+      const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+      const token = (await session.json() as { token: string }).token
+      expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+      const result = await post('/api/renderer/binding', {
+        channel,
+        payload: JSON.stringify({ requestId: 'commit', operation: 'commit' }),
+      }, token)
+      expect(result.status).toBe(503)
+      expect(await result.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
+      expect((await post('/api/renderer/session', {}, token)).status).toBe(401)
+    } finally {
+      authority.dispose()
+      await web.close()
+    }
+  },
+  15_000,
+)

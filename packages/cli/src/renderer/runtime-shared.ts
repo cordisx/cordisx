@@ -561,10 +561,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
-  /** Adopt only the owner-confirmed result of this renderer's pending configuration write. */
+  /** Adopt an owner-confirmed configuration write without replacing this Manager. */
   adoptStandaloneDesktopPackageConfig?(
     value: import('./standalone-desktop-package-config-binding.js').StandaloneDesktopConfigAdoption,
-  ): boolean
+  ): Promise<boolean>
   /** Host-private confirmation through this standalone renderer's own managed-service capability. */
   confirmStandaloneManagedServiceState?(
     input: import('../managed-service-state-confirmation.js').ManagedServiceStateConfirmation,

@@ -138,6 +138,8 @@ it('forwards a configuration receipt only for an active package and the exact re
       pluginId: 'fixture',
       expectedRevision: 1,
       revision: 2,
+      origin: true,
+      operations: [{ op: 'set', path: ['label'], value: 'updated' }],
       value: { label: 'updated' },
     }
     const session = createManagerRendererGraphSession(baseInput)
@@ -151,6 +153,8 @@ it('forwards a configuration receipt only for an active package and the exact re
         { ...payload, rendererId: '5'.repeat(64) },
         { ...payload, pluginId: 'other' },
         { ...payload, revision: 3 },
+        { ...payload, origin: 'peer' },
+        { ...payload, operations: [{ op: 'set', path: ['__proto__'], value: 'bad' }] },
         { ...payload, value: { label: forbidden[0] } },
       ]
     ) {

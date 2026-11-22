@@ -52,10 +52,16 @@ import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-lau
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 import { decision, FakeRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
 import {
+  draftDesktopConfig,
   editDesktopConfig,
   expectDesktopConfigApplied,
-  expectDesktopConfigBusy,
+  expectDesktopConfigConflict,
+  holdDesktopConfigReply,
+  openConfiguredChannel,
   openDesktopConfig,
+  releaseHeldConfigReplyAfterAdoption,
+  submitDesktopConfig,
+  waitForHeldConfigReply,
 } from './suites/desktop-package-config-browser.js'
 
 const chrome = [
@@ -248,6 +254,8 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
   let desktop: CdpClient | undefined
   let nativeConfigSession: CdpSession | undefined
   const nativeConfigEvents: string[] = []
+  let pausedConfigStage: { started(): void; released: Promise<void> } | undefined
+  let releaseConfigStage = () => {}
   let first: CdpClient | undefined
   let second: CdpClient | undefined
   let unregister: (() => void) | undefined
@@ -330,6 +338,12 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
           runtimeGeneration: generation,
           mutate: async (request, seat, action) => {
             try {
+              if (request.operation === 'stage' && pausedConfigStage) {
+                const pause = pausedConfigStage
+                pausedConfigStage = undefined
+                pause.started()
+                await pause.released
+              }
               const value = await owner.packageConfigWrites.handle(request, seat, action)
               nativeConfigEvents.push(request.operation + ':ok')
               return value
@@ -502,27 +516,48 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     await ready(second)
     if (writeFixture) {
       expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'first update' })
-      await editDesktopConfig(first, 'retained draft')
-      await expectDesktopConfigBusy(first, 'retained draft')
-      expect(await configStore.loadStable('desktop-config-fixture')).toEqual({
-        revision: 2,
-        config: { label: 'first update' },
-      })
+      await second.evaluate("globalThis.__desktopConfigDocumentMarker = 'same-document'")
+      await openDesktopConfig(second)
+      await draftDesktopConfig(second, 'retained draft')
+      await holdDesktopConfigReply(second)
+      let stageStarted = false
+      pausedConfigStage = {
+        started: () => stageStarted = true,
+        released: new Promise<void>(resolve => releaseConfigStage = resolve),
+      }
+      await editDesktopConfig(first, 'updated from first page')
+      await vi.waitFor(() => expect(stageStarted).toBe(true), { timeout: 15_000 })
+      await submitDesktopConfig(second)
+      await waitForHeldConfigReply(second)
+      releaseConfigStage()
+      await releaseHeldConfigReplyAfterAdoption(second)
+      await expectDesktopConfigApplied(first, desktop, configStore, 3, 'updated from first page')
+      await expectDesktopConfigConflict(second, 'retained draft', 'updated from first page')
+      await second.evaluate(
+        "document.querySelector('[data-plugin-config-form=desktop-config-fixture] .cxf-alert button').click()",
+      )
+      await vi.waitFor(async () => {
+        expect(
+          await second!.evaluate(
+            "!document.querySelector('[data-plugin-config-form=desktop-config-fixture] button[type=submit]').disabled",
+          ),
+        ).toBe(true)
+      }, { timeout: 10_000 })
+      await submitDesktopConfig(second)
+      await expectDesktopConfigApplied(second, desktop, configStore, 4, 'retained draft')
+      await vi.waitFor(async () => {
+        expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
+        expect(await first.evaluate('globalThis.__desktopConfigDocumentMarker')).toBe('same-document')
+      }, { timeout: 15_000 })
       await desktop.send('Target.closeTarget', { targetId: secondTarget.targetId })
       await second.close().catch(() => {})
       second = undefined
-      await vi.waitFor(() => {
-        expect(owner.managementOptions.rendererDesktopPackageConfig?.participants.ownerPeers()).toHaveLength(1)
-      }, { timeout: 15_000 })
-      await first.evaluate(
-        "document.querySelector('[data-plugin-config-form=desktop-config-fixture] button[type=submit]').click()",
-      )
-      await expectDesktopConfigApplied(first, desktop, configStore, 3, 'retained draft')
       const reopened = await desktop.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
       second = await connect(reopened.targetId)
       await second.send('Page.navigate', { url: url(web.issueUrl()) })
       await ready(second)
       expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
+      if (archive !== undefined) await openConfiguredChannel(first)
       return
     }
     const snapshot = async (page: CdpClient) =>
@@ -891,6 +926,8 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       )
     }, { timeout: 15_000 })
   } finally {
+    releaseConfigStage()
+    await second?.evaluate('globalThis.__releaseConfigReply?.()').catch(() => {})
     await first?.close().catch(() => {})
     await second?.close().catch(() => {})
     await web?.close().catch(() => {})
@@ -928,7 +965,7 @@ it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platf
 )
 
 it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
-  'saves a proven Desktop package field in place and retains a busy draft across Manager sessions',
+  'synchronizes a proven Desktop package field while preserving another Manager draft',
   async () => await exerciseDesktopOwner(undefined, false, true, true),
   120_000,
 )
@@ -947,5 +984,13 @@ it.skipIf(
 )(
   'keeps a Desktop owner Channel review local to the selected Manager page',
   async () => await exerciseDesktopOwner(channelArchive, true),
+  180_000,
+)
+
+it.skipIf(
+  chrome === undefined || channelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
+)(
+  'keeps the configured Channel available through a multi-Manager Desktop configuration handoff',
+  async () => await exerciseDesktopOwner(channelArchive, false, true, true),
   180_000,
 )
