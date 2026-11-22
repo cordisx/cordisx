@@ -82,6 +82,10 @@ export interface ChannelConversationInput {
     reactionAttempted: boolean
     waitAttempted: boolean
     replyObserved: boolean
+    receivedAttempted?: boolean
+    receivedReaction?: import('./channel-feedback.js').ChannelReactionReceipt
+    receivedRemovalAttempted?: boolean
+    processingSharesReceived?: boolean
     reaction?: import('./channel-feedback.js').ChannelReactionReceipt
     completionAttempted?: boolean
     completion?: import('./channel-feedback.js').ChannelReactionReceipt

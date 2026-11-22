@@ -38,7 +38,36 @@ remove only reactions created by this bot. An uncertain API response is not a
 receipt and must not be blindly retried. No general public `channel_reaction`
 plugin/native tool is advertised; use the configured CLI seam.
 
-Profile-local feedback configuration is read-only to agents. `reaction.emojiType`
+Profile-local feedback configuration is read-only to agents. Accepted, addressed
+messages receive `Get`; after a confirmed native turn starts, `OnIt` replaces
+only the received reaction owned by the current bot/generation. Queued work is
+not processing. Unaddressed group chatter and commands do not trigger these
+phases. Both phases are best effort and never delay native dispatch.
+
+`reaction.receivedEnabled` and `reaction.processingEnabled` independently
+control the phases; omitted switches inherit legacy `reaction.enabled`.
+`reaction.receivedEmojiType` defaults to `Get`, while the existing
+`reaction.emojiType` defaults to `OnIt`:
+
+```json
+{
+  "reaction": {
+    "enabled": true,
+    "receivedEnabled": true,
+    "receivedEmojiType": "Get",
+    "processingEnabled": true,
+    "emojiType": "OnIt"
+  }
+}
+```
+
+Waiting text, random text lists and explicit completion mappings keep their
+existing behavior. If processing feedback fails, the received reaction remains.
+A late received receipt can be removed after processing succeeds. Identical
+received/processing emojis reuse one reaction. Restarted owners cannot remove
+receipts created by an earlier generation; durable reservations prevent replay.
+
+`reaction.emojiType`
 selects processing feedback (commonly `OnIt`). Optional
 `reaction.completionEmojiType` must be a valid platform emoji identifier; do not
 assume the literal string `done` or silently invent a default. Completion replaces
