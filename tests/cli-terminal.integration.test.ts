@@ -634,3 +634,72 @@ it.each(['codex', 'claude-code'] as const)('loads Skills and MCP from the same h
     }) as typeof spawn,
   })
 })
+
+it.skipIf(process.platform === 'win32')('stops an unresponsive terminal when its provider owner retires', async () => {
+  const f = await fixture()
+  const server = await openProductionPluginManagementComposition({
+    homeDir: f.root,
+    configPath: f.configPath,
+    appId: 'codex',
+    profileId: 'default',
+    runtimeGeneration: 'runtime-one',
+    token: 'a'.repeat(64),
+    coordinator: new PluginLifecycleCoordinator({
+      homeDir: f.root,
+      profileId: 'default',
+      runtimeGeneration: 'runtime-one',
+      permissionPolicies: [],
+      runtime: {
+        stage: async () => undefined,
+        commit: async () => undefined,
+        abort: async () => undefined,
+        reload: async () => undefined,
+      },
+    }),
+    terminalProvider: async request => {
+      if (request.kind === 'prepare') {
+        return {
+          kind: 'prepared',
+          leaseId: 'lease',
+          providerId: 'fixture',
+          model: 'model',
+          provider: { name: 'Fixture' },
+        }
+      }
+      if (request.kind === 'renew') throw new Error('owner retired')
+      return { kind: 'released' }
+    },
+  })
+  closes.push(() => server.close())
+  let child: ChildProcess | undefined
+  let ready!: Promise<void>
+  const result = runCordisXCli(['cli', '--service', 'fixture', '--model', 'model'], {
+    env: f.env,
+    internalCheckTerminalClient: checkClient,
+    internalSpawnTerminal: (() => {
+      child = spawn(process.execPath, [
+        '-e',
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)",
+      ], { env: { HOME: f.root, PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'ignore'] })
+      ready = new Promise(resolve => child!.stdout!.once('data', () => resolve()))
+      return child
+    }) as typeof spawn,
+  }).then(() => undefined, error => error as Error)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await vi.waitFor(() => expect(child).toBeDefined(), { timeout: 5_000 })
+    await ready
+    const error = await Promise.race([
+      result,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('unresponsive terminal did not exit')), 18_000)
+      }),
+    ])
+    expect(error?.message).toContain('CordisX provider retired')
+    expect(child!.signalCode).toBe('SIGKILL')
+  } finally {
+    clearTimeout(timer)
+    if (child?.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    await result
+  }
+}, 25_000)

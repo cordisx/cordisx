@@ -27,6 +27,8 @@ import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-lay
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
 import { checkTerminalClient, terminalClientName, terminalClientStartupError } from './terminal-client-check.js'
 
+const RETIRED_TERMINAL_GRACE_MS = 5_000
+
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value)
@@ -267,6 +269,8 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
   let claudeMcp: Awaited<ReturnType<typeof prepareClaudeMcp>> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
+  let forcedStop: ReturnType<typeof setTimeout> | undefined
+  let childExited = false
   let renewing = false, failure: Error | undefined
   try {
     if (invocation.service && invocation.model && !shared) {
@@ -413,13 +417,27 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (prepared) {
       const leaseId = prepared.leaseId
       timer = setInterval(() => {
-        if (renewing) return
+        if (renewing || failure || childExited) return
         renewing = true
         void request!({ kind: 'renew', leaseId }).then(result => {
           if (result.kind !== 'renewed') throw new Error('Invalid terminal provider renewal')
         }).catch(() => {
+          if (childExited) return
           failure = new Error('CordisX provider retired; this CLI session was stopped. Start a new session')
-          if (child?.exitCode === null) child.kill('SIGTERM')
+          clearInterval(timer)
+          const ownedChild = child
+          if (!ownedChild || ownedChild.exitCode !== null || ownedChild.signalCode !== null) return
+          try {
+            ownedChild.kill('SIGTERM')
+          } catch { /* still attempt the bounded cleanup below */ }
+          forcedStop = setTimeout(() => {
+            if (!childExited && ownedChild.exitCode === null && ownedChild.signalCode === null) {
+              try {
+                ownedChild.kill('SIGKILL')
+              } catch { /* a failed signal cannot be reported as a successful exit */ }
+            }
+          }, RETIRED_TERMINAL_GRACE_MS)
+          forcedStop.unref()
         }).finally(() => {
           renewing = false
         })
@@ -441,9 +459,15 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       const code = await new Promise<number>((resolve, reject) => {
         child!.once(
           'error',
-          error => reject(terminalClientStartupError(client, executable!, error)),
+          error => {
+            childExited = true
+            reject(terminalClientStartupError(client, executable!, error))
+          },
         )
-        child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
+        child!.once('exit', (code, signal) => {
+          childExited = true
+          resolve(code ?? (signal === 'SIGINT' ? 130 : 143))
+        })
       })
       if (failure) throw failure
       if (code !== 0) {
@@ -458,6 +482,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   } finally {
     clearInterval(timer)
+    clearTimeout(forcedStop)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
     await reviewCatalog?.close()
     await nativeLayer?.close()
