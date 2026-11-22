@@ -108,6 +108,19 @@ describe('service owner lifecycle coordination', () => {
     expect(second.runtime.terminal).toHaveBeenCalledOnce()
   })
 
+  it('fences the owner when post-finalization adoption cannot be confirmed', async () => {
+    const f = fixture()
+    await f.wrapped.preflight(preflight)
+    f.wrapped.prepare('tx')
+    await f.wrapped.stage(mutation)
+    await f.wrapped.publish('tx')
+    await f.wrapped.complete('tx')
+    f.fence.finish.mockResolvedValueOnce(false)
+    await expect(f.wrapped.finalize('tx')).rejects.toThrow('manager-lifecycle-fence-unavailable')
+    expect(f.fence.fence).toHaveBeenCalledOnce()
+    expect(f.runtime.terminal).toHaveBeenCalledOnce()
+  })
+
   it('allows the existing bounded finalization retry without releasing the fence early', async () => {
     const f = fixture()
     await f.wrapped.preflight(preflight)

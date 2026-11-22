@@ -9,6 +9,7 @@ export async function restrictedLifecycleIds(
   homeDir: string,
   snapshot: ServiceRendererSnapshot,
   plugins: readonly CordisXConfigPlugin[],
+  configured: ReadonlySet<string> = new Set(),
 ): Promise<ReadonlySet<string>> {
   const allowed = new Set<string>()
   const byId = new Map(plugins.map(plugin => [plugin.id, plugin]))
@@ -19,7 +20,8 @@ export async function restrictedLifecycleIds(
     if (
       !plugin?.package || plugin.package.digest !== item.digest || plugin.package.version !== item.version
       || plugin.package.moduleGeneration !== item.moduleGeneration || plugin.enabled !== item.enabled
-      || config === null || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).length !== 0
+      || config === null || typeof config !== 'object' || Array.isArray(config)
+      || Object.keys(config).length !== 0 && !configured.has(item.id)
       || manifest?.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1
       || manifest.capabilities.length !== 0
     ) continue

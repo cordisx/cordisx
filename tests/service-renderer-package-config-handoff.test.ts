@@ -84,6 +84,7 @@ function fixture() {
     packageInputs: new Map(before.inputs),
     projectedConfigs: new Map([['demo', { label: 'old' }]]),
     desktopPackageConfigPlugins: ['demo'],
+    desktopLifecycleConfigPlugins: [] as string[],
     checks: new Set<Promise<boolean>>(),
     managedOwners: new Map(),
   }]))
@@ -98,6 +99,7 @@ function fixture() {
     readLifetimes: { drainCurrent },
     pluginFence: { runPackageMutation: async (_scope: unknown, action: () => Promise<unknown>) => await action() },
     rememberPluginConfig: vi.fn(() => true),
+    canCoordinatePluginConfig: vi.fn(async () => true),
     readInputs: async () => currentInputs,
     current: (id: string, entry: any) => entries.get(id) === entry && !entry.peer.closed,
   }
@@ -137,6 +139,8 @@ it('drains both pages, adopts the authoritative snapshot and waits for each rece
   expect(f.first.request.mock.calls[0]![1]).toMatchObject({ origin: true, operations })
   expect(f.entries.get('first')?.plugins[0]?.revision).toBe(2)
   expect(f.entries.get('second')?.plugins[0]?.revision).toBe(2)
+  expect(f.entries.get('first')?.desktopLifecycleConfigPlugins).toEqual(['demo'])
+  expect(f.entries.get('second')?.desktopLifecycleConfigPlugins).toEqual(['demo'])
   expect(handoff.cancel()).toBe(true)
   expect(f.first.closed).toBe(false)
   expect(f.second.closed).toBe(false)
@@ -148,6 +152,14 @@ it('rejects an incomplete baseline before dispatch and fences the affected pages
   await expect(f.reserve()).rejects.toThrow('renderer-package-config-unavailable')
   expect(f.first.closed).toBe(true)
   expect(f.second.closed).toBe(true)
+  expect(f.first.request).not.toHaveBeenCalled()
+  expect(f.second.request).not.toHaveBeenCalled()
+})
+
+it('refuses configuration writes while the owner-selected package is disabled', async () => {
+  const f = fixture()
+  for (const entry of f.entries.values()) entry.plugins = [{ ...plugin, enabled: false }]
+  await expect(f.reserve()).rejects.toThrow('renderer-package-config-unavailable')
   expect(f.first.request).not.toHaveBeenCalled()
   expect(f.second.request).not.toHaveBeenCalled()
 })

@@ -55,7 +55,7 @@ export function isWritableDesktopConfigField(
     && !secrets.some(secret => pathStartsWith(field.path, secret.path) || pathStartsWith(secret.path, field.path))
 }
 
-type ProjectedConfig = { readonly value: unknown; readonly writable: boolean }
+type ProjectedConfig = { readonly value: unknown; readonly writable: boolean; readonly lifecycle: boolean }
 
 function projectionKey(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): string {
   return createHash('sha256').update(
@@ -70,14 +70,15 @@ function projectedConfig(
 ): ProjectedConfig {
   const value = projectDesktopManagerConfig(snapshot, plugin, proof)
   const descriptor = proof.plugin.configuration
+  const lifecycle = descriptor.applies === 'live' && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
+    && isDeepStrictEqual(
+      normalized(plugin.config),
+      normalized(removePaths(plugin.config, descriptor.secrets.map(secret => secret.path))),
+    )
   return {
     value,
-    writable: descriptor.writable === true && descriptor.applies === 'live'
-      && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
-      && isDeepStrictEqual(
-        normalized(plugin.config),
-        normalized(removePaths(plugin.config, descriptor.secrets.map(secret => secret.path))),
-      )
+    lifecycle,
+    writable: descriptor.writable === true && lifecycle
       && descriptor.fields.some(field => isWritableDesktopConfigField(field, descriptor.secrets)),
   }
 }
@@ -155,6 +156,10 @@ export class DesktopManagerConfigProjection {
 
   async canWrite(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<boolean> {
     return (await this.projection(snapshot, plugin)).writable
+  }
+
+  async canCoordinateLifecycle(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<boolean> {
+    return (await this.projection(snapshot, plugin)).lifecycle
   }
 
   /** Retain a confirmed native readback so another Manager can join after the write. */

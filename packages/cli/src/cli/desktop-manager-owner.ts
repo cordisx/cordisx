@@ -136,6 +136,7 @@ export function createDesktopManagerOwner(input: {
     // Empty profiles also project permission and plugin-configuration snapshots.
     protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
     projectPluginConfig: configProjection,
+    reserveDesktopConfig: async peers => await lifecycle.reserveExternalMutation(peers),
     desktopPackageConfigEnabled: () => packageConfigWritesEnabled,
     ...(input.management === undefined ? {} : {
       restrictedManagement: {

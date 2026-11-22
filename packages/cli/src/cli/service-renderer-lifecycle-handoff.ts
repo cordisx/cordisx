@@ -10,10 +10,13 @@ import type { SharedProfilePluginConfigFence } from '../config/profile-plugin-co
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import type { DesktopManagerConfigProof } from '../launcher/renderer-config-management.js'
+import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { reserveServiceRendererPackageConfig } from './service-renderer-package-config-handoff.js'
 import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
+import { emptyPluginConfig } from './desktop-manager-config-eligibility.js'
+import { revalidateDesktopLifecycleConfig } from './desktop-lifecycle-config-proof.js'
 import type {
   ServiceRendererBootstrapEntry,
   ServiceRendererConfiguredChannelInput,
@@ -58,6 +61,13 @@ export class ServiceRendererLifecycleHandoff {
         plugin: CordisXConfigPlugin,
         proof: DesktopManagerConfigProof,
       ) => boolean
+      readonly canCoordinatePluginConfig: (
+        snapshot: ServiceRendererSnapshot,
+        plugin: CordisXConfigPlugin,
+      ) => Promise<boolean>
+      readonly reserveDesktopConfig?: (
+        peers: readonly ManagerRendererCommandPeer[],
+      ) => Promise<DesktopConfigurationReservation>
       readonly readLifetimes: ManagerRendererReadLifetimes
       readonly configuredChannel: () => ServiceRendererConfiguredChannelInput | undefined
       readonly snapshot: () => ServiceRendererSnapshot
@@ -100,6 +110,7 @@ export class ServiceRendererLifecycleHandoff {
         readLifetimes: this.input.readLifetimes,
         ...(this.input.pluginFence === undefined ? {} : { pluginFence: this.input.pluginFence }),
         rememberPluginConfig: this.input.rememberPluginConfig,
+        canCoordinatePluginConfig: this.input.canCoordinatePluginConfig,
         readInputs: async snapshot => await this.readInputs(snapshot),
         current: this.input.current,
       },
@@ -224,6 +235,19 @@ export class ServiceRendererLifecycleHandoff {
           || !attachmentEqual(inputs.config, entry.config) || !attachmentEqual(inputs.plugins, entry.plugins)
           || !attachmentEqual(inputs.policies, entry.policies) || !attachmentEqual(inputs.inputs, entry.packageInputs)
         ) throw new Error('renderer-lifecycle-handoff-unavailable')
+        for (const plugin of inputs.plugins.filter(value => mutation.affectedPluginIds.includes(value.id))) {
+          if (emptyPluginConfig(plugin.config)) continue
+          const before = mutation.previous.plugins.find(item => item.id === plugin.id)
+          const after = mutation.candidate.plugins.find(item => item.id === plugin.id)
+          if (
+            !['enable', 'disable'].includes(mutation.operation)
+            || !entry.desktopLifecycleConfigPlugins?.includes(plugin.id) || !entry.projectedConfigs?.has(plugin.id)
+            || !attachmentEqual(JSON.parse(JSON.stringify(plugin.config)), entry.projectedConfigs.get(plugin.id))
+            || !before || !after || before.digest !== after.digest || before.version !== after.version
+            || before.canonicalSource !== after.canonicalSource
+            || !attachmentEqual(before.dependencies, after.dependencies)
+          ) throw new Error('renderer-lifecycle-handoff-unavailable')
+        }
         const projected = await projection.prepareCandidate(context, mutation)
         try {
           if (!reservation.current()) throw new Error('renderer-lifecycle-handoff-unavailable')
@@ -303,6 +327,17 @@ export class ServiceRendererLifecycleHandoff {
     reservation.adopting = true
     try {
       if (!attachmentEqual(this.input.snapshot(), snapshot)) return false
+      if (
+        !await revalidateDesktopLifecycleConfig({
+          snapshot,
+          entries: reservation.cohort.map(item => item.entry),
+          current: reservation.current,
+          ...(this.input.reserveDesktopConfig === undefined ? {} : { reserve: this.input.reserveDesktopConfig }),
+          read: async () => await this.readInputs(snapshot),
+          remember: this.input.rememberPluginConfig,
+          canCoordinate: this.input.canCoordinatePluginConfig,
+        })
+      ) return false
       await Promise.all(reservation.cohort.map(async ({ id, entry }) => {
         if (!entry.identity && !entry.managementPlans) return
         await this.track(entry, async () => {
@@ -342,7 +377,12 @@ export class ServiceRendererLifecycleHandoff {
             entry.identityAliases = aliases
           }
           const eligible = entry.managementPlans
-            ? await restrictedLifecycleIds(this.input.homeDir, snapshot, inputs.plugins)
+            ? await restrictedLifecycleIds(
+              this.input.homeDir,
+              snapshot,
+              inputs.plugins,
+              new Set(entry.desktopLifecycleConfigPlugins),
+            )
             : undefined
           if (!reservation.current() || !attachmentEqual(this.input.snapshot(), snapshot)) {
             throw new Error('renderer-lifecycle-handoff-unavailable')

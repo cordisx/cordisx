@@ -51,8 +51,11 @@ Desktop login and dynamic changes to those managed packages remain unavailable.
 The service owner and an eligible Desktop owner can change an unrelated
 capability-free v1 package while admitted Manager pages retain their projected
 identities; the Desktop owner also coordinates its ready renderer seats. Manager
-controls can enable, disable or uninstall only owner-verified packages with empty
-configuration. Installation, upgrades and managed-package changes are not
+controls can enable or disable owner-verified packages with empty configuration,
+or a Desktop-proved non-sensitive live configuration. Uninstall remains limited
+to empty configuration. After a Desktop generation change, the owner reproves
+the redacted configuration before admitting a new page or accepting another
+write. Installation, upgrades and managed-package changes are not
 available through these controls. The owner waits for the participating pages'
 receipts and holds outstanding subscription results until service continuity is
 confirmed. If a participant

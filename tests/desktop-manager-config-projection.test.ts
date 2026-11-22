@@ -138,6 +138,17 @@ it('offers writes only for a live, non-secret proof and remembers confirmed read
   const projection = new DesktopManagerConfigProjection({ current: () => true, seat: () => seat, read })
   expect(await projection.canWrite(snapshot, plugin)).toBe(false)
   expect(await projection.canWrite(snapshot, clean)).toBe(true)
+  expect(await projection.canCoordinateLifecycle(snapshot, plugin)).toBe(false)
+  expect(await projection.canCoordinateLifecycle(snapshot, clean)).toBe(true)
+  const readonlyProof = structuredClone(native)
+  readonlyProof.plugin.configuration.writable = false
+  const readonlyProjection = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => Symbol.for('readonly-seat'),
+    read: async () => readonlyProof,
+  })
+  expect(await readonlyProjection.canWrite(snapshot, clean)).toBe(false)
+  expect(await readonlyProjection.canCoordinateLifecycle(snapshot, clean)).toBe(true)
   const next = { ...clean, revision: 5, config: { display: { label: 'updated' } } }
   const updated = structuredClone(native)
   updated.plugin.configuration.revision = 5

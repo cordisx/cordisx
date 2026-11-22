@@ -1,9 +1,185 @@
 import { expect, vi } from 'vitest'
 import type { PackagePluginConfigStore } from '../../packages/cli/src/launcher/package-plugin-config.js'
+import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
 import type { CdpClient } from '../fixtures/native-browser-cdp.js'
+import { decision, FakeRuntime, localPackage, request } from './plugin-lifecycle.fixtures.js'
 
 const pluginId = 'desktop-config-fixture'
 const form = `[data-plugin-config-form=${pluginId}]`
+
+export async function stageDesktopConfigFixture(input: {
+  root: string
+  homeDir: string
+  profileId: string
+  generation: string
+  store: PackagePluginConfigStore
+  writeFixture: boolean
+  label: string
+  secret: string
+}): Promise<void> {
+  const sourceDirectory = await localPackage({
+    root: input.root,
+    id: pluginId,
+    code: [
+      "const descriptor = { type: 'object', dict: { label: { type: 'string' },",
+      "  labels: { type: 'array', inner: { type: 'string' } },",
+      "  token: { type: 'string', meta: { role: 'secret' } } } }",
+      "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
+      '  validate: value => ({ value }) }, toJSON: () => descriptor }',
+      "export const configApplies = 'live'",
+      "export const inject = ['settings']",
+      'export function apply(ctx, config) { globalThis.__desktopConfigValue = config;',
+      '  ctx.settings.watch(value => { globalThis.__desktopConfigValue = value }) }',
+    ].join('\n'),
+  })
+  const seed = new PluginLifecycleCoordinator({
+    homeDir: input.homeDir,
+    profileId: input.profileId,
+    runtimeGeneration: input.generation,
+    permissionPolicies: [],
+    runtime: new FakeRuntime(),
+  })
+  await seed.store.bindRuntimeGeneration()
+  const planned = await seed.handle({
+    ...request({ kind: 'inspect-local', sourceDirectory }, 0, input.generation),
+    profileId: input.profileId,
+  })
+  if (planned.outcome !== 'planned' || !planned.candidateId || !planned.authorizationPlan) {
+    throw new Error('configuration fixture package could not be planned')
+  }
+  const installed = await seed.handle({
+    ...request(
+      {
+        kind: 'install',
+        candidateId: planned.candidateId,
+        authorizationDecision: decision(planned.authorizationPlan),
+      },
+      0,
+      input.generation,
+    ),
+    profileId: input.profileId,
+  })
+  if (installed.outcome !== 'applied') throw new Error('configuration fixture package could not be installed')
+  const candidate = await input.store.stage(
+    pluginId,
+    0,
+    input.writeFixture ? { label: input.label } : { label: input.label, token: input.secret },
+    'fixture-owner',
+  )
+  await input.store.commit(pluginId, candidate.candidateRevision, 'fixture-owner')
+}
+
+export async function verifyDesktopConfigLifecycle(
+  store: PackagePluginConfigStore,
+  desktop: CdpClient,
+  first: CdpClient,
+  second: CdpClient,
+  reopen: () => Promise<CdpClient>,
+): Promise<CdpClient> {
+  const watch = async (page: CdpClient) => {
+    await page.evaluate(`(() => {
+      globalThis.__fixtureDialogRoots = []
+      const attach = Element.prototype.attachShadow
+      Element.prototype.attachShadow = function(options) {
+        const root = attach.call(this, options)
+        globalThis.__fixtureDialogRoots.push(root)
+        return root
+      }
+      globalThis.__fixtureExecutions = []
+      const forward = window.fetch.bind(window)
+      window.fetch = async (url, options) => {
+        let operation
+        if (url === '/api/renderer/binding' && typeof options?.body === 'string') {
+          try { operation = JSON.parse(JSON.parse(options.body).payload).operation.kind } catch {}
+        }
+        const response = await forward(url, options)
+        if (operation === 'execute') {
+          const reply = await response.clone().json().catch(() => undefined)
+          globalThis.__fixtureExecutions.push({ ok: reply?.ok, status: reply?.value?.status })
+        }
+        return response
+      }
+    })()`)
+  }
+  const open = async (page: CdpClient) => {
+    if (await page.evaluate(`Boolean(document.querySelector('[data-plugin-detail=${pluginId}]'))`)) return
+    await vi.waitFor(async () => {
+      expect(await page.evaluate(`Boolean(document.querySelector('[data-plugin-id=${pluginId}]'))`)).toBe(true)
+    }, { timeout: 20_000 })
+    await page.evaluate(`document.querySelector('[data-plugin-id=${pluginId}]').click()`)
+    await vi.waitFor(async () => {
+      expect(await page.evaluate(`Boolean(document.querySelector('[data-plugin-detail=${pluginId}]'))`)).toBe(true)
+    }, { timeout: 20_000 })
+  }
+  const change = async (page: CdpClient, action: 'disable' | 'enable') => {
+    const selector = JSON.stringify(`[data-plugin-lifecycle-action="${action}"]`)
+    const previous = await page.evaluate<number>('globalThis.__fixtureExecutions.length')
+    await vi.waitFor(async () => {
+      expect(
+        await page.evaluate(`(() => {
+        const button = document.querySelector(${selector})
+        if (!button || button.disabled || button.classList.contains('t-is-disabled')) return false
+        button.click(); return true
+      })()`),
+      ).toBe(true)
+    }, { timeout: 20_000 })
+    if (action === 'disable') {
+      await vi.waitFor(async () => {
+        expect(
+          await page.evaluate(`globalThis.__fixtureDialogRoots.some(root =>
+          root.querySelector('dialog[open] [data-action=confirm]'))`),
+        ).toBe(true)
+      }, { timeout: 20_000 })
+      await page.evaluate(`globalThis.__fixtureDialogRoots.find(root =>
+        root.querySelector('dialog[open] [data-action=confirm]'))
+        .querySelector('dialog[open] [data-action=confirm]').click()`)
+    }
+    await vi.waitFor(async () => {
+      expect(
+        await page.evaluate(`globalThis.__fixtureExecutions.slice(${previous})
+        .some(item => item.ok === true && item.status === 'applied')`),
+      ).toBe(true)
+    }, { timeout: 45_000 })
+  }
+  await watch(first)
+  await open(first)
+  await change(first, 'disable')
+  const expected = { label: 'first update' }
+  expect(await store.loadStable(pluginId)).toEqual({ revision: 2, config: expected })
+  for (const page of [desktop, first, second]) {
+    expect(
+      await page.evaluate(`globalThis.__cordisxRuntime.activePluginGeneration().plugins
+      .find(item => item.id === '${pluginId}')?.enabled`),
+    ).toBe(false)
+  }
+  second = await reopen()
+  await watch(second)
+  await open(second)
+  expect(
+    await second.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
+    .find(item => item.id === '${pluginId}')?.configuration.writable`),
+  ).toBe(false)
+  for (const page of [desktop, first, second]) await page.evaluate('globalThis.__desktopConfigValue = undefined')
+  await change(second, 'enable')
+  expect(await store.loadStable(pluginId)).toEqual({ revision: 2, config: expected })
+  for (const page of [desktop, first, second]) {
+    expect(await page.evaluate('globalThis.__desktopConfigValue')).toEqual(expected)
+  }
+  await second.evaluate("globalThis.__desktopConfigDocumentMarker = 'same-document'")
+  await second.evaluate('document.querySelector("[data-plugin-detail-tab=config]").click()')
+  await vi.waitFor(async () => {
+    expect(
+      await second.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
+      .find(item => item.id === '${pluginId}')?.configuration.writable`),
+    ).toBe(true)
+  }, { timeout: 15_000 })
+  await editDesktopConfig(second, 'after lifecycle')
+  await expectDesktopConfigApplied(second, desktop, store, 3, 'after lifecycle')
+  await vi.waitFor(async () => {
+    expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'after lifecycle' })
+  }, { timeout: 15_000 })
+  return second
+}
 
 export async function openDesktopConfig(page: CdpClient): Promise<void> {
   await vi.waitFor(async () => {

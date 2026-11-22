@@ -155,6 +155,9 @@ export function createServiceRendererProjector(input: {
       profileId: input.profileId,
       generation: input.generation,
       pluginIds: mutation.affectedPluginIds.filter(id => after.plugins.some(plugin => plugin.id === id)),
+      // A projected Desktop configuration is admitted only by the reserved
+      // owner handoff below; it never enters the lifecycle payload.
+      allowNonEmptyPluginConfig: identityProjection && input.canProjectIdentity?.(identity) === true,
     })
     const packages = new Map<string, Awaited<ReturnType<typeof loadStagedPluginPackage>>>()
     for (const pluginId of mutation.affectedPluginIds) {

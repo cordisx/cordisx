@@ -21,6 +21,7 @@ import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
@@ -28,17 +29,15 @@ import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetime
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
-import {
-  allowsManagementWrite,
-  type ManagementProjectionEntry,
-  projectManagementRequest,
-} from './service-renderer-management-projection.js'
+import { allowsManagementWrite, projectManagementRequest } from './service-renderer-management-projection.js'
+import { serviceRendererManagementEntry } from './service-renderer-management-entry.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
+import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import {
@@ -102,6 +101,10 @@ export class ServiceRendererBootstrap {
       }
       /** Desktop owner only: read schema-redacted values from its existing authorized seat. */
       readonly projectPluginConfig?: DesktopConfigProjector
+      /** Reprove configuration after a coordinated Desktop generation change. */
+      readonly reserveDesktopConfig?: (
+        peers: readonly ManagerRendererCommandPeer[],
+      ) => Promise<DesktopConfigurationReservation>
       /** Available only after the Desktop owner's native config bridge is installed. */
       readonly desktopPackageConfigEnabled?: () => boolean
     },
@@ -126,6 +129,9 @@ export class ServiceRendererBootstrap {
       ...(this.pluginConfigFence === undefined ? {} : { pluginFence: this.pluginConfigFence }),
       rememberPluginConfig: (snapshot, plugin, proof) =>
         this.input.projectPluginConfig?.remember?.(snapshot, plugin, proof) === true,
+      canCoordinatePluginConfig: async (snapshot, plugin) =>
+        await this.input.projectPluginConfig?.canCoordinateLifecycle?.(snapshot, plugin) === true,
+      ...(input.reserveDesktopConfig === undefined ? {} : { reserveDesktopConfig: input.reserveDesktopConfig }),
       readLifetimes: this.readLifetimes,
       configuredChannel: () => this.configuredChannel,
       snapshot: () => input.lifecycle.snapshot(),
@@ -563,7 +569,11 @@ export class ServiceRendererBootstrap {
             if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
           }
         }
-        const { projectedConfigs, writablePlugins: desktopPackageConfigPlugins } = await prepareDesktopManagerConfigs(
+        const {
+          projectedConfigs,
+          writablePlugins: desktopPackageConfigPlugins,
+          lifecyclePlugins: desktopLifecycleConfigPlugins,
+        } = await prepareDesktopManagerConfigs(
           this.input,
           snapshot,
           plugins,
@@ -619,12 +629,18 @@ export class ServiceRendererBootstrap {
         entry.plugins = plugins
         entry.projectedConfigs = projectedConfigs
         entry.desktopPackageConfigPlugins = desktopPackageConfigPlugins
+        entry.desktopLifecycleConfigPlugins = desktopLifecycleConfigPlugins
         entry.policies = policies
         entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
         entry.needsIdentityProjection = needsIdentityProjection
         if (entry.managementPlans) {
-          entry.restrictedLifecycleIds = await restrictedLifecycleIds(this.input.homeDir, snapshot, plugins)
+          entry.restrictedLifecycleIds = await restrictedLifecycleIds(
+            this.input.homeDir,
+            snapshot,
+            plugins,
+            new Set(entry.desktopLifecycleConfigPlugins),
+          )
         }
         if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
         return {
@@ -844,25 +860,14 @@ export class ServiceRendererBootstrap {
     return await entry.completing
   }
 
-  private managementEntry(context: ManagerRendererChannelContext): ManagementProjectionEntry | undefined {
-    const entry = this.entries.get(context.rendererId)
-    if (!entry) return undefined
-    let restricted: ManagementProjectionEntry['restricted']
-    try {
-      if (
-        entry.managementPlans?.available && entry.restrictedLifecycleIds && this.input.restrictedManagement?.available()
-      ) restricted = { plans: entry.managementPlans, writableIds: entry.restrictedLifecycleIds }
-    } catch { /* A missing owner authority never opens the lifecycle path. */ }
-    return {
-      confirmed: entry.bootstrapConfirmed,
-      current: () => this.current(context.rendererId, entry) && !entry.lifecycleTransition,
-      unchanged: async () => await this.unchanged(context.rendererId, entry),
-      identity: entry.identity,
-      aliases: entry.identityAliases,
-      snapshot: entry.snapshot,
-      scopedLifecycle: this.input.restrictedManagement !== undefined,
-      restricted,
-    }
+  private managementEntry(context: ManagerRendererChannelContext) {
+    return serviceRendererManagementEntry(this.entries.get(context.rendererId), {
+      ...(this.input.restrictedManagement === undefined
+        ? {}
+        : { available: this.input.restrictedManagement.available }),
+      current: entry => this.current(context.rendererId, entry),
+      unchanged: async entry => await this.unchanged(context.rendererId, entry),
+    })
   }
 
   allowsManagementWrite(context: ManagerRendererChannelContext, operation: PluginManagementRpcOperation): boolean {

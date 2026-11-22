@@ -34,6 +34,7 @@ export interface ManagementProjectionEntry {
   readonly scopedLifecycle: boolean
   readonly restricted: {
     readonly writableIds: ReadonlySet<string>
+    readonly configuredIds?: ReadonlySet<string>
     readonly plans: ServiceRendererManagementPlans
   } | undefined
 }
@@ -51,7 +52,9 @@ function permittedIntent(entry: ManagementProjectionEntry, intent: RestrictedLif
   }
   if (intent.kind === 'plugin-enable') return true
   try {
-    return pluginDependentClosure(active, intent.pluginId).every(id => entry.restricted!.writableIds.has(id))
+    const affected = pluginDependentClosure(active, intent.pluginId)
+    return affected.every(id => entry.restricted!.writableIds.has(id))
+      && (intent.kind !== 'plugin-uninstall' || affected.every(id => !entry.restricted!.configuredIds?.has(id)))
   } catch {
     return false
   }

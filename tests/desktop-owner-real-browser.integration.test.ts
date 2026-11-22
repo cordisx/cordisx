@@ -50,7 +50,7 @@ import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-p
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
-import { decision, FakeRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
+import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 import {
   draftDesktopConfig,
   editDesktopConfig,
@@ -60,8 +60,10 @@ import {
   openConfiguredChannel,
   openDesktopConfig,
   releaseHeldConfigReplyAfterAdoption,
+  stageDesktopConfigFixture,
   submitDesktopConfig,
   verifyDesktopArrayUpdate,
+  verifyDesktopConfigLifecycle,
   waitForHeldConfigReply,
 } from './suites/desktop-package-config-browser.js'
 
@@ -82,7 +84,13 @@ const chrome = [
   }
 })
 
-async function exerciseDesktopOwner(archive?: string, review = false, configFixture = false, writeFixture = false) {
+async function exerciseDesktopOwner(
+  archive?: string,
+  review = false,
+  configFixture = false,
+  writeFixture = false,
+  lifecycleFixture = false,
+) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
   const homeDir = path.join(root, 'home')
@@ -147,7 +155,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
   })
   const artifactServer = await startPluginGenerationArtifactServer()
   const cdp = new CdpPluginLifecycleRuntime()
-  if (archive !== undefined && !review) {
+  if (archive !== undefined && !review || lifecycleFixture) {
     // This fixture supplies CDP documents; native launch graph promotion is a separate boundary.
     cdp.markBrowserGraphTransportReady()
     cdp.setBrowserGraphBootstrapRefresh(async () => {})
@@ -157,56 +165,16 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
   const fixtureLabel = 'synthetic-desktop-config-label'
   const configStore = new PackagePluginConfigStore(homeDir, profileId, generation)
   if (configFixture) {
-    const sourceDirectory = await localPackage({
+    await stageDesktopConfigFixture({
       root,
-      id: 'desktop-config-fixture',
-      code: [
-        "const descriptor = { type: 'object', dict: { label: { type: 'string' },",
-        "  labels: { type: 'array', inner: { type: 'string' } },",
-        "  token: { type: 'string', meta: { role: 'secret' } } } }",
-        "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
-        '  validate: value => ({ value }) }, toJSON: () => descriptor }',
-        "export const configApplies = 'live'",
-        "export const inject = ['settings']",
-        'export function apply(ctx, config) { globalThis.__desktopConfigValue = config;',
-        '  ctx.settings.watch(value => { globalThis.__desktopConfigValue = value }) }',
-      ].join('\n'),
-    })
-    const seed = new PluginLifecycleCoordinator({
       homeDir,
       profileId,
-      runtimeGeneration: generation,
-      permissionPolicies: [],
-      runtime: new FakeRuntime(),
+      generation,
+      store: configStore,
+      writeFixture,
+      label: fixtureLabel,
+      secret: fixtureSecret,
     })
-    await seed.store.bindRuntimeGeneration()
-    const planned = await seed.handle({
-      ...request({ kind: 'inspect-local', sourceDirectory }, 0, generation),
-      profileId,
-    })
-    if (planned.outcome !== 'planned' || !planned.candidateId || !planned.authorizationPlan) {
-      throw new Error('configuration fixture package could not be planned')
-    }
-    const installed = await seed.handle({
-      ...request(
-        {
-          kind: 'install',
-          candidateId: planned.candidateId,
-          authorizationDecision: decision(planned.authorizationPlan),
-        },
-        0,
-        generation,
-      ),
-      profileId,
-    })
-    if (installed.outcome !== 'applied') throw new Error('configuration fixture package could not be installed')
-    const candidate = await configStore.stage(
-      'desktop-config-fixture',
-      0,
-      writeFixture ? { label: fixtureLabel } : { label: fixtureLabel, token: fixtureSecret },
-      'fixture-owner',
-    )
-    await configStore.commit('desktop-config-fixture', candidate.candidateRevision, 'fixture-owner')
   }
   const settings = nativeCodexSettings({
     configPath,
@@ -217,6 +185,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       },
     },
   })
+  let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
   const owner = await createDesktopManagerOwnerIfEligible({
     homeDir,
     configPath,
@@ -230,6 +199,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     attach: false,
     configuredPlugins: configured.plugins,
     codex: async (operation, request) => await dispatchCodexSettings(settings, operation, request),
+    ...(lifecycleFixture ? { management: () => composition } : {}),
   })
   if (!owner) throw new Error('fixture Desktop owner is unavailable')
   const managed = createProductionManagedServiceLifecycle({
@@ -247,10 +217,9 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     profileId,
     runtimeGeneration: generation,
     permissionPolicies: policies,
-    runtime: managed,
+    runtime: lifecycleFixture ? owner.coordinateLifecycle(managed) : managed,
     pluginGenerationArtifactServer: artifactServer,
   })
-  let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
   let web: { url: string; issueUrl(): string; close(): Promise<void> } | undefined
   let browser: ChildProcess | undefined
   let desktop: CdpClient | undefined
@@ -279,7 +248,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     await writeSupervisorState(paths, state)
     expect(await coordinator.prepareRecovery()).toHaveLength(0)
     const active = await store.bindRuntimeGeneration()
-    owner.initialize(active, false)
+    owner.initialize(active, false, lifecycleFixture ? managed : undefined)
     await (await managed.initialize(active)).coreReady
     if (writeFixture) expect(owner.enablePackageConfigWrites(generation)).toBe(true)
     const nativePlugins = configFixture ? await loadPluginComposition(store, active) : []
@@ -516,6 +485,19 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     second = await connect(secondTarget.targetId)
     await second.send('Page.navigate', { url: url(web.issueUrl()) })
     await ready(second)
+    if (lifecycleFixture) {
+      second = await verifyDesktopConfigLifecycle(configStore, desktop, first, second, async () => {
+        await desktop!.send('Target.closeTarget', { targetId: secondTarget.targetId })
+        await second?.close().catch(() => {})
+        second = undefined
+        const reopened = await desktop!.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
+        second = await connect(reopened.targetId)
+        await second.send('Page.navigate', { url: url(web!.issueUrl()) })
+        await ready(second)
+        return second
+      })
+      return
+    }
     if (writeFixture) {
       expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'first update' })
       await second.evaluate("globalThis.__desktopConfigDocumentMarker = 'same-document'")
@@ -970,6 +952,12 @@ it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platf
   'synchronizes a proven Desktop package field while preserving another Manager draft',
   async () => await exerciseDesktopOwner(undefined, false, true, true),
   120_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'preserves a proven Desktop package configuration across lifecycle changes and new Manager admission',
+  async () => await exerciseDesktopOwner(undefined, false, true, true, true),
+  180_000,
 )
 
 const channelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE

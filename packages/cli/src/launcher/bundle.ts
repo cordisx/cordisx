@@ -175,7 +175,7 @@ async function assertStandaloneOwner(
       desktopConfig.token !== 'renderer-binding-placeholder' || !Array.isArray(desktopConfig.plugins)
       || desktopConfig.plugins.length === 0 || desktopConfig.plugins.length > 256
       || new Set(desktopConfig.plugins).size !== desktopConfig.plugins.length
-      || desktopConfig.plugins.some(id => !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id) || !byId.get(id)?.enabled)
+      || desktopConfig.plugins.some(id => !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id) || !byId.has(id))
     )
   ) throw new Error('Standalone package configuration projection is invalid')
   for (const item of activation.plugins) {

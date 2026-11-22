@@ -113,6 +113,15 @@ it('projects only a safe dependency closure and consumes the originating page pl
     request: { ...intent, extra: true } as any,
   })).toBe(false)
   expect(allowsManagementWrite({ ...entry(plans), restricted: undefined }, planOperation)).toBe(false)
+  const configured = {
+    ...entry(plans),
+    restricted: { writableIds: ids, configuredIds: new Set(['second']), plans },
+  }
+  expect(allowsManagementWrite(configured, planOperation)).toBe(true)
+  expect(allowsManagementWrite(configured, {
+    kind: 'plan',
+    request: { kind: 'plugin-uninstall', pluginId: 'first' },
+  })).toBe(false)
   const unscoped = [
     { kind: 'plan', request: { kind: 'plugin-plan-local', sourceDirectory: '/fixture' } },
     { kind: 'plan', request: { kind: 'plugin-plan-marketplace', pluginId: 'new' } },

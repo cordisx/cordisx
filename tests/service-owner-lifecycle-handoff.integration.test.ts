@@ -264,9 +264,15 @@ it.each(channelArchive ? [...scenarios, 'channel'] : scenarios)(
         expect(view.value.value.plugins).toHaveLength(
           outcome === 'rollback' || outcome === 'observation-rollback' ? 1 : 2,
         )
-        expect(view.value.value.plugins.find((plugin: any) => plugin.id === 'fixture-service').canonicalSource)
-          .toBe(originalAliases[index])
-        expect(view.value.value.plugins.every((plugin: any) => plugin.availableOperations.length === 0)).toBe(true)
+        const managed = view.value.value.plugins.find((plugin: any) => plugin.id === 'fixture-service')
+        const installed = view.value.value.plugins.find((plugin: any) => plugin.id === 'other-plugin')
+        expect(managed.canonicalSource).toBe(originalAliases[index])
+        expect(managed.availableOperations).toEqual([])
+        if (outcome === 'rollback' || outcome === 'observation-rollback') {
+          expect(installed).toBeUndefined()
+        } else {
+          expect(installed.availableOperations).toEqual(['disable', 'uninstall'])
+        }
         expect(await f.sessions.call(peers[index]!, 'manager-bootstrap', { action: 'status' }))
           .toEqual({ status: 'ok', value: { status: 'ok', current: true } })
       }

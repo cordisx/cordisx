@@ -35,6 +35,10 @@ export async function reserveServiceRendererPackageConfig(
       plugin: CordisXConfigPlugin,
       proof: DesktopManagerConfigProof,
     ) => boolean
+    readonly canCoordinatePluginConfig: (
+      snapshot: ServiceRendererSnapshot,
+      plugin: CordisXConfigPlugin,
+    ) => Promise<boolean>
     readonly readInputs: (snapshot: ServiceRendererSnapshot) => Promise<Inputs>
     readonly current: (rendererId: string, entry: ServiceRendererBootstrapEntry) => boolean
   },
@@ -139,6 +143,9 @@ export async function reserveServiceRendererPackageConfig(
             || !current()
           ) return false
           if (applied && !input.rememberPluginConfig(snapshot, target, proof)) return false
+          const configured = Object.keys(target.config as Record<string, unknown>).length > 0
+          const lifecycle = configured && await input.canCoordinatePluginConfig(snapshot, target)
+          if (!current()) return false
           for (const item of cohort) {
             item.entry.plugins = after.plugins
             item.entry.packageInputs = new Map(after.inputs)
@@ -149,6 +156,10 @@ export async function reserveServiceRendererPackageConfig(
               projections.delete(pluginId)
             } else projections.set(pluginId, expected)
             item.entry.projectedConfigs = projections
+            const lifecyclePlugins = new Set(item.entry.desktopLifecycleConfigPlugins)
+            if (lifecycle) lifecyclePlugins.add(pluginId)
+            else lifecyclePlugins.delete(pluginId)
+            item.entry.desktopLifecycleConfigPlugins = [...lifecyclePlugins]
           }
           return true
         } catch {

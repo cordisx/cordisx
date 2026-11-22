@@ -36,6 +36,7 @@ export type ServiceRendererBootstrapEntry = {
   plugins?: readonly CordisXConfigPlugin[]
   projectedConfigs?: ReadonlyMap<string, unknown>
   desktopPackageConfigPlugins?: readonly string[]
+  desktopLifecycleConfigPlugins?: readonly string[]
   packageInputs?: Map<string, string>
   policies?: readonly CordisXPersistedPermissionPolicyRecord[]
   managedOwners?: ReadonlyMap<string, string>
