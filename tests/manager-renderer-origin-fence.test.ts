@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { expect, it } from 'vitest'
-import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
+import {
+  ManagerRendererSessions,
+  rejectedUndispatchedRendererWrite,
+} from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 
 const secret = () => randomBytes(32).toString('hex')
@@ -122,6 +125,44 @@ it('does not report success if the originating write leaves its fence unreleased
     expect(await authority.call(origin, 'fixture', 'origin')).toEqual({ status: 'unknown' })
     expect(authority.mutationAvailability()).toBe('unavailable')
     expect(await test.open()).toBeUndefined()
+  } finally {
+    authority.dispose()
+  }
+})
+
+it('returns an owner-proven pre-dispatch rejection while keeping a failed cleanup fenced', async () => {
+  let authority!: ManagerRendererSessions
+  const test = fixture(async () => {
+    const fence = await authority.suspendMutationsForCurrentWrite()
+    fence.fence()
+    return rejectedUndispatchedRendererWrite('request-1', 'unavailable')
+  })
+  authority = test.authority
+  try {
+    const origin = (await test.open())!
+    expect(await authority.call(origin, 'fixture', 'origin')).toEqual({
+      status: 'ok',
+      value: { requestId: 'request-1', ok: true, value: { status: 'rejected', reason: 'unavailable' } },
+    })
+    expect(authority.mutationAvailability()).toBe('unavailable')
+    expect(await test.open()).toBeUndefined()
+  } finally {
+    authority.dispose()
+  }
+})
+
+it('does not treat an unmarked lookalike as a proven pre-dispatch rejection', async () => {
+  let authority!: ManagerRendererSessions
+  const test = fixture(async () => {
+    const fence = await authority.suspendMutationsForCurrentWrite()
+    fence.fence()
+    return { requestId: 'request-1', ok: true, value: { status: 'rejected', reason: 'unavailable' } }
+  })
+  authority = test.authority
+  try {
+    const origin = (await test.open())!
+    expect(await authority.call(origin, 'fixture', 'origin')).toEqual({ status: 'unknown' })
+    expect(authority.mutationAvailability()).toBe('unavailable')
   } finally {
     authority.dispose()
   }

@@ -3,7 +3,11 @@ import { parseRendererConfigOperation } from '../launcher/renderer-config-manage
 import type { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
 import { DesktopPackageConfigWrite, type DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 import { fenceManagerOrigin } from './manager-origin-fence.js'
-import type { ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
+import {
+  type ManagerRendererChannel,
+  type ManagerRendererSessions,
+  rejectedUndispatchedRendererWrite,
+} from './manager-renderer-sessions.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 
@@ -56,11 +60,19 @@ export function createManagerRendererDesktopPackageConfig(input: {
               lifecycle: input.lifecycle,
             })
           } catch {
-            return { requestId, ok: true, value: { status: 'rejected', reason: 'busy' } }
+            return rejectedUndispatchedRendererWrite(requestId, 'busy')
           }
           let handoff: Awaited<ReturnType<ServiceRendererBootstrap['reservePackageConfig']>> | undefined
           let reservation: ReturnType<DesktopPackageConfigWriteGate['begin']> | undefined
           let dispatched = false
+          const fence = () => {
+            try {
+              handoff?.fence()
+            } catch { /* Continue fencing the origin. */ }
+            try {
+              origin.fence()
+            } catch { /* The write must not be retried through this authority. */ }
+          }
           try {
             handoff = await input.bootstrap.reservePackageConfig(origin, operation.pluginId)
             const native = origin.desktopConfiguration
@@ -101,12 +113,15 @@ export function createManagerRendererDesktopPackageConfig(input: {
                 : { status: 'rejected', reason: 'unavailable' },
             }
           } catch {
-            reservation?.release()
-            if (!dispatched && handoff?.cancel() !== false && origin.release()) {
-              return { requestId, ok: true, value: { status: 'rejected', reason: 'unavailable' } }
+            let released = false
+            try {
+              reservation?.release()
+              if (!dispatched && handoff?.cancel() !== false) released = origin.release()
+            } catch { /* Fence either authority when cleanup is not confirmed. */ }
+            if (!released) fence()
+            if (!dispatched) {
+              return rejectedUndispatchedRendererWrite(requestId, 'unavailable')
             }
-            handoff?.fence()
-            origin.fence()
             throw new Error('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')
           }
         },

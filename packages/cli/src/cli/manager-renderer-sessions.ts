@@ -73,6 +73,20 @@ interface Session {
 
 const MAX_LONG_LIVED_READS = 32
 
+// Only an owner-side channel can mark a bounded rejection as having performed
+// no write. The marker never crosses the RPC or browser boundary.
+const undispatchedWrites = new WeakSet<object>()
+
+export function rejectedUndispatchedRendererWrite(requestId: string, reason: 'busy' | 'unavailable') {
+  const result = Object.freeze({
+    requestId,
+    ok: true,
+    value: Object.freeze({ status: 'rejected', reason }),
+  })
+  undispatchedWrites.add(result)
+  return result
+}
+
 interface ActiveWriteContext {
   readonly token: symbol
   readonly session: Session
@@ -505,6 +519,17 @@ export class ManagerRendererSessions {
       const value = write
         ? await this.writeContext.run(write, async () => await prepared.dispatch())
         : await prepared.dispatch()
+      if (write && value !== null && typeof value === 'object' && undispatchedWrites.has(value)) {
+        // A failed cleanup still closes the fence, but cannot turn a proven
+        // undispatched operation into a possibly committed write. The sidecar
+        // separately checks whether its browser session can receive the reply.
+        if (this.mutationFenceOrigin === write.token) this.fenceMutations()
+        if (!await this.authenticated(session.gateway)) {
+          this.retireGateway(session.gateway)
+          return unavailable
+        }
+        return { status: 'ok', value }
+      }
       // A caller must settle its reservation before its receipt can be trusted.
       if (write && this.mutationFenceOrigin === write.token) return unknown()
       if (!this.current(session)) return dispatched === 'write' ? unknown() : unavailable
