@@ -53,6 +53,19 @@ export class ChannelAgentAccess {
     const source = this.source(entry.threadId, entry.turnId)
     return source ? { source, threadId: entry.threadId, ...(entry.turnId ? { turnId: entry.turnId } : {}) } : undefined
   }
+  requestText(metadata: unknown): string | undefined {
+    const caller = this.caller(metadata)
+    if (!caller) return undefined
+    const matches = Object.values(this.state().inputs ?? {}).filter(record => {
+      const event = record.input.source.event
+      return ['adapterId', 'accountId', 'tenantId', 'conversationId', 'messageId'].every(key =>
+        event[key as keyof ChannelEventRef] === caller.source[key as keyof ChannelEventRef]
+      )
+        && event.actor?.userId === caller.source.actor?.userId
+    })
+    if (matches.length !== 1) return undefined
+    return matches[0]!.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  }
   routine(command: unknown, threadId: string, turnId: string): boolean {
     const operation = this.native()?.cliApprovalOperation?.(command)
     if (!operation || operation.kind === 'write') return false

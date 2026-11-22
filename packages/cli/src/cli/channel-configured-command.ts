@@ -10,6 +10,11 @@ import {
 import { processIdentityStatus } from './supervisor-state.js'
 
 const OPERATIONS = [
+  'memory',
+  'memory-authority-set',
+  'memory-persona-profile',
+  'memory-persona-bind',
+  'memory-persona-context',
   'connections',
   'conversations',
   'bind',
@@ -65,6 +70,23 @@ export async function runConfiguredChannelCommand(
   stdout: (line: string) => void,
 ): Promise<void> {
   const operation = args[0]
+  if (operation === 'memory' && args[1] && !args[1].startsWith('--')) {
+    const action = args[1], remaining = args.slice(2), inputIndex = remaining.indexOf('--input')
+    let input: Record<string, unknown> = {}
+    if (inputIndex >= 0) {
+      input = JSON.parse(remaining[inputIndex + 1] ?? '') as Record<string, unknown>
+      if (!input || typeof input !== 'object' || Array.isArray(input) || 'action' in input) {
+        throw new Error('MEMORY_INVALID_REQUEST')
+      }
+      remaining.splice(inputIndex, 2)
+    }
+    return runConfiguredChannelCommand([
+      'memory',
+      ...remaining,
+      '--input',
+      JSON.stringify({ ...input, action }),
+    ], stdout)
+  }
   if (!operation || !OPERATIONS.includes(operation)) throw new Error('INVALID_CHANNEL_OPERATION')
   const options: Record<string, string> = {}
   for (let i = 1; i < args.length; i += 2) {
