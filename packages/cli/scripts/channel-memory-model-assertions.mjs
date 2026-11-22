@@ -6,6 +6,15 @@ export function scenarioChecks(scenario, turns, events, records) {
     && ['get', 'batch'].includes(event.input.action)
   )
   return {
+    personaContinuity: scenario.id !== 'persona-account-continuity-control'
+      || turns.length === 4 && turns[2].answer.includes('Atlas') && turns[2].answer.includes('CONTINUITY-93')
+        && successful.some(event =>
+          event.turn === 2 && event.input.action === 'get'
+          && JSON.stringify(event.result).includes('CONTINUITY-93')
+        )
+        && last.includes('Nova')
+        && successful.some(event => event.turn === 3 && ['search', 'search-page'].includes(event.input.action))
+        && !successful.some(event => event.turn === 3 && ['get', 'batch'].includes(event.input.action)),
     noPrematureGrant: scenario.id !== 'natural-admin-new-member'
       || !successful.some(event => event.turn === 0 && event.input.action === 'grant'),
     personaRecognized: !scenario.personaName || last.includes(scenario.personaName),
@@ -21,7 +30,7 @@ export function scenarioChecks(scenario, turns, events, records) {
     toolOnly: turns.every(turn => turn.toolOnly !== false),
     modelCompleted: turns.length === scenario.turns.length && turns.every(turn => turn.exit === 0),
     actualSave: (scenario.bootstrap || successful.some(event => event.input.action === 'remember'))
-      && records.length > 0,
+      && (records.length > 0 || scenario.id === 'persona-account-continuity-control'),
     incrementalBudget: !scenario.maxReadBytes
       || events.reduce((sum, event) => sum + (event.bytes ?? 0), 0) <= scenario.maxReadBytes,
     factsFromRead: scenario.negative

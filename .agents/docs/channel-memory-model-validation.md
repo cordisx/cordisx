@@ -12,6 +12,28 @@ local configured administrator authority, two-account challenge confirmation,
 persona native startup injection and task memory routing. Model runs below are
 mock-platform evidence; no live platform permissions or remote sends are used.
 
+Persona core continuity/control rerun passed at
+`/tmp/channel-memory-model-3y9WQO/results.json`: `gpt-6.1-sol` / `aiden_local`,
+four independent model contexts, seven tool calls, 2,257 returned bytes,
+59,606 ms scenario elapsed time. Feishu and Telegram bot accounts were bound to
+Atlas; the model initiated and confirmed the human-account challenge, then
+retrieved CONTINUITY-93 through actual get. A Discord account bound to Nova
+searched its separate space and found no code. All turns use actual native
+startup prompt assembly over a simulated native bridge. This demonstrates
+persona-space continuity without granting every human access to private memory.
+The first outer-sandbox attempt (`ViqXz2`) failed runtime initialization with
+zero calls; the approved rerun above is the behavioral evidence.
+
+Independent style-delivery repeat passed both scenarios at
+`/tmp/channel-memory-model-ogy5Ej/results.json`, using the same configured model
+and provider. `manual-auto-style` received an actual mock-platform `sent`
+receipt through production send and generated the same code in a subsequent
+Chinese final response. `scoped-style-separation` answered STYLE-55 in Chinese
+privately and English in the professional context. This does not establish
+automatic-final outbox transport or ask/progress coverage. Focused regression
+after the durable harness additions: 22 tests passed across six files; the
+strengthened continuity assertion also passed its four-test focused rerun.
+
 - Own-topic corrected run: `/tmp/channel-memory-model-9VQH6G`, passed for that
   scenario; its administrator scenario failed and was subsequently fixed.
 - Cross-platform confirmation: `/tmp/channel-memory-model-uTJz3W`, passed with
@@ -101,6 +123,55 @@ never counted as passed even if an answer accidentally contains expected text.
 
 ## Reproduce
 
+### Durable methodology and scenario matrix
+
+The Host project owns the runner, assertions and synthetic platform fixture:
+`packages/cli/scripts/channel-memory-model-scenarios.mjs`,
+`packages/cli/scripts/channel-memory-model-assertions.mjs`,
+`tests/fixtures/channel-memory-model-boundary.ts` and
+`tests/channel-memory-model-assertions.test.ts`. Temporary evidence is not a
+dependency: these source artifacts build a fresh store and model contexts.
+
+- **PERSONA CORE:** `persona-blank-bootstrap` tests actual native startup;
+  `persona-account-continuity-control` tests Feishu/Telegram accounts bound to
+  Atlas, explicitly confirmed human identity, progressive recall and a separate
+  Discord/Nova space with no inherited memory. Registry/bootstrap unit tests
+  separately test pinning, rebind and capsule revision behavior.
+- **PERSONA STYLE DELIVERY:** `scoped-style-separation` tests configured private
+  Chinese versus professional-group English with identical facts;
+  `manual-auto-style` tests real manual send receipt and final-response
+  generation. Automatic-final outbox composition and ask/progress delivery
+  remain unverified: final text generation alone is not transport evidence.
+- **MEMORY BEHAVIORS:** save/reset, own-topic group, administrator/new member,
+  aliases, timeline, correction, purpose, human linking, guided writing,
+  bounded large corpus and one other-person negative control.
+- **PROJECT CI/Protocol RELEASE:** dependency installation, package-wide
+  typecheck/lint, compatibility/public contracts and release checks. These are
+  delivery gates, not persona behavior failures.
+
+Use the owning repository's compatible installed development dependencies
+(Node, esbuild, Vitest, TypeScript) and an already configured/authenticated
+`codex` executable. No new key, credential copying, global configuration edit
+or Darwin-only Aiden package is needed. `MEMORY_SCENARIO_TOOLCHAIN` may point at
+any compatible existing node_modules directory; `/tmp` is not required.
+
+For durable local evidence, choose a fresh private output directory outside the
+Git checkout and set `MEMORY_SCENARIO_OUTPUT` explicitly. Each run records model
+and provider, executable/arguments, assertions, storage/tool events, returned
+bytes, tool-call counts, bootstrap time and scenario elapsed time. Bootstrap
+cost is separate from retrieval. Repeat selected IDs in another fresh directory
+to evaluate repeatability; do not infer semantic recall from alias matching.
+Model reasoning events are filtered. Do not commit runtime logs, raw model
+outputs, credentials, private transcripts or the temporary loopback token.
+Runtime writes outside the enclosing sandbox require explicit approval; an
+initialization error with zero tools is a runtime blocker, not persona failure.
+
+```sh
+node packages/cli/scripts/channel-memory-model-scenarios.mjs persona-blank-bootstrap persona-account-continuity-control
+node packages/cli/scripts/channel-memory-model-scenarios.mjs scoped-style-separation manual-auto-style
+npx --no-install vitest run tests/channel-memory-model-assertions.test.ts tests/channel-memory-model-boundary.test.ts tests/channel-memory-native-bootstrap.test.ts tests/channel-memory-personas.test.ts --project core
+```
+
 With repository dependencies available:
 
 ```sh
@@ -132,7 +203,15 @@ This tests the bounded builder plus mock initialization delivery only, not
 production consumer/native preparation routing, resumed-session deduplication,
 safe-turn updates or persona-scoped command dispatch. Those remain blockers.
 
-### Observed real-model evidence (2026-11-22 local date)
+### Historical initial evidence (2026-11-22 local date)
+
+This section preserves the initial failures and staged architecture, not current
+implementation status. The corrected runs in **Current fix-loop evidence**
+supersede its own-topic, administrator, identity-confirmation, native bootstrap
+and scoped-style blockers. The original `fcnS6t/results.json` style entry remains
+failed; use the independent `yfAETg/results.json` scoped-style pass, not an
+informal reassessment, as the successful rerun. Likewise use `MCI9NW/results.json`
+for actual manual delivery and `f2QdcM/results.json` for strict grant consent.
 
 The configured model is `gpt-6.1-sol`, provider `aiden_local`; this label is read
 from the existing configuration, not a claim about server-side model identity.
@@ -201,16 +280,18 @@ Temporary evidence is local and may be cleaned by the OS. The committed harness
 is the reproducible artifact; no raw private conversations are checked in.
 
 - Explicit save and recall after independent model-context reset.
-- Alice's own private topic requested in a group (currently blocked).
-- Natural-language A→B full-source grant and new member recall (blocked).
+- Alice's own private topic requested in a group (initially blocked; corrected
+  runs passed, see current evidence).
+- Natural-language A→B full-source grant and new member recall (initially
+  blocked; strict corrected run passed, see current evidence).
 - Project alias with different recall keyword.
 - Collaboration timeline and dated participants.
 - Correction of an existing decision and latest-value recall.
 - Conversation-purpose recall.
-- Claimed cross-platform identity linking (blocked until confirmation exists).
+- Cross-platform identity linking (initially blocked; dual-account confirmation
+  corrected runs passed, see current evidence).
 - One minimal negative control: Bob cannot retrieve Alice's private code.
 
-The missing group disclosure, administrator authority and cross-platform
-confirmation contracts remain in the
+The remaining public contracts and integration gates are recorded in the
 [implementation ledger](channel-memory-design.md#required-owner-changes-and-remaining-gates).
 The harness deliberately does not fabricate them to make the scenarios green.

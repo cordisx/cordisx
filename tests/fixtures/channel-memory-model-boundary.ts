@@ -84,12 +84,13 @@ export function mockMemoryBoundary(root: string) {
       messageId: string,
       context: string,
       text = '',
+      accountId = 'synthetic-bot',
     ) {
       requestText = text
       token = context
       source = {
         adapterId: adapter,
-        accountId: 'synthetic-bot',
+        accountId,
         tenantId: 'synthetic-tenant',
         actor: { userId: actor },
         conversationId: conversation,

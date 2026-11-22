@@ -1,6 +1,26 @@
 import { expect, it } from 'vitest'
 import { scenarioChecks } from '../packages/cli/scripts/channel-memory-model-assertions.mjs'
 
+it('persona continuity needs actual reads and separate-space control, not names alone', () => {
+  const scenario = {
+    id: 'persona-account-continuity-control',
+    turns: ['save', 'link', 'recall', 'control'],
+    facts: [],
+    negative: true,
+  }
+  const turns = [{ exit: 0, answer: '' }, { exit: 0, answer: '' }, { exit: 0, answer: 'Atlas CONTINUITY-93' }, {
+    exit: 0,
+    answer: 'Nova',
+  }]
+  expect(scenarioChecks(scenario, turns, [], []).personaContinuity).toBe(false)
+  const read = { turn: 2, input: { action: 'get' }, result: { status: 'ok', result: { summary: 'CONTINUITY-93' } } }
+  const search = { turn: 3, input: { action: 'search' }, result: { status: 'ok', result: [] } }
+  expect(scenarioChecks(scenario, turns, [read], []).personaContinuity).toBe(false)
+  expect(scenarioChecks(scenario, turns, [read, search], []).personaContinuity).toBe(true)
+  expect(scenarioChecks(scenario, turns, [read, search, { ...read, turn: 3 }], []).personaContinuity).toBe(false)
+  expect(scenarioChecks(scenario, [], [], []).personaContinuity).toBe(false)
+})
+
 it('answer-only hallucination cannot pass real-model scenario checks', () => {
   const scenario = { turns: ['save', 'recall'], facts: ['CODE-42'] }
   const turns = [{ exit: 0, answer: 'Saved' }, { exit: 0, answer: 'CODE-42' }]
