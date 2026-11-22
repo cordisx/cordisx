@@ -241,6 +241,75 @@ it.skipIf(
       await first.send('Page.reload')
       await ready(first)
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
+      const channelForm = async (page: CdpClient) => {
+        await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
+        await expect.poll(() => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
+          .toBe(true)
+        await expect.poll(() =>
+          page.evaluate([
+            '(() => {',
+            "  const row = [...document.querySelectorAll('[data-manager-collection-item]')].find(item =>",
+            "    item.textContent.includes('Simulator') || item.textContent.includes('模拟器'))",
+            "  const button = row?.querySelector('.cxr-manager-collection-open')",
+            '  if (!button) return false',
+            '  button.click(); return true',
+            '})()',
+          ].join('\n'))
+        ).toBe(true)
+        await expect.poll(() =>
+          page.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))')
+        )
+          .toBe(true)
+      }
+      await channelForm(first)
+      await channelForm(second)
+      const editName = async (page: CdpClient, value: string) =>
+        await page.evaluate([
+          '(() => {',
+          "  const input = document.querySelector('#channel-connection-displayName input')",
+          "  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, "
+          + JSON.stringify(value) + ')',
+          "  input.dispatchEvent(new Event('input', { bubbles: true }))",
+          "  input.dispatchEvent(new Event('change', { bubbles: true }))",
+          '})()',
+        ].join('\n'))
+      await editName(second, 'Other page draft')
+      await editName(first, 'Managed fixture channel')
+      await expect.poll(() =>
+        first.evaluate([
+          '(() => {',
+          "  const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>",
+          "    ['Save', '保存'].includes(item.textContent.trim()))",
+          '  if (!button || button.disabled) return false',
+          '  button.click(); return true',
+          '})()',
+        ].join('\n'))
+      ).toBe(true)
+      await expect.poll(async () => {
+        const config = JSON.parse(await readFile(configPath, 'utf8'))
+        return config.plugins[0].services.runtime.profiles.default.revision
+      }, { timeout: 30_000 }).toBe(2)
+      await expect.poll(() =>
+        second.evaluate(
+          'document.body.textContent.includes("Your draft was kept") || document.body.textContent.includes("草稿已保留")',
+        ), { timeout: 15_000 }).toBe(true)
+      expect(await second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Other page draft')
+      for (const label of [['Use latest version', '使用最新版本'], ['Undo changes', '撤销修改']]) {
+        await expect.poll(() =>
+          second.evaluate([
+            '(() => {',
+            "  const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>",
+            '    ' + JSON.stringify(label) + '.includes(item.textContent.trim()))',
+            '  if (!button || button.disabled) return false',
+            '  button.click(); return true',
+            '})()',
+          ].join('\n'))
+        ).toBe(true)
+      }
+      await expect.poll(() => second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Managed fixture channel')
+      expect(await managementState(first)).toEqual({ source: await alias(first), operations: [] })
       await run('stop', '--mode', 'service', 'codex', 'default', '--json')
       for (const page of [first, second]) {
         await expect.poll(() => page.evaluate('document.body.textContent.includes("CordisX 连接不可用")'), {
