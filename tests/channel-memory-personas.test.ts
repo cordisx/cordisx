@@ -1,11 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { expect, it } from 'vitest'
 import { ChannelMemoryPersonas } from '../packages/cli/src/launcher/channel-memory-personas.js'
 
 it('one persona spans bot accounts; rebind pins old tasks and separates spaces', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-personas-'))
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'memory-personas-'))
   try {
     const registry = new ChannelMemoryPersonas(root)
     const feishu = { adapterId: 'feishu', accountId: 'bot-one', tenantId: 'tenant' }

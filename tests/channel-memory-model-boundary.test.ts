@@ -1,11 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { expect, it } from 'vitest'
 import { mockMemoryBoundary } from './fixtures/channel-memory-model-boundary.js'
 
 it('mock platform dispatch reaches real command/store with reset verified context', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-boundary-'))
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'memory-boundary-'))
   try {
     const boundary = mockMemoryBoundary(root)
     boundary.dispatch('alice', 'A', 'direct', 'qq', 'message-one', 'context-one')
