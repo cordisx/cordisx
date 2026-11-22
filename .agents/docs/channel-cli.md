@@ -471,6 +471,83 @@ response, final-message delivery reads the exact completed turn with
 `thread/read`. This compatibility path loads the complete thread and can hit
 transport limits for very long histories; other read errors do not trigger it.
 
+## Model-service continuation (experimental)
+
+The Host can link a new native conversation to its source when switching model
+services. Linked mode exposes the approved user and assistant text to the new
+conversation on demand; a separately approved saved checkpoint can be passed to
+the first Channel job. A compatible full fork inherits native history, including
+tool content. The original remains. Existing fresh relations remain readable,
+but fresh cannot be selected for a new continuation. A saved fresh preference
+requires a new choice; it does not grant history access.
+
+In a direct Channel conversation with exactly one active binding, use
+`/continue-provider suggest <provider> <model>` to see the recommended mode
+and matching confirmation command. Follow its history and checkpoint flags
+explicitly. Fork is currently limited to the same provider and model with no
+linked parent; otherwise the default recommendation is linked. A failed or
+uncertain native creation never automatically retries with another mode.
+Channel dispatch and task-setting permissions are checked again at commit, and
+eligible queued messages move with the binding. Group and multiple-binding
+migration are unavailable.
+
+Desktop support requires `CORDISX_EXPERIMENTAL_LOGICAL_CONTINUATION=1` at launch.
+Its confirmation offers a one-time choice, a conversation override, or a profile
+default; an override can also be cleared to follow the default. A saved preference
+does not grant future history access. The confirmation can show committed
+session boundaries authorized for the active Desktop account; selecting a source
+opens that native session after the Host rechecks the current identity and scope.
+An earlier-conversation action is also shown beside the model selector when the
+current Desktop account owns a previous committed boundary. It opens that native
+source after the same checks; it does not merge native transcripts. For a
+single direct Channel binding, Desktop can migrate the binding and eligible queued
+messages after the Channel user sends the exact command shown in the Desktop
+confirmation and the Desktop user confirms. A short-lived challenge identifies
+that confirmation; it is not an authorization by itself. Linked mode separately
+requires both users' consent and a matching live
+native and Desktop account. Every source in the linked chain must have no native
+fork, attached or parent thread, and Channel jobs must belong to the authorizing
+actor. Earlier logical links must have the same two authorized participants;
+their original history categories remain in force. History reads check
+the account, binding and Channel permission again, and fail closed when account
+identity cannot be verified. These paths do not transfer a checkpoint. Other
+Channel-bound Desktop modes and Desktop checkpoint transfer are unavailable. The profile
+owner coordinates its own native operations and compares bounded source
+snapshots; another independent native process modifying the source is outside
+that coordination.
+
+The Host copies an explicit source name and the native project assignment to the new
+session. For an explicitly ordered native section, it places the destination
+immediately before the source and checks the order using both model providers.
+The native unsectioned list uses recency rather than a movable position; App
+pinning and unsectioned order are not established by this path. The previous
+native session remains available.
+
+For an unconfirmed Desktop result, first inspect the source and any target:
+
+```sh
+cordisx channel logical-status --input '{"sessionId":"<source-thread-id>"}'
+```
+
+To inspect confirmed session boundaries ending at a destination, use
+`cordisx channel logical-chain --input '{"sessionId":"<destination-thread-id>"}'`.
+It lists identifiers, modes and approved categories; it does not display or
+grant access to conversation content.
+
+If the operation is `unknown` and the local user accepts that an orphan target
+may exist, the following command can release its fence when the current owner
+confirms that it has no outstanding native writes or leases for the affected
+threads. It does not delete a target or retry the operation. A still-running or
+uncertain owner may refuse; inspect and stop the prior operation before using a
+fresh owner. An `applied` result needs separate inspection and navigation.
+
+```sh
+cordisx channel logical-abandon --input '{"sessionId":"<source-thread-id>","operationId":"<operation-id>","confirmOrphanPossible":true}'
+```
+
+These management commands are local-user operations and are unavailable to
+an Agent caller. They do not provide a lock against independent native processes.
+
 ## Fresh Channel continuation
 
 The live threshold and target-ready path has a separate

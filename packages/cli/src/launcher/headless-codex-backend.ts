@@ -8,6 +8,7 @@ import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { bindHeadlessCatalog } from './headless-catalog-binding.js'
 import { HeadlessContextCapture } from './headless-context-capture.js'
 import { HeadlessSettingsObserver } from './headless-settings-observer.js'
+import { nativeOwnerIdentity } from '../../assets/launcher/native-owner-account.mjs'
 
 /** A native preflight refusal is safe to report; transport failures remain uncertain. */
 function providerSwitchRefused(error: unknown, current: unknown, requested: string): boolean {
@@ -245,6 +246,19 @@ export async function startHeadlessCodexBackend(input: {
     return {
       ...(catalogReceipt ? { catalogReceipt } : {}),
       nativeRequest: authority.nativeRequest,
+      async nativeOwnerIdentity() {
+        try {
+          const first = nativeOwnerIdentity(
+            await server.request('accountSession/list', { refreshWorkspaceMetadata: false }),
+          )
+          const second = nativeOwnerIdentity(
+            await server.request('accountSession/list', { refreshWorkspaceMetadata: false }),
+          )
+          return first && first === second ? first : undefined
+        } catch {
+          return undefined
+        }
+      },
       models,
       call: (app: string, operation: unknown, args: unknown) => {
         if (app !== 'codex') throw new Error('Unsupported backend')

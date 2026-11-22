@@ -69,6 +69,13 @@ export const CHANNEL_COMMAND_DEFINITIONS = [
   { name: 'approvals', usage: '/approvals', summary: '查看当前频道会话的待处理请求。', readOnly: true },
   { name: 'models', usage: '/models', summary: '查看当前已认证的服务商、模型目录。', readOnly: true },
   {
+    name: 'continue-provider',
+    usage:
+      '/continue-provider suggest <服务商> <模型> | /continue-provider linked|fork|preferred <服务商> <模型> <历史授权> --no-checkpoint|--checkpoint | /continue-provider preference linked|fork|inherit | /continue-provider status <操作 ID> | /continue-provider abandon <操作 ID> --confirm-orphan-possible',
+    summary: '新建底层对话并保留原对话；按选择授权历史与检查点。仅当前私聊单一绑定；迁移时不要从其他原生进程修改来源。',
+    readOnly: false,
+  },
+  {
     name: 'fast',
     usage: '/fast [on | off] [--target ID | --all]',
     summary: '读取或设置 Fast；按字段权限审批，空闲后应用。',

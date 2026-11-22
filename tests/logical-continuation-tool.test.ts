@@ -48,6 +48,40 @@ describe('logical history native tool boundary', () => {
       expect(f.page).not.toHaveBeenCalled()
     }
   })
+  it('bounds an oversized model page request without accepting malformed limits', async () => {
+    const f = fixture()
+    const read = vi.spyOn(f.reader, 'read')
+    expect((await logicalHistoryToolCall({ ...call, arguments: { limit: 100 } }, f, f.reader)).success).toBe(true)
+    expect(read).toHaveBeenCalledWith(caller, { contract: 'cordisx.continuation-history-request/v1', limit: 32 })
+    for (const limit of [0, -1, 1.5, '100']) {
+      expect((await logicalHistoryToolCall({ ...call, arguments: { limit } }, f, f.reader)).success).toBe(false)
+    }
+  })
+  it('withholds a page if the active turn ends or its actor changes during the read', async () => {
+    for (const next of [undefined, { ...caller, actorKey: 'another-user' }]) {
+      const f = fixture()
+      let release!: () => void
+      let started!: () => void
+      const reading = new Promise<void>(resolve => {
+        started = resolve
+      })
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      f.page.mockImplementationOnce(async () => {
+        started()
+        await gate
+        return { items: [{ type: 'userMessage', content: [{ type: 'text', text: 'synthetic' }] }] }
+      })
+      const pending = logicalHistoryToolCall(call, f, f.reader)
+      await reading
+      f.activeCaller.mockResolvedValueOnce(next as typeof caller)
+      release()
+      const result = await pending
+      expect(result.success).toBe(false)
+      expect(JSON.stringify(result)).not.toContain('synthetic')
+    }
+  })
   it('fails closed for wrong tools, namespaces, turns, callers and unavailable native reads', async () => {
     const f = fixture()
     for (

@@ -5,6 +5,7 @@ const selected = process.argv.find(argument => argument.startsWith('model_provid
 const current = selected ? JSON.parse(selected.slice('model_provider='.length)) : 'openai'
 const threads = new Map()
 const approvals = new Map()
+const heldWrites = new Map()
 let sequence = 0
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n')
 createInterface({ input: process.stdin }).on('line', line => {
@@ -86,6 +87,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     })
   } else if (message.method === 'turn/start') {
     const expected = threads.get(params.threadId)
+    const turn = expected === current ? { id: `turn-${++sequence}`, status: 'inProgress' } : undefined
+    if (turn && params.fixtureNotify) emit({ method: 'turn/started', params: { threadId: params.threadId, turn } })
     emit(
       expected !== current
         ? {
@@ -98,8 +101,9 @@ createInterface({ input: process.stdin }).on('line', line => {
         : {
           id: message.id,
           result: {
-            turn: { id: `turn-${++sequence}`, status: 'inProgress' },
+            turn,
             current,
+            ...(params.fixtureNotify ? { fixtureConfigPresent: params.config !== undefined } : {}),
             ...(params.input?.[0]?.text === undefined ? {} : {
               textLength: params.input[0].text.length,
               textDigest: createHash('sha256').update(params.input[0].text).digest('hex'),
@@ -107,9 +111,36 @@ createInterface({ input: process.stdin }).on('line', line => {
           },
         },
     )
+  } else if (message.method === 'fixture/finish-turn') {
+    emit({ method: 'turn/completed', params: { threadId: params.threadId, turn: { id: params.turnId } } })
+    emit({ id: message.id, result: { completed: true } })
+  } else if (message.method === 'fixture/start-turn-notification') {
+    emit({ method: 'turn/started', params: { threadId: params.threadId, turn: { id: 'turn', privateText: 'hidden' } } })
+    emit({ id: message.id, result: { completed: true } })
   } else if (message.method === 'fixture/approval') {
     approvals.set(1, message.id)
     emit({ id: 1, method: 'item/commandExecution/requestApproval', params: { threadId: params.threadId } })
+  } else if (message.method === 'fixture/hold-write') {
+    heldWrites.set(params.threadId, message.id)
+    emit({ method: 'fixture/write-accepted', params: { threadId: params.threadId } })
+  } else if (message.method === 'fixture/finish-write') {
+    const held = heldWrites.get(params.threadId)
+    heldWrites.delete(params.threadId)
+    emit({ id: held, result: { completed: true } })
+    emit({ id: message.id, result: { completed: true } })
+  } else if (message.method === 'fixture/logical-history') {
+    approvals.set(2, message.id)
+    emit({
+      id: 2,
+      method: 'item/tool/call',
+      params: {
+        threadId: params.threadId,
+        turnId: params.turnId ?? 'turn',
+        callId: 'call',
+        tool: 'cordisx_continuation_history',
+        arguments: {},
+      },
+    })
   } else if (message.method === 'fixture/cancel-approval') {
     const pending = approvals.get(1)
     approvals.delete(1)

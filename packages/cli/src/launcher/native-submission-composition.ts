@@ -1,4 +1,11 @@
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
+import { createDesktopLogicalServices } from './desktop-logical-composition.js'
+import {
+  bundledCodexVersion,
+  resolveBundledCodexCliPath,
+  resolveBundledCodexNodePath,
+} from './native-bundled-runtime-paths.js'
+export { resolveBundledCodexCliPath, resolveBundledCodexNodePath } from './native-bundled-runtime-paths.js'
 import type { ModelProviderDisplay } from '../model-provider-display.js'
 import { createNativeCliEntry } from './native-cli-entry.js'
 import { RemoteTerminalProviderClient } from './remote-terminal-provider-client.js'
@@ -111,6 +118,7 @@ export interface NativeSubmissionComposition {
 }
 export interface NativeSubmissionBootstrap {
   readonly environment: Readonly<Record<string, string>>
+  bindLogicalFenceOwner(owner: import('./profile-logical-conversation-owner.js').ProfileLogicalConversationOwner): void
   complete(
     activation: NativeSubmissionActivation,
     codexHome: string,
@@ -126,6 +134,8 @@ export class NativeSubmissionCompatibilityError extends Error {
 }
 export interface NativeSubmissionCatalogOptions {
   readonly chatSettingsGuard?: CodexChatSettingsGuard
+  readonly logicalHistory?: (params: unknown) => Promise<unknown>
+  readonly logicalOwner?: import('./profile-logical-conversation-owner.js').ProfileLogicalConversationOwner
   readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
@@ -186,39 +196,6 @@ export async function createNativeSubmissionComposition(
   }
 }
 
-/** Resolve only CLI binaries bundled inside the selected Desktop app. */
-export async function resolveBundledCodexCliPath(contents: string): Promise<string> {
-  for (const relative of ['Resources/codex', 'Resources/codex-cli/bin/codex']) {
-    const candidate = path.join(contents, relative)
-    let resolved: string
-    try {
-      resolved = await realpath(candidate)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
-      throw error
-    }
-    await access(resolved, constants.X_OK)
-    return resolved
-  }
-  throw new Error('The selected Desktop app does not contain a supported bundled Codex CLI')
-}
-
-/** Keep the intermediary inside the selected App's signed runtime chain, without changing the Host's Node. */
-export async function resolveBundledCodexNodePath(contents: string): Promise<string> {
-  const resources = await realpath(path.join(contents, 'Resources'))
-  let runtime: string
-  try {
-    runtime = await realpath(path.join(resources, 'cua_node/bin/node'))
-  } catch (error) {
-    throw new Error('The selected Desktop app does not contain its bundled intermediary Node runtime', { cause: error })
-  }
-  if (!runtime.startsWith(`${resources}${path.sep}`)) {
-    throw new Error('The intermediary Node runtime must remain inside the selected Desktop app')
-  }
-  await access(runtime, constants.X_OK)
-  return runtime
-}
-
 /** Start only the fail-closed native transport; compatibility discovery continues off the Host launch path. */
 export async function prepareNativeSubmissionBootstrap(
   desktopExecutable: string,
@@ -228,6 +205,7 @@ export async function prepareNativeSubmissionBootstrap(
     signal?: AbortSignal
     remoteTerminalProvider?: ExistingTerminalProviderSource
     staticCatalog?: DesktopStaticCatalogLease
+    requireLogicalFences?: boolean
   }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   options.signal?.throwIfAborted()
@@ -239,9 +217,12 @@ export async function prepareNativeSubmissionBootstrap(
   }
   const contents = path.dirname(macos)
   const cli = await resolveBundledCodexCliPath(contents)
+  const nativeVersion = options.requireLogicalFences ? await bundledCodexVersion(cli) : undefined
   const node = await resolveBundledCodexNodePath(contents)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
-  const control = await startNativeSubmissionControlServer()
+  const control = await startNativeSubmissionControlServer(
+    options.requireLogicalFences ? { requireLogicalFences: true } : {},
+  )
   const nativeEntry = await createNativeCliEntry(node, nativeAppServerIntermediaryPath()).catch(async error => {
     await control.close()
     throw error
@@ -352,6 +333,7 @@ export async function prepareNativeSubmissionBootstrap(
   }
   return {
     environment,
+    bindLogicalFenceOwner: owner => control.bindLogicalFenceOwner(owner),
     complete(activation, codexHome, completeOptions = {}) {
       if (closePromise !== undefined) return Promise.reject(new Error('Native submission bootstrap was closed'))
       completion ??= (async () => {
@@ -691,6 +673,7 @@ export async function prepareNativeSubmissionBootstrap(
           ? undefined
           : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
         const cdp = createNativeSubmissionCdpAuthority({
+          ...(discovered.accountCapability ? { accountCapability: discovered.accountCapability } : {}),
           ...(homeConfigPath === undefined ? {} : {
             modelServices: {
               read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
@@ -733,6 +716,19 @@ export async function prepareNativeSubmissionBootstrap(
             : { defaultProviderId: completeOptions.defaultProviderId }),
           ...(completeOptions.defaultModelId === undefined ? {} : { defaultModelId: completeOptions.defaultModelId }),
         })
+        const { composition: logicalComposition, migration: logicalMigration } = createDesktopLogicalServices({
+          control,
+          owner: completeOptions.logicalOwner,
+          profileId: completeOptions.managedCatalog?.profileId,
+          identity: scope => cdp.desktopIdentity(scope),
+          ownerIdentity: scope => cdp.desktopOwnerIdentity(scope),
+          channelHistory: completeOptions.logicalHistory,
+          native: () => channelSession,
+          targetAllowed: (providerId, model) =>
+            providerSources.source(providerId) === 'remote'
+              ? Promise.resolve(false)
+              : providerSources.validate({ providerId, model }),
+        })
         encryptedReplay = await startResponsesEncryptedReplay()
         const prepareConfiguredProvider = configuredEncryptedReplay(
           codexHome,
@@ -741,6 +737,8 @@ export async function prepareNativeSubmissionBootstrap(
         )
         control.bindConfiguredProvider(prepareConfiguredProvider)
         controller = createNativeSubmissionController({
+          ...(logicalComposition.preparation ? { logicalTurns: logicalComposition.preparation } : {}),
+          ...(logicalMigration ? { logicalMigration } : {}),
           ...(startup === undefined ? {} : { startup }),
           prepareConfiguredProvider,
           ...(remote === undefined ? {} : {
@@ -961,6 +959,7 @@ export async function prepareNativeSubmissionBootstrap(
         channelSession = createChannelNativeSession({
           options: completeOptions,
           codexHome,
+          ...(nativeVersion ? { nativeVersion } : {}),
           selection: threadId => cdp.sourceConfiguration(threadId),
           bridge: () => agentBridge,
           control,
@@ -968,6 +967,7 @@ export async function prepareNativeSubmissionBootstrap(
           configuration: chatConfiguration,
           models: modelHandler,
         })
+        logicalComposition.bindNative(channelSession)
         return {
           codex: (operation, input, metadata) => agentModels.call(operation, input, metadata),
           ...(chatExecution === undefined ? {} : { chatExecution }),

@@ -160,6 +160,23 @@ async function fixture() {
 }
 
 describe('Channel continuation durability', () => {
+  it('does not reserve an automatic continuation while logical migration fences the source', async () => {
+    const f = await fixture()
+    try {
+      await f.store.mutate(state => {
+        state.logicalContinuations = {
+          revision: 0,
+          relations: {},
+          intents: { op: { request: { source: { sessionId: 'source' } }, state: 'creating' } as never },
+        }
+      })
+      expect(await f.manager.reserve('source', 'auto')).toBeUndefined()
+      expect(f.store.snapshot().continuations.source?.intent).toBeUndefined()
+    } finally {
+      await f.store.close()
+      await rm(f.dir, { recursive: true, force: true })
+    }
+  })
   it('forwards only the native usage fields needed for the boundary decision', async () => {
     const tracker = new ContinuationUsage()
     const events: Record<string, unknown>[] = []
@@ -171,6 +188,10 @@ describe('Channel continuation durability', () => {
         events.push(event)
         if (event.type === 'continuation-event') tracker.notification(String(event.method), event.params, 100)
       },
+    })
+    control.received({
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'inProgress', secret: 'secret' } },
     })
     control.received({
       method: 'thread/tokenUsage/updated',
@@ -189,6 +210,12 @@ describe('Channel continuation durability', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', secret: 'secret' } },
     })
     expect(tracker.eligible('thread-1', policy, 101)).toBe(true)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        method: 'turn/started',
+        params: expect.objectContaining({ turn: { id: 'turn-1', status: 'inProgress' } }),
+      }),
+    )
     expect(JSON.stringify(events)).not.toContain('secret')
     expect(JSON.stringify(events)).not.toContain('99999')
     control.dispose()
@@ -219,6 +246,15 @@ describe('Channel continuation durability', () => {
     })
     expect(continuationConfiguration({ ...effective, serviceTier: undefined }, undefined)).toBeUndefined()
     expect(continuationConfiguration({ ...effective, sandbox: {} }, undefined)).toBeUndefined()
+    expect(continuationConfiguration({ ...effective, activePermissionProfile: undefined }, undefined)).toBeUndefined()
+    expect(continuationConfiguration({ ...effective, activePermissionProfile: {} }, undefined)).toBeUndefined()
+    const noNetworkField = continuationConfiguration({
+      ...effective,
+      activePermissionProfile: null,
+      sandbox: { type: 'readOnly' },
+    }, undefined)
+    expect(noNetworkField).toBeDefined()
+    expect(JSON.parse(JSON.stringify(noNetworkField))).toStrictEqual(noNetworkField)
     const { activePermissionProfile: _profile, ...unknownProfile } = effective
     expect(continuationConfiguration(unknownProfile, undefined)).toBeUndefined()
     expect(continuationConfiguration({

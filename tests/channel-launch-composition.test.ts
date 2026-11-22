@@ -3,7 +3,10 @@ import { access, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createRendererChannelComposition } from '../packages/cli/src/cli/renderer-channel-composition.js'
-import { createConfiguredChannelConsumer } from '../packages/cli/src/cli/channel-consumer-composition.js'
+import {
+  createConfiguredChannelConsumer,
+  createDesktopChannelConsumer,
+} from '../packages/cli/src/cli/channel-consumer-composition.js'
 import { configuredLaunchCleanup } from '../packages/cli/src/cli/channel-consumer-composition.js'
 
 describe('configured Channel launch cleanup', () => {
@@ -79,6 +82,112 @@ describe('Channel dry-run boundary', () => {
       await expect(access(path.join(homeDir, 'apps', 'codex', 'profiles', 'work'))).rejects.toMatchObject({
         code: 'ENOENT',
       })
+    } finally {
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
+  it('opens the profile logical owner without starting a Channel consumer when explicitly requested', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'logical-owner-'))
+    const native = vi.fn()
+    const input = {
+      service: undefined,
+      homeDir,
+      appId: 'codex',
+      profileId: 'work',
+      logicalRuntime: true,
+      native,
+      report: vi.fn(),
+    }
+    try {
+      const first = await createConfiguredChannelConsumer(input)
+      expect(first.consumer).toBeUndefined()
+      const owner = first.logicalOwner!
+      expect(await first.tools.callLocal('logical-mode-default-set', { mode: 'fresh', expectedRevision: 0 }, {}))
+        .toMatchObject({ status: 'rejected', code: 'LOCAL_USER_REQUIRED' })
+      expect(await first.tools.callLocal('logical-mode-default-set', { mode: 'fresh', expectedRevision: 0 }))
+        .toMatchObject({ status: 'ok', preference: { mode: 'fresh' } })
+      const choice = await first.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }) as {
+        conversationId: string
+      }
+      expect(
+        await first.tools.callLocal('logical-mode-conversation-set', {
+          sessionId: 'source',
+          mode: 'linked',
+          expectedRevision: 0,
+          expectedConversationId: 'changed',
+        }),
+      ).toMatchObject({ status: 'rejected', code: 'CONVERSATION_IDENTITY_CHANGED' })
+      expect(
+        await first.tools.callLocal('logical-mode-conversation-set', {
+          sessionId: 'source',
+          mode: 'linked',
+          expectedRevision: 0,
+          expectedConversationId: choice.conversationId,
+        }),
+      ).toMatchObject({ status: 'ok', revision: 1, preference: { mode: 'linked' } })
+      expect(
+        await first.tools.callLocal('logical-mode-conversation-set', {
+          sessionId: 'source',
+          mode: 'fork',
+          expectedRevision: 0,
+          expectedConversationId: choice.conversationId,
+        }),
+      ).toMatchObject({ status: 'rejected', code: 'REVISION_CONFLICT' })
+      expect(await first.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }, {}))
+        .toMatchObject({ status: 'rejected', code: 'LOCAL_USER_REQUIRED' })
+      await owner.store.mutate(state => {
+        state.inputCursor = 'fixture-cursor'
+      })
+      const release = owner.fence.beginMigration('source')!
+      expect(() => owner.fence.enterNative('turn/start', { threadId: 'source' })).toThrow('CONTINUATION_PENDING')
+      release()
+      await first.dispose()
+      const reopened = await createConfiguredChannelConsumer(input)
+      expect(reopened.logicalOwner!.store.snapshot().inputCursor).toBe('fixture-cursor')
+      expect(await reopened.tools.callLocal('logical-mode-default', {}))
+        .toMatchObject({ status: 'ok', preference: { mode: 'fresh' } })
+      expect(await reopened.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }))
+        .toMatchObject({ status: 'ok', revision: 1, preference: { mode: 'linked' } })
+      expect(
+        await reopened.tools.callLocal('logical-mode-conversation-set', {
+          sessionId: 'source',
+          mode: null,
+          expectedRevision: 1,
+          expectedConversationId: choice.conversationId,
+        }),
+      ).toMatchObject({ status: 'ok', revision: 2, preference: null })
+      expect(await reopened.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }))
+        .toMatchObject({ status: 'ok', revision: 2, preference: { mode: 'fresh' } })
+      expect(native).not.toHaveBeenCalled()
+      await reopened.dispose()
+    } finally {
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+  it('passes the same optional profile owner to the Desktop bootstrap', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'desktop-logical-owner-'))
+    const bind = vi.fn()
+    try {
+      const configured = await createDesktopChannelConsumer({
+        service: undefined,
+        homeDir,
+        appId: 'codex',
+        profileId: 'work',
+        logicalRecovery: true,
+        nativeBootstrap: { bindLogicalFenceOwner: bind } as never,
+        native: () => undefined,
+        report: vi.fn(),
+      })
+      expect(bind).toHaveBeenCalledOnce()
+      expect(bind).toHaveBeenCalledWith(configured.logicalOwner)
+      expect(configured.consumer).toBeUndefined()
+      expect(await configured.tools.callLocal('logical-mode-default', {}))
+        .toMatchObject({ status: 'rejected', code: 'LOGICAL_RECOVERY_UNAVAILABLE' })
+      await configured.logicalOwner!.store.bindCommitBarrier(async () => {})
+      expect(await configured.tools.callLocal('logical-mode-default-set', { mode: 'linked', expectedRevision: 0 }))
+        .toMatchObject({ status: 'ok', preference: { mode: 'linked' } })
+      await configured.dispose()
     } finally {
       await rm(homeDir, { recursive: true, force: true })
     }

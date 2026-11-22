@@ -6,6 +6,8 @@ import type { NormalizedNativeSubmissionAction } from './native-provider-submiss
 import type { CatalogManagementChannel } from '../model-catalog-management.js'
 import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { logComposerTiming } from './native-composer-diagnostics.js'
+import type { LogicalChain, NativeProviderSubmitConfirmation } from './native-provider-confirmation-types.js'
+export type { LogicalChain, NativeProviderSubmitConfirmation } from './native-provider-confirmation-types.js'
 
 export interface NativeSubmissionScope {
   readonly targetId: string
@@ -43,13 +45,6 @@ export interface NativeProviderSelectionProjection {
     readonly providerId: string
     readonly generation: number
   }>
-}
-
-export interface NativeProviderSubmitConfirmation {
-  readonly confirmationId: string
-  readonly expectedSelectionRevision: number
-  readonly target: PendingNativeProviderSelection
-  readonly threadId: string
 }
 
 export interface NativeProviderSelectionCommandChannel extends Partial<CatalogManagementChannel> {
@@ -95,6 +90,8 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
   selectionDiscard(
     input: Readonly<{ scope: NativeSubmissionScope; expectedRevision: number }>,
   ): Promise<NativeProviderSelectionProjection>
+  logicalPrevious?(input: Readonly<{ scope: NativeSubmissionScope }>): Promise<string | null>
+  logicalSourceNavigation?(input: Readonly<{ scope: NativeSubmissionScope; sessionId: string }>): Promise<boolean>
   submissionPrepare(
     input: Readonly<{
       scope: NativeSubmissionScope
@@ -102,6 +99,21 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
     }>,
   ): Promise<
     | Readonly<{ status: 'pass-through' }>
+    | Readonly<{ status: 'allow-logical-turn'; operationToken: string }>
+    | Readonly<
+      {
+        status: 'confirm-logical'
+        confirmationId: string
+        expectedSelectionRevision: number
+        recommended: 'linked' | 'fork'
+        forkAvailable: boolean
+        linkedAvailable: boolean
+        legacyFreshPreference?: boolean
+        channelBound?: boolean
+        channelChallenge?: string
+        chain?: LogicalChain
+      }
+    >
     | Readonly<{ status: 'confirm'; confirmationId: string; expectedSelectionRevision: number }>
     | Readonly<{
       status: 'allow-original'
@@ -124,6 +136,22 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
       projection: NativeProviderSelectionProjection
       continuation?: NativeProviderContinuation
     }>
+    | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
+  >
+  submissionConfirmLogical?(
+    input: Readonly<{
+      scope: NativeSubmissionScope
+      confirmationId: string
+      expectedSelectionRevision: number
+      mode: 'linked' | 'fork'
+      historyConsent: 'on-demand' | 'inherit'
+      remember?: 'conversation' | 'profile' | 'inherit'
+      channelCode?: string
+    }>,
+  ): Promise<
+    | Readonly<
+      { status: 'allow-logical-continuation'; operationToken: string; continuation: NativeProviderContinuation }
+    >
     | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
   >
   submissionCancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<unknown>
@@ -157,9 +185,14 @@ export type NativeSubmissionRejection =
   | 'submission-rejected'
   | import('../launcher/native-thread-switch-error.js').NativeThreadSwitchReason
 
+type LogicalChoice = {
+  mode: 'linked' | 'fork'
+  remember?: 'conversation' | 'profile' | 'inherit'
+  channelCode?: string
+}
 interface ConfirmationWaiter {
   readonly confirmation: NativeProviderSubmitConfirmation
-  readonly resolve: (confirmed: boolean) => void
+  readonly resolve: (confirmed: boolean | LogicalChoice) => void
 }
 
 const validToken = (value: unknown): value is string =>
@@ -423,9 +456,30 @@ export class NativeProviderSelectionClient {
   confirmSubmission(confirmed: boolean): void {
     const waiter = this.waiter
     if (!waiter) return
+    if (confirmed && waiter.confirmation.logical) return
     this.waiter = undefined
     this.emit()
     waiter.resolve(confirmed)
+  }
+  confirmLogicalSubmission(
+    mode: 'linked' | 'fork' | undefined,
+    remember?: 'conversation' | 'profile' | 'inherit',
+    channelCode?: string,
+  ): void {
+    const waiter = this.waiter, logical = waiter?.confirmation.logical
+    if (!waiter || !logical) return
+    if (
+      mode === 'fork' && !logical.forkAvailable || mode === 'linked' && !logical.linkedAvailable
+      || mode !== undefined && !['linked', 'fork'].includes(mode)
+      || remember !== undefined && !['conversation', 'profile', 'inherit'].includes(remember)
+      || mode !== undefined && logical.channelBound
+        && (mode === 'fork' || !channelCode || channelCode !== logical.channelChallenge
+          || !/^[A-Za-z0-9_-]{32}$/u.test(channelCode))
+      || !logical.channelBound && channelCode !== undefined
+    ) return
+    this.waiter = undefined
+    this.emit()
+    waiter.resolve(mode ? { mode, ...(remember ? { remember } : {}), ...(channelCode ? { channelCode } : {}) } : false)
   }
 
   /** Retire a read already in flight without discarding the live selection. */
@@ -640,6 +694,7 @@ export class NativeProviderSelectionClient {
       this.notice(result.reason)
     }
     let cancelId: string | undefined
+    let logicalConfirmationInFlight = false
     try {
       const prepared = await this.channel.submissionPrepare({ scope: before.scope, action })
       if (prepared.status === 'pass-through') {
@@ -659,6 +714,82 @@ export class NativeProviderSelectionClient {
         rejected(prepared)
         return { allow: false }
       }
+      if (prepared.status === 'allow-logical-turn') {
+        const valid = validToken(prepared.operationToken) && pending === undefined && action.intent === 'ordinary-send'
+          && before.scope.threadId !== undefined && before.idle && this.scopeCurrent(before.scope, lifetime)
+          && projectionGeneration === this.projectionGeneration && this.projection.available
+          && this.projection.revision === revision && this.projection.pending === undefined
+          && this.projection.pendingProviderIntent === undefined && !this.intentUnacknowledged
+        if (valid) return { allow: true, operationToken: prepared.operationToken }
+        await this.cancelQuietly(before.scope, prepared.operationToken)
+        return { allow: false }
+      }
+      if (prepared.status === 'confirm-logical') {
+        cancelId = prepared.confirmationId
+        if (
+          !this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)
+          || !before.scope.threadId || !pending || this.waiter || !this.channel.submissionConfirmLogical
+        ) {
+          return { allow: false }
+        }
+        const choice = await new Promise<boolean | LogicalChoice>(resolve => {
+          this.waiter = {
+            confirmation: {
+              confirmationId: prepared.confirmationId,
+              expectedSelectionRevision: prepared.expectedSelectionRevision,
+              target: pending,
+              threadId: before.scope.threadId!,
+              logical: {
+                recommended: prepared.recommended,
+                forkAvailable: prepared.forkAvailable,
+                linkedAvailable: prepared.linkedAvailable,
+                ...(prepared.legacyFreshPreference ? { legacyFreshPreference: true } : {}),
+                ...(prepared.channelBound ? { channelBound: true } : {}),
+                ...(prepared.channelChallenge ? { channelChallenge: prepared.channelChallenge } : {}),
+                ...(prepared.chain ? { chain: prepared.chain } : {}),
+              },
+            },
+            resolve,
+          }
+          this.emit()
+        })
+        if (
+          choice === false || choice === true
+          || !this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)
+        ) return { allow: false }
+        logicalConfirmationInFlight = true
+        const result = await this.channel.submissionConfirmLogical({
+          scope: before.scope,
+          confirmationId: prepared.confirmationId,
+          expectedSelectionRevision: prepared.expectedSelectionRevision,
+          mode: choice.mode,
+          historyConsent: choice.mode === 'linked' ? 'on-demand' : 'inherit',
+          ...(choice.remember ? { remember: choice.remember } : {}),
+          ...(choice.channelCode ? { channelCode: choice.channelCode } : {}),
+        })
+        if (result.status === 'reject') {
+          logicalConfirmationInFlight = false
+          rejected(result)
+          return { allow: false }
+        }
+        cancelId = result.operationToken
+        if (
+          !validToken(result.operationToken) || result.continuation.sourceThreadId !== before.scope.threadId
+          || !result.continuation.threadId || result.continuation.threadId === before.scope.threadId
+          || !this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)
+        ) {
+          rejected({ reason: 'provider-switch-reconciliation-required' })
+          return { allow: false }
+        }
+        logicalConfirmationInFlight = false
+        cancelId = undefined
+        return {
+          allow: true,
+          operationToken: result.operationToken,
+          continuation: result.continuation,
+          ...(action.reasoningEffort === undefined ? {} : { reasoningEffort: action.reasoningEffort }),
+        }
+      }
       cancelId = prepared.status === 'confirm' ? prepared.confirmationId : prepared.operationToken
       if (!this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)) return { allow: false }
       let token: string
@@ -667,7 +798,7 @@ export class NativeProviderSelectionClient {
         if (before.scope.threadId === undefined || pending === undefined || this.waiter !== undefined) {
           return { allow: false }
         }
-        const confirmed = await new Promise<boolean>(resolve => {
+        const confirmed = await new Promise<boolean | LogicalChoice>(resolve => {
           this.waiter = {
             confirmation: {
               confirmationId: prepared.confirmationId,
@@ -679,7 +810,7 @@ export class NativeProviderSelectionClient {
           }
           this.emit()
         })
-        if (!confirmed || !this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)) {
+        if (confirmed !== true || !this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)) {
           return { allow: false }
         }
         const result = await this.channel.submissionConfirm({
@@ -755,7 +886,8 @@ export class NativeProviderSelectionClient {
         ...(action.reasoningEffort === undefined ? {} : { reasoningEffort: action.reasoningEffort }),
       }
     } catch {
-      this.notice('submission-rejected')
+      if (logicalConfirmationInFlight) rejected({ reason: 'provider-switch-reconciliation-required' })
+      else this.notice('submission-rejected')
       return { allow: false }
     } finally {
       // The successful path has no await after its last mutable-state check.

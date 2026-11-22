@@ -43,13 +43,14 @@ export function channelLogicalContinuationAdmitted(
   if (
     Object.values(state.jobs).some(job =>
       job.sessionId === sourceSessionId
-      && !['completed', 'failed', 'cancelled'].includes(job.state)
+      && !['queued', 'completed', 'failed', 'cancelled'].includes(job.state)
     )
     || Object.values(state.taskRequests).some(request =>
       request.threadId === sourceSessionId
       && !['applied', 'denied', 'expired'].includes(request.state)
     )
-    || ['applying', 'submitted', 'unknown'].includes(state.taskSettings[sourceSessionId]?.application ?? '')
+    || !!state.taskSettings[sourceSessionId] && state.taskSettings[sourceSessionId]?.application !== 'applied'
+    || !!state.taskSettings[sourceSessionId]?.pending || !!state.taskSettings[sourceSessionId]?.pendingPatch
   ) return false
   const continuation = state.continuations[sourceSessionId]?.intent
   const live = state.liveTakeovers[sourceSessionId]

@@ -26,6 +26,7 @@ import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-labe
 import { ModelStartupIcon } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
 import { managerCopy } from './ui-copy.js'
+import { NativeLogicalContinuationDialog } from './native-logical-continuation-dialog.js'
 
 export interface NativeProviderModelOption {
   readonly id: string
@@ -87,6 +88,13 @@ export interface ProviderSelectionTransport {
   selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'>
   cancelProviderIntent?(): Promise<'accepted' | 'busy' | 'unavailable'>
   confirmSubmission?(confirmed: boolean): void
+  confirmLogicalSubmission?(
+    mode: 'linked' | 'fork' | undefined,
+    remember?: 'conversation' | 'profile' | 'inherit',
+    channelCode?: string,
+  ): void
+  openLogicalSource?(sessionId: string): Promise<'accepted' | 'unavailable'>
+  logicalPrevious?(threadId: string): Promise<string | undefined>
 }
 
 export { selectionModelForProvider } from './model-provider-selection.js'
@@ -125,6 +133,19 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const catalog = useSyncExternalStore(registry.subscribe, registry.snapshot)
   const native = useSyncExternalStore(listener => transport.subscribe(listener), () => transport.getSnapshot())
   const [open, setOpen] = useState<'provider' | 'model'>()
+  const [previous, setPrevious] = useState<string | undefined>()
+  useEffect(() => {
+    let live = true
+    setPrevious(undefined)
+    if (native.threadId && transport.logicalPrevious) {
+      void transport.logicalPrevious(native.threadId).then(source => {
+        if (live) setPrevious(source)
+      }).catch(() => {})
+    }
+    return () => {
+      live = false
+    }
+  }, [native.threadId, transport])
   const [providerQuery, setProviderQuery] = useState('')
   const [modelQuery, setModelQuery] = useState('')
   const [modelExpanded, setModelExpanded] = useState(false)
@@ -500,6 +521,22 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
+      {previous && transport.openLogicalSource
+        ? (
+          <button
+            type="button"
+            className="cxmp-trigger cxmp-previous-trigger"
+            disabled={suspended || native.busy}
+            onClick={() => {
+              void transport.openLogicalSource!(previous).then(result => {
+                if (result !== 'accepted') feedback.show('source.failed')
+              }).catch(() => feedback.show('source.failed'))
+            }}
+          >
+            {locale.toLowerCase().startsWith('zh') ? '此前对话' : 'Earlier conversation'}
+          </button>
+        )
+        : null}
       <button
         ref={providerTrigger}
         type="button"
@@ -897,6 +934,28 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           )
           : null}
       </HostMenuSurface>
+      {native.confirmation?.logical && transport.confirmLogicalSubmission
+        ? (
+          <NativeLogicalContinuationDialog
+            key={native.confirmation.confirmationId}
+            confirmation={native.confirmation as NativeProviderSubmitConfirmation & {
+              logical: NonNullable<NativeProviderSubmitConfirmation['logical']>
+            }}
+            locale={locale}
+            finish={(mode, remember, channelCode) => transport.confirmLogicalSubmission?.(mode, remember, channelCode)}
+            {...(transport.openLogicalSource
+              ? {
+                openSource: async (sessionId: string) => {
+                  const generation = operation.current
+                  const result = await transport.openLogicalSource!(sessionId).catch(() => 'unavailable' as const)
+                  if (result !== 'accepted' && generation === operation.current) feedback.show('source.failed')
+                  return result
+                },
+              }
+              : {})}
+          />
+        )
+        : null}
     </div>
   )
 }

@@ -192,6 +192,9 @@ export async function startHeadlessService(input: {
     if (catalog) cleanup.push(catalog.close)
     let native: ChannelNativeSessions | undefined
     let channelTools: ChannelConversationTools | undefined
+    let logicalHistory: ((params: unknown) => Promise<unknown>) | undefined
+    let guardNativeSource: ((method: string, params: Readonly<Record<string, unknown>>) => () => void) | undefined
+    let guardNativeHandoff: ((method: string, params: Readonly<Record<string, unknown>>) => void) | undefined
     const backend = await startHeadlessCodexBackend({
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
@@ -202,14 +205,38 @@ export async function startHeadlessService(input: {
       contextObserver,
       onRequest: (method, params, id) =>
         method === 'item/tool/call'
-          ? handlePreparationToolCall(params, native, channelTools)
+          ? native?.isPreparing(String((params as { threadId?: unknown })?.threadId ?? ''))
+            ? handlePreparationToolCall(params, native, channelTools)
+            : logicalHistory?.(params)
+              ?? { success: false, contentItems: [{ type: 'inputText', text: '{"status":"unavailable"}' }] }
           : authority.request(method, params, id),
       onDispatch: (operationId, threadId, turnId) => native?.observedDispatch(operationId, threadId, turnId),
       preparationTools: operationId =>
         version === 'codex-cli 0.167.0-alpha.3.2' && native?.isPreparationOperation(operationId)
           ? CHANNEL_PREPARATION_TOOLS
           : undefined,
-      ...(authority.nativeRequest ? { nativeRequest: authority.nativeRequest } : {}),
+      nativeRequest: async (method, params, next) => {
+        const release = guardNativeSource?.(method, params)
+        let effectPossible = false, settled = false
+        try {
+          const guarded = (prepared: Readonly<Record<string, unknown>>) => {
+            guardNativeHandoff?.(method, prepared)
+            effectPossible = true
+            return next(prepared)
+          }
+          const result =
+            await (authority.nativeRequest ? authority.nativeRequest(method, params, guarded) : guarded(params))
+          settled = true
+          return result
+        } catch (error) {
+          // An RPC error can follow an effect. Keep this writer fence until
+          // the owner closes unless the failure happened before dispatch.
+          if (!effectPossible) settled = true
+          throw error
+        } finally {
+          if (settled) release?.()
+        }
+      },
       ...(authority.notification ? { onNotification: authority.notification } : {}),
     })
     cleanup.push(() => backend.close())
@@ -241,9 +268,12 @@ export async function startHeadlessService(input: {
     native = new ChannelNativeSessions({
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
+      logicalOwnerIdentity: () => backend.nativeOwnerIdentity(),
+      logicalHandoffWriteGuardReady: () => guardNativeHandoff !== undefined,
       models: backend.models,
       configuration: chatConfiguration,
       cwd: workspace || input.cwd,
+      nativeVersion: version,
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,
       name: event => service.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
@@ -263,12 +293,20 @@ export async function startHeadlessService(input: {
       service,
       homeDir: input.homeDir,
       appId: input.appId,
+      logicalRuntime: true,
       profileId: input.profileId,
       native: () => native,
       report: input.report,
       documents: value => configuredPluginDocuments(plugins, value),
     })
     channelTools = channel.tools
+    logicalHistory = channel.consumer ? params => channel.consumer!.logicalHistoryCall(params) : undefined
+    guardNativeSource = channel.consumer
+      ? (method, params) => channel.consumer!.enterNativeSourceOperation(method, params)
+      : undefined
+    guardNativeHandoff = channel.consumer
+      ? (method, params) => channel.consumer!.assertNativeHandoff(method, params)
+      : undefined
     // Consumer disposal owns service disposal from here on.
     cleanup.splice(cleanup.indexOf(disposeService), 1)
     cleanup.push(() => channel.dispose())

@@ -42,6 +42,15 @@ export function harness(input: {
     ]
   providerSource?: (providerId: string) => 'managed' | 'config' | 'remote' | undefined
   validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
+  logicalTurns?:
+    import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions[
+      'logicalTurns'
+    ]
+  logicalMigration?:
+    import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions[
+      'logicalMigration'
+    ]
+  enableContinuation?: boolean
 } = {}) {
   const scope = input.scope ?? draftScope
   let snapshot: NativeSubmissionSelectionSnapshot = {
@@ -106,6 +115,8 @@ export function harness(input: {
   let id = 0
   const controller = createNativeSubmissionController({
     ...(input.startup === undefined ? {} : { startup: input.startup }),
+    ...(input.logicalTurns === undefined ? {} : { logicalTurns: input.logicalTurns }),
+    ...(input.logicalMigration === undefined ? {} : { logicalMigration: input.logicalMigration }),
     selection: {
       adoptScope: (source, target) => {
         const current = snapshots.get(JSON.stringify(source))
@@ -116,10 +127,12 @@ export function harness(input: {
       snapshot: requested => snapshots.get(JSON.stringify(requested)) ?? snapshot,
       commitEffective,
       clearPending,
+      ...(input.enableContinuation ? { commitContinuation: () => true } : {}),
     },
     credentials: { prepare },
     runtime: {
       revalidate: runtimeRevalidate,
+      ...(input.enableContinuation ? { revalidateContinuation: async () => true } : {}),
       resolveCreatedScope: async (draft, threadId) => ({
         ...draft,
         threadId,

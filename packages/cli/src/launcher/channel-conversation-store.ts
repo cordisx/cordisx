@@ -1,4 +1,9 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import {
+  type LogicalContinuationState,
+  parseLogicalContinuationState,
+  recoverLogicalContinuations,
+} from './logical-continuation-control.js'
 import { type ChannelLivePolicyOverride, parseLivePolicy } from './channel-live-policy.js'
 import {
   type ChannelContinuationDefaults,
@@ -110,7 +115,7 @@ export interface ChannelConversationJob {
 }
 export interface ChannelConversationState {
   readonly contract: 'cordisx.channel-conversation-store/v1'
-  readonly schemaVersion: 1
+  schemaVersion: 1 | 2
   revision: number
   policyRevision: number
   policy: ChannelConversationPolicy
@@ -128,6 +133,7 @@ export interface ChannelConversationState {
   continuations: Record<string, ChannelContinuationRecord>
   continuationDefaults: ChannelContinuationDefaults
   liveTakeovers: Record<string, import('./channel-live-takeover.js').LiveTakeoverIntent>
+  logicalContinuations?: LogicalContinuationState
 }
 
 export interface ChannelContinuationRecord {
@@ -170,17 +176,36 @@ function initial(): ChannelConversationState {
 /** Host-owned bindings and dispatch receipts. This is not a Channel connection store or shared Codex DB. */
 export class ChannelConversationStore {
   private tail: Promise<void> = Promise.resolve()
+  private durabilityUncertain = false
+  private closed = false
+  private commitBarrier: ((state: ChannelConversationState) => Promise<void>) | undefined
+  private barrierReady = false
   private constructor(private readonly file: string, private value: ChannelConversationState) {}
+  static logicalSourceFenced(state: ChannelConversationState, sessionId: string): boolean {
+    return Object.values(state.logicalContinuations?.intents ?? {}).some(intent =>
+      intent.request.source.sessionId === sessionId && ['creating', 'unknown'].includes(intent.state)
+    )
+  }
+  static logicalSessionFenced(state: ChannelConversationState, sessionId: string): boolean {
+    return Object.values(state.logicalContinuations?.intents ?? {}).some(intent =>
+      ['creating', 'unknown'].includes(intent.state)
+      && (intent.request.source.sessionId === sessionId || intent.destination?.sessionId === sessionId)
+    )
+  }
   static async open(file: string): Promise<ChannelConversationStore> {
     await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
     let value = initial()
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8')) as ChannelConversationState
       if (
-        parsed.contract !== value.contract || parsed.schemaVersion !== 1 || !Number.isSafeInteger(parsed.revision)
+        parsed.contract !== value.contract || ![1, 2].includes(parsed.schemaVersion)
+        || !Number.isSafeInteger(parsed.revision)
         || !Number.isSafeInteger(parsed.nextSequence) || typeof parsed.inputCursor !== 'string'
         || !parsed.bindings || !parsed.inputs || !parsed.jobs
       ) throw new Error('INVALID_CONVERSATION_STORE')
+      if (parsed.schemaVersion === 2) {
+        parsed.logicalContinuations = parseLogicalContinuationState(parsed.logicalContinuations)
+      } else if (parsed.logicalContinuations !== undefined) throw new Error('INVALID_CONVERSATION_STORE')
       parsed.policy = parseChannelConversationPolicy(parsed.policy)
       parsed.taskConfig = parseChannelTaskConfig(parsed.taskConfig ?? CHANNEL_TASK_CONFIG_INITIAL)
       parsed.taskConfigRevision ??= 0
@@ -264,6 +289,7 @@ export class ChannelConversationStore {
     const store = new ChannelConversationStore(file, value)
     // A process died after reserving a native effect. Never blindly recreate/resend it.
     await store.mutate(state => {
+      if (state.logicalContinuations) recoverLogicalContinuations(state.logicalContinuations)
       for (const intent of Object.values(state.liveTakeovers)) {
         if (['preparing', 'ready'].includes(intent.state)) intent.state = 'abandoned'
         else if (intent.state === 'interrupting' || intent.state === 'business-starting') intent.state = 'unknown'
@@ -295,11 +321,55 @@ export class ChannelConversationStore {
     return store
   }
   snapshot(): ChannelConversationState {
+    if (this.closed) throw new Error('CONVERSATION_STORE_CLOSED')
+    if (this.durabilityUncertain) throw new Error('CONVERSATION_STORE_DURABILITY_UNCERTAIN')
     return structuredClone(this.value)
   }
+  hasCommitBarrier(): boolean {
+    return !this.closed && !this.durabilityUncertain && this.commitBarrier !== undefined && this.barrierReady
+  }
+  pauseCommitBarrier(): void {
+    this.barrierReady = false
+  }
+  async resumeCommitBarrier(onReady?: () => void): Promise<void> {
+    if (this.closed) throw new Error('CONVERSATION_STORE_CLOSED')
+    const task = this.tail.then(async () => {
+      if (!this.commitBarrier || this.durabilityUncertain) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
+      await this.commitBarrier(structuredClone(this.value))
+      onReady?.()
+      this.barrierReady = true
+    })
+    this.tail = task.catch(() => undefined)
+    await task
+  }
+  /** Install once under the same queue as commits, so no update can overtake recovery. */
+  async bindCommitBarrier(
+    barrier: (state: ChannelConversationState) => Promise<void>,
+    onReady?: () => void,
+  ): Promise<void> {
+    if (this.closed) throw new Error('CONVERSATION_STORE_CLOSED')
+    const task = this.tail.then(async () => {
+      if (this.commitBarrier || this.durabilityUncertain) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
+      try {
+        await barrier(structuredClone(this.value))
+      } catch (error) {
+        this.durabilityUncertain = true
+        throw error
+      }
+      this.commitBarrier = barrier
+      onReady?.()
+      this.barrierReady = true
+    })
+    this.tail = task.catch(() => undefined)
+    await task
+  }
   async mutate<T>(update: (draft: ChannelConversationState) => T): Promise<T> {
+    if (this.closed) throw new Error('CONVERSATION_STORE_CLOSED')
+    if (this.commitBarrier && !this.barrierReady) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
     let result!: T
     const task = this.tail.then(async () => {
+      if (this.durabilityUncertain) throw new Error('CONVERSATION_STORE_DURABILITY_UNCERTAIN')
+      if (this.commitBarrier && !this.barrierReady) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
       const value = structuredClone(this.value)
       result = update(value)
       if (JSON.stringify(value) === JSON.stringify(this.value)) return
@@ -311,13 +381,26 @@ export class ChannelConversationStore {
         await handle.sync()
         await handle.close()
         await rename(temporary, this.file)
-        const directory = await open(path.dirname(this.file), 'r')
-        try {
-          await directory.sync()
-        } finally {
-          await directory.close()
-        }
+        // After rename, an error syncing the directory is an uncertain durability outcome.
+        // Keep the in-process fence aligned with the visible file; never retry from stale state.
         this.value = value
+        try {
+          const directory = await open(path.dirname(this.file), 'r')
+          try {
+            await directory.sync()
+          } finally {
+            await directory.close()
+          }
+        } catch (error) {
+          this.durabilityUncertain = true
+          throw error
+        }
+        try {
+          await this.commitBarrier?.(structuredClone(value))
+        } catch (error) {
+          this.durabilityUncertain = true
+          throw error
+        }
       } finally {
         await handle.close().catch(() => undefined)
         await rm(temporary, { force: true })
@@ -328,6 +411,7 @@ export class ChannelConversationStore {
     return result
   }
   async close(): Promise<void> {
+    this.closed = true
     await this.tail
   }
 }

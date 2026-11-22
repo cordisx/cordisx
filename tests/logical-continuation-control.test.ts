@@ -4,6 +4,7 @@ import {
   type LogicalContinuationEvidence,
   type LogicalContinuationRequest,
   type LogicalContinuationState,
+  parseLogicalContinuationState,
   recoverLogicalContinuations,
 } from '../packages/cli/src/launcher/logical-continuation-control.js'
 
@@ -75,6 +76,36 @@ function fixture() {
 }
 
 describe('logical continuation lifecycle', () => {
+  it('rejects a new fresh request while keeping an existing fresh relation readable', async () => {
+    const f = fixture()
+    const { historyCategories: _categories, handoffConsent: _handoff, ...base } = request
+    const legacy: LogicalContinuationRequest = { ...base, mode: 'fresh', historyConsent: 'none' }
+    expect(await f.control.start(actor, legacy)).toMatchObject({
+      state: 'rejected',
+      code: 'FRESH_CONTINUATION_REMOVED',
+    })
+    expect(f.adapter.preflight).not.toHaveBeenCalled()
+    expect(f.adapter.create).not.toHaveBeenCalled()
+    await f.store.mutate(root => {
+      root.logical.revision = 1
+      root.logical.intents.operation = { request: legacy, actor, evidence, state: 'applied', destination }
+      root.logical.relations.operation = {
+        contract: 'cordisx.conversation-continuation-relation/v1',
+        operationId: 'operation',
+        logicalConversationId: 'logical',
+        revision: 1,
+        source,
+        destination,
+        target: request.target,
+        mode: 'fresh',
+        historyAccess: 'none',
+        handoff: 'none',
+      }
+    })
+    expect(parseLogicalContinuationState(f.store.snapshot().logical).relations.operation?.mode).toBe('fresh')
+    expect(await f.control.start(actor, legacy)).toEqual({ state: 'applied', operationId: 'operation', destination })
+    expect(f.adapter.create).not.toHaveBeenCalled()
+  })
   it('persists the exact intent before creation and commits relation and binding together', async () => {
     const f = fixture()
     f.adapter.create.mockImplementation(async () => {
@@ -129,6 +160,33 @@ describe('logical continuation lifecycle', () => {
     expect(await f.control.start(actor, request)).toMatchObject({ state: 'unknown' })
     expect(await f.control.reconcile(actor, 'operation')).toEqual({ state: 'unknown', operationId: 'operation' })
     expect(f.store.snapshot().binding).toBe('source')
+    expect(parseLogicalContinuationState(f.store.snapshot().logical).intents.operation?.destination).toBeUndefined()
+  })
+  it('validates persisted security evidence and the committed revision before recovery', async () => {
+    const f = fixture()
+    await f.control.start(actor, request)
+    const saved = f.store.snapshot().logical
+    expect(parseLogicalContinuationState(JSON.parse(JSON.stringify(saved)))).toEqual(saved)
+    const missingSecurity = structuredClone(saved) as any
+    delete missingSecurity.intents.operation.evidence.sourceConfiguration.execution
+    expect(() => parseLogicalContinuationState(missingSecurity)).toThrow('INVALID_LOGICAL_CONTINUATION_STORE')
+    const wrongProfile = structuredClone(saved) as any
+    wrongProfile.intents.operation.evidence.sourceConfiguration.permissionProfile = { id: 'other' }
+    expect(() => parseLogicalContinuationState(wrongProfile)).toThrow('INVALID_LOGICAL_CONTINUATION_STORE')
+    const staleRevision = structuredClone(saved)
+    staleRevision.revision = 0
+    expect(() => parseLogicalContinuationState(staleRevision)).toThrow('INVALID_LOGICAL_CONTINUATION_STORE')
+    const tamperedRelation = structuredClone(saved) as any
+    tamperedRelation.relations.operation.destination.sessionId = 'other'
+    expect(() => parseLogicalContinuationState(tamperedRelation)).toThrow('INVALID_LOGICAL_CONTINUATION_STORE')
+  })
+  it('rejects object prototype names as operation identifiers', async () => {
+    const f = fixture()
+    expect(await f.control.start(actor, { ...request, operationId: '__proto__' })).toMatchObject({
+      state: 'rejected',
+      code: 'INVALID_REQUEST',
+    })
+    expect(f.adapter.create).not.toHaveBeenCalled()
   })
   it('fences an interrupted reservation on store recovery before any dispatch', () => {
     const state: LogicalContinuationState = {

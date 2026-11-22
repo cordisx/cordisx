@@ -5,6 +5,39 @@ import { createHeadlessCodexOperations } from '../packages/cli/src/launcher/head
 import { JsonLineRpcError } from '../packages/cli/src/providers/json-line-rpc.js'
 
 describe('headless Codex backend', () => {
+  it('checks the native owner twice and returns only a digest', async () => {
+    let userId = 'user'
+    const request = vi.fn(async (method: string) => {
+      if (method !== 'accountSession/list') throw new Error('unexpected method')
+      return {
+        activeSessionId: 'session',
+        sessions: [{ sessionId: 'session', isActive: true, userId, selectedWorkspaceAccountId: 'workspace' }],
+      }
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => ({ request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      expect(await backend.nativeOwnerIdentity()).toMatch(/^desktop:[a-f0-9]{64}$/u)
+      request.mockImplementationOnce(async () => ({
+        activeSessionId: 'session',
+        sessions: [{
+          sessionId: 'session',
+          isActive: true,
+          userId: 'user',
+          selectedWorkspaceAccountId: 'workspace',
+        }],
+      }))
+      userId = 'other'
+      expect(await backend.nativeOwnerIdentity()).toBeUndefined()
+    } finally {
+      await backend.close()
+    }
+  })
   it('distinguishes an explicit cold provider refusal from an uncertain resume', async () => {
     let failure: Error = new JsonLineRpcError(
       "thread/resume failed: cannot change this thread's model provider from openrouter to openai on resume",

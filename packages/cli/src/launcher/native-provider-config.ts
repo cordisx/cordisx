@@ -1,7 +1,23 @@
 import type { NativeProviderCredentialLease } from './native-submission-controller.js'
+import type { PendingNativeProviderChange } from '../renderer/native-provider-submission-policy.js'
 
 function validText(value: string, max: number): boolean {
   return value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
+}
+
+export function nativeProviderRequestConfig(
+  pending: PendingNativeProviderChange,
+  lease: NativeProviderCredentialLease,
+): Readonly<Record<string, unknown>> {
+  if (
+    !validText(pending.providerId, 128) || !validText(pending.model, 512)
+    || !validText(lease.serviceGeneration, 256)
+  ) throw new Error('native provider selection or service generation is invalid')
+  return Object.freeze({
+    model_provider: pending.providerId,
+    model: pending.model,
+    [`model_providers.${pending.providerId}`]: nativeProviderConfig(lease),
+  })
 }
 
 export function nativeProviderConfig(lease: NativeProviderCredentialLease): Readonly<Record<string, unknown>> {

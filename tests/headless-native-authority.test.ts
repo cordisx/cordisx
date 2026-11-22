@@ -10,6 +10,7 @@ vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
   ChatExecutionPreferences: { open: async () => execution },
 }))
 import { createHeadlessNativeAuthority } from '../packages/cli/src/launcher/headless-native-authority.js'
+import { HeadlessWorkMode } from '../packages/cli/src/launcher/headless-work-mode.js'
 
 const input = {
   homeDir: '/state',
@@ -19,6 +20,14 @@ const input = {
   report: () => {},
 }
 describe('headless native authority', () => {
+  it('does not infer a mode when two writes overlap, even if a notification agrees', () => {
+    const evidence = new HeadlessWorkMode(false)
+    const first = evidence.begin('thread'), second = evidence.begin('thread')
+    evidence.observe('thread', 'default')
+    first(true, 'default', false)
+    second(true, 'default', false)
+    expect(evidence.get('thread')).toBeUndefined()
+  })
   it('requires the actual native request id and delegates exact approval to shared chat control', async () => {
     const native = await createHeadlessNativeAuthority(input)
     const events: Record<string, unknown>[] = []
@@ -102,6 +111,33 @@ describe('headless native authority', () => {
     await native.close()
     const unknownVersion = await createHeadlessNativeAuthority(input)
     await unknownVersion.authority.nativeRequest!('thread/start', {}, async () => ({ thread: { id: 'thread' } }))
+    expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBeUndefined()
+    let finishDefault!: () => void
+    const changingDefault = unknownVersion.authority.nativeRequest!(
+      'turn/start',
+      { threadId: 'thread', collaborationMode: { mode: 'default' } },
+      () =>
+        new Promise(resolve => {
+          finishDefault = () => resolve({})
+        }),
+    )
+    await vi.waitFor(() => expect(finishDefault).toBeDefined())
+    unknownVersion.authority.notification!('thread/settings/updated', {
+      threadId: 'thread',
+      threadSettings: { collaborationMode: { mode: 'default' } },
+    })
+    finishDefault()
+    await changingDefault
+    expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBe('default')
+    await unknownVersion.authority.nativeRequest!('thread/resume', { threadId: 'thread' }, async () => ({}))
+    expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBeUndefined()
+    await unknownVersion.authority.nativeRequest!(
+      'turn/start',
+      { threadId: 'thread', collaborationMode: { mode: 'default' } },
+      async () => ({}),
+    )
+    expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBe('default')
+    await unknownVersion.authority.nativeRequest!('thread/resume', { threadId: 'thread' }, async () => ({}))
     expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBeUndefined()
     await unknownVersion.close()
   })

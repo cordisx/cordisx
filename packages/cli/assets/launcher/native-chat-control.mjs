@@ -146,7 +146,9 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
           params: {
             threadId: params.threadId,
             ...(params.turnId === undefined ? {} : { turnId: params.turnId }),
-            ...(message.method === 'turn/completed' ? { turn: { id: turn.id, status: turn.status } } : {}),
+            ...(['turn/started', 'turn/completed'].includes(message.method)
+              ? { turn: { id: turn.id, status: turn.status } }
+              : {}),
             ...(message.method === 'thread/settings/updated'
               ? {
                 threadSettings: {

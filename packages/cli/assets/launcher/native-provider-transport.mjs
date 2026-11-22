@@ -13,7 +13,10 @@ const MAX_WORKERS = 128
  * The inert process default satisfies native provider identity checks and cannot
  * silently send a request when a per-thread override has been lost.
  */
-export function createNativeProviderTransport(primary, { executable, args, env, initialize, diagnostic } = {}) {
+export function createNativeProviderTransport(
+  primary,
+  { executable, args, env, initialize, diagnostic, uncertain } = {},
+) {
   const stdout = new PassThrough()
   const workers = new Map()
   const owners = new Map()
@@ -159,6 +162,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
         if (workers.get(id) === worker) workers.delete(id)
         worker.rejectReady(new Error('Native provider connection closed'))
         for (const pending of worker.pending.values()) {
+          uncertain?.(pending.id)
           emit({
             id: pending.id,
             error: {
@@ -264,6 +268,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
             await route(frame, original)
           } catch {
             if (frame.id !== undefined) {
+              uncertain?.(frame.id)
               emit({
                 id: frame.id,
                 error: {

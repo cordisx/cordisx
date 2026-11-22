@@ -76,6 +76,16 @@ describe('logical continuation source reader', () => {
     f.authority.page.mockResolvedValue({ items: [{ type: 'agentMessage', text: 'y'.repeat(60_010) }] })
     await expect(f.reader.read(caller, input({ cursor: page.nextCursor }))).rejects.toThrow('HISTORY_CURSOR_INVALID')
   })
+  it('bounds encoded pages and retains a cursor for long multibyte content', async () => {
+    const f = fixture()
+    f.authority.page.mockResolvedValue({ items: [{ type: 'agentMessage', text: '🧭'.repeat(5000) }] })
+    const first = await f.reader.read(caller, input({}))
+    expect(Buffer.byteLength(JSON.stringify(first.entries), 'utf8')).toBeLessThanOrEqual(5000)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBeDefined()
+    const second = await f.reader.read(caller, input({ cursor: first.nextCursor }))
+    expect(second.entries.length).toBeGreaterThan(0)
+  })
   it('refuses ambiguous relations and native pagination loops', async () => {
     const f = fixture()
     f.authority.relation.mockResolvedValueOnce({ ...relation, source: destination })
@@ -95,6 +105,11 @@ describe('logical continuation source reader', () => {
   it('rejects an oversized native page instead of silently clipping or hashing it', async () => {
     const f = fixture()
     f.authority.page.mockResolvedValue({ items: [{ type: 'agentMessage', text: 'x'.repeat(2_000_001) }] })
+    await expect(f.reader.read(caller, input({}))).rejects.toThrow('HISTORY_PAGE_UNAVAILABLE')
+  })
+  it('counts JSON escaping when enforcing the native page limit', async () => {
+    const f = fixture()
+    f.authority.page.mockResolvedValue({ items: [{ type: 'agentMessage', text: '"'.repeat(1_000_001) }] })
     await expect(f.reader.read(caller, input({}))).rejects.toThrow('HISTORY_PAGE_UNAVAILABLE')
   })
 })

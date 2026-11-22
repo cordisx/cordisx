@@ -30,6 +30,7 @@ export function modelProviderCopy(locale: string) {
       loading: '正在加载…',
       loadFailed: '加载失败，请重试',
       unavailable: '模型服务暂不可用',
+      sourceUnavailable: '无法打开此前的会话，请检查当前账号和对话状态。',
       choose: '选择模型',
       back: '返回服务列表',
       actions: '服务操作',
@@ -37,7 +38,8 @@ export function modelProviderCopy(locale: string) {
       submitRejected: '此次发送未执行，模型服务状态已变化，请重试。',
       switchUnsupported:
         '当前 Codex 无法在这个对话中切换模型服务。原对话和草稿已保留，请选回当前服务继续，或在新对话使用目标服务。',
-      switchReconciliation: '模型服务切换未完成，原连接状态尚未确认。草稿已保留，请重新打开这个对话后确认服务再发送。',
+      switchReconciliation:
+        '模型服务切换结果尚未确认，草稿已保留。请先检查原对话和可能出现的新对话，也可通过本地管理命令查看切换状态；确认结果前不要重复切换。',
       switching: '正在切换模型服务…',
       accepted: '正在同步模型服务…',
       switched: '模型服务已切换',
@@ -79,6 +81,7 @@ export function modelProviderCopy(locale: string) {
       loading: 'Loading…',
       loadFailed: 'Could not load. Try again.',
       unavailable: 'Model services unavailable',
+      sourceUnavailable: 'Could not open the earlier session. Check the current account and conversation state.',
       choose: 'Choose model',
       back: 'Back to providers',
       actions: 'Service actions',
@@ -88,7 +91,7 @@ export function modelProviderCopy(locale: string) {
       switchUnsupported:
         'This Codex cannot change the model service for this conversation. The conversation and draft are preserved. Select the current service to continue, or use the target service in a new conversation.',
       switchReconciliation:
-        'The model service switch did not complete, and the original connection is not confirmed. Your draft is preserved. Reopen this conversation and confirm the service before sending.',
+        'The model service switch outcome is unconfirmed. Your draft is preserved. Check the original and any new conversation, or inspect the switch with the local management command, before trying again.',
       switching: 'Switching model service…',
       accepted: 'Synchronizing model service…',
       switched: 'Model service switched',

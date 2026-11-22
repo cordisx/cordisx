@@ -121,6 +121,19 @@ async function fixture() {
 }
 
 describe('exact Channel task changes', () => {
+  it('does not accept a task selection while logical migration is reserved', async () => {
+    const f = await fixture()
+    await f.store.mutate(state => {
+      state.logicalContinuations = {
+        revision: 0,
+        relations: {},
+        intents: { op: { request: { source: { sessionId: 'chat' } }, state: 'creating' } as never },
+      }
+    })
+    await expect(f.tasks.request(source, 'chat', { model: 'new' })).rejects.toThrow('CONTINUATION_PENDING')
+    expect(f.store.snapshot().taskRequests).toEqual({})
+    expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
+  })
   it('records a definitive provider refusal without leaving the chat uncertain', async () => {
     const f = await fixture()
     f.native.applyTaskSelection.mockResolvedValueOnce({
@@ -143,6 +156,7 @@ describe('exact Channel task changes', () => {
       () => undefined,
       {
         taskSettings: f.tasks,
+        isNativeSourceMigrating: () => false,
         agentAccess: new ChannelAgentAccess(() => f.store.snapshot(), () => f.native as never),
       } as never,
     )
