@@ -284,6 +284,19 @@ describe('provider-aware native task operation', () => {
     expect(await f.tasks.create(input, metadata)).toMatchObject({ reason: 'native-task-adapter-unavailable' })
     expect(f.authority.invoke).not.toHaveBeenCalled()
   })
+  it('does not interpret a projectless directory name as a filesystem path', async () => {
+    const f = await fixture()
+    for (const directoryName of ['.', '..', '../outside', '/outside', 'a\\b', 'C:outside', 'bad\u0001name']) {
+      expect(await f.tasks.create({ ...input, target: { type: 'projectless', directoryName } }, metadata))
+        .toMatchObject({ status: 'rejected', reason: 'invalid-creation' })
+    }
+    expect(f.authority.invoke).not.toHaveBeenCalled()
+    expect(await f.tasks.create({ ...input, target: { type: 'projectless', directoryName: '任务 1' } }, metadata))
+      .toMatchObject({ status: 'created' })
+    expect(f.authority.invoke.mock.calls[0]?.[0]).toMatchObject({
+      arguments: { target: { type: 'projectless', directoryName: '任务 1' } },
+    })
+  })
   it('claims by the exact call/source/arguments once and keeps credential config out of the renderer handle', async () => {
     const f = await fixture()
     f.authority.invoke.mockImplementation(async (request: any) => {

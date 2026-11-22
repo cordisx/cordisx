@@ -10,6 +10,7 @@ import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import type { CodexCreationSettings } from '../codex-creation-settings.js'
 import { codexCreationSelection } from './codex-creation-selection.js'
 import { nativeTaskEffort, nativeTaskSelectionAllowed } from './native-agent-task-effort.js'
+import { isProjectlessDirectoryName } from '../agent-task-target.js'
 
 const object = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined
@@ -358,7 +359,7 @@ function nativeReceipt(value: unknown): Record<string, any> | undefined {
 function validTarget(target: Record<string, any>): boolean {
   if (target.type === 'projectless') {
     return Object.keys(target).every(key => ['type', 'directoryName'].includes(key))
-      && (target.directoryName === undefined || valid(target.directoryName, 128))
+      && (target.directoryName === undefined || isProjectlessDirectoryName(target.directoryName))
   }
   if (
     target.type !== 'project' || !valid(target.projectId) || !object(target.environment)

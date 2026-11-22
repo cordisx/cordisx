@@ -57,7 +57,12 @@ const tools = [
           properties: {
             type: { enum: ['project', 'projectless'] },
             projectId: { type: 'string' },
-            directoryName: { type: 'string' },
+            directoryName: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              description: 'One projectless directory name, without path separators or traversal.',
+            },
             environment: {
               type: 'object',
               properties: { type: { enum: ['local', 'worktree'] }, startingState: { type: 'object' } },

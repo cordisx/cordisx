@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { parseChatExecutionSettings } from '../chat-execution-settings.js'
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { isProjectlessDirectoryName } from '../agent-task-target.js'
 
 export interface CodexCommand {
   readonly operation: string
@@ -222,6 +223,7 @@ export async function parseCodexCommand(args: readonly string[], models = false)
       )
     ) failure()
     if (options['--fast'] !== undefined && !['true', 'false'].includes(options['--fast'])) failure()
+    if (options['--directory-name'] !== undefined && !isProjectlessDirectoryName(options['--directory-name'])) failure()
     if (options['--effort'] !== undefined && !isModelReasoningEffort(options['--effort'])) {
       throw new Error('INVALID_REASONING_EFFORT')
     }

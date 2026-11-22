@@ -50,7 +50,8 @@ the choice, so replay cannot change it after an uncertain result.
 | Permissions, approval and work mode | The existing native creation path owns source permissions and delegation behavior. This tool does not accept arbitrary permission, approval, work-mode or private configuration overrides.                                |
 | Remote and cloud targets            | Not supported by the current provider-aware adapter; ordinary native creation remains separate.                                                                                                                           |
 
-The CLI exposes the supported local and worktree target choices. It validates
+The projectless directory name is one name, not an absolute path, a path with
+separators, or `.` or `..`. The CLI exposes the supported local and worktree target choices. It validates
 their combinations before requesting native creation. Project registration and
 worktree provisioning remain native operations, not a promise of a particular
 filesystem layout or permission expansion.

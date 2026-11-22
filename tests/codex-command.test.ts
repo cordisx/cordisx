@@ -135,6 +135,9 @@ test('provider-aware creation carries a checked effort and explicit native targe
       ['--project', 'p', '--environment', 'worktree', '--branch', 'b'],
       ['--project', 'p', '--environment', 'worktree', '--starting-state', 'branch'],
       ['--project', 'p', '--directory-name', 'task'],
+      ['--directory-name', '../outside'],
+      ['--directory-name', '/outside'],
+      ['--directory-name', '..'],
     ]
   ) {
     await expect(parseCodexCommand(['chats', 'create', '--message', 'work', '--operation', 'op', ...flags]))
