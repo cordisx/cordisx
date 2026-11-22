@@ -3,7 +3,7 @@ import { mkdir, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
-import type { HomeConfig, HomeConfigPlugin } from './home-config.js'
+import type { HomeConfig, HomeConfigPlugin, JsonValue } from './home-config.js'
 import { SharedProfileFence } from './shared-profile-fence.js'
 import {
   isOwnedHomeServiceChange,
@@ -126,9 +126,49 @@ async function admit(configPath: string, profileId: string): Promise<() => Promi
   }
 }
 
-/** The profile projection is the selected configured plugin and service state, including candidates. */
-function projection(plugins: readonly HomeConfigPlugin[], profileId: string): unknown {
-  return plugins.map(plugin => {
+/** Serialize installed-package writes with the same profile fence as Manager admission. */
+export async function fencePackageProfileWrite(
+  homeDir: string,
+  profileId: string,
+): Promise<() => Promise<void>> {
+  if (!PROFILE.test(profileId)) throw new Error('invalid plugin configuration profile id')
+  // A configured Home service authority does not authorize installed-package state.
+  if (ownedServiceWrites.getStore() !== undefined) throw new ProfilePluginConfigFenceBusyError()
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    return async () => {}
+  }
+  return await admit(path.join(homeDir, 'config.json'), profileId)
+}
+
+/** Exclude cross-process service writers while a credential recovery reads that file. */
+export async function fencePackageServiceFile(
+  homeDir: string,
+  profileId: string,
+  pluginId: string,
+  serviceId: string,
+): Promise<() => Promise<void>> {
+  if (!PROFILE.test(profileId) || !LOCAL_ID.test(pluginId) || !LOCAL_ID.test(serviceId)) {
+    throw new Error('invalid package service configuration identity')
+  }
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return async () => {}
+  const root = path.join(await directory(path.join(homeDir, 'config.json')), 'package-services', profileId, pluginId)
+  await mkdir(root, { recursive: true, mode: 0o700 })
+  return await lock(path.join(root, `${serviceId}.lock`))
+}
+
+export interface ProfileManagedStartupInput {
+  readonly appId: string
+  readonly profileId: string
+  readonly config: Readonly<Record<string, JsonValue>>
+}
+
+/** The profile projection includes configured plugins and their owner-selected startup inputs. */
+function projection(
+  plugins: readonly HomeConfigPlugin[],
+  profileId: string,
+  startup: readonly ProfileManagedStartupInput[],
+): unknown {
+  const configured = plugins.map(plugin => {
     const scoped = plugin.profiles && Object.hasOwn(plugin.profiles, profileId)
       ? plugin.profiles[profileId]
       : undefined
@@ -144,6 +184,7 @@ function projection(plugins: readonly HomeConfigPlugin[], profileId: string): un
       services,
     }
   })
+  return { configured, startup: startup.filter(item => item.profileId === profileId) }
 }
 
 /** Hold registry discovery through publication so an unlisted profile cannot join mid-write. */
@@ -151,12 +192,20 @@ export async function fenceChangedConfiguredPlugins(
   configPath: string,
   previous: readonly HomeConfigPlugin[],
   candidate: readonly HomeConfigPlugin[],
+  previousStartup: readonly ProfileManagedStartupInput[] = [],
+  candidateStartup: readonly ProfileManagedStartupInput[] = [],
 ): Promise<() => Promise<void>> {
   const owner = ownedServiceWrites.getStore()
-  if (owner && !isOwnedServiceChange(owner, configPath, previous, candidate)) {
+  if (
+    owner && (!isOwnedServiceChange(owner, configPath, previous, candidate)
+      || !equalJson(previousStartup, candidateStartup))
+  ) {
     throw new ProfilePluginConfigFenceBusyError()
   }
-  if (process.platform !== 'darwin' && process.platform !== 'linux' || equalJson(previous, candidate)) {
+  if (
+    process.platform !== 'darwin' && process.platform !== 'linux'
+    || equalJson([previous, previousStartup], [candidate, candidateStartup])
+  ) {
     return async () => {}
   }
   const releases: Array<() => Promise<void>> = []
@@ -180,7 +229,9 @@ export async function fenceChangedConfiguredPlugins(
       .map(name => name.slice(0, -5)).sort()
     if (profiles.length > 4096) throw new Error('plugin configuration fence limit exceeded')
     for (const profile of profiles) {
-      if (!equalJson(projection(previous, profile), projection(candidate, profile))) {
+      if (
+        !equalJson(projection(previous, profile, previousStartup), projection(candidate, profile, candidateStartup))
+      ) {
         if (owner && profile === owner.profileId) continue
         releases.push(await lock(path.join(root, `${profile}.lock`)))
       }

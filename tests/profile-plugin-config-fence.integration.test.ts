@@ -119,6 +119,49 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
 )
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'fences managed-service startup configuration for the selected profile only',
+  async () => {
+    const root = await mkdtemp('/tmp/cx-managed-startup-fence-')
+    const configPath = path.join(root, 'config.json')
+    const fence = new SharedProfilePluginConfigFence(configPath, 'work')
+    const changeStartup = async (profileId: string) =>
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        apps: {
+          ...current.apps,
+          codex: {
+            ...current.apps.codex!,
+            profiles: {
+              ...current.apps.codex!.profiles,
+              [profileId]: {
+                displayName: profileId,
+                dataMode: 'shared',
+                managedServiceStartupConfig: { fixture: { enabled: true } },
+              },
+            },
+          },
+        },
+      }), configPath)
+    try {
+      await ensureHomeConfig(configPath)
+      const release = await fence.acquire()
+      await expect(changeStartup('work')).rejects.toThrow('plugin configuration is in use')
+      await changeStartup('other')
+      expect((await loadHomeConfig(configPath)).apps.codex!.profiles.other!.managedServiceStartupConfig)
+        .toEqual({ fixture: { enabled: true } })
+      await release()
+      await changeStartup('work')
+      expect((await loadHomeConfig(configPath)).apps.codex!.profiles.work!.managedServiceStartupConfig)
+        .toEqual({ fixture: { enabled: true } })
+    } finally {
+      await fence.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+  30_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   'rolls back all acquired locks when a combined permission and plugin write is refused',
   async () => {
     const root = await mkdtemp('/tmp/cx-plugin-config-combined-')

@@ -16,7 +16,11 @@ import { createServiceRendererProjector } from '../../packages/cli/src/cli/servi
 import { ManagerRendererSessions } from '../../packages/cli/src/cli/manager-renderer-sessions.js'
 import { createProductionManagedServiceLifecycle } from '../../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../../packages/cli/src/cli/manager-managed-service-ui.js'
-import { createDefaultHomeConfig } from '../../packages/cli/src/config/home-config.js'
+import {
+  createDefaultHomeConfig,
+  type HomeConfigProfile,
+  updateHomeConfigAtomic,
+} from '../../packages/cli/src/config/home-config.js'
 import { createLocalChannelService } from '../../packages/cli/src/launcher/channel-service.js'
 import { loadConfig } from '../../packages/cli/src/launcher/config.js'
 import { PluginActivationStore } from '../../packages/cli/src/launcher/plugin-activation.js'
@@ -48,6 +52,7 @@ export async function fixture(
     managedBackend?: boolean
     managedUiVersion?: 14 | 15
     managedUiGrant?: boolean
+    managedStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
     protectProfileInputs?: boolean
     writeDispatch?: () => Promise<unknown>
     readDispatch?: () => Promise<unknown>
@@ -155,6 +160,7 @@ export async function fixture(
        }`,
       options.managedUiVersion === undefined ? {} : {
         version: options.managedUiVersion,
+        nodeConfig: options.managedStartupConfig !== undefined,
         uiPoints: ['manager.settings.navigation-items', 'manager.content', 'workspace.toolbar.items'],
       },
     )
@@ -169,6 +175,24 @@ export async function fixture(
       }))
       await persistPermissionPolicies({ configPath }, policies)
     }
+  }
+  if (options.managedStartupConfig) {
+    await updateHomeConfigAtomic(current => ({
+      ...current,
+      apps: {
+        ...current.apps,
+        codex: {
+          ...current.apps.codex!,
+          profiles: {
+            ...current.apps.codex!.profiles,
+            [profileId]: {
+              ...current.apps.codex!.profiles[profileId]!,
+              managedServiceStartupConfig: options.managedStartupConfig,
+            },
+          },
+        },
+      },
+    }), configPath)
   }
   const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
   const participants = new ServiceRendererParticipants(scope)
@@ -217,6 +241,7 @@ export async function fixture(
     generation,
     environment: { PATH: process.env.PATH, HOME: root },
     store,
+    startupConfig: options.managedStartupConfig,
     dryRun: false,
     requireOwnedProcess: true,
   })
@@ -248,6 +273,7 @@ export async function fixture(
     appId: 'codex',
     profileId,
     generation,
+    ownerStartupConfig: options.managedStartupConfig,
     lifecycle,
     participants,
     store,

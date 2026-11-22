@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
@@ -278,6 +279,32 @@ it.skipIf(
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
       await showChannel(second)
+      const pluginStore = pathToFileURL(path.join(managerPackage!, 'dist/src/launcher/package-plugin-config.js')).href
+      const serviceStore =
+        pathToFileURL(path.join(managerPackage!, 'dist/src/launcher/package-plugin-service-config.js')).href
+      const writeScript = `
+        import { PackagePluginConfigStore } from ${JSON.stringify(pluginStore)};
+        import { PackagePluginServiceConfigStore } from ${JSON.stringify(serviceStore)};
+        const [home, kind] = process.argv.slice(1);
+        const ownerToken = 'a'.repeat(64);
+        try {
+          if (kind === 'plugin') await new PackagePluginConfigStore(home, 'default', 'fixture-owner')
+            .stage('config-fence-fixture', 0, {}, ownerToken);
+          else await new PackagePluginServiceConfigStore(home, 'default', 'fixture-owner').stage({
+            profileId: 'default', pluginId: 'config-fence-fixture', serviceId: 'runtime',
+            generation: 'fixture-owner', ownerToken, initialConfig: {}, expectedRevision: 0,
+            config: {}, applies: 'service-restart' });
+          process.stdout.write('written');
+        } catch (error) { process.stdout.write(error.name); }
+      `
+      for (const kind of ['plugin', 'service']) {
+        const child = await exec(process.execPath, ['--input-type=module', '-e', writeScript, homeDir, kind], {
+          cwd: root,
+          env,
+          timeout: 10_000,
+        })
+        expect(child.stdout).toBe('ProfilePluginConfigFenceBusyError')
+      }
       for (const page of [first, second]) {
         await expect.poll(
           () => page.evaluate('document.querySelector("p[role=status]")?.hidden === true'),

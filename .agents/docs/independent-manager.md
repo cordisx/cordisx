@@ -65,6 +65,19 @@ owner's revision and credential protection; they retain the app-restart apply
 semantics described below. An edit started against an older revision is rejected
 if another client changes the declarations first.
 
+While an experimental Host page is attached, installed-package plugin and
+service configuration writers use the same profile fence as Manager admission.
+Pending configuration candidates prevent admission; a confirmed change outside
+that fence retires the affected page. The managed-service startup configuration
+for the selected app and profile must also match the value used when the owner
+started. Changes to that startup input are fenced while a Manager is attached;
+when the value already differs, the owner must be restarted or the previous value
+restored before a new page can attach. These checks do not project private
+startup values into the browser. Installed-package configuration writes are not
+yet coordinated across Manager sessions and remain unavailable while the fence is
+held. The separate, explicitly coordinated configured-Channel service update
+retains its existing owner and receipt checks.
+
 The sidecar listens only on loopback and communicates with the owner through its
 private management socket. Each browser opening obtains a 60-second bootstrap
 in the URL fragment; it is exchanged for a separate session token and removed

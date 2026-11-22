@@ -226,6 +226,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           appId,
           profileId,
           generation,
+          ownerStartupConfig: config.apps[appId]?.profiles[profileId]?.managedServiceStartupConfig,
           lifecycle: rendererLifecycle,
           participants: rendererParticipants,
           store,

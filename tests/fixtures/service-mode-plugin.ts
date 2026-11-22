@@ -85,6 +85,7 @@ export async function stageServiceModePlugin(
     readonly uiPoints?: readonly string[]
     readonly authentication?: boolean
     readonly logout?: boolean
+    readonly nodeConfig?: boolean
   } = {},
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
@@ -139,7 +140,12 @@ export async function apply(ctx, input) {
 }
 apply.inject = ['managedServices']
 `
-  const service = version === 14 ? registration : `${registration}
+  const nodeConfig = options.nodeConfig
+    ? `export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture',
+        validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { marker: { type: 'string' } } }) }`
+    : ''
+  const service = version === 14 ? registration : `${nodeConfig}
+${registration}
 export async function prepare(ctx, input) {
   const ready = await input.registration.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')

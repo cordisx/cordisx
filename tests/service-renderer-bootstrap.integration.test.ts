@@ -148,8 +148,9 @@ it('projects an already-running managed backend into two isolated read-only rend
       ),
     )
       .toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+    // Subscription requests now require the owner-issued service binding.
     expect(await f.sessions.call(second, 'managed-service-ui', request(other.token, 'subscribe')))
-      .toEqual({ status: 'ok', value: { requestId: 'fixture-subscribe', ok: false, code: 'unsupported' } })
+      .toEqual({ status: 'unavailable' })
     expect(await f.sessions.close(f.invocation)).toBe(true)
     expect(await f.sessions.call(f.invocation, 'managed-service-ui', request(first.token, 'get')))
       .toEqual({ status: 'unavailable' })

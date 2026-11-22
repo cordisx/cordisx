@@ -9,6 +9,7 @@ import {
 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
+import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 
 /** Private owner→sidecar only. URLs carry an upstream lease secret. */
 export interface ServiceRendererPrivateGraph {
@@ -139,6 +140,12 @@ export function createServiceRendererProjector(input: {
       || !mutation.affectedPluginIds.includes(mutation.targetId)
       || (mutation.managedServiceUICapabilities?.length ?? 0) !== 0 || mutation.developmentPackage !== undefined
     ) throw new Error('renderer-projection-scope-invalid')
+    await readSettledPackageInputs({
+      homeDir: input.homeDir,
+      profileId: input.profileId,
+      generation: input.generation,
+      pluginIds: mutation.affectedPluginIds.filter(id => after.plugins.some(plugin => plugin.id === id)),
+    })
     const packages = new Map<string, Awaited<ReturnType<typeof loadStagedPluginPackage>>>()
     for (const pluginId of mutation.affectedPluginIds) {
       const item = after.plugins.find(plugin => plugin.id === pluginId)

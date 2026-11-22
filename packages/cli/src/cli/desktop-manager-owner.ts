@@ -1,4 +1,5 @@
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { HomeConfigProfile } from '../config/home-config.js'
 import type { CdpPluginLifecycleRuntime } from '../launcher/cdp-plugin-lifecycle-runtime.js'
 import type { PluginActivationStore } from '../launcher/plugin-activation.js'
 import type { PluginGenerationArtifactServer } from '../launcher/plugin-generation-artifact-server.js'
@@ -26,6 +27,7 @@ export function createDesktopManagerOwner(input: {
   readonly appId: string
   readonly profileId: string
   readonly generation: string
+  readonly ownerStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
   readonly cdp: CdpPluginLifecycleRuntime
   readonly artifactServer: PluginGenerationArtifactServer
   readonly store: PluginActivationStore
@@ -79,6 +81,7 @@ export function createDesktopManagerOwner(input: {
     appId: input.appId,
     profileId: input.profileId,
     generation: input.generation,
+    ownerStartupConfig: input.ownerStartupConfig,
     lifecycle,
     participants,
     store: input.store,

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { loadHomeConfig } from '../config/home-config.js'
+import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js'
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
 import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
@@ -36,6 +36,7 @@ import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
+import { readSettledProfileInputs } from './service-renderer-profile-inputs.js'
 
 type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
 type ConfiguredChannel = {
@@ -53,6 +54,7 @@ type Entry = {
   snapshot?: Snapshot
   config?: CordisXConfig
   plugins?: readonly CordisXConfigPlugin[]
+  packageInputs?: Map<string, string>
   policies?: readonly CordisXPersistedPermissionPolicyRecord[]
   managedOwners?: ReadonlyMap<string, string>
   managedContext?: ManagerRendererChannelContext
@@ -87,6 +89,7 @@ export class ServiceRendererBootstrap {
   private readonly unsubscribeFinalization: () => void
   private readonly permissionFence: SharedProfilePermissionFence | undefined
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
+  private readonly ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
   private closed = false
@@ -99,6 +102,8 @@ export class ServiceRendererBootstrap {
       readonly appId: string
       readonly profileId: string
       readonly generation: string
+      /** Exact Host-only startup input selected by this owner before launching managed services. */
+      readonly ownerStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
       readonly lifecycle: OwnerRendererLifecycle
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
@@ -113,6 +118,7 @@ export class ServiceRendererBootstrap {
       readonly experimentalChannelCredentials?: boolean
     },
   ) {
+    this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
     this.configuredChannel = input.experimentalConfiguredChannel
     this.managedServiceUI = input.managedServiceUI
     this.permissionFence = input.protectProfileInputs
@@ -165,6 +171,18 @@ export class ServiceRendererBootstrap {
     )
   }
 
+  private async profileInputs(snapshot: Snapshot): Promise<Map<string, string>> {
+    return await readSettledProfileInputs({
+      homeDir: this.input.homeDir,
+      configPath: this.input.configPath,
+      appId: this.input.appId,
+      profileId: this.input.profileId,
+      generation: this.input.generation,
+      ownerStartupConfig: this.ownerStartupConfig,
+      pluginIds: snapshot.active.plugins.map(plugin => plugin.id),
+    })
+  }
+
   private async trackCheck(entry: Entry, operation: () => Promise<boolean>): Promise<boolean> {
     const check = operation()
     entry.checks.add(check)
@@ -180,18 +198,29 @@ export class ServiceRendererBootstrap {
     return await this.trackCheck(entry, async () => {
       try {
         if (
-          !this.current(rendererId, entry) || !entry.config || !entry.policies
+          !this.current(rendererId, entry) || !entry.config || !entry.policies || !entry.packageInputs
           || entry.configuredChannel && !entry.configuredChannel.isCurrent()
         ) return false
-        const [configRead, policiesRead] = await Promise.allSettled([
+        const snapshot = this.input.lifecycle.snapshot()
+        const [configRead, policiesRead, inputsRead] = await Promise.allSettled([
           loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
           this.policies(),
+          this.profileInputs(snapshot),
         ])
-        if (configRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled') return false
+        if (
+          configRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled' || inputsRead.status !== 'fulfilled'
+        ) return false
         const config = configRead.value
         const policies = policiesRead.value
-        return this.current(rendererId, entry) && attachmentEqual(config, entry.config)
-          && attachmentEqual(policies, entry.policies)
+        if (
+          !this.current(rendererId, entry) || !attachmentEqual(this.input.lifecycle.snapshot(), snapshot)
+          || !attachmentEqual(config, entry.config) || !attachmentEqual(policies, entry.policies)
+        ) return false
+        for (const [id, digest] of inputsRead.value) {
+          if (entry.packageInputs.has(id) && entry.packageInputs.get(id) !== digest) return false
+        }
+        for (const [id, digest] of inputsRead.value) entry.packageInputs.set(id, digest)
+        return true
       } catch {
         return false
       }
@@ -203,19 +232,22 @@ export class ServiceRendererBootstrap {
       try {
         if (
           !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
+          || !entry.packageInputs
           || entry.configuredChannel && !entry.configuredChannel.isCurrent()
         ) {
           return false
         }
         if (entry.managedContext) this.managedServiceUI?.projectInitial(entry.managedContext)
         if (!attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)) return false
-        const [configRead, pluginsRead, policiesRead] = await Promise.allSettled([
+        const [configRead, pluginsRead, policiesRead, inputsRead] = await Promise.allSettled([
           loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
           loadPluginComposition(this.input.store, entry.snapshot.active),
           this.policies(),
+          this.profileInputs(entry.snapshot),
         ])
         if (
           configRead.status !== 'fulfilled' || pluginsRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled'
+          || inputsRead.status !== 'fulfilled'
         ) return false
         const config = configRead.value
         const plugins = pluginsRead.value
@@ -223,7 +255,7 @@ export class ServiceRendererBootstrap {
         if (entry.managedContext) this.managedServiceUI?.projectInitial(entry.managedContext)
         return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
           && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
-          && attachmentEqual(policies, entry.policies)
+          && attachmentEqual(policies, entry.policies) && attachmentEqual(inputsRead.value, entry.packageInputs)
       } catch {
         return false
       }
@@ -468,13 +500,15 @@ export class ServiceRendererBootstrap {
           entry.releasePluginConfigFence = release
         }
         const snapshot = this.input.lifecycle.snapshot()
-        const [configRead, pluginsRead, policiesRead] = await Promise.allSettled([
+        const [configRead, pluginsRead, policiesRead, inputsRead] = await Promise.allSettled([
           loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
           loadPluginComposition(this.input.store, snapshot.active),
           this.policies(),
+          this.profileInputs(snapshot),
         ])
         if (
           configRead.status !== 'fulfilled' || pluginsRead.status !== 'fulfilled' || policiesRead.status !== 'fulfilled'
+          || inputsRead.status !== 'fulfilled'
         ) throw new Error('renderer-bootstrap-unavailable')
         const config = configRead.value
         const plugins = pluginsRead.value
@@ -557,6 +591,7 @@ export class ServiceRendererBootstrap {
         entry.config = config
         entry.plugins = plugins
         entry.policies = policies
+        entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
         entry.needsIdentityProjection = needsIdentityProjection
         if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')

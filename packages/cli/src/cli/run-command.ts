@@ -28,13 +28,7 @@ import { buildRendererBundle, type BuildRendererBundleOptions } from '../launche
 import { CdpPluginLifecycleRuntime } from '../launcher/cdp.js'
 import { findPackageRoot, localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
-import {
-  DirectPublisherGrantAuthority,
-  DirectPublisherGrantStore,
-  MacOSMachineIdentityProvider,
-  StaticPublisherKeyRegistry,
-} from '../launcher/publisher-grants.js'
-import { createPublisherGrantBridgeHandler, type PublisherGrantBridgeHandler } from '../launcher/publisher-grant-rpc.js'
+import { createPublisherGrantForHome } from './publisher-grant-composition.js'
 import {
   type CordisXConfig,
   findCordisXProjectConfig,
@@ -231,12 +225,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       projectRoot: rootFromConfigPath(configPath),
     })
     const currentHomeConfig = await loadHomeConfig(configPath)
-    const publisherGrant = createPublisherGrantBridgeHandler(
-      new DirectPublisherGrantAuthority(
-        new StaticPublisherKeyRegistry(currentHomeConfig.publisherGrantIssuers),
-        new MacOSMachineIdentityProvider(),
-        await DirectPublisherGrantStore.open(rootFromConfigPath(configPath)),
-      ),
+    const publisherGrant = await createPublisherGrantForHome(
+      rootFromConfigPath(configPath),
+      currentHomeConfig.publisherGrantIssuers,
     )
     const permissionPolicies = currentHomeConfig.permissions.filter(policy =>
       policy.key.profileId === selection.profileId
@@ -255,6 +246,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       appId,
       profileId: selection.profileId,
       generation: lifecycleGeneration,
+      ownerStartupConfig: selection.profile.managedServiceStartupConfig,
       cdp: lifecycleRuntime,
       artifactServer: activePluginGenerationArtifactServer,
       store: lifecycleStore,
