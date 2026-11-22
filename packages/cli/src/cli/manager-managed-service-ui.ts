@@ -10,6 +10,7 @@ import type { ManagedServiceUICapabilityMutation } from '../launcher/plugin-life
 import type { StartupUIRequest } from '../launcher/startup-ui-rpc.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { ManagerStartupObservation } from './manager-startup-observation.js'
+import { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import {
   ManagerManagedServiceObservation,
   type ManagerManagedServiceObservationRequest,
@@ -46,7 +47,7 @@ interface Alias {
 }
 interface Session {
   readonly context: ManagerRendererChannelContext
-  readonly fence: number
+  fence: number
   readonly aliases: ReadonlyMap<string, Alias>
   readonly capabilities: readonly OwnerCapability[]
   readonly startup: ManagerStartupObservation
@@ -225,6 +226,7 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly allowLogout?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
+    reserveManagedServiceUIContinuity?(): { finish(): number | undefined; cancel(): boolean }
     readonly managedServiceUI: {
       handleBindingValue(value: string, signal?: AbortSignal): Promise<Record<string, unknown>>
     }
@@ -235,6 +237,7 @@ export function createManagerManagedServiceUIBridge(input: {
   const usedAliases = new Set<string>()
   const usedObservationIds = new Set<string>()
   const retirements = new Map<string, Promise<boolean>>()
+  const gate = new ManagerManagedServiceUIGate()
   let disposed = false
 
   function fence(): number {
@@ -293,7 +296,7 @@ export function createManagerManagedServiceUIBridge(input: {
   }
 
   function projectInitial(context: ManagerRendererChannelContext): readonly ManagerManagedServiceUICapability[] {
-    if (!validContext(context)) throw unavailable()
+    if (!gate.open || !validContext(context)) throw unavailable()
     const existing = sessions.get(context.rendererId)
     if (existing) {
       assertCurrent(existing, context)
@@ -362,7 +365,7 @@ export function createManagerManagedServiceUIBridge(input: {
     return [...aliases.values()].map(alias => alias.public)
   }
 
-  const channel: ManagerRendererChannel = {
+  const rawChannel: ManagerRendererChannel = {
     prepare(payload, context) {
       try {
         const session = sessions.get(context.rendererId)
@@ -630,8 +633,132 @@ export function createManagerManagedServiceUIBridge(input: {
     },
   }
 
+  const channel: ManagerRendererChannel = {
+    prepare(payload, context) {
+      if (!gate.open) throw unavailable()
+      const prepared = rawChannel.prepare(payload, context)
+      return {
+        ...prepared,
+        async dispatch() {
+          const finish = gate.begin()
+          try {
+            return await prepared.dispatch()
+          } finally {
+            finish()
+          }
+        },
+      }
+    },
+  }
+
+  /**
+   * Owner-only: freeze and drain this bridge before asking the runtime for its
+   * continuity evidence. The enclosing lifecycle still owns all other fences.
+   */
+  async function reserveTransition(timeoutMs?: number): Promise<{
+    isCurrent(): boolean
+    resume(): boolean
+    cancel(): boolean
+    fence(): void
+  }> {
+    if (!gate.open || !input.runtime.reserveManagedServiceUIContinuity) throw unavailable()
+    const cohort = [...sessions.values()]
+    const initialFence = fence()
+    const capabilities = copyCapabilities(input.runtime.capabilities())
+    for (const session of cohort) assertCurrent(session, session.context)
+    const current = () => {
+      try {
+        return !disposed && input.ownerCurrent() && sessions.size === cohort.length
+          && cohort.every(session =>
+            sessions.get(session.context.rendererId) === session && !session.context.signal.aborted
+          )
+      } catch {
+        return false
+      }
+    }
+    let lease: Awaited<ReturnType<ManagerManagedServiceUIGate['reserve']>>
+    try {
+      lease = await gate.reserve(current, timeoutMs)
+    } catch {
+      if (!gate.open) { for (const session of cohort) retire(session.context.rendererId) }
+      throw unavailable()
+    }
+    let continuity: ReturnType<NonNullable<typeof input.runtime.reserveManagedServiceUIContinuity>>
+    try {
+      if (
+        !lease.isCurrent() || fence() !== initialFence
+        || !sameCapabilities(capabilities, copyCapabilities(input.runtime.capabilities())) || fence() !== initialFence
+      ) throw unavailable()
+      continuity = input.runtime.reserveManagedServiceUIContinuity()
+    } catch {
+      lease.fence()
+      for (const session of cohort) retire(session.context.rendererId)
+      throw unavailable()
+    }
+    let ended = false
+    const fail = () => {
+      if (ended) return
+      ended = true
+      try {
+        continuity.cancel()
+      } catch { /* Failed continuity remains fenced. */ }
+      lease.fence()
+      for (const session of cohort) retire(session.context.rendererId)
+    }
+    const stable = (expected: number): boolean => {
+      try {
+        return lease.isCurrent() && fence() === expected
+          && sameCapabilities(capabilities, copyCapabilities(input.runtime.capabilities())) && fence() === expected
+      } catch {
+        return false
+      }
+    }
+    return {
+      isCurrent: () => !ended && lease.isCurrent(),
+      resume: () => {
+        if (ended || !lease.isCurrent()) {
+          fail()
+          return false
+        }
+        let next: number | undefined
+        try {
+          next = continuity.finish()
+        } catch { /* The result is unavailable. */ }
+        if (next === undefined || !stable(next)) {
+          fail()
+          return false
+        }
+        for (const session of cohort) session.fence = next
+        if (!lease.release()) {
+          fail()
+          return false
+        }
+        ended = true
+        return true
+      },
+      cancel: () => {
+        if (ended || !lease.isCurrent()) {
+          fail()
+          return false
+        }
+        let canceled = false
+        try {
+          canceled = continuity.cancel()
+        } catch { /* The result is unavailable. */ }
+        if (!canceled || !stable(initialFence) || !lease.release()) {
+          fail()
+          return false
+        }
+        ended = true
+        return true
+      },
+      fence: fail,
+    }
+  }
+
   return {
     projectInitial,
+    reserveTransition,
     /** Abort one owner-issued projection if its bootstrap cannot complete. */
     retire(context: ManagerRendererChannelContext): void {
       const session = sessions.get(context.rendererId)
@@ -643,7 +770,7 @@ export function createManagerManagedServiceUIBridge(input: {
     /** Check the owner-built renderer source before any bytes reach a browser. */
     assertBundleSafe(context: ManagerRendererChannelContext, source: string): void {
       const session = sessions.get(context.rendererId)
-      if (!session || typeof source !== 'string') throw unavailable()
+      if (!gate.open || !session || typeof source !== 'string') throw unavailable()
       assertCurrent(session, context)
       if (session.capabilities.some(owner => source.includes(owner.token))) throw unavailable()
       assertCurrent(session, context)
@@ -651,6 +778,7 @@ export function createManagerManagedServiceUIBridge(input: {
     channel,
     dispose(): void {
       disposed = true
+      gate.close()
       for (const id of sessions.keys()) retire(id)
       usedRenderers.clear()
       usedAliases.clear()

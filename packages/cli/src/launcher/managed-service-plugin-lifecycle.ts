@@ -10,6 +10,7 @@ import {
 } from './managed-service-ui-fence-sources.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
 import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
+import { ManagedServiceUIContinuity, type ManagedServiceUIRecovery } from './managed-service-ui-continuity.js'
 import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
 import { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 import type { StartupPluginAdmission } from './managed-service-startup-admission.js'
@@ -31,10 +32,14 @@ import type {
 } from './plugin-lifecycle-model.js'
 import {
   managedServiceFleetActivation,
-  type ManagedServiceFleetLease,
   managedServiceLeases,
   unchangedManagedServiceLease,
 } from './managed-service-fleet.js'
+import type {
+  ManagedServiceFleet,
+  ManagedServiceOwnerRoute,
+  ManagedServiceTransaction,
+} from './managed-service-fleet-types.js'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import {
   type ManagedServiceClientIdentity,
@@ -43,43 +48,12 @@ import {
 } from './managed-service-client-reservation.js'
 import {
   createManagedServiceUIBridgeHandler,
-  type ManagedServiceUIBridgeHandler,
   type ManagedServiceUIOwner,
   MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
   parseManagedServiceUIBindingRequest,
 } from './managed-service-ui-rpc.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { safeDiagnosticMessage } from './diagnostic-redaction.js'
-
-interface ManagedServiceOwnerRoute {
-  readonly key: string
-  readonly token: string
-  readonly owner: ManagedServiceUIOwner
-  readonly startup?: true
-  readonly handler: ManagedServiceUIBridgeHandler
-}
-
-interface ManagedServiceFleet {
-  readonly leases: readonly ManagedServiceFleetLease[]
-  readonly activation: ManagedServiceNodeActivation | undefined
-  readonly record?: CordisXPluginActivationRecordV1
-  readonly routes: ReadonlyMap<string, ManagedServiceOwnerRoute>
-}
-
-interface ManagedServiceTransaction {
-  readonly previous: ManagedServiceFleet
-  readonly candidate: ManagedServiceFleet
-  readonly newCapabilities: readonly ManagedServiceUICapabilityMutation[]
-  published: boolean
-}
-
-interface ManagedServiceUIRecovery {
-  readonly stamp: number
-  readonly registryEpoch: number
-  readonly profileId: string
-  readonly runtimeGeneration: string
-  readonly plugins: string
-}
 
 export interface ManagedServicePluginLifecycleOptions {
   readonly runtime: PluginLifecycleRuntime
@@ -143,6 +117,18 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private uiFenceSources: readonly ManagedServiceUISourceSnapshot[] | undefined
   private readonly uiFencePending = new Map<string, number>()
   private readonly uiFenceRecovery = new Map<string, ManagedServiceUIRecovery>()
+  private readonly uiContinuity = new ManagedServiceUIContinuity({
+    capture: () => {
+      const fleet = this.active
+      const fence = this.readManagedServiceUIFence()
+      if (!fleet || fence === undefined) return undefined
+      const sources = captureManagedServiceUISources(fleet.activation?.sources ?? [])
+      const capabilities = this.capabilities()
+      if (this.active !== fleet || this.readManagedServiceUIFence() !== fence) return undefined
+      return { fence, sources, capabilities, activations: fleet.leases.map(lease => lease.activation) }
+    },
+    cleanupFailed: () => this.uiFenceFailed = true,
+  })
   readonly startup: ManagedServiceStartupAuthority
   readonly startupObserver: StartupObserverV1
   readonly browserConsoleLaunch = new ManagedConsoleBrowserLaunch()
@@ -328,6 +314,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     }
     if (this.uiFenceFailed) return undefined
     return this.uiFenceEpoch
+  }
+
+  /** Owner-only evidence; callers must separately fence and drain all Manager activity. */
+  reserveManagedServiceUIContinuity() {
+    return this.uiContinuity.reserve()
   }
 
   /** Host bootstrap passes this only to B's dedicated Host transport, never plugin metadata. */
@@ -650,12 +641,14 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   terminal(error: unknown): void {
     this.advanceUIFence()
     this.uiFenceFailed = true
+    this.uiContinuity.dispose()
     this.runtime.terminal?.(error)
   }
 
   async dispose(): Promise<void> {
     this.advanceUIFence()
     this.uiFenceFailed = true
+    this.uiContinuity.dispose()
     this.managerServiceAuth.close()
     if (this.disposed) return await this.mutation.then(() => undefined)
     this.disposed = true
@@ -953,6 +946,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   private setActive(fleet: ManagedServiceFleet | undefined): void {
+    this.uiContinuity.observeRoutes(this.active?.routes, fleet?.routes)
     this.advanceUIFence()
     this.uiFenceSources = undefined
     this.stopNativeProviders?.()

@@ -84,7 +84,7 @@ function fixture(
   options: { observeSources?: boolean; throwOnObserve?: boolean; throwOnStop?: boolean; invalidStop?: boolean } = {},
 ) {
   const base = baseRuntime()
-  const listeners = new Map<string, () => void>()
+  const listeners = new Map<string, Set<() => void>>()
   const snapshots = new Map<string, ReturnType<typeof vi.fn>>()
   let tokenIndex = 0
   const runtime = new ManagedServicePluginLifecycleRuntime({
@@ -120,11 +120,14 @@ function fixture(
         ...(options.observeSources === false ? {} : {
           subscribeSources: (listener: () => void) => {
             if (options.throwOnObserve) throw new Error('observer unavailable')
-            listeners.set(generation, listener)
+            const group = listeners.get(generation) ?? new Set<() => void>()
+            group.add(listener)
+            listeners.set(generation, group)
             if (options.invalidStop) return undefined
             return () => {
               if (options.throwOnStop) throw new Error('observer cleanup unavailable')
-              listeners.delete(generation)
+              group.delete(listener)
+              if (group.size === 0) listeners.delete(generation)
             }
           },
         }),
@@ -155,6 +158,32 @@ function mutation(previous: ReturnType<typeof activation>, candidate: ReturnType
     targetId: 'fixture-provider',
     affectedPluginIds: ['fixture-provider'],
   }
+}
+
+function unrelatedMutation(previous: ReturnType<typeof activation>): PluginRuntimeMutation {
+  const candidate = {
+    ...previous,
+    recordKind: 'candidate' as const,
+    transactionId: 'unrelated',
+    revision: 2,
+    lastGoodRevision: 1,
+    plugins: [...previous.plugins, {
+      id: 'unrelated',
+      version: '1.0.0',
+      digest: 'sha256:' + 'a'.repeat(64),
+      moduleGeneration: 'unrelated-1',
+      enabled: false,
+      dependencies: [],
+    }],
+  }
+  return {
+    transactionId: 'unrelated',
+    operation: 'install',
+    previous,
+    candidate,
+    targetId: 'unrelated',
+    affectedPluginIds: ['unrelated'],
+  } as unknown as PluginRuntimeMutation
 }
 
 function recoveryPlan(first: ReturnType<typeof activation>, transactionId: string) {
@@ -222,6 +251,158 @@ describe('managed-service owner UI lifecycle fence', () => {
     expect(base.prepare).toHaveBeenCalledOnce()
     await runtime.dispose()
     expect(runtime.readManagedServiceUIFence()).toBeUndefined()
+  })
+
+  it('proves continuity across a settled transaction that retains the same managed fleet', async () => {
+    const { runtime, listeners } = fixture()
+    const first = await initialize(runtime)
+    const original = runtime.capabilities()
+    const reservation = runtime.reserveManagedServiceUIContinuity()
+    expect(listeners.get('old')?.size).toBe(2)
+    runtime.prepare('unrelated')
+    await runtime.stage(unrelatedMutation(first))
+    await runtime.publish('unrelated')
+    await runtime.complete('unrelated')
+    await runtime.finalize('unrelated')
+    const fence = runtime.readManagedServiceUIFence()
+    expect(runtime.capabilities()).toEqual(original)
+    expect(reservation.finish()).toBe(fence)
+    expect(listeners.get('old')?.size).toBe(1)
+    await runtime.dispose()
+  })
+
+  it('does not certify a managed route replacement followed by rollback to the same token', async () => {
+    const { runtime, listeners } = fixture()
+    const first = await initialize(runtime)
+    const original = runtime.capabilities()
+    const reservation = runtime.reserveManagedServiceUIContinuity()
+    const next = activation(2, 'next')
+    runtime.prepare(next.transactionId!)
+    await runtime.stage(mutation(first, next))
+    await runtime.publish(next.transactionId!)
+    await runtime.rollback(next.transactionId!)
+    expect(runtime.capabilities()).toEqual(original)
+    expect(runtime.readManagedServiceUIFence()).toEqual(expect.any(Number))
+    expect(reservation.finish()).toBeUndefined()
+    expect(listeners.get('old')?.size).toBe(1)
+    await runtime.dispose()
+  })
+
+  it('closes the owner UI fence if a temporary continuity observer cannot be removed', async () => {
+    const { runtime } = fixture({ throwOnStop: true })
+    await initialize(runtime)
+    const reservation = runtime.reserveManagedServiceUIContinuity()
+    expect(reservation.cancel()).toBe(false)
+    expect(runtime.readManagedServiceUIFence()).toBeUndefined()
+    await runtime.dispose()
+  })
+
+  it('drains existing Manager reads and resumes both pages after an unrelated transaction', async () => {
+    const { runtime, snapshots } = fixture()
+    const first = await initialize(runtime)
+    const bridge = createManagerManagedServiceUIBridge({
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      ownerGeneration: 'owner-1',
+      ownerCurrent: () => true,
+      readLifecycleFence: () => runtime.readManagedServiceUIFence(),
+      runtime,
+    })
+    const a = {
+      profileId: 'work',
+      rendererId: '1'.repeat(64),
+      ownerGeneration: 'owner-1',
+      signal: new AbortController().signal,
+    }
+    const b = { ...a, rendererId: '2'.repeat(64), signal: new AbortController().signal }
+    const third = { ...a, rendererId: '3'.repeat(64), signal: new AbortController().signal }
+    try {
+      const firstToken = bridge.projectInitial(a)[0]!.token
+      const secondToken = bridge.projectInitial(b)[0]!.token
+      const request = (token: string, operation: string, extra: Record<string, unknown> = {}) =>
+        JSON.stringify({
+          version: 1,
+          token,
+          requestId: 'request-1',
+          operation,
+          scope: { profileId: 'work', runtimeGeneration: 'runtime-1', pluginGeneration: 'old' },
+          serviceId: 'gateway',
+          ...extra,
+        })
+      const service = await bridge.channel.prepare(request(firstToken, 'get'), a).dispatch() as {
+        value: { service: { binding: unknown } }
+      }
+      let finish!: (value: unknown) => void
+      const snapshot = snapshots.get('old')!
+      snapshot.mockImplementationOnce(async () => await new Promise(done => finish = done))
+      const pending = bridge.channel.prepare(
+        request(firstToken, 'snapshot', { binding: service.value.service.binding }),
+        a,
+      )
+        .dispatch()
+      await vi.waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
+      const reserving = bridge.reserveTransition(2_000)
+      expect(() => bridge.channel.prepare(request(secondToken, 'get'), b)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(() => bridge.projectInitial(third)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      finish({ status: 'available', projection: { binding: service.value.service.binding } })
+      await expect(pending).resolves.toMatchObject({ ok: true })
+      const held = await reserving
+      runtime.prepare('unrelated')
+      await runtime.stage(unrelatedMutation(first))
+      await runtime.publish('unrelated')
+      await runtime.complete('unrelated')
+      await runtime.finalize('unrelated')
+      expect(held.resume()).toBe(true)
+      expect(bridge.projectInitial(a)[0]!.token).toBe(firstToken)
+      expect(bridge.projectInitial(b)[0]!.token).toBe(secondToken)
+      await expect(bridge.channel.prepare(request(firstToken, 'get'), a).dispatch()).resolves.toMatchObject({
+        ok: true,
+      })
+      await expect(bridge.channel.prepare(request(secondToken, 'get'), b).dispatch()).resolves.toMatchObject({
+        ok: true,
+      })
+    } finally {
+      bridge.dispose()
+      await runtime.dispose()
+    }
+  })
+
+  it('retires both Manager projections if the managed route changed and then rolled back', async () => {
+    const { runtime } = fixture()
+    const first = await initialize(runtime)
+    const bridge = createManagerManagedServiceUIBridge({
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      ownerGeneration: 'owner-1',
+      ownerCurrent: () => true,
+      readLifecycleFence: () => runtime.readManagedServiceUIFence(),
+      runtime,
+    })
+    const a = {
+      profileId: 'work',
+      rendererId: '1'.repeat(64),
+      ownerGeneration: 'owner-1',
+      signal: new AbortController().signal,
+    }
+    const b = { ...a, rendererId: '2'.repeat(64), signal: new AbortController().signal }
+    try {
+      bridge.projectInitial(a)
+      bridge.projectInitial(b)
+      const held = await bridge.reserveTransition()
+      const next = activation(2, 'next')
+      runtime.prepare(next.transactionId!)
+      await runtime.stage(mutation(first, next))
+      await runtime.publish(next.transactionId!)
+      await runtime.rollback(next.transactionId!)
+      expect(held.resume()).toBe(false)
+      expect(() => bridge.projectInitial(a)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(() => bridge.projectInitial(b)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      await expect(bridge.waitForRetirement(a.rendererId)).resolves.toBe(true)
+      await expect(bridge.waitForRetirement(b.rendererId)).resolves.toBe(true)
+    } finally {
+      bridge.dispose()
+      await runtime.dispose()
+    }
   })
 
   it('drops a real managed runtime read that spans publish and rollback to the same owner token', async () => {
@@ -347,7 +528,7 @@ describe('managed-service owner UI lifecycle fence', () => {
     await abort
     const afterAbort = runtime.readManagedServiceUIFence()!
     expect(afterAbort).toBeGreaterThan(initial)
-    listeners.get('old')!()
+    for (const listener of listeners.get('old') ?? []) listener()
     expect(runtime.readManagedServiceUIFence()).toBeGreaterThan(afterAbort)
     runtime.terminal(new Error('renderer lost'))
     expect(runtime.readManagedServiceUIFence()).toBeUndefined()
