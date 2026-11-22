@@ -38,6 +38,33 @@ describe('headless Codex backend', () => {
       await backend.close()
     }
   })
+  it('uses the native default rather than the first external provider for ordinary new threads', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'native', model: 'native', hidden: false, isDefault: true }] }
+      if (method === 'config/read') return { config: { model_provider: 'openai' } }
+      return { thread: { id: 'created' } }
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      environment: { CORDISX_HEADLESS_PROVIDER_ID: 'external', CORDISX_HEADLESS_MODEL_ID: 'external-model' },
+      declaredProviders: [{
+        providerId: 'openai',
+        pluginId: 'codex',
+        models: [{ id: 'native', label: 'Native', aliases: [] }],
+        defaultModelId: 'native',
+      }],
+      startServer: async () => ({ request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      await backend.nativeRequest('thread/start', {})
+      expect(request).toHaveBeenLastCalledWith('thread/start', { model: 'native' })
+    } finally {
+      await backend.close()
+    }
+  })
   it('distinguishes an explicit cold provider refusal from an uncertain resume', async () => {
     let failure: Error = new JsonLineRpcError(
       "thread/resume failed: cannot change this thread's model provider from openrouter to openai on resume",

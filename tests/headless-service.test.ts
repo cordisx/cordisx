@@ -2,6 +2,8 @@ vi.mock(
   '../packages/cli/src/config/home-config.js',
   () => ({
     loadHomeConfig: async () => ({
+      providers: f.providers,
+      environmentVariables: f.savedEnvironment,
       apps: {
         codex: {
           profiles: { test: { approvalReview: f.reviewSettings ? { settings: f.reviewSettings } : undefined } },
@@ -46,6 +48,19 @@ const f = vi.hoisted(() => ({
   },
   reviewSettings: undefined as undefined | { providerId: string },
   backendReview: undefined as undefined | { modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
+  providers: [] as import('../packages/cli/src/config/home-config.js').HomeConfigProvider[],
+  savedEnvironment:
+    [] as import('../packages/cli/src/config/home-config-environment.js').HomeConfigEnvironmentVariable[],
+  declaredProviders: [] as readonly { providerId: string }[],
+  projectedProviders: [] as readonly { id: string }[],
+  reports: [] as string[],
+}))
+vi.mock('../packages/cli/src/launcher/model-service-projection.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../packages/cli/src/launcher/model-service-projection.js')>(),
+  projectModelServicesToCodex: async (services: readonly { id: string }[]) => {
+    f.projectedProviders = services
+    return { providerIds: services.map(service => service.id) }
+  },
 }))
 vi.mock(
   '../packages/cli/src/launcher/approval-review-catalog.js',
@@ -136,8 +151,14 @@ vi.mock('../packages/cli/src/launcher/channel-service.js', () => ({
 }))
 vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
   startHeadlessCodexBackend: async (
-    input: { environment: NodeJS.ProcessEnv; modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
+    input: {
+      environment: NodeJS.ProcessEnv
+      modelCatalogPath?: string
+      modelCatalogPreserveProvider?: boolean
+      declaredProviders: readonly { providerId: string }[]
+    },
   ) => {
+    f.declaredProviders = input.declaredProviders
     f.backendEnvironment = input.environment
     f.backendOptions = input as unknown as NonNullable<typeof f.backendOptions>
     f.backendReview = input
@@ -235,6 +256,11 @@ describe('headless service lifecycle', () => {
     f.rejectHandoff = false
     f.reviewSettings = undefined
     f.backendReview = undefined
+    f.providers = []
+    f.savedEnvironment = []
+    f.projectedProviders = []
+    f.declaredProviders = []
+    f.reports = []
   })
   it('passes profile review routing to the native backend before ingress and closes its snapshot', async () => {
     f.reviewSettings = { providerId: 'gateway' }
@@ -326,5 +352,39 @@ describe('headless service lifecycle', () => {
     expect(f.events).toEqual([])
     await service.close()
     expect(await service.codex('capabilities', {})).toMatchObject({ code: 'CODEX_RUNTIME_UNAVAILABLE' })
+  })
+  it('wires all saved shared services into the backend while keeping unrelated and Channel secrets out', async () => {
+    f.providers = ['one', 'two', 'three'].map(id => ({
+      id,
+      kind: 'model-service',
+      displayName: id,
+      baseUrl: 'https://example.com/v1',
+      apiKeyEnv: id.toUpperCase() + '_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['work'] },
+    }))
+    f.savedEnvironment = ['ONE_KEY', 'TWO_KEY', 'THREE_KEY', 'UNRELATED_KEY'].map(name => ({
+      name,
+      value: 'synthetic-' + name,
+      enabled: true,
+    }))
+    const service = await startHeadlessService({
+      ...input,
+      environment: { CHANNEL_KEY: 'channel-only', PATH: '/bin' },
+      report: code => f.reports.push(code),
+    })
+    try {
+      expect(f.declaredProviders.map(service => service.providerId)).toEqual(['one', 'two', 'three'])
+      expect(f.projectedProviders.map(service => service.id)).toEqual(['one', 'two', 'three'])
+      expect(f.backendEnvironment).toEqual({
+        PATH: '/bin',
+        ONE_KEY: 'synthetic-ONE_KEY',
+        TWO_KEY: 'synthetic-TWO_KEY',
+        THREE_KEY: 'synthetic-THREE_KEY',
+      })
+      expect(f.reports).toEqual([])
+    } finally {
+      await service.close()
+    }
   })
 })

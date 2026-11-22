@@ -9,6 +9,7 @@ import { bindHeadlessCatalog } from './headless-catalog-binding.js'
 import { HeadlessContextCapture } from './headless-context-capture.js'
 import { HeadlessSettingsObserver } from './headless-settings-observer.js'
 import { nativeOwnerIdentity } from '../../assets/launcher/native-owner-account.mjs'
+import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 
 /** A native preflight refusal is safe to report; transport failures remain uncertain. */
 function providerSwitchRefused(error: unknown, current: unknown, requested: string): boolean {
@@ -37,6 +38,7 @@ export async function startHeadlessCodexBackend(input: {
   readonly home: string
   readonly timeoutMs?: number
   readonly environment?: NodeJS.ProcessEnv
+  readonly declaredProviders?: readonly NativeModelProviderCatalogEntry[]
   readonly modelCatalogPath?: string
   readonly modelCatalogPreserveProvider?: boolean
   readonly staticCatalog?: {
@@ -104,7 +106,7 @@ export async function startHeadlessCodexBackend(input: {
             })
             const native = config.config ?? {}
             if (native.model_provider == null || native.model_provider === 'openai') {
-              const provider = (await models('list', {})).providers?.[0]
+              const provider = (await models('list', {})).providers?.find(item => item.providerId === 'openai')
               if (typeof native.model === 'string' && !provider?.models.some(row => row.id === native.model)) {
                 throw new Error('MODEL_NOT_IN_NATIVE_CATALOG')
               }
@@ -171,10 +173,15 @@ export async function startHeadlessCodexBackend(input: {
           ...(reasoningCapabilities ? { reasoningCapabilities } : {}),
         }
       })
-      const configuredProviders = headlessConfiguredProviders(input.environment ?? process.env, catalog)
+      const defaults = visible.filter(row => row.isDefault === true)
+      const configuredProviders = headlessConfiguredProviders(
+        input.environment ?? process.env,
+        catalog,
+        input.declaredProviders,
+        defaults.length === 1 ? defaults[0]!.model as string : undefined,
+      )
       if (operation === 'list' && configuredProviders) return { providers: configuredProviders }
       if (operation === 'list') {
-        const defaults = visible.filter(row => row.isDefault === true)
         return {
           providers: [{
             providerId: 'openai',
