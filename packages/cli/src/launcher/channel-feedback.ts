@@ -138,6 +138,15 @@ export class ChannelFeedback {
   jobUpdated(_recordId: string) {
     this.sync()
   }
+  async catchup() {
+    for (
+      const record of Object.values(this.options.store.snapshot().inputs).filter(record =>
+        record.feedback?.reaction && !record.feedback.completionAttempted
+      ).slice(0, 100)
+    ) {
+      await this.completed(record.recordId).catch(() => this.diagnostic('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN'))
+    }
+  }
   async completed(recordId: string) {
     const state = this.options.store.snapshot(), record = state.inputs[recordId]
     const jobs = Object.values(state.jobs).filter(job => job.recordId === recordId)

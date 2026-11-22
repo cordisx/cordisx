@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { validateOutboundMedia } from './outbound-media.js'
+import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
 import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
@@ -17,13 +17,8 @@ import {
   sanitizedThread,
   validateInput,
 } from './runtime-validation.js'
-import {
-  type ChannelStoreState,
-  JsonChannelStore,
-  type StoredAuditRecord,
-  type StoredInboxRecord,
-  type StoredOutboxRecord,
-} from './store.js'
+import type { ChannelStoreState, StoredAuditRecord, StoredInboxRecord, StoredOutboxRecord } from './store.js'
+import { JsonChannelStore } from './store.js'
 import type {
   ChannelAdapterDefinition,
   ChannelAdapterDescriptor,
@@ -383,13 +378,7 @@ export class ChannelRuntime {
     if (!['completion', 'approval', 'failure', 'reply'].includes(notification.kind)) {
       throw new ChannelIntegrityError('Channel notification kind is invalid')
     }
-    const media = notification.media === undefined ? undefined : validateOutboundMedia(notification.media)
-    if (media && (notification.text !== '' || questionCard !== undefined)) {
-      throw new ChannelIntegrityError('Media cannot be combined with text or a question card')
-    }
-    if (!media && !nonEmptyText(notification.text, 100_000)) {
-      throw new ChannelIntegrityError('Channel notification text is invalid')
-    }
+    const media = validateNotificationMedia(notification, questionCard !== undefined)
     const key = accountKey(target)
     const adapter = this.#store.snapshot().adapters[key]
     if (adapter === undefined) throw new ChannelGenerationFencedError()

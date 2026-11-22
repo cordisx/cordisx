@@ -46,7 +46,6 @@ import {
   ChannelConversationStore,
 } from './channel-conversation-store.js'
 
-/** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {
   private readonly lifetime = new AbortController()
   private readonly timer: ReturnType<typeof setInterval>
@@ -459,15 +458,7 @@ export class ChannelConversationConsumer {
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
-      for (
-        const record of Object.values(this.store.snapshot().inputs).filter(record =>
-          record.feedback?.reaction && !record.feedback.completionAttempted
-        ).slice(0, 100)
-      ) {
-        await this.feedback.completed(record.recordId).catch(() =>
-          this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
-        )
-      }
+      await this.feedback.catchup()
       await this.continuation.pumpLive()
     })().catch(error =>
       this.input.report?.(

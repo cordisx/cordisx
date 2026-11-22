@@ -1,4 +1,16 @@
-import { ChannelIntegrityError } from './runtime-validation.js'
+import { ChannelIntegrityError, nonEmptyText } from './runtime-validation.js'
+import type { ChannelNotification } from './types.js'
+
+export function validateNotificationMedia(notification: ChannelNotification, hasQuestionCard: boolean) {
+  const media = notification.media === undefined ? undefined : validateOutboundMedia(notification.media)
+  if (media && (notification.text !== '' || hasQuestionCard)) {
+    throw new ChannelIntegrityError('Media cannot be combined with text or a question card')
+  }
+  if (!media && !nonEmptyText(notification.text, 100_000)) {
+    throw new ChannelIntegrityError('Channel notification text is invalid')
+  }
+  return media
+}
 
 export interface ChannelOutboundMedia {
   readonly type: 'image' | 'audio'

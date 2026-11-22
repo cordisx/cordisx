@@ -15,7 +15,7 @@ import {
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import type { Socket } from 'node:net'
 import path from 'node:path'
-import { validateOutboundMedia } from '../../../channel-runtime/src/outbound-media.js'
+import { validateOutboundMedia } from '@cordisx/channel-runtime'
 import { createFeishuAdapterDefinition } from '../launcher/feishu-adapter.js'
 import { type ChannelCliScope, matchesChannelCliScope, requireCliValue } from './channel-cli-scope.js'
 import { type ChannelCliRequest, type ChannelCliTransport, openChannelCliTransport } from './channel-cli-transport.js'
