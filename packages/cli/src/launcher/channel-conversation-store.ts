@@ -80,6 +80,7 @@ export interface ChannelConversationInput {
   readonly addressing?: ChannelCommandAddressing
   accepted: boolean
   routed: boolean
+  feedback?: { since: number; reactionAttempted: boolean; waitAttempted: boolean; replyObserved: boolean }
 }
 export interface ChannelConversationJob {
   readonly id: string

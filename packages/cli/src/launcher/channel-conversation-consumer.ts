@@ -1,4 +1,6 @@
+import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
+import { createChannelFeedback } from './channel-feedback-composition.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
@@ -59,11 +61,13 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
+  private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
-    private readonly input: ChannelConversationConsumerInput,
+    private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
+    this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
@@ -169,18 +173,7 @@ export class ChannelConversationConsumer {
     return binding.sessionId
   }
   async bindingLabels(ids?: readonly string[]) {
-    const native = this.extraNative?.()
-    return Promise.all(
-      this.bindings().filter(binding => ids === undefined || ids.includes(binding.id)).map(async binding => {
-        const event: ChannelEventRef = { ...binding.channel, eventId: 'display' }
-        const conversationName = await this.input.access()?.name?.(event).catch(() => undefined)
-        return {
-          bindingId: binding.id,
-          sessionName: await native?.label(binding.sessionId).catch(() => undefined) ?? 'Codex 对话',
-          conversationName: conversationName ?? (binding.channel.kind === 'direct' ? '私聊' : '群聊'),
-        }
-      }),
-    )
+    return channelBindingLabels(this.bindings(), this.input.access(), this.extraNative?.(), ids)
   }
   policy() {
     const state = this.store.snapshot()
@@ -432,6 +425,7 @@ export class ChannelConversationConsumer {
     if (this.lifetime.signal.aborted || this.pumping) return this.pumping
     this.pumping = (async () => {
       this.approvals.attach(this.extraNative?.())
+      this.feedback.sync()
       await this.approvals.expire()
       void this.taskSettings.pump().catch(() => this.input.report?.('CHANNEL_TASK_SETTINGS_UNAVAILABLE'))
       await this.catchup()
@@ -545,6 +539,7 @@ export class ChannelConversationConsumer {
         return false
       })
       if (waiting) return
+      void this.feedback.routed(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
     }
     await this.store.mutate(state => {
       state.inputs[record.recordId]!.routed = true
@@ -985,6 +980,7 @@ export class ChannelConversationConsumer {
   }
   async dispose(): Promise<void> {
     this.lifetime.abort()
+    this.feedback.dispose()
     clearInterval(this.timer)
     await this.pumping
     this.commandUsers.dispose()
