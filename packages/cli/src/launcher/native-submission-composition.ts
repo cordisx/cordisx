@@ -1,3 +1,4 @@
+import { approvalReviewCatalogEnvironment } from './approval-review-catalog.js'
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
 import { createDesktopLogicalServices } from './desktop-logical-composition.js'
 import {
@@ -206,6 +207,7 @@ export async function prepareNativeSubmissionBootstrap(
     remoteTerminalProvider?: ExistingTerminalProviderSource
     staticCatalog?: DesktopStaticCatalogLease
     requireLogicalFences?: boolean
+    reviewCatalog?: Awaited<ReturnType<typeof import('./approval-review-catalog.js').prepareApprovalReviewCatalog>>
   }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   options.signal?.throwIfAborted()
@@ -313,7 +315,9 @@ export async function prepareNativeSubmissionBootstrap(
             try {
               await control.close()
             } finally {
-              await nativeEntry.close().finally(() => options.staticCatalog?.close())
+              await nativeEntry.close().finally(() => options.staticCatalog?.close()).finally(() =>
+                options.reviewCatalog?.close()
+              )
             }
           }
         }
@@ -330,6 +334,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_NODE_PATH: node,
     CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
     ...desktopContext.desktopStaticCatalogEnvironment(options.staticCatalog),
+    ...approvalReviewCatalogEnvironment(options.reviewCatalog),
   }
   return {
     environment,

@@ -1,3 +1,15 @@
+vi.mock(
+  '../packages/cli/src/config/home-config.js',
+  () => ({
+    loadHomeConfig: async () => ({
+      apps: {
+        codex: {
+          profiles: { test: { approvalReview: f.reviewSettings ? { settings: f.reviewSettings } : undefined } },
+        },
+      },
+    }),
+  }),
+)
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
   ChatExecutionPreferences: class {
@@ -32,7 +44,25 @@ const f = vi.hoisted(() => ({
       next: (value: Record<string, unknown>) => Promise<unknown>,
     ) => Promise<unknown>
   },
+  reviewSettings: undefined as undefined | { providerId: string },
+  backendReview: undefined as undefined | { modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
 }))
+vi.mock(
+  '../packages/cli/src/launcher/approval-review-catalog.js',
+  () => ({
+    prepareApprovalReviewCatalog: async (input: { settings?: unknown }) =>
+      input.settings
+        ? {
+          path: '/review/catalog.json',
+          providerId: 'gateway',
+          modelIds: ['work'],
+          close: async () => {
+            f.events.push('review-close')
+          },
+        }
+        : undefined,
+  }),
+)
 vi.mock(
   '../packages/cli/src/launcher/config.js',
   () => ({
@@ -105,9 +135,12 @@ vi.mock('../packages/cli/src/launcher/channel-service.js', () => ({
   },
 }))
 vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
-  startHeadlessCodexBackend: async (input: { environment: NodeJS.ProcessEnv }) => {
+  startHeadlessCodexBackend: async (
+    input: { environment: NodeJS.ProcessEnv; modelCatalogPath?: string; modelCatalogPreserveProvider?: boolean },
+  ) => {
     f.backendEnvironment = input.environment
     f.backendOptions = input as unknown as NonNullable<typeof f.backendOptions>
+    f.backendReview = input
     f.events.push('backend-start')
     return {
       call: async () => ({}),
@@ -160,7 +193,14 @@ vi.mock(
 )
 vi.mock('../packages/cli/src/launcher/headless-native-authority.js', () => ({
   createHeadlessNativeAuthority: async () => ({
-    authority: { request: () => ({}) },
+    authority: {
+      request: () => ({}),
+      execution: {
+        bindReviewProvider: (provider: string) => {
+          f.events.push(`review-bound:${provider}`)
+        },
+      },
+    },
     setReader: () => {},
     close: async () => {
       f.events.push('authority-close')
@@ -193,6 +233,19 @@ describe('headless service lifecycle', () => {
     f.backendOptions = undefined
     f.sourceGuard = undefined
     f.rejectHandoff = false
+    f.reviewSettings = undefined
+    f.backendReview = undefined
+  })
+  it('passes profile review routing to the native backend before ingress and closes its snapshot', async () => {
+    f.reviewSettings = { providerId: 'gateway' }
+    const service = await startHeadlessService(input)
+    expect(f.backendReview).toMatchObject({
+      modelCatalogPath: '/review/catalog.json',
+      modelCatalogPreserveProvider: true,
+    })
+    expect(f.events.slice(0, 2)).toEqual(['review-bound:gateway', 'backend-start'])
+    await service.close()
+    expect(f.events).toContain('review-close')
   })
   it('attaches the consumer before ingress and disposes in reverse order once', async () => {
     const service = await startHeadlessService(input)

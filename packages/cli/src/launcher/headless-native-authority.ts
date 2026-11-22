@@ -141,7 +141,7 @@ export async function createHeadlessNativeAuthority(input: {
         ? workMode.begin(threadId)
         : undefined
       try {
-        if (!['thread/start', 'thread/resume', 'turn/start'].includes(method)) {
+        if (!['thread/start', 'thread/resume', 'turn/start', 'thread/settings/update'].includes(method)) {
           const result = await next(params)
           if (modeChange) {
             const mode = params.collaborationMode
@@ -150,7 +150,10 @@ export async function createHeadlessNativeAuthority(input: {
           return result
         }
         let prepared = await execution.prepare(method, params)
-        if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string') {
+        if (
+          prepared.contextRequired && ['thread/resume', 'turn/start', 'thread/settings/update'].includes(method)
+          && typeof params.threadId === 'string'
+        ) {
           if (!read) throw new Error('HEADLESS_BACKEND_UNAVAILABLE')
           const thread = record(
             record(await read('thread/read', { threadId: params.threadId, includeTurns: false })).thread,

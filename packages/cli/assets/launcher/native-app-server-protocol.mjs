@@ -30,10 +30,11 @@ import {
   NativeLogicalWriteFence,
 } from './native-logical-write-fence.mjs'
 
-const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
-  process.env,
-  process.argv.slice(2),
-)
+const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs, reviewRouting } =
+  nativeLaunchConfiguration(
+    process.env,
+    process.argv.slice(2),
+  )
 const marker = 'cordisx.operation_token'
 const maxControlLineBytes = 8 * 1024 * 1024
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
@@ -43,6 +44,7 @@ const nativeTransport = createNativeProviderTransport(child, {
   executable,
   args: nativeArgs,
   env: process.env,
+  reviewRouting,
   diagnostic: details => nativeLifecycle(details.phase, details),
   uncertain: id => logicalWriteFence.uncertain(id),
 })

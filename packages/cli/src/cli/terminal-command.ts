@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { prepareApprovalReviewCatalog } from '../launcher/approval-review-catalog.js'
 import os from 'node:os'
 import { installConfiguredSkills } from '../launcher/configured-skills.js'
 import { randomUUID } from 'node:crypto'
@@ -208,6 +211,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   }
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
   let child: ChildProcess | undefined
+  let reviewCatalog: Awaited<ReturnType<typeof prepareApprovalReviewCatalog>>
   let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
   let claudeMcp: Awaited<ReturnType<typeof prepareClaudeMcp>> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
@@ -307,6 +311,27 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       if (client === 'codex') await projectMcpToCodex(homeConfig?.mcp, codexHome(environment), environment)
       else claudeMcp = await prepareClaudeMcp(homeConfig?.mcp, environment, cwd)
     }
+    if (client === 'codex' && !nativeInspection && homeConfig) {
+      const app = homeConfig.apps.codex
+      const profile = app?.profiles[invocation.profile ?? app.defaultProfile]
+      const settings = profile?.approvalReview?.settings
+      if (settings) {
+        if (invocation.service !== settings.providerId) throw new Error('REVIEW_PROVIDER_SCOPE_MISMATCH')
+        if (!invocation.model) throw new Error('REVIEW_PARENT_MODEL_REQUIRED')
+        if (invocation.codexArgs.some(arg => arg === '--profile' || arg.startsWith('--profile=') || /^-p/u.test(arg))) {
+          throw new Error('REVIEW_NATIVE_PROFILE_UNSUPPORTED')
+        }
+        const version = await promisify(execFile)(executable!, ['--version'], { env: environment, timeout: 5000 })
+        reviewCatalog = await prepareApprovalReviewCatalog({
+          settings,
+          configPath,
+          nativeVersion: version.stdout.trim().replace(/^codex-cli\s+/u, ''),
+        })
+        if (invocation.model && !reviewCatalog?.modelIds.includes(invocation.model)) {
+          throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
+        }
+      }
+    }
     const args = client === 'codex'
       ? terminalCodexArguments(invocation, prepared ?? effectiveShared, instructionsFile, nativeLayer?.name)
       : [
@@ -317,7 +342,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     try {
       child = (runtime.internalSpawnTerminal ?? spawn)(
         executable!,
-        [...args],
+        [...(reviewCatalog ? ['-c', `model_catalog_json=${toml(reviewCatalog.path)}`] : []), ...args],
         {
           cwd,
           env: environment,
@@ -377,6 +402,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   } finally {
     clearInterval(timer)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
+    await reviewCatalog?.close()
     await nativeLayer?.close()
     await claudeMcp?.close()
   }

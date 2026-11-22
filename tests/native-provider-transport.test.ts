@@ -20,6 +20,57 @@ import { DesktopLogicalTurnAuthority } from '../packages/cli/src/launcher/deskto
 import { createDesktopLogicalComposition } from '../packages/cli/src/launcher/desktop-logical-composition.js'
 import { abandonDesktopLogicalContinuation } from '../packages/cli/src/launcher/desktop-logical-abandon.js'
 import { LogicalContinuationControl } from '../packages/cli/src/launcher/logical-continuation-control.js'
+import { PassThrough } from 'node:stream'
+
+it('checks the final native review provider/model after Host routing and before writing any request', async () => {
+  const primary = { stdin: new PassThrough(), stdout: new PassThrough(), on() {}, once() {}, kill() {} }
+  const transport = createNativeProviderTransport(primary, {
+    reviewRouting: { providerId: 'openai', models: ['work'] },
+  })
+  const sent: string[] = []
+  primary.stdin.on('data', value => sent.push(value.toString()))
+  const lines = createInterface({ input: transport.stdout }), errors: any[] = []
+  lines.on('line', value => errors.push(JSON.parse(value)))
+  const send = (message: unknown) =>
+    new Promise<void>((resolve, reject) =>
+      transport.stdin.write(JSON.stringify(message) + '\n', error => error ? reject(error) : resolve())
+    )
+  try {
+    await send({
+      id: 'good',
+      method: 'thread/start',
+      params: {
+        modelProvider: 'openai',
+        model: 'work',
+        config: { 'model_providers.openai': { private: 'preserved' } },
+      },
+    })
+    expect(sent).toHaveLength(1)
+    primary.stdout.write(
+      JSON.stringify({ id: 'good', result: { thread: { id: 'chat' }, modelProvider: 'openai', model: 'work' } }) + '\n',
+    )
+    await send({ id: 'turn', method: 'turn/start', params: { threadId: 'chat' } })
+    expect(sent).toHaveLength(2)
+    for (
+      const params of [
+        { modelProvider: 'other', model: 'work' },
+        { modelProvider: 'openai', model: 'missing' },
+        { modelProvider: 'openai', model: 'work', config: { model_catalog_json: '/other' } },
+        { modelProvider: 'openai', model: 'work', config: { model_provider: 'other' } },
+      ]
+    ) await send({ id: 'bad', method: 'thread/start', params })
+    expect(sent).toHaveLength(2)
+    expect(errors.filter(value => value.error).map(value => value.error.message)).toEqual([
+      'REVIEW_PROVIDER_SCOPE_MISMATCH',
+      'REVIEW_PARENT_MODEL_NOT_IN_CATALOG',
+      'REVIEW_NATIVE_CONFIG_CONFLICT',
+      'REVIEW_PROVIDER_SCOPE_MISMATCH',
+    ])
+  } finally {
+    lines.close()
+    transport.close()
+  }
+})
 
 it('keeps native provider identity per connection, preserves history ids and namespaces approval replies', async () => {
   const args = [path.resolve('tests/fixtures/native-provider-process.mjs'), 'app-server']
