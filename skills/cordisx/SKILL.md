@@ -33,6 +33,10 @@ The bundled revision and owning source for this entry are recorded in
 - For the independent management page or a standalone background service, read
   [the management guide](references/management.md). Check the installed CLI's
   help and reuse the selected profile's existing owner before opening a page.
+- For reproducible Channel memory/persona model validation, read
+  [the Host-owned methodology](https://github.com/cordisx/cordisx/blob/main/.agents/docs/channel-memory-model-validation.md#durable-methodology-and-scenario-matrix).
+  Separate persona core, style delivery and project CI/Protocol release evidence;
+  use synthetic fixtures and existing authorized model configuration only.
 - For supplemental chat settings, explicit creation defaults or shared model-service
   commands, read [the Codex CLI guide](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/codex-cli.md).
   Prefer native tools for ordinary chat operations; an omitted session never means
