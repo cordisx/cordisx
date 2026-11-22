@@ -6,6 +6,11 @@ import { attachmentEqual, type RendererAttachmentIdentity } from '../launcher/re
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
+import type { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
+import type { ManagerOriginFence } from './manager-origin-fence.js'
+import type { DesktopManagerConfigProof } from '../launcher/renderer-config-management.js'
+import { reserveServiceRendererPackageConfig } from './service-renderer-package-config-handoff.js'
 import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
@@ -46,6 +51,13 @@ export class ServiceRendererLifecycleHandoff {
       readonly store: PluginActivationStore
       readonly entries: Map<string, ServiceRendererBootstrapEntry>
       readonly participants: ServiceRendererParticipants
+      readonly lifecycle: OwnerRendererLifecycle
+      readonly pluginFence?: SharedProfilePluginConfigFence
+      readonly rememberPluginConfig: (
+        snapshot: ServiceRendererSnapshot,
+        plugin: CordisXConfigPlugin,
+        proof: DesktopManagerConfigProof,
+      ) => boolean
       readonly readLifetimes: ManagerRendererReadLifetimes
       readonly configuredChannel: () => ServiceRendererConfiguredChannelInput | undefined
       readonly snapshot: () => ServiceRendererSnapshot
@@ -75,6 +87,25 @@ export class ServiceRendererLifecycleHandoff {
       this.input.profileInputs(snapshot),
     ])
     return { config, plugins, policies, inputs }
+  }
+
+  async reservePackageConfig(origin: ManagerOriginFence, pluginId: string) {
+    return await reserveServiceRendererPackageConfig(
+      {
+        homeDir: this.input.homeDir,
+        profileId: this.input.profileId,
+        entries: this.input.entries,
+        participants: this.input.participants,
+        lifecycle: this.input.lifecycle,
+        readLifetimes: this.input.readLifetimes,
+        ...(this.input.pluginFence === undefined ? {} : { pluginFence: this.input.pluginFence }),
+        rememberPluginConfig: this.input.rememberPluginConfig,
+        readInputs: async snapshot => await this.readInputs(snapshot),
+        current: this.input.current,
+      },
+      origin,
+      pluginId,
+    )
   }
 
   async reserve(input: {

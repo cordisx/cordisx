@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import type { HomeConfig, HomeConfigPlugin, JsonValue } from './home-config.js'
 import { SharedProfileFence } from './shared-profile-fence.js'
+import { createOwnedPackageWrite, type OwnedPackageWrite } from './owned-profile-package-write.js'
 import {
   isOwnedHomeServiceChange,
   isOwnedServiceChange,
@@ -14,6 +15,8 @@ import {
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 const ownedServiceWrites = new AsyncLocalStorage<OwnedServiceWrite>()
+const ownedPackageWrites = new AsyncLocalStorage<OwnedPackageWrite>()
+const currentOwnedPackageWrite = () => ownedPackageWrites.getStore()
 // The Home document is JSON; structuredClone does not retain null prototypes.
 const equalJson = (left: unknown, right: unknown) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(left)), JSON.parse(JSON.stringify(right)))
@@ -30,6 +33,7 @@ export function captureOwnedHomeServiceWriteCheck(
   configPath: string,
   previous: HomeConfig,
 ): (candidate: HomeConfig) => void {
+  if (currentOwnedPackageWrite()) throw new ProfilePluginConfigFenceBusyError()
   const owner = ownedServiceWrites.getStore()
   if (!owner) return () => {}
   const baseline = structuredClone(previous)
@@ -48,7 +52,9 @@ async function runOwnedServiceWrite<T>(input: {
   readonly serviceId: string
   readonly isCurrent: () => boolean
 }, action: () => Promise<T>): Promise<T> {
-  if (ownedServiceWrites.getStore() !== undefined) throw new Error('owned service write is unavailable')
+  if (ownedServiceWrites.getStore() !== undefined || currentOwnedPackageWrite()) {
+    throw new Error('owned service write is unavailable')
+  }
   let accepting = true
   let borrowed = 0
   const waiters = new Set<() => void>()
@@ -99,6 +105,30 @@ async function runOwnedServiceWrite<T>(input: {
   return value as T
 }
 
+/** Only the held profile fence can install this package-writing context. */
+async function runOwnedPackageWrite<T>(input: {
+  readonly homeDir: string
+  readonly profileId: string
+  readonly pluginId: string
+  readonly isCurrent: () => boolean
+}, action: () => Promise<T>): Promise<T> {
+  if (currentOwnedPackageWrite()) throw new Error('owned package write is unavailable')
+  const scope = createOwnedPackageWrite(input)
+  if (!scope.owner.current()) throw new Error('owned package write is unavailable')
+  let value: T | undefined
+  let failure: unknown
+  let failed = false
+  try {
+    value = await ownedPackageWrites.run(scope.owner, action)
+  } catch (error) {
+    failed = true
+    failure = error
+  }
+  await scope.finish()
+  if (failed) throw failure
+  return value as T
+}
+
 async function directory(configPath: string): Promise<string> {
   const result = path.join(path.dirname(path.resolve(configPath)), 'run', 'profile-plugin-config-fences')
   await mkdir(result, { recursive: true, mode: 0o700 })
@@ -130,10 +160,19 @@ async function admit(configPath: string, profileId: string): Promise<() => Promi
 export async function fencePackageProfileWrite(
   homeDir: string,
   profileId: string,
+  pluginId?: string,
 ): Promise<() => Promise<void>> {
   if (!PROFILE.test(profileId)) throw new Error('invalid plugin configuration profile id')
   // A configured Home service authority does not authorize installed-package state.
   if (ownedServiceWrites.getStore() !== undefined) throw new ProfilePluginConfigFenceBusyError()
+  const owner = currentOwnedPackageWrite()
+  if (owner) {
+    if (
+      !pluginId || pluginId !== owner.pluginId || profileId !== owner.profileId
+      || path.resolve(homeDir) !== owner.homeDir || !owner.current()
+    ) throw new ProfilePluginConfigFenceBusyError()
+    return owner.borrow()
+  }
   if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return async () => {}
   }
@@ -195,6 +234,7 @@ export async function fenceChangedConfiguredPlugins(
   previousStartup: readonly ProfileManagedStartupInput[] = [],
   candidateStartup: readonly ProfileManagedStartupInput[] = [],
 ): Promise<() => Promise<void>> {
+  if (currentOwnedPackageWrite()) throw new ProfilePluginConfigFenceBusyError()
   const owner = ownedServiceWrites.getStore()
   if (
     owner && (!isOwnedServiceChange(owner, configPath, previous, candidate)
@@ -265,6 +305,25 @@ export class SharedProfilePluginConfigFence extends SharedProfileFence {
         profileId: this.profileId,
         pluginId: input.pluginId,
         serviceId: input.serviceId,
+        isCurrent: () => held() && input.isCurrent(),
+      }, action)
+    )
+  }
+
+  /** Host-only: borrow the held profile lock for one installed plugin's configuration. */
+  async runPackageMutation<T>(input: {
+    readonly pluginId: string
+    readonly isCurrent: () => boolean
+  }, action: () => Promise<T>): Promise<T> {
+    if (
+      process.platform !== 'darwin' && process.platform !== 'linux' || !PROFILE.test(this.profileId)
+      || !LOCAL_ID.test(input.pluginId) || ownedServiceWrites.getStore() !== undefined
+    ) throw new Error('owned package write is unavailable')
+    return await this.runWhileHeld(async held =>
+      await runOwnedPackageWrite({
+        homeDir: path.dirname(path.resolve(this.configPath)),
+        profileId: this.profileId,
+        pluginId: input.pluginId,
         isCurrent: () => held() && input.isCurrent(),
       }, action)
     )

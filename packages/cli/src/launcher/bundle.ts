@@ -47,6 +47,8 @@ export interface BuildRendererBundleOptions {
   readonly iconThemePreference?: HomeConfigIconThemePreference
   readonly iconThemePreferenceBridgeToken?: string
   readonly configBridgeToken?: string
+  /** Desktop-owner configuration writes for individually proved standalone packages. */
+  readonly standaloneDesktopPackageConfig?: { readonly token: string; readonly plugins: readonly string[] }
   /** Host-private and emitted only by the explicit Playground launcher. */
   readonly playgroundAgentSessionStoreToken?: string
   /** Host-validated declarative scenarios emitted only by the explicit Playground launcher. */
@@ -105,6 +107,10 @@ async function assertStandaloneOwner(
   options: BuildRendererBundleOptions,
 ): Promise<boolean> {
   const owner = options.standaloneOwner
+  if (
+    options.standaloneDesktopPackageConfig !== undefined
+    && (options.managerPresentationMode !== 'standalone' || options.playground === true || owner === undefined)
+  ) throw new Error('Standalone package configuration requires an owner')
   if (options.managerPresentationMode !== 'standalone') {
     if (owner !== undefined) throw new Error('Standalone owner scope is only valid for the standalone Manager')
     return false
@@ -163,6 +169,15 @@ async function assertStandaloneOwner(
   ) {
     throw new Error('Standalone Manager activation projection is invalid')
   }
+  const desktopConfig = options.standaloneDesktopPackageConfig
+  if (
+    desktopConfig !== undefined && (
+      desktopConfig.token !== 'renderer-binding-placeholder' || !Array.isArray(desktopConfig.plugins)
+      || desktopConfig.plugins.length === 0 || desktopConfig.plugins.length > 256
+      || new Set(desktopConfig.plugins).size !== desktopConfig.plugins.length
+      || desktopConfig.plugins.some(id => !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id) || !byId.get(id)?.enabled)
+    )
+  ) throw new Error('Standalone package configuration projection is invalid')
   for (const item of activation.plugins) {
     const plugin = byId.get(item.id)
     if (
@@ -526,6 +541,10 @@ export async function buildRendererCompositionSource(
   }${
     options.configBridgeToken === undefined ? '' : `, configBridgeToken: ${JSON.stringify(options.configBridgeToken)}`
   }${
+    options.standaloneDesktopPackageConfig === undefined
+      ? ''
+      : `, standaloneDesktopPackageConfig: ${JSON.stringify(options.standaloneDesktopPackageConfig)}`
+  }${
     options.playgroundAgentSessionStoreToken === undefined
       ? ''
       : `, playgroundAgentSessionStoreToken: ${JSON.stringify(options.playgroundAgentSessionStoreToken)}`
@@ -603,7 +622,7 @@ export async function buildRendererCompositionSource(
   const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
   const standaloneSignal = attachedStandalone ? ', undefined, signal' : ''
   const bootMetadata = attachedStandalone
-    ? `{ ...${metadata}, standaloneReviewSession: verifySession }`
+    ? `{ ...${metadata}, standaloneReviewSession: verifySession, standaloneWriteUncertain: onResultUnknown }`
     : metadata
   const boot = runtimeGraphs.length === 0
     ? `installCordisX(${composition}, ${bootMetadata}${standaloneSignal})`
@@ -619,7 +638,7 @@ ${graphRetireSource}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
   const registryBootstrap = attachedStandalone ? resourceRegistryInstallSource() : ''
   const hostGraphLaunchSource =
-    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal, verifySession) {
+    `export async function bootCordisXComposition(installCordisX, installCordisXComposition, signal, verifySession, onResultUnknown) {
 ${registryBootstrap}
 return await ${boot}
 }
@@ -648,7 +667,7 @@ return await ${boot}
   const source = attachedStandalone
     ? `${imports.join('\n')}
 let __cordisxStandaloneStarted = false;
-export function startStandaloneManagerComposition(signal, verifySession) {
+export function startStandaloneManagerComposition(signal, verifySession, onResultUnknown) {
   if (__cordisxStandaloneStarted || !signal || signal.aborted || typeof signal.addEventListener !== 'function') {
     throw new Error('Standalone Manager session is unavailable');
   }

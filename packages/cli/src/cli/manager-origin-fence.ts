@@ -1,13 +1,26 @@
-import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
+import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
+import type { AttachedRendererPeer } from '../launcher/renderer-lifecycle-peer.js'
 import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 
 export interface ManagerOriginFence {
   readonly rendererId: string
+  readonly desktopConfiguration?: DesktopConfigurationReservation['desktopConfiguration']
   isCurrent(): boolean
   release(): boolean
   fence(): void
+}
+
+type ExternalReservation = {
+  isCurrent(): boolean
+  release(): boolean
+  fence(): void
+  readonly desktopConfiguration?: DesktopConfigurationReservation['desktopConfiguration']
+}
+type ExternalLifecycle = OwnerRendererLifecycle & {
+  reserveExternalMutation(peers: readonly AttachedRendererPeer[]): ExternalReservation | Promise<ExternalReservation>
+  terminal(error: unknown): void
 }
 
 const issued = new WeakMap<ManagerOriginFence, {
@@ -35,13 +48,13 @@ export function isCurrentManagerOriginFence(
 export async function fenceManagerOrigin(input: {
   readonly sessions: ManagerRendererSessions
   readonly participants: ServiceRendererParticipants
-  readonly lifecycle: ServiceRendererLifecycle
+  readonly lifecycle: ExternalLifecycle
   readonly allowAdditionalManagers?: boolean
   readonly timeoutMs?: number
 }): Promise<ManagerOriginFence> {
   if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-origin-fence-scope-invalid')
   const writes = await input.sessions.suspendMutationsForCurrentWrite(input.timeoutMs)
-  let lifecycle: ReturnType<ServiceRendererLifecycle['reserveExternalMutation']>
+  let lifecycle: ExternalReservation
   let peers: readonly NonNullable<ReturnType<ServiceRendererParticipants['peer']>>[]
   try {
     peers = input.participants.ownerPeers()
@@ -52,7 +65,7 @@ export async function fenceManagerOrigin(input: {
     ) {
       throw new Error('manager-origin-fence-unavailable')
     }
-    lifecycle = input.lifecycle.reserveExternalMutation(peers)
+    lifecycle = await input.lifecycle.reserveExternalMutation(peers)
   } catch {
     if (!writes.release()) writes.fence()
     throw new Error('manager-origin-fence-unavailable')
@@ -96,6 +109,24 @@ export async function fenceManagerOrigin(input: {
   const result: ManagerOriginFence = Object.freeze({
     rendererId: writes.rendererId,
     isCurrent: current,
+    ...(lifecycle.desktopConfiguration === undefined ? {} : {
+      desktopConfiguration: {
+        seat: lifecycle.desktopConfiguration.seat,
+        proof: async (pluginId: string) => {
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          const proof = await lifecycle.desktopConfiguration!.proof(pluginId)
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          return proof
+        },
+        update: async (operation: Parameters<DesktopConfigurationReservation['desktopConfiguration']['update']>[0]) => {
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          const value = await lifecycle.desktopConfiguration!.update(operation)
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          return value
+        },
+        confirm: () => current() && lifecycle.desktopConfiguration!.confirm(),
+      },
+    }),
     release() {
       if (ended) return false
       if (!current()) {
@@ -110,6 +141,11 @@ export async function fenceManagerOrigin(input: {
         if (lifecycleReleased && writes.release()) return true
       } catch {
         // A lifecycle exception must never leave the Manager gate open.
+      }
+      if (!lifecycleReleased) {
+        try {
+          lifecycle.fence()
+        } catch { /* Continue fencing the Manager write gate. */ }
       }
       writes.fence()
       if (lifecycleReleased) {

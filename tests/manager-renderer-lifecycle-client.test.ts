@@ -47,6 +47,44 @@ const rollback = {
   disposedAfter: candidate,
 }
 
+it('acknowledges only the scoped pending Desktop configuration adoption', async () => {
+  const { runtime } = fixture()
+  const adopt = vi.fn(() => true)
+  const client = createManagerRendererLifecycleClient({
+    runtime: runtime as never,
+    scope,
+    onDesktopPackageConfiguration: adopt,
+  })
+  const update = {
+    rendererId,
+    ownerGeneration: scope.generation,
+    requestId: 'request-1',
+    pluginId: 'demo',
+    expectedRevision: 2,
+    revision: 3,
+    value: { label: 'new' },
+  }
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(await client.handle(command(2, 'desktop-package-configuration', update))).toMatchObject({
+      ok: true,
+      value: { rendererId, requestId: 'request-1', pluginId: 'demo', revision: 3, adopted: true },
+    })
+    expect(adopt).toHaveBeenCalledExactlyOnceWith({
+      requestId: 'request-1',
+      pluginId: 'demo',
+      expectedRevision: 2,
+      revision: 3,
+      value: { label: 'new' },
+    })
+    expect(await client.handle(command(3, 'desktop-package-configuration', { ...update, revision: 4 })))
+      .toMatchObject({ ok: false })
+    expect(client.closed).toBe(true)
+  } finally {
+    await client.close()
+  }
+})
+
 it('acknowledges only the owner-scoped Channel view that the renderer adopted', async () => {
   const { runtime } = fixture()
   const adopt = vi.fn(async () => true)

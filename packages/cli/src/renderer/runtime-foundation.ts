@@ -675,6 +675,7 @@ export const createRuntimeCapabilityAvailability = (runtimeScope: RuntimeClosure
         rawBridgeExposed: false,
       },
       configurationWritable: runtimeScope.configBridge()! !== undefined,
+      configurationPartiallyWritable: runtimeScope.standaloneDesktopPackageConfigBridge() !== undefined,
       packageLifecycleAvailable: runtimeScope.lifecycleBridge()! !== undefined,
     }),
   ])
@@ -838,7 +839,11 @@ export const createRuntimeRegisterController = (
     applies: configApplies,
     raw: controller.item.config,
     revision: controller.item.revision,
-    writable: runtimeScope.configBridge()! !== undefined
+    writable: (runtimeScope.configBridge()! !== undefined
+      || runtimeScope.metadata()!.hostKind === 'standalone'
+        && runtimeScope.standaloneDesktopPackageConfigBridge() !== undefined
+        && runtimeScope.metadata()!.standaloneDesktopPackageConfig?.plugins.includes(controller.item.id) === true
+        && configApplies === 'live')
       && controller.item.enabled
       && controllerHasRuntimeModule(controller)
       && configApplies !== 'service-restart',

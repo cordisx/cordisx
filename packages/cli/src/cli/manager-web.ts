@@ -58,6 +58,7 @@ const rendererChannelAllowlist = new Set([
   'managed-service-ui',
   'channel-actions',
   'channel-credentials',
+  'desktop-package-config',
   'model-services',
   'service-config',
   'marketplace',
@@ -631,7 +632,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         const handle = await session.rendererOpen
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
-        let rendererWrite = input.channel === 'channel-credentials'
+        let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
         if (input.channel === 'service-config') {
           try {
             const envelope = object(JSON.parse(input.payload))

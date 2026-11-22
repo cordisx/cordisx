@@ -7,6 +7,10 @@ import type {
   RuntimeGenerationFence,
 } from './plugin-lifecycle-model.js'
 import { CdpPluginLifecycleRuntime, type CdpSharedAdmission } from './cdp-plugin-lifecycle-runtime.js'
+import {
+  createDesktopConfigurationReservation,
+  type DesktopConfigurationReservation,
+} from './desktop-configuration-reservation.js'
 import { sameUniquePluginIds } from './cdp-shared-admission.js'
 import { RendererLifecycleFederation } from './renderer-lifecycle-federation.js'
 import type { RendererConfigOperation, RendererConfigResult } from './renderer-config-management.js'
@@ -138,6 +142,7 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   private readonly federation: RendererLifecycleFederation
   private readonly desktopId = `cdp-group-${randomUUID()}`
   private reservation: Reservation | undefined
+  private externalConfig: { fence?: () => void } | undefined
   private rollbackInProgress = false
   private failed = false
   private closed = false
@@ -208,7 +213,7 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async attach(peer: AttachedRendererPeer): Promise<void> {
-    if (this.failed || this.reservation || peer.identity.rendererId === this.desktopId) {
+    if (this.failed || this.reservation || this.externalConfig || peer.identity.rendererId === this.desktopId) {
       peer.close()
       throw new Error('Desktop renderer attachment is unavailable')
     }
@@ -217,7 +222,7 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     const joining = this.joinTail.then(async () => {
       let admission: CdpSharedAdmission | undefined
       try {
-        if (this.failed || this.reservation || peer.closed) {
+        if (this.failed || this.reservation || this.externalConfig || peer.closed) {
           throw new Error('Desktop renderer attachment is unavailable')
         }
         admission = this.input.cdp.beginSharedAdmission(`join-${randomUUID()}`)
@@ -252,7 +257,10 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   }
 
   async preflight(input: PluginRuntimePreflight): Promise<void> {
-    if (this.failed || this.reservation || this.joiningManagers > 0 || this.federation.requiresReconciliation) {
+    if (
+      this.failed || this.reservation || this.externalConfig || this.joiningManagers > 0
+      || this.federation.requiresReconciliation
+    ) {
       throw new Error('Desktop shared preflight is unavailable')
     }
     const admission = this.input.cdp.beginSharedAdmission(input.transactionId)
@@ -452,6 +460,7 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
   }
   terminal(error: unknown): void {
     this.failed = true
+    this.externalConfig?.fence?.()
     this.federation.terminal()
     // No renderer may keep serving a session after the owner has fenced an
     // uncertain generation. Confirmed rollback uses a separate nonterminal path.
@@ -463,14 +472,14 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
     throw new Error('Desktop shared lifecycle requires the package authority')
   }
   async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
-    if (this.failed || this.reservation || this.managers.size > 0) {
+    if (this.failed || this.reservation || this.externalConfig || this.managers.size > 0) {
       throw new Error('Desktop shared reload is unavailable')
     }
     await this.input.cdp.reload(input)
   }
 
   async pluginConfiguration(operation: RendererConfigOperation): Promise<RendererConfigResult> {
-    if (this.failed || this.reservation || this.joiningManagers > 0 || this.managers.size > 0) {
+    if (this.failed || this.reservation || this.externalConfig || this.joiningManagers > 0 || this.managers.size > 0) {
       return { status: 'unavailable', reason: 'renderer-busy' }
     }
     return await this.input.cdp.pluginConfiguration(operation)
@@ -478,14 +487,59 @@ export class DesktopRendererLifecycle implements PluginLifecycleRuntime {
 
   /** A joining Manager cannot query a native seat once another Manager is admitted. */
   async managerConfigProof(pluginId: string) {
-    if (this.failed || this.reservation || this.joiningManagers > 0 || this.managers.size > 0) return undefined
+    if (this.failed || this.reservation || this.externalConfig || this.joiningManagers > 0 || this.managers.size > 0) {
+      return undefined
+    }
     return await this.input.cdp.managerConfigProof(pluginId)
+  }
+
+  /** Reserve one admitted Manager and one native seat for a coordinated config write. */
+  async reserveExternalMutation(peers: readonly AttachedRendererPeer[]): Promise<DesktopConfigurationReservation> {
+    if (
+      this.failed || this.closed || this.reservation || this.externalConfig || this.joiningManagers > 0
+      || this.federation.requiresReconciliation || peers.length !== 1 || this.managers.size !== 1
+      || !this.managers.has(peers[0]!) || peers[0]!.closed
+    ) throw new Error('Desktop configuration reservation is unavailable')
+    const admission = this.input.cdp.beginSharedAdmission(`config-${randomUUID()}`)
+    const marker: { fence?: () => void } = {}
+    this.externalConfig = marker
+    try {
+      if (admission.sessionCount !== 1) throw new Error('Desktop configuration reservation is unavailable')
+      const snapshot = this.federation.snapshot()
+      const revision = this.managerRevision
+      this.joinSnapshot = { admission, value: snapshot }
+      const observed = await admission.readSnapshot()
+      if (
+        this.failed || this.closed || this.externalConfig !== marker || admission.closed
+        || this.managerRevision !== revision || peers[0]!.closed || !attachmentEqual(observed, snapshot)
+      ) throw new Error('Desktop configuration reservation is unavailable')
+      const reservation = createDesktopConfigurationReservation({
+        admission,
+        ownerCurrent: () =>
+          !this.failed && !this.closed && this.externalConfig === marker && this.managerRevision === revision
+          && this.managers.size === 1 && this.managers.has(peers[0]!) && !peers[0]!.closed
+          && attachmentEqual(this.federation.snapshot(), snapshot),
+        onEnd: () => {
+          if (this.joinSnapshot?.admission === admission) this.joinSnapshot = undefined
+          if (this.externalConfig === marker) this.externalConfig = undefined
+        },
+        onUncertain: () => this.terminal(new Error('Desktop configuration result is uncertain')),
+      })
+      marker.fence = reservation.fence
+      return reservation
+    } catch (error) {
+      if (this.joinSnapshot?.admission === admission) this.joinSnapshot = undefined
+      if (this.externalConfig === marker) this.externalConfig = undefined
+      admission.release()
+      throw error
+    }
   }
 
   close(): void {
     if (this.closed) return
     this.closed = true
     this.failed = true
+    this.externalConfig?.fence?.()
     for (const peer of this.joiningPeers) peer.close()
     this.joiningPeers.clear()
     for (const peer of this.managers) peer.close()

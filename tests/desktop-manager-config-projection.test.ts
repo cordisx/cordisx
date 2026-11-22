@@ -126,3 +126,25 @@ it('discards a native readback if the seat changes while the read is pending', a
   finish(proof)
   await expect(pending).rejects.toThrow('desktop-manager-config-unavailable')
 })
+
+it('offers writes only for a live, non-secret proof and remembers confirmed readback for another page', async () => {
+  const clean = { ...plugin, config: { display: { label: 'visible' } } }
+  const native = structuredClone(proof)
+  native.plugin.configuration.writable = true
+  native.plugin.configuration.applies = 'live'
+  const read = vi.fn(async () => native)
+  let seat: symbol | undefined = Symbol('seat')
+  const projection = new DesktopManagerConfigProjection({ current: () => true, seat: () => seat, read })
+  expect(await projection.canWrite(snapshot, plugin)).toBe(false)
+  expect(await projection.canWrite(snapshot, clean)).toBe(true)
+  const next = { ...clean, revision: 5, config: { display: { label: 'updated' } } }
+  const updated = structuredClone(native)
+  updated.plugin.configuration.revision = 5
+  updated.plugin.configuration.lastGoodRevision = 5
+  updated.plugin.configuration.value.display.label = 'updated'
+  expect(projection.remember(snapshot, next, updated)).toBe(true)
+  expect(await projection.project(snapshot, next)).toEqual({ display: { label: 'updated' } })
+  expect(read).toHaveBeenCalledTimes(2)
+  seat = undefined
+  expect(projection.remember(snapshot, next, updated)).toBe(false)
+})

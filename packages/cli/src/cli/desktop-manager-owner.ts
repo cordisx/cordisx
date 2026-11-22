@@ -20,6 +20,7 @@ import { createManagerRendererModelServicesChannel } from './manager-renderer-mo
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { supportsReadonlyConfiguredChannel } from './readonly-headless-channel.js'
 import { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
+import { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 
 /** Compose the optional Manager inside an already-authorized Desktop owner. */
 export function createDesktopManagerOwner(input: {
@@ -46,6 +47,7 @@ export function createDesktopManagerOwner(input: {
   const participants = new ServiceRendererParticipants(scope)
   let bootstrap!: ServiceRendererBootstrap
   let closed = false
+  let packageConfigWritesEnabled = false
   const lifecycle = new DesktopOwnerRendererLifecycle({
     scope,
     cdp: input.cdp,
@@ -64,6 +66,7 @@ export function createDesktopManagerOwner(input: {
     }),
   })
   participants.bind(lifecycle)
+  const packageConfigWrites = new DesktopPackageConfigWriteGate()
   const configProjection = new DesktopManagerConfigProjection({
     current: snapshot => {
       try {
@@ -72,10 +75,11 @@ export function createDesktopManagerOwner(input: {
         return false
       }
     },
-    seat: () => input.cdp.managerConfigSeat(),
+    seat: () => input.cdp.managerConfigSeat()?.token,
     read: async pluginId => await lifecycle.managerConfigProof(pluginId),
   })
   const unsubscribeSeats = input.cdp.onConfigSeatsChanged(() => {
+    packageConfigWrites.invalidate()
     const hadProjection = configProjection.hasValues
     configProjection.clear()
     if (hadProjection) participants.disconnectAll()
@@ -114,6 +118,7 @@ export function createDesktopManagerOwner(input: {
     // Empty profiles also project permission and plugin-configuration snapshots.
     protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
     projectPluginConfig: configProjection,
+    desktopPackageConfigEnabled: () => packageConfigWritesEnabled,
   })
   const rendererModelServices = input.codex === undefined
     ? undefined
@@ -142,6 +147,7 @@ export function createDesktopManagerOwner(input: {
   }
   return {
     lifecycle,
+    packageConfigWrites,
     get managementOptions() {
       return {
         rendererParticipant: participant,
@@ -150,10 +156,29 @@ export function createDesktopManagerOwner(input: {
         rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
         rendererWriteLifetimes: bootstrap.writeLifetimes,
         rendererReadLifetimes: bootstrap.readLifetimes,
+        ...(packageConfigWritesEnabled
+          ? {
+            rendererDesktopPackageConfig: {
+              participant,
+              participants,
+              lifecycle,
+              bootstrap,
+              writes: packageConfigWrites,
+            },
+          }
+          : {}),
         ...(managedServiceUI === undefined ? {} : { rendererManagedServiceUI: managedServiceUI.channel }),
         ...(rendererModelServices === undefined ? {} : { rendererModelServices }),
         ...(channelBridge === undefined ? {} : { rendererReadonlyChannel: channelBridge.channel }),
       }
+    },
+    enablePackageConfigWrites(rendererGeneration: string): boolean {
+      if (
+        closed || packageConfigWritesEnabled || rendererGeneration !== input.generation
+        || process.platform !== 'darwin' && process.platform !== 'linux'
+      ) return false
+      packageConfigWritesEnabled = true
+      return true
     },
     bindConfiguredChannel(plugin: CordisXConfigPlugin, service: LocalChannelService): boolean {
       const owner = service.managementOwner()
@@ -176,6 +201,7 @@ export function createDesktopManagerOwner(input: {
     close(): Promise<boolean> {
       if (closing) return closing
       closed = true
+      packageConfigWrites.close()
       configProjection.clear()
       unsubscribeSeats()
       unsubscribeNoSeats()

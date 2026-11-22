@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { DesktopManagerConfigProof } from '../launcher/renderer-config-management.js'
+import type { ManagerPluginConfigSnapshot } from '../renderer/configuration/model.js'
 import {
   assertPath,
   hasOwnPath,
@@ -19,6 +20,43 @@ function normalized(value: unknown): unknown {
     throw new Error('desktop-manager-config-unavailable')
   }
   return JSON.parse(json) as unknown
+}
+
+/** Only fields that can also be verified in the redacted readback are writable. */
+export function isWritableDesktopConfigField(
+  field: ManagerPluginConfigSnapshot['fields'][number],
+  secrets: ManagerPluginConfigSnapshot['secrets'],
+): boolean {
+  return !field.disabled && ['string', 'number', 'natural', 'boolean', 'const', 'union'].includes(field.type)
+    && (field.role === undefined || !isReservedConfigRole(field.role))
+    && !secrets.some(secret => pathStartsWith(field.path, secret.path) || pathStartsWith(secret.path, field.path))
+}
+
+type ProjectedConfig = { readonly value: unknown; readonly writable: boolean }
+
+function projectionKey(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): string {
+  return createHash('sha256').update(
+    JSON.stringify([snapshot, plugin.id, plugin.package, plugin.revision, plugin.config]),
+  ).digest('hex')
+}
+
+function projectedConfig(
+  snapshot: ServiceRendererSnapshot,
+  plugin: CordisXConfigPlugin,
+  proof: DesktopManagerConfigProof,
+): ProjectedConfig {
+  const value = projectDesktopManagerConfig(snapshot, plugin, proof)
+  const descriptor = proof.plugin.configuration
+  return {
+    value,
+    writable: descriptor.writable === true && descriptor.applies === 'live'
+      && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
+      && isDeepStrictEqual(
+        normalized(plugin.config),
+        normalized(removePaths(plugin.config, descriptor.secrets.map(secret => secret.path))),
+      )
+      && descriptor.fields.some(field => isWritableDesktopConfigField(field, descriptor.secrets)),
+  }
 }
 
 /** Keep only declared, non-sensitive scalar fields from a verified native configuration. */
@@ -76,8 +114,8 @@ export function projectDesktopManagerConfig(
 export class DesktopManagerConfigProjection {
   private epoch = 0
   private boundSeat: symbol | undefined
-  private readonly cache = new Map<string, unknown>()
-  private readonly pending = new Map<string, Promise<unknown>>()
+  private readonly cache = new Map<string, ProjectedConfig>()
+  private readonly pending = new Map<string, Promise<ProjectedConfig>>()
   private queue: Promise<void> = Promise.resolve()
 
   constructor(
@@ -93,6 +131,29 @@ export class DesktopManagerConfigProjection {
   }
 
   async project(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<unknown> {
+    return structuredClone((await this.projection(snapshot, plugin)).value)
+  }
+
+  async canWrite(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<boolean> {
+    return (await this.projection(snapshot, plugin)).writable
+  }
+
+  /** Retain a confirmed native readback so another Manager can join after the write. */
+  remember(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin, proof: DesktopManagerConfigProof): boolean {
+    const seat = this.input.seat()
+    if (seat === undefined || this.boundSeat !== seat || !this.input.current(snapshot)) return false
+    try {
+      const projected = projectedConfig(snapshot, plugin, proof)
+      if (this.input.seat() !== seat || !this.input.current(snapshot)) return false
+      if (this.cache.size >= 256) this.cache.clear()
+      this.cache.set(projectionKey(snapshot, plugin), projected)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async projection(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<ProjectedConfig> {
     const seat = this.input.seat()
     if (seat === undefined || !this.input.current(snapshot)) throw new Error('desktop-manager-config-unavailable')
     if (this.boundSeat !== seat) {
@@ -101,16 +162,14 @@ export class DesktopManagerConfigProjection {
     }
     const epoch = this.epoch
     const current = () => epoch === this.epoch && this.input.seat() === seat && this.input.current(snapshot)
-    const key = createHash('sha256').update(
-      JSON.stringify([snapshot, plugin.id, plugin.package, plugin.revision, plugin.config]),
-    )
-      .digest('hex')
-    if (this.cache.has(key)) return structuredClone(this.cache.get(key))
+    const key = projectionKey(snapshot, plugin)
+    const cached = this.cache.get(key)
+    if (cached) return cached
     const existing = this.pending.get(key)
     if (existing) {
       const value = await existing
       if (!current()) throw new Error('desktop-manager-config-unavailable')
-      return structuredClone(value)
+      return value
     }
     const task = this.queue.then(async () => {
       if (!current()) throw new Error('desktop-manager-config-unavailable')
@@ -118,7 +177,7 @@ export class DesktopManagerConfigProjection {
       if (!proof || !current()) {
         throw new Error('desktop-manager-config-unavailable')
       }
-      const projected = projectDesktopManagerConfig(snapshot, plugin, proof)
+      const projected = projectedConfig(snapshot, plugin, proof)
       if (this.cache.size >= 256) this.cache.clear()
       this.cache.set(key, projected)
       return projected
@@ -126,7 +185,7 @@ export class DesktopManagerConfigProjection {
     this.pending.set(key, task)
     this.queue = task.then(() => undefined, () => undefined)
     try {
-      return structuredClone(await task)
+      return await task
     } finally {
       if (this.pending.get(key) === task) this.pending.delete(key)
     }

@@ -168,8 +168,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   /** Read only from one already-admitted Desktop seat, under the generation fence. */
   readonly managerConfigProof = (pluginId: string) => this.configuration.managerConfigProof(pluginId)
 
-  managerConfigSeat(): symbol | undefined {
-    return this.sessions.size === 1 && this.joining.size === 0 ? this.departures.token() : undefined
+  managerConfigSeat(): { readonly token: symbol; readonly session: CdpSession } | undefined {
+    if (this.sessions.size !== 1 || this.joining.size !== 0) return undefined
+    return { token: this.departures.token(), session: [...this.sessions][0]! }
   }
 
   setBrowserGraphAdmission(admission: BrowserGraphAdmission | undefined): void {
@@ -387,9 +388,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
-    const added = !this.sessions.has(session)
-    this.sessions.add(session)
-    if (added) this.departures.changed()
+    this.departures.add(session)
     return () => this.departures.remove(session)
   }
 
@@ -418,8 +417,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         }
         this.generationOwner = undefined
         settled = true
-        this.sessions.add(session)
-        this.departures.changed()
+        this.departures.add(session)
         return () => this.departures.remove(session)
       },
       abort: () => {

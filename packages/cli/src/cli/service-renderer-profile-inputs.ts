@@ -5,10 +5,37 @@ import { isDeepStrictEqual } from 'node:util'
 import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js'
 import { PackagePluginConfigStore } from '../launcher/package-plugin-config.js'
 import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
+import type { ServiceRendererSnapshot } from './service-renderer-bootstrap-state.js'
 
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 const MAX_SERVICE_STATES = 512
+
+/** Bind profile input verification to the owner's selected startup configuration. */
+export async function readOwnerProfileInputs(
+  input: {
+    readonly homeDir: string
+    readonly configPath: string
+    readonly appId: string
+    readonly profileId: string
+    readonly generation: string
+    readonly protectProfileInputs?: boolean
+    readonly projectPluginConfig?: unknown
+  },
+  ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>,
+  snapshot: ServiceRendererSnapshot,
+): Promise<Map<string, string>> {
+  return await readSettledProfileInputs({
+    homeDir: input.homeDir,
+    configPath: input.configPath,
+    appId: input.appId,
+    profileId: input.profileId,
+    generation: input.generation,
+    ownerStartupConfig,
+    pluginIds: snapshot.active.plugins.map(plugin => plugin.id),
+    allowNonEmptyPluginConfig: input.protectProfileInputs === true && input.projectPluginConfig !== undefined,
+  })
+}
 
 type Input = {
   readonly homeDir: string
@@ -32,6 +59,20 @@ async function existingStateDirectory(homeDir: string, parts: readonly string[])
     }
   }
   return current
+}
+
+/** The first package-config handoff excludes packages with any service state. */
+export async function hasNoPackageServiceState(homeDir: string, profileId: string, pluginId: string): Promise<boolean> {
+  if (!PROFILE.test(profileId) || !LOCAL_ID.test(pluginId)) return false
+  const directory = await existingStateDirectory(homeDir, [
+    'state',
+    'profiles',
+    profileId,
+    'plugins',
+    'services',
+    pluginId,
+  ])
+  return directory === undefined || (await readdir(directory)).length === 0
 }
 
 /** Inspect settled package inputs without sending configuration or credentials to a renderer. */

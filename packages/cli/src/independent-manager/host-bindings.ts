@@ -11,6 +11,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
   'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
   'channel-credentials': ['__cordisxChannelCredentialRequestV1', '__cordisxChannelCredentialReceiveV1'],
+  'desktop-package-config': ['__cordisxDesktopPackageConfigRequestV1', '__cordisxDesktopPackageConfigReceiveV1'],
   marketplace: ['__cordisxMarketplaceRequestV1', '__cordisxMarketplaceReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
@@ -197,7 +198,7 @@ export function installIndependentHostBindings(input: {
       pending.set(key, request)
       void Promise.resolve().then(async () => {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
-          || channel === 'channel-credentials'
+          || channel === 'channel-credentials' || channel === 'desktop-package-config'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')
             && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {

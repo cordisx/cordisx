@@ -128,6 +128,9 @@ export class DesktopOwnerRendererLifecycle implements PluginLifecycleRuntime, Ow
     if (this.phase !== 'ready' || !this.lifecycle || this.failed) return undefined
     return await this.lifecycle.managerConfigProof(pluginId)
   }
+  async reserveExternalMutation(peers: readonly AttachedRendererPeer[]) {
+    return await this.ready().reserveExternalMutation(peers)
+  }
   async commit(): Promise<void> {
     throw new Error('Desktop lifecycle requires the package authority')
   }

@@ -29,6 +29,7 @@ type Composition = {
   startStandaloneManagerComposition(
     signal: AbortSignal,
     verifySession: () => Promise<boolean>,
+    onResultUnknown: () => void,
   ): Promise<CordisXRuntimeHandle>
 }
 type Browser = Window & {
@@ -455,7 +456,11 @@ export function startStandaloneManager(input: {
         throw new Error('manager-owner-unavailable')
       }
       const starting = Promise.resolve().then(() =>
-        composition.startStandaloneManagerComposition(lifetime.signal, verifyReviewSession)
+        composition.startStandaloneManagerComposition(
+          lifetime.signal,
+          verifyReviewSession,
+          () => fail('result-unknown'),
+        )
       )
       void starting.then(started => {
         if (closed) {
@@ -489,6 +494,7 @@ export function startStandaloneManager(input: {
           startedRuntime.adoptStandaloneChannelProjection?.(projection, revision) === true,
         onManagedServiceState: async value =>
           await (startedRuntime.confirmStandaloneManagedServiceState?.(value) ?? Promise.resolve(false)),
+        onDesktopPackageConfiguration: value => startedRuntime.adoptStandaloneDesktopPackageConfig?.(value) === true,
         onQuiesce: async () => {
           // Do not acknowledge a fence while an operation may have written or
           // while resource recovery has an unresolved result.

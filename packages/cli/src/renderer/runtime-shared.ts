@@ -265,6 +265,8 @@ export interface CordisXRuntimeMetadata {
   /** Host-private bootstrap token, stripped before runtime metadata is retained. */
   readonly agentContextBridgeToken?: string
   readonly configBridgeToken?: string
+  /** Host-private, owner-proved Desktop package configuration scope. */
+  readonly standaloneDesktopPackageConfig?: { readonly token: string; readonly plugins: readonly string[] }
   readonly nativeSessionBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
   readonly ownerDocumentBindings?: readonly {
@@ -306,6 +308,7 @@ export interface CordisXRuntimeMetadata {
   readonly standaloneRendererId?: string
   /** Host-private owner and resource check supplied by the standalone session. */
   readonly standaloneReviewSession?: () => Promise<boolean>
+  readonly standaloneWriteUncertain?: () => void
   /** Host-only presentation preview; never exposed through plugin Contexts. */
   readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */
@@ -558,6 +561,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
+  /** Adopt only the owner-confirmed result of this renderer's pending configuration write. */
+  adoptStandaloneDesktopPackageConfig?(
+    value: import('./standalone-desktop-package-config-binding.js').StandaloneDesktopConfigAdoption,
+  ): boolean
   /** Host-private confirmation through this standalone renderer's own managed-service capability. */
   confirmStandaloneManagedServiceState?(
     input: import('../managed-service-state-confirmation.js').ManagedServiceStateConfirmation,

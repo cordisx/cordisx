@@ -263,7 +263,10 @@ export class ServiceRendererLifecycleProjection {
   readonly project: OwnerCommandProjection = (method: ManagerRendererCommandMethod, value: unknown) => {
     this.live()
     if (this.awaiting) throw new Error('renderer-identity-lifecycle-unavailable')
-    if (method === 'quiesce' || method === 'channel-configuration' || method === 'managed-service-state') {
+    if (
+      method === 'quiesce' || method === 'channel-configuration' || method === 'managed-service-state'
+      || method === 'desktop-package-configuration'
+    ) {
       return { payload: value }
     }
     if (method === 'synchronize') return this.synchronize(value)

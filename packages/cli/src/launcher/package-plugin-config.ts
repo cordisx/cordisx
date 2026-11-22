@@ -72,7 +72,7 @@ export class PackagePluginConfigStore {
       if (state.candidate !== undefined && state.candidate.generation !== this.generation) {
         let release: () => Promise<void>
         try {
-          release = await fencePackageProfileWrite(this.root, this.profileId)
+          release = await fencePackageProfileWrite(this.root, this.profileId, pluginId)
         } catch (error) {
           // A live Manager can still read last-good state, but cannot erase an unconfirmed candidate.
           if (error instanceof ProfilePluginConfigFenceBusyError) {
@@ -226,7 +226,7 @@ export class PackagePluginConfigStore {
   ): Promise<T> {
     const filePath = this.file(pluginId)
     return await this.serial(filePath, async () => {
-      const release = await fencePackageProfileWrite(this.root, this.profileId)
+      const release = await fencePackageProfileWrite(this.root, this.profileId, pluginId)
       try {
         const loaded = await this.readState(pluginId)
         const state: State = loaded.candidate !== undefined && loaded.candidate.generation !== this.generation

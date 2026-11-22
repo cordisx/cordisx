@@ -12,6 +12,7 @@ export type ManagerRendererCommandMethod =
   | 'quiesce'
   | 'channel-configuration'
   | 'managed-service-state'
+  | 'desktop-package-configuration'
 
 export interface ManagerRendererPeerScope {
   readonly homeDigest: string
@@ -52,6 +53,7 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'quiesce',
   'channel-configuration',
   'managed-service-state',
+  'desktop-package-configuration',
 ])
 const MAX_COMMAND_BYTES = 256 * 1024
 // Channel views omit images but can still describe many configured accounts.

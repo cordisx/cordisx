@@ -502,8 +502,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         packagePlugins: {
           homeDir: rootFromConfigPath(configPath),
           runtimeGeneration: lifecycleGeneration,
+          ...(desktopManager === undefined ? {} : {
+            mutate: async (request, seat, action) =>
+              await desktopManager!.packageConfigWrites.handle(request, seat, action),
+          }),
         },
       })
+    if (configBridge && desktopManager) desktopManager.enablePackageConfigWrites(configBridge.generation)
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
       localWalletHomeDir: rootFromConfigPath(configPath),

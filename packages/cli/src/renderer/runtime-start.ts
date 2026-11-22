@@ -66,6 +66,7 @@ import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { createRuntimeModelProviders } from './runtime-model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
+import { createStandaloneDesktopPackageConfigBridge } from './standalone-desktop-package-config-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { prepareAgentContextBootstrap } from './agent-context-binding.js'
 import { createRuntimePermissionStore } from './runtime-permission-store.js'
@@ -167,6 +168,7 @@ export async function start(
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
+  let standaloneDesktopPackageConfigBridge: ReturnType<typeof createStandaloneDesktopPackageConfigBridge>
   const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined
     ? undefined
     : new BrowserOwnerDocumentBridge()
@@ -225,6 +227,7 @@ export async function start(
   }
   let certifiedPermissionChannel = options.certifiedPermissionChannel
   try {
+    standaloneDesktopPackageConfigBridge = createStandaloneDesktopPackageConfigBridge(metadata)
     disposeNotifications = installNotificationHost(document, metadata.profileId, {
       externalStyles: metadata.hostKind === 'standalone',
     })
@@ -293,6 +296,7 @@ export async function start(
       commitPluginMutation: () => commitPluginMutation,
       completePluginMutation: () => completePluginMutation,
       configBridge: () => configBridge,
+      standaloneDesktopPackageConfigBridge: () => standaloneDesktopPackageConfigBridge,
       configRendererFiber: [() => configRendererFiber, (value: any) => configRendererFiber = value],
       configRenderers: () => configRenderers,
       configuration: () => configuration,
@@ -978,6 +982,7 @@ export async function start(
     await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
+    standaloneDesktopPackageConfigBridge?.dispose()
     agentContextBridge?.dispose()
     disposeDialogs()
     disposeNotifications()

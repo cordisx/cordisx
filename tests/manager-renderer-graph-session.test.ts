@@ -127,6 +127,44 @@ it('allows managed-service readback only for the active plugin generation of the
   }
 })
 
+it('forwards a configuration receipt only for an active package and the exact renderer', async () => {
+  const fixture = await managerRendererGraphFixture()
+  try {
+    const lease = await fixture.lease('old')
+    const payload = {
+      rendererId,
+      ownerGeneration: baseInput.generation,
+      requestId: 'request-1',
+      pluginId: 'fixture',
+      expectedRevision: 1,
+      revision: 2,
+      value: { label: 'updated' },
+    }
+    const session = createManagerRendererGraphSession(baseInput)
+    session.projectInitial([descriptor(lease)])
+    expect(session.projectCommand(command('desktop-package-configuration', 1, payload)))
+      .toEqual(command('desktop-package-configuration', 1, payload))
+    session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+    session.close()
+    for (
+      const bad of [
+        { ...payload, rendererId: '5'.repeat(64) },
+        { ...payload, pluginId: 'other' },
+        { ...payload, revision: 3 },
+        { ...payload, value: { label: forbidden[0] } },
+      ]
+    ) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([descriptor(lease)])
+      expect(() => target.projectCommand(command('desktop-package-configuration', 1, bad)))
+        .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+      expect(target.closed).toBe(true)
+    }
+  } finally {
+    await fixture.close()
+  }
+})
+
 it('keeps initial graphs active through staging and rollback, without exposing owner secrets', async () => {
   const fixture = await managerRendererGraphFixture()
   const session = createManagerRendererGraphSession(baseInput)

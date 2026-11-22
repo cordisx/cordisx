@@ -1,6 +1,7 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
+import type { StandaloneDesktopConfigAdoption } from '../renderer/standalone-desktop-package-config-binding.js'
 
 type Method =
   | 'synchronize'
@@ -13,6 +14,7 @@ type Method =
   | 'quiesce'
   | 'channel-configuration'
   | 'managed-service-state'
+  | 'desktop-package-configuration'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
 
 export interface ManagerRendererLifecycleCommand {
@@ -86,6 +88,7 @@ const methods = new Set<Method>([
   'quiesce',
   'channel-configuration',
   'managed-service-state',
+  'desktop-package-configuration',
 ])
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const epochPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -165,6 +168,8 @@ export function createManagerRendererLifecycleClient(input: {
   readonly onChannelConfiguration?: (projection: unknown, revision: number) => boolean | Promise<boolean>
   /** Confirm a service through this renderer's own capability before or after an owner action. */
   readonly onManagedServiceState?: (value: ManagedServiceStateConfirmation) => boolean | Promise<boolean>
+  /** Adopt only the pending write and exact redacted value confirmed by this owner. */
+  readonly onDesktopPackageConfiguration?: (value: StandaloneDesktopConfigAdoption) => boolean | Promise<boolean>
 }): {
   readonly closed: boolean
   readonly quiesced: boolean
@@ -230,6 +235,38 @@ export function createManagerRendererLifecycleClient(input: {
   }
   const execute = async (method: Method, payload: unknown): Promise<unknown> => {
     assertLive()
+    if (method === 'desktop-package-configuration') {
+      const item = record(payload)
+      exact(item, ['rendererId', 'ownerGeneration', 'requestId', 'pluginId', 'expectedRevision', 'revision', 'value'])
+      if (
+        item.rendererId !== scope.rendererId || item.ownerGeneration !== scope.generation
+        || typeof item.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(item.requestId)
+        || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
+        || !Number.isSafeInteger(item.expectedRevision) || (item.expectedRevision as number) < 0
+        || item.revision !== (item.expectedRevision as number) + 1
+        || !synchronized || transaction !== undefined || awaitingAdoption !== undefined
+        || !input.onDesktopPackageConfiguration
+      ) throw new Error('renderer-package-configuration-unavailable')
+      const adoption: StandaloneDesktopConfigAdoption = {
+        requestId: item.requestId,
+        pluginId: item.pluginId,
+        expectedRevision: item.expectedRevision as number,
+        revision: item.revision as number,
+        value: item.value,
+      }
+      if (!await input.onDesktopPackageConfiguration(adoption)) {
+        throw new Error('renderer-package-configuration-unavailable')
+      }
+      assertLive()
+      return {
+        rendererId: scope.rendererId,
+        ownerGeneration: scope.generation,
+        requestId: adoption.requestId,
+        pluginId: adoption.pluginId,
+        revision: adoption.revision,
+        adopted: true,
+      }
+    }
     if (method === 'managed-service-state') {
       const item = record(payload)
       exact(item, [

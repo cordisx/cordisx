@@ -29,6 +29,9 @@ import { coordinateManagerPermissionReview } from './manager-permission-review-f
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
 import { createManagerRendererChannelCredentials } from './manager-renderer-channel-credentials.js'
 import { createManagerRendererMarketplaceChannel } from './manager-renderer-marketplace.js'
+import { createManagerRendererDesktopPackageConfig } from './manager-renderer-desktop-package-config.js'
+import type { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
+import type { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 import { coordinateManagerManagedServiceMutations } from './manager-managed-service-mutation.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
@@ -87,6 +90,13 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererModelServices?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
   readonly rendererReadonlyChannel?: ManagerRendererChannel
+  readonly rendererDesktopPackageConfig?: {
+    readonly participant: NonNullable<ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']>
+    readonly participants: ServiceRendererParticipants
+    readonly lifecycle: DesktopOwnerRendererLifecycle
+    readonly bootstrap: ServiceRendererBootstrap
+    readonly writes: DesktopPackageConfigWriteGate
+  }
   readonly rendererConfiguredChannelService?: {
     readonly bootstrap: ServiceRendererBootstrap
     readonly plugin: CordisXConfigPlugin
@@ -106,6 +116,11 @@ export async function openProductionPluginManagementComposition(input: {
       input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
       || !input.rendererReadonlyChannel
     )
+  ) throw new Error('manager-consumer-fence-scope-invalid')
+  if (
+    input.rendererDesktopPackageConfig && (input.mode === 'service'
+      || input.rendererParticipant !== input.rendererDesktopPackageConfig.participant
+      || !input.rendererDesktopPackageConfig.participants.isBoundTo(input.rendererDesktopPackageConfig.lifecycle))
   ) throw new Error('manager-consumer-fence-scope-invalid')
   const service = await openPluginManagementService({
     configPath: input.configPath,
@@ -128,6 +143,14 @@ export async function openProductionPluginManagementComposition(input: {
       isCurrent: context => !closed && input.rendererParticipants!.peer(context.rendererId) !== undefined,
     })
   let rendererSessions!: ManagerRendererSessions
+  const rendererDesktopPackageConfig = input.rendererDesktopPackageConfig === undefined
+    ? undefined
+    : createManagerRendererDesktopPackageConfig({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      ...input.rendererDesktopPackageConfig,
+      sessions: () => rendererSessions,
+    })
   const rendererManagedServiceUI = input.rendererManagedServiceUI === undefined
     ? undefined
     : coordinateManagerManagedServiceMutations({
@@ -196,6 +219,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererModelServices === undefined
         ? []
         : [['model-services', input.rendererModelServices] as const]),
+      ...(rendererDesktopPackageConfig === undefined
+        ? []
+        : [['desktop-package-config', rendererDesktopPackageConfig] as const]),
       ...(input.rendererReadonlyChannel === undefined
         ? []
         : [['channel-actions', input.rendererReadonlyChannel] as const]),

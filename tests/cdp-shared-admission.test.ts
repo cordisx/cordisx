@@ -138,23 +138,67 @@ it('changes the single-seat proof whenever a Desktop seat joins, leaves, or atte
   const unsubscribe = cdp.onConfigSeatsChanged(changed)
   expect(cdp.managerConfigSeat()).toBeUndefined()
   const removeFirst = cdp.register(first)
-  const initial = cdp.managerConfigSeat()
+  const initial = cdp.managerConfigSeat()?.token
   expect(initial).toBeDefined()
   const joining = cdp.beginJoin(second)
   expect(cdp.managerConfigSeat()).toBeUndefined()
   joining.abort()
-  const afterAbort = cdp.managerConfigSeat()
+  const afterAbort = cdp.managerConfigSeat()?.token
   expect(afterAbort).toBeDefined()
   expect(afterAbort).not.toBe(initial)
   const removeSecond = cdp.register(second)
   expect(cdp.managerConfigSeat()).toBeUndefined()
   removeSecond()
   expect(cdp.managerConfigSeat()).toBeDefined()
-  expect(cdp.managerConfigSeat()).not.toBe(afterAbort)
+  expect(cdp.managerConfigSeat()?.token).not.toBe(afterAbort)
   removeFirst()
   expect(cdp.managerConfigSeat()).toBeUndefined()
   expect(changed).toHaveBeenCalledTimes(6)
   unsubscribe()
   cdp.register(first)()
   expect(changed).toHaveBeenCalledTimes(6)
+})
+
+it('keeps native configuration under the shared seat reservation and rejects a late result', async () => {
+  const cdp = new CdpPluginLifecycleRuntime()
+  const entered = deferred()
+  const release = deferred()
+  const session = {
+    async send(_method: string, params: Record<string, unknown>) {
+      if (String(params.expression).includes('updatePluginConfig')) {
+        entered.resolve()
+        await release.promise
+      }
+      return { result: { value: { ok: true, result: { status: 'ok' } } } }
+    },
+  } as never
+  const unregister = cdp.register(session)
+  const admission = cdp.beginSharedAdmission('config-write')
+  expect(admission.configurationSeat()).toBe(session)
+  const pending = admission.configuration({
+    kind: 'plugin-configuration',
+    action: 'update',
+    pluginId: 'fixture',
+    expectedRevision: 0,
+    operations: [{ op: 'set', path: ['label'], value: 'new' }],
+  })
+  await entered.promise
+  expect(() => cdp.register({} as never)).toThrow('cannot register')
+  expect(() => cdp.beginJoin({} as never)).toThrow('cannot join')
+  unregister()
+  release.resolve()
+  await expect(pending).rejects.toThrow('CDP shared admission is stale')
+  admission.release()
+})
+
+it('refuses a shared configuration operation when the Desktop seat is ambiguous', async () => {
+  const cdp = new CdpPluginLifecycleRuntime()
+  const first = cdp.register({} as never)
+  const second = cdp.register({} as never)
+  const admission = cdp.beginSharedAdmission('config-ambiguous')
+  expect(() => admission.configurationSeat()).toThrow('CDP shared configuration is unavailable')
+  await expect(admission.configurationProof('fixture')).rejects.toThrow('CDP shared configuration is unavailable')
+  admission.release()
+  first()
+  second()
 })

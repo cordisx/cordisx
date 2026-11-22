@@ -13,6 +13,13 @@ import type {
 import type { PluginGenerationGraphLease } from './plugin-generation-loader.js'
 import { type CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
 import { attachmentEqual } from './renderer-lifecycle-peer.js'
+import {
+  type DesktopManagerConfigProof,
+  desktopManagerConfigProofExpression,
+  evaluateRendererConfig,
+  type RendererConfigOperation,
+  type RendererConfigResult,
+} from './renderer-config-management.js'
 
 export type GenerationOwner =
   | { readonly kind: 'join'; readonly token: symbol; readonly session: CdpSession }
@@ -55,6 +62,9 @@ export interface CdpSharedAdmission {
   readonly sessionCount: number
   onInvalidated(listener: () => void): () => void
   readSnapshot(): Promise<Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>>
+  configurationSeat(): CdpSession
+  configurationProof(pluginId: string): Promise<DesktopManagerConfigProof | undefined>
+  configuration(operation: RendererConfigOperation): Promise<RendererConfigResult>
   prepare(fence: RuntimeGenerationFence): void
   prepareBrowserGraph(active: CordisXPluginActivationRecordV1, fence: RuntimeGenerationFence): Promise<void>
   stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation>
@@ -87,6 +97,7 @@ type SharedAdmissionHost = {
 
 export function createCdpSharedAdmission(host: SharedAdmissionHost, state: SharedAdmissionState): CdpSharedAdmission {
   const transactionId = state.transactionId
+  const initialEpoch = host.registryEpoch
   const assertCurrent = (): void => {
     if (
       state.released || state.invalid || host.sharedAdmission !== state
@@ -105,6 +116,14 @@ export function createCdpSharedAdmission(host: SharedAdmissionHost, state: Share
     const frozen = Object.freeze({ ...fence })
     host.fences.set(transactionId, frozen)
     host.generationOwner = { kind: 'transaction', transactionId, fence: frozen }
+  }
+  const configurationSeat = (): CdpSession => {
+    assertCurrent()
+    if (
+      state.sessions.length !== 1 || host.registryEpoch !== initialEpoch
+      || host.generationOwner?.kind !== 'shared-admission' || host.generationOwner.token !== state.token
+    ) throw new Error('CDP shared configuration is unavailable')
+    return state.sessions[0]!
   }
   const readSnapshot = async () => {
     assertCurrent()
@@ -146,6 +165,23 @@ export function createCdpSharedAdmission(host: SharedAdmissionHost, state: Share
       return () => state.listeners.delete(listener)
     },
     readSnapshot,
+    configurationSeat,
+    async configurationProof(pluginId) {
+      const session = configurationSeat()
+      const proof = await evaluateRuntimeOperation<DesktopManagerConfigProof | undefined>(
+        session,
+        desktopManagerConfigProofExpression(pluginId),
+        30_000,
+      )
+      if (configurationSeat() !== session) throw new Error('CDP shared configuration is stale')
+      return proof
+    },
+    async configuration(operation) {
+      const session = configurationSeat()
+      const result = await evaluateRendererConfig(session, operation)
+      if (configurationSeat() !== session) throw new Error('CDP shared configuration is stale')
+      return result
+    },
     prepare,
     async stage(mutation) {
       assertCurrent()
@@ -278,6 +314,7 @@ export function createCdpDepartureObserver(
   subscribeChange(listener: () => void): () => void
   token(): symbol
   changed(): void
+  add(session: CdpSession): void
   remove(session: CdpSession): void
 } {
   const listeners = new Set<() => void>()
@@ -302,6 +339,11 @@ export function createCdpDepartureObserver(
     },
     token: () => seatToken,
     changed,
+    add(session) {
+      if (sessions.has(session)) return
+      sessions.add(session)
+      changed()
+    },
     remove(session) {
       const present = sessions.has(session)
       removeCdpSession(sessions, staged, admission(), session)

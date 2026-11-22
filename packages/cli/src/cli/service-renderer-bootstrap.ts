@@ -37,21 +37,22 @@ import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-
 import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
-import { readSettledProfileInputs } from './service-renderer-profile-inputs.js'
+import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
-import type { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
+import {
+  type DesktopConfigProjector,
+  desktopPackageConfigBundleOptions,
+  emptyPluginConfig,
+  prepareDesktopManagerConfigs,
+} from './desktop-manager-config-eligibility.js'
 import type {
   ServiceRendererBootstrapEntry as Entry,
   ServiceRendererConfiguredChannelInput as ConfiguredChannel,
   ServiceRendererSnapshot as Snapshot,
 } from './service-renderer-bootstrap-state.js'
 const MAX_INITIAL_GRAPHS = 256
-function emptyConfig(value: unknown): boolean {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
-}
-
 /**
  * Owner-only, two-phase bootstrap. Phase one creates and retains immutable
  * leases; phase two accepts only the authenticated sidecar's same-origin
@@ -100,7 +101,9 @@ export class ServiceRendererBootstrap {
         readonly discardPlan: (token: string) => void
       }
       /** Desktop owner only: read schema-redacted values from its existing authorized seat. */
-      readonly projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
+      readonly projectPluginConfig?: DesktopConfigProjector
+      /** Available only after the Desktop owner's native config bridge is installed. */
+      readonly desktopPackageConfigEnabled?: () => boolean
     },
   ) {
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
@@ -119,6 +122,10 @@ export class ServiceRendererBootstrap {
       store: input.store,
       entries: this.entries,
       participants: input.participants,
+      lifecycle: input.lifecycle,
+      ...(this.pluginConfigFence === undefined ? {} : { pluginFence: this.pluginConfigFence }),
+      rememberPluginConfig: (snapshot, plugin, proof) =>
+        this.input.projectPluginConfig?.remember?.(snapshot, plugin, proof) === true,
       readLifetimes: this.readLifetimes,
       configuredChannel: () => this.configuredChannel,
       snapshot: () => input.lifecycle.snapshot(),
@@ -171,17 +178,7 @@ export class ServiceRendererBootstrap {
   }
 
   private async profileInputs(snapshot: Snapshot): Promise<Map<string, string>> {
-    return await readSettledProfileInputs({
-      homeDir: this.input.homeDir,
-      configPath: this.input.configPath,
-      appId: this.input.appId,
-      profileId: this.input.profileId,
-      generation: this.input.generation,
-      ownerStartupConfig: this.ownerStartupConfig,
-      pluginIds: snapshot.active.plugins.map(plugin => plugin.id),
-      allowNonEmptyPluginConfig: this.input.protectProfileInputs === true
-        && this.input.projectPluginConfig !== undefined,
-    })
+    return await readOwnerProfileInputs(this.input, this.ownerStartupConfig, snapshot)
   }
 
   private async trackCheck(entry: Entry, operation: () => Promise<boolean>): Promise<boolean> {
@@ -537,7 +534,7 @@ export class ServiceRendererBootstrap {
         // Configured plugins stay closed unless the owner explicitly supplies
         // the constrained read-only Channel composition.
         if (
-          plugins.some(plugin => !emptyConfig(plugin.config))
+          plugins.some(plugin => !emptyPluginConfig(plugin.config))
             && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
           || config.plugins.length !== 0 && (
               !this.input.protectProfileInputs || !this.configuredChannel
@@ -566,16 +563,14 @@ export class ServiceRendererBootstrap {
             if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
           }
         }
-        const projectedConfigs = new Map<string, unknown>()
-        for (const plugin of plugins) {
-          if (emptyConfig(plugin.config)) continue
-          const projected = await this.input.projectPluginConfig!.project(snapshot, plugin)
-          if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
-          projectedConfigs.set(plugin.id, projected)
-          // A renderer with a copied configuration cannot mutate the package
-          // until every owner participant supports configuration handoff.
-          needsIdentityProjection = true
-        }
+        const { projectedConfigs, writablePlugins: desktopPackageConfigPlugins } = await prepareDesktopManagerConfigs(
+          this.input,
+          snapshot,
+          plugins,
+          managedOwners,
+          () => this.current(rendererId, entry),
+        )
+        if (projectedConfigs.size > 0 || desktopPackageConfigPlugins.length > 0) needsIdentityProjection = true
         if (needsIdentityProjection && !this.input.protectProfileInputs) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
@@ -623,6 +618,7 @@ export class ServiceRendererBootstrap {
         entry.config = config
         entry.plugins = plugins
         entry.projectedConfigs = projectedConfigs
+        entry.desktopPackageConfigPlugins = desktopPackageConfigPlugins
         entry.policies = policies
         entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
@@ -701,7 +697,7 @@ export class ServiceRendererBootstrap {
         let projectedSnapshot: Snapshot | undefined
         let projectedPolicies = entry.policies
         let projectedPlugins = entry.plugins.map(plugin => {
-          if (emptyConfig(plugin.config)) return plugin
+          if (emptyPluginConfig(plugin.config)) return plugin
           if (!entry.projectedConfigs?.has(plugin.id)) throw new Error('renderer-bootstrap-plugin-unsupported')
           return { ...plugin, config: entry.projectedConfigs.get(plugin.id) }
         })
@@ -789,6 +785,10 @@ export class ServiceRendererBootstrap {
           pluginActivation: projectedSnapshot?.active ?? snapshot.active,
           initialRegistryEpoch: snapshot.registryEpoch,
           pluginManagement: { profileId: this.input.profileId, token: 'renderer-binding-placeholder' },
+          ...desktopPackageConfigBundleOptions(
+            entry.desktopPackageConfigPlugins,
+            this.input.desktopPackageConfigEnabled?.(),
+          ),
           ...(configured === undefined ? {} : {
             channelManager: configured.projection,
             serviceCapabilityOwners: [configured.serviceOwner],
@@ -887,6 +887,9 @@ export class ServiceRendererBootstrap {
   async reserveLifecycleHandoff(input: Parameters<ServiceRendererLifecycleHandoff['reserve']>[0]) {
     return await this.lifecycleHandoff.reserve(input)
   }
+
+  readonly reservePackageConfig = (origin: ManagerOriginFence, pluginId: string) =>
+    this.lifecycleHandoff.reservePackageConfig(origin, pluginId)
 
   canProjectLifecycle(identity: RendererAttachmentIdentity): boolean {
     return this.lifecycleHandoff.canProject(identity)

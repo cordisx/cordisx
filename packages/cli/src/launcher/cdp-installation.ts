@@ -308,7 +308,7 @@ export async function install(
             activeConfigRequests += 1
             let value: unknown
             try {
-              value = await lifecycleRequests.exclusive(async () => await config.handle(request))
+              value = await lifecycleRequests.exclusive(async () => await config.handle(request, session))
             } finally {
               activeConfigRequests -= 1
             }

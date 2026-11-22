@@ -281,6 +281,7 @@ export function createManagerRendererGraphSession(input: {
             'quiesce',
             'channel-configuration',
             'managed-service-state',
+            'desktop-package-configuration',
           ].includes(
             command.method,
           )
@@ -352,6 +353,19 @@ export function createManagerRendererGraphSession(input: {
             ...Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'privateGraphs')),
             graphs: staged.map(entry => entry.publicGraph),
           }
+        } else if (command.method === 'desktop-package-configuration') {
+          if (
+            transaction !== undefined || Object.keys(payload).length !== 7
+            || Object.keys(payload).some(key =>
+              !['rendererId', 'ownerGeneration', 'requestId', 'pluginId', 'expectedRevision', 'revision', 'value']
+                .includes(key)
+            )
+            || payload.rendererId !== input.rendererId || payload.ownerGeneration !== input.generation
+            || typeof payload.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(payload.requestId)
+            || typeof payload.pluginId !== 'string' || !pluginId.test(payload.pluginId) || !active.has(payload.pluginId)
+            || !Number.isSafeInteger(payload.expectedRevision) || Number(payload.expectedRevision) < 0
+            || payload.revision !== Number(payload.expectedRevision) + 1
+          ) throw invalid()
         } else if (command.method === 'managed-service-state') {
           if (
             transaction !== undefined || Object.keys(payload).length !== 8

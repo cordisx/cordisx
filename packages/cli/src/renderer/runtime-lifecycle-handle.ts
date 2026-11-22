@@ -501,6 +501,7 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.finalizedTransactions()!.clear()
   runtimeScope.rollbackReceipts()!.clear()
   runtimeScope.configBridge()!?.dispose()
+  runtimeScope.standaloneDesktopPackageConfigBridge()?.dispose()
   runtimeScope.agentContextBridge()?.dispose()
   runtimeScope.serviceConfigBridge()!?.dispose()
   runtimeScope.managedServiceBridge()!?.dispose()
@@ -772,6 +773,9 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
       revision,
     )
   },
+  adoptStandaloneDesktopPackageConfig: value =>
+    !runtimeScope.disposed && runtimeScope.metadata()!.hostKind === 'standalone'
+    && runtimeScope.standaloneDesktopPackageConfigBridge()?.adopt(value) === true,
   confirmStandaloneManagedServiceState: async input => {
     if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
     return await (runtimeScope.managedServiceBridge()?.confirmState(input) ?? Promise.resolve(false))

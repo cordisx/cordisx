@@ -23,6 +23,14 @@ import {
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
+import { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import {
+  CONFIG_BINDING,
+  configBridgeError,
+  createConfigBridgeHandler,
+  parseConfigBindingRequest,
+} from '../packages/cli/src/launcher/config-rpc.js'
+import { sendConfigBindingResponse } from '../packages/cli/src/launcher/cdp-installation-support.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import {
   pluginManagementRpcPaths,
@@ -43,6 +51,12 @@ import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-c
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 import { decision, FakeRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
+import {
+  editDesktopConfig,
+  expectDesktopConfigApplied,
+  expectDesktopConfigBusy,
+  openDesktopConfig,
+} from './suites/desktop-package-config-browser.js'
 
 const chrome = [
   process.env.CHROME_PATH,
@@ -61,7 +75,7 @@ const chrome = [
   }
 })
 
-async function exerciseDesktopOwner(archive?: string, review = false, configFixture = false) {
+async function exerciseDesktopOwner(archive?: string, review = false, configFixture = false, writeFixture = false) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
   const homeDir = path.join(root, 'home')
@@ -145,7 +159,9 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
         "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
         '  validate: value => ({ value }) }, toJSON: () => descriptor }',
         "export const configApplies = 'live'",
-        'export function apply(_ctx, config) { globalThis.__desktopConfigValue = config }',
+        "export const inject = ['settings']",
+        'export function apply(ctx, config) { globalThis.__desktopConfigValue = config;',
+        '  ctx.settings.watch(value => { globalThis.__desktopConfigValue = value }) }',
       ].join('\n'),
     })
     const seed = new PluginLifecycleCoordinator({
@@ -179,7 +195,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     const candidate = await configStore.stage(
       'desktop-config-fixture',
       0,
-      { label: fixtureLabel, token: fixtureSecret },
+      writeFixture ? { label: fixtureLabel } : { label: fixtureLabel, token: fixtureSecret },
       'fixture-owner',
     )
     await configStore.commit('desktop-config-fixture', candidate.candidateRevision, 'fixture-owner')
@@ -230,6 +246,8 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
   let web: { url: string; issueUrl(): string; close(): Promise<void> } | undefined
   let browser: ChildProcess | undefined
   let desktop: CdpClient | undefined
+  let nativeConfigSession: CdpSession | undefined
+  const nativeConfigEvents: string[] = []
   let first: CdpClient | undefined
   let second: CdpClient | undefined
   let unregister: (() => void) | undefined
@@ -253,6 +271,8 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     const active = await store.bindRuntimeGeneration()
     owner.initialize(active, false)
     await (await managed.initialize(active)).coreReady
+    if (writeFixture) expect(owner.enablePackageConfigWrites(generation)).toBe(true)
+    const nativePlugins = configFixture ? await loadPluginComposition(store, active) : []
     if (archive !== undefined) {
       channel = await createRendererChannelComposition({
         composition: configured,
@@ -284,7 +304,8 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     })
     const launched = launchChrome(chrome!, chromeProfile)
     browser = launched.browser
-    desktop = await CdpClient.connect(await waitForChromeTarget(chromeProfile, browser, launched.stderr))
+    const desktopSocket = await waitForChromeTarget(chromeProfile, browser, launched.stderr)
+    desktop = await CdpClient.connect(desktopSocket)
     await desktop.send('Runtime.enable')
     await desktop.send('Page.enable')
     await desktop.send('Page.navigate', { url: desktopOrigin + '/' })
@@ -292,11 +313,58 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       expect(await desktop!.evaluate('location.origin')).toBe(desktopOrigin)
       expect(await desktop!.evaluate('document.readyState')).toBe('complete')
     }, { timeout: 10_000 })
-    const nativePlugins = configFixture ? await loadPluginComposition(store, active) : []
+    const configToken = randomBytes(32).toString('hex')
+    if (writeFixture) {
+      nativeConfigSession = await CdpSession.connect(desktopSocket)
+      await nativeConfigSession.send('Runtime.enable')
+      await nativeConfigSession.send('Runtime.addBinding', { name: CONFIG_BINDING })
+      const session = nativeConfigSession
+      const handler = createConfigBridgeHandler({
+        token: configToken,
+        profileId,
+        generation,
+        configPath,
+        composition: { ...configured, plugins: [...configured.plugins, ...nativePlugins] },
+        packagePlugins: {
+          homeDir,
+          runtimeGeneration: generation,
+          mutate: async (request, seat, action) => {
+            try {
+              const value = await owner.packageConfigWrites.handle(request, seat, action)
+              nativeConfigEvents.push(request.operation + ':ok')
+              return value
+            } catch (error) {
+              nativeConfigEvents.push(request.operation + ':' + (error instanceof Error ? error.message : 'failed'))
+              throw error
+            }
+          },
+        },
+      })
+      session.onEvent('Runtime.bindingCalled', params => {
+        if (params.name !== CONFIG_BINDING || typeof params.payload !== 'string') return
+        void (async () => {
+          let requestId = 'invalid'
+          try {
+            const request = parseConfigBindingRequest(
+              JSON.parse(params.payload as string),
+              configToken,
+              profileId,
+              generation,
+            )
+            requestId = request.requestId
+            const value = await handler.handle(request, session)
+            await sendConfigBindingResponse(session, { requestId, ok: true, value })
+          } catch (error) {
+            await sendConfigBindingResponse(session, { requestId, ok: false, ...configBridgeError(error) })
+          }
+        })()
+      })
+    }
     const bundle = await buildRendererBundle({ ...configured, plugins: [...configured.plugins, ...nativePlugins] }, {
       profileId,
       generation,
       pluginActivation: active,
+      ...(writeFixture ? { configBridgeToken: configToken } : {}),
       ...(archive === undefined ? {} : {
         permission: { profileId, policies },
         ...(channel?.manager === undefined ? {} : { channelManager: channel.manager }),
@@ -329,7 +397,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       })
       throw new Error('Desktop fixture did not start: ' + JSON.stringify(diagnostics), { cause: error })
     }
-    unregister = cdp.register(desktop as never)
+    unregister = cdp.register((nativeConfigSession ?? desktop) as never)
     const configProof = vi.spyOn(cdp, 'managerConfigProof')
     const managerOwner = await openManagerOwner(profileId, { CORDISX_HOME: homeDir })
     // Built assets are used by the same sidecar module shipped in the package.
@@ -396,12 +464,67 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     first = await connect(firstTarget.targetId)
     await first.send('Page.navigate', { url: url(web.url) })
     await ready(first)
+    if (writeFixture) {
+      expect(
+        await first.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
+        .find(item => item.id === 'desktop-config-fixture')?.configuration.writable`),
+      ).toBe(true)
+      await first.evaluate("globalThis.__desktopConfigDocumentMarker = 'same-document'")
+      await openDesktopConfig(first)
+      await editDesktopConfig(first, 'first update')
+      try {
+        await expectDesktopConfigApplied(first, desktop, configStore, 2, 'first update')
+      } catch (error) {
+        const status = await first.evaluate(`({
+          text: document.querySelector('p[role=status]')?.textContent,
+          hidden: document.querySelector('p[role=status]')?.hidden,
+          runtime: Boolean(globalThis.__cordisxRuntime),
+          form: document.querySelector('[data-plugin-config-form=desktop-config-fixture]')?.dataset.state,
+        })`).catch(() => undefined)
+        const stored = await configStore.loadStable('desktop-config-fixture').then(value => value.revision).catch(() =>
+          'pending'
+        )
+        throw new Error(
+          'Desktop config browser diagnostics: ' + JSON.stringify({
+            status,
+            stored,
+            nativeConfigEvents,
+          }),
+          { cause: error },
+        )
+      }
+    }
     const secondTarget = await desktop.send('Target.createTarget', { url: 'about:blank' }) as {
       targetId: string
     }
     second = await connect(secondTarget.targetId)
     await second.send('Page.navigate', { url: url(web.issueUrl()) })
     await ready(second)
+    if (writeFixture) {
+      expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'first update' })
+      await editDesktopConfig(first, 'retained draft')
+      await expectDesktopConfigBusy(first, 'retained draft')
+      expect(await configStore.loadStable('desktop-config-fixture')).toEqual({
+        revision: 2,
+        config: { label: 'first update' },
+      })
+      await desktop.send('Target.closeTarget', { targetId: secondTarget.targetId })
+      await second.close().catch(() => {})
+      second = undefined
+      await vi.waitFor(() => {
+        expect(owner.managementOptions.rendererDesktopPackageConfig?.participants.ownerPeers()).toHaveLength(1)
+      }, { timeout: 15_000 })
+      await first.evaluate(
+        "document.querySelector('[data-plugin-config-form=desktop-config-fixture] button[type=submit]').click()",
+      )
+      await expectDesktopConfigApplied(first, desktop, configStore, 3, 'retained draft')
+      const reopened = await desktop.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
+      second = await connect(reopened.targetId)
+      await second.send('Page.navigate', { url: url(web.issueUrl()) })
+      await ready(second)
+      expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
+      return
+    }
     const snapshot = async (page: CdpClient) =>
       await page.evaluate(`({
         active: globalThis.__cordisxRuntime.activePluginGeneration(),
@@ -774,6 +897,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
     await composition?.close().catch(() => {})
     await owner.close()
     unregister?.()
+    nativeConfigSession?.close()
     await desktop?.close().catch(() => {})
     if (browser) await stopChrome(browser)
     await managed.dispose()
@@ -800,6 +924,12 @@ it.skipIf(chrome === undefined)(
 it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
   'projects a redacted Desktop plugin configuration into two Manager pages',
   async () => await exerciseDesktopOwner(undefined, false, true),
+  120_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'saves a proven Desktop package field in place and retains a busy draft across Manager sessions',
+  async () => await exerciseDesktopOwner(undefined, false, true, true),
   120_000,
 )
 
