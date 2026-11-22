@@ -9,6 +9,7 @@ import type { NativeSourceConfiguration } from './native-source-configuration.js
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import type { CodexCreationSettings } from '../codex-creation-settings.js'
 import { codexCreationSelection } from './codex-creation-selection.js'
+import { nativeTaskEffort, nativeTaskSelectionAllowed } from './native-agent-task-effort.js'
 
 const object = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined
@@ -60,6 +61,9 @@ export class NativeAgentTasks {
       ?? (valid(turn?.turn_id) && ['string', 'number'].includes(typeof meta?.['cordisx/mcpRequestId'])
         ? `${turn.turn_id}:${String(meta!['cordisx/mcpRequestId'])}`
         : undefined)
+    if (value?.thinking !== undefined && !isModelReasoningEffort(value.thinking)) {
+      return { status: 'rejected', reason: 'invalid-reasoning-effort' }
+    }
     if (
       !value || !valid(sourceThreadId) || !valid(sourceTurnId) || !valid(sourceCallId) || !valid(value.operationId, 128)
       || value.providerId !== undefined && !valid(value.providerId, 128)
@@ -69,7 +73,7 @@ export class NativeAgentTasks {
       || value.prompt.length > 100_000 || value.prompt.includes('\0') || !object(value.target)
       || !validTarget(value.target) || (value.title !== undefined && !valid(value.title))
       || Object.keys(value).some(key =>
-        !['operationId', 'providerId', 'model', 'fast', 'prompt', 'target', 'title'].includes(key)
+        !['operationId', 'providerId', 'model', 'fast', 'thinking', 'prompt', 'target', 'title'].includes(key)
       )
     ) return { status: 'rejected', reason: 'invalid-creation' }
     const fingerprint = createHash('sha256').update(JSON.stringify([sourceThreadId, value])).digest('hex')
@@ -138,11 +142,14 @@ export class NativeAgentTasks {
     ) {
       return { status: 'rejected', reason: 'selection-outside-catalog' }
     }
+    const effort = nativeTaskEffort(catalog, value.providerId, value.model, value.thinking)
+    if ('reason' in effort) return { status: 'rejected', reason: effort.reason }
     const callId = `cordisx-task-${createHash('sha256').update(sourceCallId).digest('hex')}-${randomUUID()}`
     const args = {
       prompt: value.prompt,
       target: value.target,
       ...(value.title === undefined ? {} : { title: value.title }),
+      ...(effort.effort === undefined ? {} : { thinking: effort.effort }),
     }
     await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
     const directory = await lstat(this.authority.directory)
@@ -282,23 +289,43 @@ export class NativeAgentTasks {
     this.report({ event: 'native-task-create', phase: 'claim-matched', requestRef: diagnosticRef(intent.callId) })
     if (!await this.authority.available()) throw new Error('Native task adapter retired')
     const catalog = await this.authority.catalog()
+    const providerId = intent.arguments.providerId, model = intent.arguments.model
     if (
-      !catalog.some(provider =>
-        provider.providerId === intent.arguments.providerId
-        && provider.models.some(model => model.id === intent.arguments.model)
+      !valid(providerId, 128) || !valid(model) || !catalog.some(provider =>
+        provider.providerId === providerId
+        && provider.models.some(item => item.id === model)
       )
     ) {
       throw new Error('Native task selection unavailable')
     }
+    const effort = nativeTaskEffort(
+      catalog,
+      providerId,
+      model,
+      intent.arguments.thinking,
+    )
+    if ('reason' in effort) throw new Error(`Native task effort unavailable: ${effort.reason}`)
+    const explicitFast = typeof intent.arguments.fast === 'boolean'
+    if (
+      !nativeTaskSelectionAllowed(catalog, {
+        providerId,
+        model,
+        ...(explicitFast ? { fastExplicit: true, serviceTier: intent.arguments.fast ? 'priority' : null } : {}),
+      })
+    ) throw new Error('Native task selection unavailable')
     const source = await this.authority.sourceConfiguration?.(intent.sourceThreadId)
     const handle = await this.authority.routing.prepare({
       callId: intent.callId,
       sourceThreadId: intent.sourceThreadId,
-      providerId: String(intent.arguments.providerId),
-      model: String(intent.arguments.model),
-      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort }),
-      ...(typeof intent.arguments.fast === 'boolean'
-        ? { serviceTier: intent.arguments.fast ? 'priority' : null }
+      providerId,
+      model,
+      ...(effort.effort !== undefined
+        ? { reasoningEffort: effort.effort, reasoningExplicit: true }
+        : source === undefined
+        ? {}
+        : { reasoningEffort: source.reasoningEffort }),
+      ...(explicitFast
+        ? { serviceTier: intent.arguments.fast ? 'priority' : null, fastExplicit: true }
         : source === undefined
         ? {}
         : { serviceTier: source.serviceTier }),

@@ -98,7 +98,7 @@ a bound chat explicitly.
 
 ```sh
 cordisx codex chats create --provider PROVIDER --model MODEL \
-  --message "Work on this task" --operation STABLE_ID --project NATIVE_PROJECT_ID
+  --effort high --message "Work on this task" --operation STABLE_ID --project NATIVE_PROJECT_ID
 ```
 
 This uses [the existing native task creation path](native-agent-task-creation.md),
@@ -107,7 +107,14 @@ for a projectless target. Source identity must identify an actual calling chat
 and turn through `CODEX_THREAD_ID`/`CODEX_TURN_ID`, or explicit `--source-session`
 and `--source-turn`. The command does not fabricate them or substitute a backend
 thread for an App task. Keep the same operation ID after uncertain delivery;
-changing it can create another task. Runtime `providerCreation` availability is
+changing it can create another task. `--effort` is optional and must appear in
+the selected model's advertised reasoning capabilities; it applies to the first
+turn. An unknown or unsupported value is rejected before provisioning. A project
+may explicitly select `--environment worktree` and, when requested,
+`--starting-state working-tree` or `--starting-state branch --branch REF`
+with optional `--on-missing error|create-branch`. A projectless task can use
+`--directory-name NAME`. These flags do not accept arbitrary cwd or permission
+overrides. Runtime `providerCreation` availability is
 required. Provider/model/Fast flags can be omitted to use the profile creation
 defaults. Stable operation replay keeps its original result even after defaults change. Native Codex creation tools remain preferred without a provider override.
 

@@ -47,6 +47,7 @@ import {
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
 import { startNativeAgentModelsServer } from './native-agent-models.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
+import { nativeTaskSelectionAllowed } from './native-agent-task-effort.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
 import { createChannelNativeSession } from './channel-native-composition.js'
 import * as desktopContext from './desktop-native-context-observer.js'
@@ -775,11 +776,8 @@ export async function prepareNativeSubmissionBootstrap(
         taskRouting = new NativeAgentTaskRouting(
           controller,
           async selection =>
-            selection.providerId === 'openai'
-            || (await catalog()).some(provider =>
-              provider.providerId === selection.providerId
-              && provider.models.some(model => model.id === selection.model)
-            ),
+            selection.providerId === 'openai' && !selection.reasoningExplicit && !selection.fastExplicit
+            || nativeTaskSelectionAllowed(await (chatConfiguration?.catalog() ?? catalog()), selection),
         )
         lifetime.signal.throwIfAborted()
         control.bindTaskRouting(taskRouting)

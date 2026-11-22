@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type DiagnosticEvent, withDiagnostics } from '../packages/cli/src/diagnostics/context.js'
 import { NativeAgentTasks } from '../packages/cli/src/launcher/native-agent-tasks.js'
 import { NativeAgentTaskRouting } from '../packages/cli/src/launcher/native-agent-task-routing.js'
+import { nativeTaskSelectionAllowed } from '../packages/cli/src/launcher/native-agent-task-effort.js'
 import {
   applyAgentTaskStructure,
   nativeAgentTaskTransforms,
@@ -50,6 +51,126 @@ async function fixture() {
   return { controller, routing, authority, tasks: new NativeAgentTasks(authority) }
 }
 describe('provider-aware native task operation', () => {
+  it('validates explicit effort and carries it through native start and the first turn', async () => {
+    const f = await fixture()
+    const catalog = async () =>
+      [{
+        providerId: 'configured',
+        pluginId: 'host',
+        models: [{
+          id: 'model',
+          aliases: [],
+          supportsFastMode: true,
+          reasoningCapabilities: { efforts: ['low', 'high'] },
+        }],
+      }] as any
+    let tasks: NativeAgentTasks
+    const invoke = vi.fn(async (request: any) => {
+      expect(request.arguments).toMatchObject({ thinking: 'high', title: 'Task', target: input.target })
+      const handle = await tasks.claim({ ...request, hostId: 'local' }) as { token: string; reasoningEffort: string }
+      expect(handle.reasoningEffort).toBe('high')
+      const start = { operationToken: handle.token, method: 'thread/start' as const, requestId: 1 }
+      expect(await f.routing.consume(start)).toMatchObject({
+        providerId: 'configured',
+        model: 'model',
+        reasoningEffort: 'high',
+        serviceTier: null,
+      })
+      expect(await f.routing.authorize(handle.token, 1)).toBe(true)
+      await f.routing.complete({
+        operationToken: handle.token,
+        requestId: 1,
+        succeeded: true,
+        boundThreadId: 'created',
+        providerId: 'configured',
+        model: 'model',
+      })
+      const turn = { operationToken: handle.token, method: 'turn/start' as const, requestId: 2, threadId: 'created' }
+      expect(await f.routing.consume(turn)).toMatchObject({ reasoningEffort: 'high', serviceTier: null })
+      expect(await f.routing.authorize(handle.token, 2)).toBe(true)
+      await f.routing.complete({ operationToken: handle.token, requestId: 2, succeeded: true })
+      return { content: [{ type: 'text', text: JSON.stringify({ threadId: 'created', hostId: 'local' }) }] }
+    })
+    tasks = new NativeAgentTasks({
+      ...f.authority,
+      catalog,
+      invoke,
+      sourceConfiguration: async () => ({
+        providerId: 'configured',
+        model: 'model',
+        reasoningEffort: 'low',
+        serviceTier: 'priority',
+      }),
+    })
+    const request = { ...input, thinking: 'high', fast: false, title: 'Task' }
+    expect(await tasks.create(request, metadata)).toMatchObject({ status: 'created' })
+    expect(await tasks.create({ ...request, thinking: 'low' }, metadata)).toMatchObject({
+      reason: 'operation-conflict',
+    })
+    expect(invoke).toHaveBeenCalledOnce()
+  })
+  it('rejects unknown, unsupported or unverified effort before creating an intent', async () => {
+    const f = await fixture()
+    const catalog = async () =>
+      [{
+        providerId: 'configured',
+        pluginId: 'host',
+        models: [{ id: 'model', aliases: [], reasoningCapabilities: { efforts: ['low'] } }],
+      }] as any
+    const tasks = new NativeAgentTasks({ ...f.authority, catalog })
+    expect(await tasks.create({ ...input, thinking: 'invented' }, metadata)).toMatchObject({
+      reason: 'invalid-reasoning-effort',
+    })
+    expect(await tasks.create({ ...input, thinking: 'high' }, metadata)).toMatchObject({
+      reason: 'reasoning-effort-unsupported',
+    })
+    const malformed = new NativeAgentTasks({
+      ...f.authority,
+      catalog: async () =>
+        [{
+          providerId: 'configured',
+          pluginId: 'host',
+          models: [{ id: 'model', aliases: [], reasoningCapabilities: { efforts: 'low' } }],
+        }] as any,
+    })
+    expect(await malformed.create({ ...input, thinking: 'low' }, metadata))
+      .toMatchObject({ reason: 'reasoning-capabilities-unavailable' })
+    expect(f.authority.invoke).not.toHaveBeenCalled()
+    expect(await readdir(f.authority.directory)).toEqual([])
+  })
+  it('revokes an explicitly selected effort or Fast mode if the catalog changes before a native write', async () => {
+    const f = await fixture()
+    let supported = true
+    const catalog = () =>
+      [{
+        providerId: 'configured',
+        pluginId: 'host',
+        models: [{
+          id: 'model',
+          aliases: [],
+          supportsFastMode: supported,
+          reasoningCapabilities: { efforts: supported ? ['low', 'high'] : ['low'] },
+        }],
+      }] as any
+    const routing = new NativeAgentTaskRouting(
+      f.controller,
+      async selection => nativeTaskSelectionAllowed(catalog(), selection),
+    )
+    const route = await routing.prepare({
+      callId: 'call',
+      sourceThreadId: 'source',
+      providerId: 'configured',
+      model: 'model',
+      reasoningEffort: 'high',
+      reasoningExplicit: true,
+      serviceTier: 'priority',
+      fastExplicit: true,
+    })
+    supported = false
+    expect(await routing.consume({ operationToken: route.token, method: 'thread/start', requestId: 1 }))
+      .toMatchObject({ kind: 'reject', reason: 'selection-outside-catalog' })
+    await routing.close()
+  })
   it('records an exact pre-dispatch missing-source rejection without retrying the native operation', async () => {
     const f = await fixture()
     f.authority.invoke.mockRejectedValue(Object.assign(new Error('private native detail'), {
