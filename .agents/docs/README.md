@@ -136,6 +136,10 @@ implementation of those contracts, not a second public specification.
 
 ## Maintainer and artifact entry points
 
+- [Local runtime resource maintenance](../rules/local-runtime-resources.md):
+  installation roots, configured previews, bounded compilation caches, and
+  cleanup after validation; operator rules rather than automatic Host behavior.
+
 - [CI validation and diagnosis](ci-validation.md): scope selection, Skill package checks, and slow-phase diagnosis.
 
 - [Release recovery](release-recovery.md): registry propagation, idempotent reruns, prepared artifact reuse, and conflict diagnosis.
@@ -192,4 +196,7 @@ or protocol sources. Availability depends on the installed CordisX version.
 
 - [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.
 - [Channel media and reactions](channel-media-reactions.md): model capability boundaries, bot-owned reaction CLI, completion mapping and event context.
+- [Channel memory proposal](channel-memory-design.md): scoped directory-backed memory design, partial local CLI implementation and remaining authority gates.
+- [Channel memory real-model scenarios](channel-memory-model-validation.md): durable Host-owned harness, setup/approval boundaries, persona core versus style-delivery matrix, model/tool metrics and reproducible synthetic evidence.
+- [Channel memory Protocol handoff](channel-memory-protocol-handoff.md): exact owner contract contribution and Host integration files for coordinated delivery.
 - [Context threshold and live continuation](context-threshold-continuation.md): effective compaction budget, observed usage, and target-ready handoff boundaries.

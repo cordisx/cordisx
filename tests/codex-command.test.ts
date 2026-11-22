@@ -67,6 +67,84 @@ test('provider-aware CLI creation preserves a stable operation and native projec
     })
 })
 
+test('provider-aware creation carries a checked effort and explicit native target options', async () => {
+  expect(
+    await parseCodexCommand([
+      'chats',
+      'create',
+      '--provider',
+      'p',
+      '--model',
+      'm',
+      '--effort',
+      'high',
+      '--fast',
+      'false',
+      '--message',
+      'work',
+      '--operation',
+      'op',
+      '--title',
+      'Task',
+      '--project',
+      'project',
+      '--environment',
+      'worktree',
+      '--starting-state',
+      'branch',
+      '--branch',
+      'feature',
+      '--on-missing',
+      'create-branch',
+    ]),
+  ).toMatchObject({
+    operation: 'create',
+    input: {
+      providerId: 'p',
+      model: 'm',
+      thinking: 'high',
+      fast: false,
+      title: 'Task',
+      target: {
+        type: 'project',
+        projectId: 'project',
+        environment: {
+          type: 'worktree',
+          startingState: { type: 'branch', branchName: 'feature', onMissing: 'create-branch' },
+        },
+      },
+    },
+  })
+  expect(
+    await parseCodexCommand([
+      'chats',
+      'create',
+      '--message',
+      'work',
+      '--operation',
+      'op',
+      '--directory-name',
+      'task',
+    ]),
+  ).toMatchObject({ input: { target: { type: 'projectless', directoryName: 'task' } } })
+  for (
+    const flags of [
+      ['--effort', 'invented'],
+      ['--environment', 'worktree'],
+      ['--project', 'p', '--environment', 'local', '--starting-state', 'working-tree'],
+      ['--project', 'p', '--environment', 'worktree', '--branch', 'b'],
+      ['--project', 'p', '--environment', 'worktree', '--starting-state', 'branch'],
+      ['--project', 'p', '--directory-name', 'task'],
+      ['--directory-name', '../outside'],
+      ['--directory-name', '/outside'],
+      ['--directory-name', '..'],
+    ]
+  ) {
+    await expect(parseCodexCommand(['chats', 'create', '--message', 'work', '--operation', 'op', ...flags]))
+      .rejects.toThrow()
+  }
+})
+
 test('model defaults, Fast and project settings retain explicit scope and false values', async () => {
   expect(
     await parseCodexCommand([

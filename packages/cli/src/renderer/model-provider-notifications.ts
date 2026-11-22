@@ -11,6 +11,7 @@ type Notice =
   | 'selection.queued'
   | 'selection.busy'
   | 'selection.failed'
+  | 'source.failed'
   | 'reasoning.updated'
   | 'intent.pending'
   | 'submission.rejected'
@@ -73,6 +74,7 @@ export function useModelProviderNotifications(
       'selection.queued': copy.nextSend,
       'selection.busy': copy.busy,
       'selection.failed': copy.failed,
+      'source.failed': copy.sourceUnavailable,
       'reasoning.updated': copy.updated,
       'intent.pending': managerCopy(locale, 'catalog.startup.intent'),
       'submission.rejected': nativeSubmissionFeedback(copy, rejection),

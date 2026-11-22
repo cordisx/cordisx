@@ -2,6 +2,7 @@ export interface NativeAccountCapabilityDescriptor {
   readonly module: string
   readonly exportName: string
   readonly readerProperty?: 'accessInputs' | 'accountInfo'
+  readonly rspack?: { readonly moduleId: string; readonly definitionModule: string }
 }
 
 /** Serialized into the calling native context; never accepts a plugin-supplied module URL. */
@@ -9,14 +10,27 @@ export async function nativeAccountCapability(
   load: (url: string) => Promise<Record<string, unknown>> = url => import(/* @vite-ignore */ url),
   descriptor?: NativeAccountCapabilityDescriptor,
 ): Promise<{ module: string; native: { TW: { accessInputs: { readAccountInfo(): Promise<unknown> } } } }> {
+  const rspack = descriptor?.rspack
   if (descriptor !== undefined) {
     const target = new URL(descriptor.module)
+    const pathAllowed = rspack
+      ? /^\/assets\/[A-Za-z0-9_-]+\.[a-f0-9]{8,64}\.js$/u.test(target.pathname)
+      : /^\/assets\/app-(?:initial|shared)-[^/]+\.js$/u.test(target.pathname)
     if (
       target.protocol !== 'app:' || target.hostname !== '-' || target.username || target.password || target.search
-      || target.hash
-      || !/^\/assets\/app-(?:initial|shared)-[^/]+\.js$/u.test(target.pathname)
+      || target.hash || !pathAllowed
     ) {
       throw new Error('Native account capability: invalid resource')
+    }
+    if (rspack) {
+      const definition = new URL(rspack.definitionModule)
+      if (
+        descriptor.exportName !== '__webpack_require__' || descriptor.readerProperty !== 'accountInfo'
+        || !/^[A-Za-z0-9_$-]{1,64}$/u.test(rspack.moduleId)
+        || definition.protocol !== 'app:' || definition.hostname !== '-' || definition.username
+        || definition.password || definition.search || definition.hash
+        || !/^\/assets\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.[a-f0-9]{8,64}\.js$/u.test(definition.pathname)
+      ) throw new Error('Native account capability: invalid resource')
     }
   }
   const urls = new Set<string>()
@@ -50,7 +64,17 @@ export async function nativeAccountCapability(
   }
   const exports = await load(module)
   if (descriptor !== undefined) {
-    const service = exports[descriptor.exportName] as
+    let selected: unknown = exports[descriptor.exportName]
+    if (rspack) {
+      if (typeof selected !== 'function') throw new Error('Native account capability: typed reader missing')
+      const require = selected as { readonly c?: Record<string, { readonly exports?: object }> } | undefined
+      const cached = require?.c && Object.getOwnPropertyDescriptor(require.c, rspack.moduleId)?.value as
+        | { readonly exports?: object }
+        | undefined
+      const serviceExport = cached?.exports && Object.getOwnPropertyDescriptor(cached.exports, 'appServices')
+      selected = serviceExport?.get ? serviceExport.get.call(cached!.exports) : serviceExport?.value
+    }
+    const service = selected as
       | {
         accessInputs?: { readAccountInfo(): Promise<unknown> }
         accountInfo?: { readAccountInfo(): Promise<unknown> }
@@ -60,7 +84,9 @@ export async function nativeAccountCapability(
     if (property !== 'accessInputs' && property !== 'accountInfo') {
       throw new Error('Native account capability: invalid reader')
     }
-    const inputs = service?.[property]
+    const inputs = rspack && service
+      ? Object.getOwnPropertyDescriptor(service, property)?.value as { readAccountInfo(): Promise<unknown> } | undefined
+      : service?.[property]
     if (typeof inputs?.readAccountInfo !== 'function') {
       throw new Error('Native account capability: typed reader missing')
     }

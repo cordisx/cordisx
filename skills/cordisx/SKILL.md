@@ -31,6 +31,10 @@ The bundled revision and owning source for this entry are recorded in
 - For Channel connection listing, chat bindings, message listening/history, or
   sending through a configured account, inbound image/audio/file/video handling,
   or bot-owned reactions, read [the Channel guide](references/channel.md).
+- For reproducible Channel memory/persona model validation, read
+  [the Host-owned methodology](https://github.com/cordisx/cordisx/blob/main/.agents/docs/channel-memory-model-validation.md#durable-methodology-and-scenario-matrix).
+  Separate persona core, style delivery and project CI/Protocol release evidence;
+  use synthetic fixtures and existing authorized model configuration only.
 - For supplemental chat settings, explicit creation defaults or shared model-service
   commands, read [the Codex CLI guide](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/codex-cli.md).
   Prefer native tools for ordinary chat operations; an omitted session never means

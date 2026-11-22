@@ -8,6 +8,7 @@ import { CordisXAgentContextService, CordisXAgentTurnControlService } from './ag
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { installModelProviderSelector } from './install-model-provider-selector.js'
+import { scheduleNativeSubmissionReadiness } from './native-submission-readiness.js'
 import { installNativePermissionDisplay } from './native-permission-display.js'
 import { reportNativeModelSelectionUnavailable } from './native-model-availability-notice.js'
 import type {
@@ -889,34 +890,30 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
         __cordisxNativeProviderCommandChannel?: NativeProviderSelectionCommandChannel
         __cordisxNativeSubmissionReady?: Promise<boolean>
       }
-      const nativeReady = native.__cordisxNativeSubmissionReady === undefined
-        ? false
-        : await native.__cordisxNativeSubmissionReady
-      if (
-        !nativeReady && native.__cordisxNativeProviderCommandChannel !== undefined
-        && document.location.href === 'app://-/index.html'
-      ) {
-        runtimeScope.registrySubscriptions()!.push(reportNativeModelSelectionUnavailable(
-          document,
-          runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
-        ))
-      }
       runtimeScope.registrySubscriptions()!.push(installNativePermissionDisplay(document))
-      const disposeModelProviderSelector = await installModelProviderSelector(
-        document,
-        runtimeScope.modelProviders()!,
-        () => runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
-        nativeReady,
-        native.__cordisxNativeProviderOwner,
-        native.__cordisxNativeProviderCommandChannel,
-        threadId => {
-          return runtimeScope.agentDetailNavigator().navigate({
-            target: 'host',
-            url: `app://-/local/${encodeURIComponent(threadId)}`,
-          })
-        },
-      )
-      runtimeScope.registrySubscriptions()!.push(disposeModelProviderSelector)
+      runtimeScope.registrySubscriptions()!.push(scheduleNativeSubmissionReadiness({
+        ready: native.__cordisxNativeSubmissionReady,
+        current: () => !runtimeScope.disposed && !signal?.aborted,
+        unavailable: () =>
+          native.__cordisxNativeProviderCommandChannel !== undefined
+            && document.location.href === 'app://-/index.html'
+            ? reportNativeModelSelectionUnavailable(document, runtimeScope.i18nService?.getSnapshot().locale ?? 'en')
+            : () => {},
+        install: () =>
+          installModelProviderSelector(
+            document,
+            runtimeScope.modelProviders()!,
+            () => runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
+            true,
+            native.__cordisxNativeProviderOwner,
+            native.__cordisxNativeProviderCommandChannel,
+            threadId =>
+              runtimeScope.agentDetailNavigator().navigate({
+                target: 'host',
+                url: `app://-/local/${encodeURIComponent(threadId)}`,
+              }),
+          ),
+      }))
     }
   } catch (error) {
     await runtimeScope.dispose()!()

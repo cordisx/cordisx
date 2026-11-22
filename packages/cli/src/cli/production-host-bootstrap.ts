@@ -17,6 +17,7 @@ import {
   type IsolatedCodexProfile,
   launchCodex,
   launchCodexHidden,
+  readCodexAppVersion,
   retainProfileLeaseAfterHiddenHostFailure,
 } from '../launcher/process.js'
 import { releaseHostProfileLease, stopPrelaunchedHost } from './injected-host-cleanup.js'
@@ -40,6 +41,13 @@ export interface ProductionHostBootstrap {
   readonly prelaunchedHost?: Readonly<{ child: ChildProcess; hostPid: number; inspectorUrl?: Promise<string> }>
 }
 
+export async function managerNativeAppVersion(
+  environment: Readonly<Record<string, string | undefined>>,
+  executable?: string,
+) {
+  return environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1' ? await readCodexAppVersion(executable) : undefined
+}
+
 /** Resolve and reserve shared CLI/App launch inputs before compatibility analysis. */
 export async function prepareProductionHostBootstrap(
   prepared: PreparedRunCommand,
@@ -48,6 +56,7 @@ export async function prepareProductionHostBootstrap(
     signal?: AbortSignal
     prelaunch: boolean
     prepareNativeSubmission: boolean
+    logicalFenceRecovery?: boolean
     mainInspector: boolean
     markHostLaunched(
       pid: number,
@@ -166,6 +175,7 @@ export async function prepareProductionHostBootstrap(
         }
         try {
           nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable, {
+            ...(input.logicalFenceRecovery ? { requireLogicalFences: true } : {}),
             ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
             environment: configuredEnvironment,
             ...(catalog === undefined ? {} : { staticCatalog: catalog }),

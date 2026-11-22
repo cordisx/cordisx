@@ -4,6 +4,7 @@ import path from 'node:path'
 import { connect } from 'node:net'
 import vm from 'node:vm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { bundle as builtinAdapter } from '@cordisx/codex-adapter'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
 import {
@@ -13,6 +14,7 @@ import {
   resolveBundledCodexNodePath,
 } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
+import { selectAdapterModules } from '../packages/cli/src/launcher/codex-adapter/selection.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
 import { applyCatalogManagementPreferences } from '../packages/cli/src/renderer/model-provider-preferences.js'
 import { resources, sharedResources } from './fixtures/native-submission-structure.js'
@@ -99,6 +101,44 @@ it('uses the application HTML entry when the bundler changes every chunk prefix'
   const f = await bundle(false, scripts, '<script type="module" src="./assets/new-entry.js"></script>')
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
     .toEqual(scripts.map(resource => resource.url).sort())
+})
+
+it('discovers the Rspack account reader through the packaged native resource graph', async () => {
+  const scripts = resources()
+  const query = {
+    url: 'app://-/assets/async/111.abcdef1234.js',
+    source: 'export const __webpack_modules__={query:function(module,exports,load){'
+      + "var services=load('account1');"
+      + 'async function read(){let account=services.appServices?.accountInfo;return account.readAccountInfo()}'
+      + '}};',
+  }
+  const definition = {
+    url: 'app://-/assets/async/222.abcdef1234.js',
+    source: 'export const __webpack_modules__={account1:function(module,exports,load){'
+      + 'let value;load.d(exports,{appServices:()=>value},{setAppServices:function(next){value=next}})'
+      + '}};',
+  }
+  const runtime = {
+    url: 'app://-/assets/333.abcdef1234.js',
+    source: scripts.map(script => 'import "./' + path.basename(script.url) + '";').join('')
+      + 'import "./async/111.abcdef1234.js";import "./async/222.abcdef1234.js";'
+      + 'let loader;export {loader as __webpack_require__};',
+  }
+  scripts.push(query, definition, runtime)
+  const f = await bundle(false, scripts, '<script type="module" src="./assets/333.abcdef1234.js"></script>')
+  const found = readNativeSubmissionResources(f.contents)
+  expect(found.map(resource => resource.url)).toContain(definition.url)
+  const selected = selectAdapterModules([{ identity: 'builtin', bundle: builtinAdapter }], {
+    appVersion: 'fixture',
+    buildNumber: 'fixture',
+    resources: found,
+  })
+  expect(selected.accountCapability).toEqual({
+    module: runtime.url,
+    exportName: '__webpack_require__',
+    readerProperty: 'accountInfo',
+    rspack: { moduleId: 'account1', definitionModule: definition.url },
+  })
 })
 
 it('reads finite async chunk tables from the real ASAR and preserves nested resource URLs', async () => {

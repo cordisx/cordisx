@@ -1,6 +1,8 @@
 import type { ProviderSelectionSnapshot } from './model-provider-selector.js'
 import type { NativeSubmissionRejection } from './native-provider-selection-client.js'
 
+export const nativeProviderTiming = { controlRetryMs: 50, controlAttempts: 20, turnRetryMs: 500 } as const
+
 export interface SelectionSnapshot extends ProviderSelectionSnapshot {
   readonly error?: string
 }

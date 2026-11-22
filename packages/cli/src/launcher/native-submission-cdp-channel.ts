@@ -1,7 +1,11 @@
 import { createNativeTaskCreationReadiness } from './native-task-creation-readiness.js'
+import { desktopLogicalIdentity } from './desktop-logical-identity.js'
+import { desktopLogicalCdpNavigation } from './desktop-logical-navigation.js'
+import { readNativeHttpAccount } from './plugin-http-native-account.js'
+import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import type { NativeTaskCreationStatus } from './native-task-creation-readiness.js'
 import { readNativeSourceConfiguration, reconcileNativeThreadSelection } from './native-source-configuration.js'
-import { NativeDraftModelPreference, type NativeDraftModelPreferenceValue } from './native-draft-model-preference.js'
+import { NativeDraftModelPreference } from './native-draft-model-preference.js'
 import { randomUUID } from 'node:crypto'
 import { nativeSubmissionChannelCleanup } from './native-submission-channel-cleanup.js'
 import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
@@ -37,12 +41,9 @@ import type {
   NativeSubmissionScope,
   NativeSubmissionSelectionAuthority,
 } from './native-submission-controller.js'
-import type {
-  NativeProviderSelection,
-  NormalizedNativeSubmissionAction,
-  PendingNativeProviderChange,
-} from '../renderer/native-provider-submission-policy.js'
-import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import type { NativeProviderSelection } from '../renderer/native-provider-submission-policy.js'
+import { actionOf, record, scopeOf, selectionOf, text } from './native-submission-cdp-validation.js'
+import { key, projection, type State } from './native-submission-cdp-state.js'
 import type {
   ModelServicesReadResult,
   ModelServicesSaveRequest,
@@ -51,86 +52,11 @@ import type {
 
 const BINDING = '__cordisxNativeSubmissionCommand'
 const RECEIVER = '__cordisxNativeSubmissionReceive'
-const key = (scope: NativeSubmissionScope): string =>
-  JSON.stringify([
-    scope.targetId,
-    scope.rendererGeneration,
-    scope.navigationGeneration,
-    scope.threadId ?? null,
-    scope.composerId ?? null,
-  ])
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-const text = (value: unknown, max = 512): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
-function scopeOf(value: unknown): NativeSubmissionScope {
-  const scope = record(value)
-  if (
-    !scope || !text(scope.targetId) || !text(scope.rendererGeneration, 256)
-    || !Number.isSafeInteger(scope.navigationGeneration) || (scope.navigationGeneration as number) < 0
-    || (scope.threadId !== undefined && !text(scope.threadId))
-    || (scope.composerId !== undefined && !text(scope.composerId, 256))
-  ) throw new Error('Invalid native scope')
-  return {
-    targetId: scope.targetId,
-    rendererGeneration: scope.rendererGeneration,
-    navigationGeneration: scope.navigationGeneration as number,
-    ...(typeof scope.composerId === 'string' ? { composerId: scope.composerId } : {}),
-    ...(typeof scope.threadId === 'string' ? { threadId: scope.threadId } : {}),
-  }
-}
-function selectionOf(value: unknown): NativeProviderSelection {
-  const selection = record(value)
-  if (!selection || !text(selection.providerId, 128) || !text(selection.model)) {
-    throw new Error('Invalid native selection')
-  }
-  return { providerId: selection.providerId, model: selection.model }
-}
-function actionOf(value: unknown): NormalizedNativeSubmissionAction {
-  const action = record(value)
-  if (
-    !action || !text(action.operationId, 256) || !Number.isSafeInteger(action.operationGeneration)
-    || (action.operationGeneration as number) < 1 || (action.threadId !== undefined && !text(action.threadId))
-    || (action.reasoningEffort !== undefined && !isModelReasoningEffort(action.reasoningEffort))
-    || (action.continuationAvailable !== undefined && typeof action.continuationAvailable !== 'boolean')
-    || !['ordinary-send', 'steer', 'queue', 'edit-retry', 'unknown-submission', 'non-submission'].includes(
-      String(action.intent),
-    )
-  ) throw new Error('Invalid native action')
-  return action as unknown as NormalizedNativeSubmissionAction
-}
-interface State {
-  scope: NativeSubmissionScope
-  revision: number
-  nextGeneration: number
-  effective?: NativeProviderSelection
-  pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
-  pending?: PendingNativeProviderChange
-  draftPreference?: NativeDraftModelPreferenceValue
-  draftUserSelected?: true
-}
-const projection = (state: State) => ({
-  available: state.effective !== undefined,
-  revision: state.revision,
-  ...(state.effective ? { effective: state.effective } : {}),
-  ...(state.pendingProviderIntent ? { pendingProviderIntent: state.pendingProviderIntent } : {}),
-  ...(state.pending === undefined
-    ? {}
-    : {
-      pending: {
-        providerId: state.pending.providerId,
-        model: state.pending.model,
-        generation: state.pending.selectionGeneration,
-        ...(state.pending.sendOnly ? { sendOnly: true } : {}),
-        ...(state.pending.blockedReason ? { blockedReason: state.pending.blockedReason } : {}),
-      },
-    }),
-  ...(state.draftPreference === undefined ? {} : { draftPreference: state.draftPreference }),
-})
 interface DocumentOwner {
   generation: string
   session: CdpSession
   disposed: boolean
+  executionContextId?: number
 }
 export interface NativeSubmissionCdpAuthority {
   readonly selection: NativeSubmissionSelectionAuthority
@@ -142,6 +68,8 @@ export interface NativeSubmissionCdpAuthority {
   }
   bindController(controller: NativeSubmissionController): void
   sourceConfiguration(threadId: string): ReturnType<typeof readNativeSourceConfiguration>
+  desktopIdentity(scope: NativeSubmissionScope): Promise<string | undefined>
+  desktopOwnerIdentity(scope: NativeSubmissionScope): Promise<string | undefined>
   taskCreationAvailable(): Promise<boolean>
   taskCreationStatus(): Promise<NativeTaskCreationStatus>
   providerDisplays(): Promise<readonly ModelProviderDisplay[]>
@@ -150,6 +78,7 @@ export interface NativeSubmissionCdpAuthority {
 
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
 export function createNativeSubmissionCdpAuthority(options: {
+  readonly accountCapability?: NativeAccountCapabilityDescriptor
   readonly taskExecutionUrl?: string
   readonly taskClaim?: (input: unknown) => Promise<unknown>
   readonly submissionAvailable?: boolean
@@ -356,7 +285,29 @@ export function createNativeSubmissionCdpAuthority(options: {
     },
   }
   const taskCreationStatus = createNativeTaskCreationReadiness(options.taskExecutionUrl, documents)
+  const accountIdentity = async (scope: NativeSubmissionScope, requireScope: boolean) => {
+    const owner = documents.get(scope.targetId), contextId = owner?.executionContextId
+    if (!owner || !contextId || !scope.threadId || owner.generation !== scope.rendererGeneration) return undefined
+    const stillOwned = () =>
+      documents.get(scope.targetId) === owner && owner.executionContextId === contextId
+      && !owner.disposed && !owner.session.isClosed()
+    const current = async () =>
+      stillOwned() && (!requireScope || await runtime.revalidate(scope, false)) && stillOwned()
+    return desktopLogicalIdentity({
+      current,
+      read: () =>
+        readNativeHttpAccount(
+          owner.session,
+          contextId,
+          () => documents.get(scope.targetId) === owner && !owner.disposed && owner.executionContextId === contextId,
+          undefined,
+          options.accountCapability,
+        ),
+    })
+  }
   return {
+    desktopIdentity: scope => accountIdentity(scope, true),
+    desktopOwnerIdentity: scope => accountIdentity(scope, false),
     async providerDisplays() {
       const owners = [...documents.values()].filter(owner => !owner.disposed && !owner.session.isClosed())
       if (owners.length !== 1) return []
@@ -610,6 +561,32 @@ export function createNativeSubmissionCdpAuthority(options: {
           if (scope.threadId && agentSelections.has(scope.threadId) && envelope.operation !== 'selectionRead') {
             throw new Error('Agent provider selection is in progress')
           }
+          if (envelope.operation === 'logicalPrevious' || envelope.operation === 'logicalNext') {
+            const read = envelope.operation === 'logicalPrevious'
+              ? controller!.logicalPrevious
+              : controller!.logicalNext
+            const neighbor = await read(scope)
+            const current = await liveScope(scope)
+            if (!current || key(current) !== key(scope) || owner.disposed) throw new Error('Stale native document')
+            const confirmed = neighbor && await read(scope) === neighbor ? neighbor : null
+            const after = await liveScope(scope)
+            if (!after || key(after) !== key(scope) || owner.disposed) throw new Error('Stale native document')
+            await respond(requestId, confirmed)
+            return
+          }
+          if (envelope.operation === 'logicalSourceNavigation') {
+            await respond(
+              requestId,
+              await desktopLogicalCdpNavigation(
+                controller!,
+                scope,
+                input?.sessionId,
+                () => liveScope(scope),
+                () => owner.disposed,
+              ),
+            )
+            return
+          }
           let state = states.get(key(scope))
           if (envelope.operation === 'selectionRead') {
             const supplied = input?.effective === undefined ? undefined : selectionOf(input.effective)
@@ -822,14 +799,56 @@ export function createNativeSubmissionCdpAuthority(options: {
             }
             await respond(
               requestId,
-              result.kind === 'confirm'
+              result.kind === 'confirm' || result.kind === 'confirm-logical'
                 ? {
+                  ...result,
                   status: result.kind,
                   confirmationId: result.confirmationId,
                   expectedSelectionRevision: result.selectionRevision,
                 }
                 : { ...result, status: result.kind, ...(rejectedProjection ? { projection: rejectedProjection } : {}) },
             )
+          } else if (envelope.operation === 'submissionConfirmLogical') {
+            if (
+              !text(input?.confirmationId, 256) || !Number.isSafeInteger(input?.expectedSelectionRevision)
+              || !['linked', 'fork'].includes(String(input?.mode))
+              || !['on-demand', 'inherit'].includes(String(input?.historyConsent))
+              || input?.remember !== undefined
+                && !['conversation', 'profile', 'inherit'].includes(String(input.remember))
+              || input?.channelCode !== undefined
+                && (typeof input.channelCode !== 'string' || !/^[A-Za-z0-9_-]{32}$/u.test(input.channelCode))
+            ) {
+              throw new Error('Invalid logical confirmation')
+            }
+            const beforePending = state?.pending
+            const result = await controller!.confirmLogicalSubmission({
+              scope,
+              confirmationId: input.confirmationId,
+              expectedSelectionRevision: input.expectedSelectionRevision as number,
+              mode: input.mode as 'linked' | 'fork',
+              historyConsent: input.historyConsent as 'on-demand' | 'inherit' | 'none',
+              ...(input.remember === undefined
+                ? {}
+                : { remember: input.remember as 'conversation' | 'profile' | 'inherit' }),
+              ...(input.channelCode === undefined ? {} : { channelCode: input.channelCode as string }),
+            })
+            let rejectedProjection
+            if (
+              result.kind === 'reject' && state?.pending && state.pending === beforePending
+              && (result.reason === 'provider-switch-unsupported'
+                || result.reason === 'provider-switch-reconciliation-required')
+            ) {
+              if (state.pending.blockedReason !== result.reason) {
+                state.pending = { ...state.pending, blockedReason: result.reason }
+                state.revision++
+              }
+              rejectedProjection = projection(state)
+            }
+            await respond(requestId, {
+              ...result,
+              status: result.kind,
+              ...(rejectedProjection ? { projection: rejectedProjection } : {}),
+            })
           } else if (envelope.operation === 'submissionConfirm') {
             if (!text(input?.confirmationId, 256) || !Number.isSafeInteger(input?.expectedSelectionRevision)) {
               throw new Error('Invalid confirmation')
@@ -869,7 +888,12 @@ export function createNativeSubmissionCdpAuthority(options: {
       }
       await session.send('Runtime.addBinding', { name: BINDING })
       const remove = session.onEvent('Runtime.bindingCalled', params => {
-        if (params.name === BINDING && typeof params.payload === 'string') void dispatch(params.payload)
+        if (params.name === BINDING && typeof params.payload === 'string') {
+          if (Number.isSafeInteger(params.executionContextId) && Number(params.executionContextId) > 0) {
+            owner.executionContextId = Number(params.executionContextId)
+          }
+          void dispatch(params.payload)
+        }
       })
       const source = `(() => {
         const generation=${
@@ -904,7 +928,7 @@ export function createNativeSubmissionCdpAuthority(options: {
         options.modelServices
           ? "modelServicesRead:()=>call('modelServicesRead',{generation}),modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
           : ''
-      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
+      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),logicalPrevious:input=>call('logicalPrevious',input),logicalNext:input=>call('logicalNext',input),logicalSourceNavigation:input=>call('logicalSourceNavigation',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionConfirmLogical:input=>call('submissionConfirmLogical',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined

@@ -258,6 +258,10 @@ describe('Agent model-provider tools', () => {
     try {
       expect((await request(1, 'initialize', { protocolVersion: '2024-11-05' })).capabilities).toEqual({ tools: {} })
       const advertised = (await request(2, 'tools/list', {})).tools
+      expect(
+        advertised.find((tool: any) => tool.name === 'create_thread_with_provider')
+          .inputSchema.properties.thinking.enum,
+      ).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
       expect(advertised.map((tool: any) => tool.name)).toEqual([
         'list_model_providers',
         'select_thread_model_provider',

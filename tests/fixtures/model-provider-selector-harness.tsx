@@ -42,6 +42,8 @@ export async function setup(model = 'shared', busy = false, options?: {
   }[]
   readonly secondDefaultModelId?: string
   readonly draft?: boolean
+  readonly previous?: string
+  readonly next?: () => string | undefined
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference']
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
@@ -148,6 +150,8 @@ export async function setup(model = 'shared', busy = false, options?: {
     return 'accepted' as const
   })
   const confirmSubmission = vi.fn()
+  const confirmLogicalSubmission = vi.fn()
+  const openLogicalSource = vi.fn(async () => 'accepted' as const)
   root = createRoot(document.getElementById('root')!)
   await act(async () =>
     root!.render(
@@ -165,6 +169,10 @@ export async function setup(model = 'shared', busy = false, options?: {
           selectFastMode,
           cancelProviderIntent,
           confirmSubmission,
+          confirmLogicalSubmission,
+          openLogicalSource,
+          logicalPrevious: async () => options?.previous,
+          logicalNext: async () => options?.next?.(),
         }}
       />,
     )
@@ -177,6 +185,8 @@ export async function setup(model = 'shared', busy = false, options?: {
     cancelProviderIntent,
     snapshot,
     confirmSubmission,
+    confirmLogicalSubmission,
+    openLogicalSource,
     unmount: async () => {
       await act(async () => root?.unmount())
       root = undefined

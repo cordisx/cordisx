@@ -118,6 +118,21 @@ export interface NativeExistingThreadSwitch {
 
 export type NativeSubmissionPreparation =
   | Readonly<{ kind: 'pass-through' }>
+  | Readonly<{ kind: 'allow-logical-turn'; operationToken: string }>
+  | Readonly<
+    {
+      kind: 'confirm-logical'
+      confirmationId: string
+      selectionRevision: number
+      recommended: import('./desktop-logical-migration.js').DesktopLogicalMode
+      forkAvailable: boolean
+      linkedAvailable: boolean
+      legacyFreshPreference?: boolean
+      channelBound?: boolean
+      channelChallenge?: string
+      chain?: ReturnType<typeof import('./desktop-logical-chain.js').desktopLogicalChain>
+    }
+  >
   | Readonly<
     {
       kind: 'allow-original'
@@ -139,6 +154,13 @@ export type NativeSubmissionPreparation =
   }>
 
 export type NativeSubmissionConfirmation =
+  | Readonly<
+    {
+      kind: 'allow-logical-continuation'
+      operationToken: string
+      continuation: Readonly<{ sourceThreadId: string; threadId: string }>
+    }
+  >
   | Readonly<{
     kind: 'allow-original'
     operationToken: string
@@ -232,6 +254,20 @@ export interface NativeSubmissionController {
       expectedSelectionRevision: number
     }>,
   ): Promise<NativeSubmissionConfirmation>
+  confirmLogicalSubmission(
+    input: Readonly<{
+      scope: NativeSubmissionScope
+      confirmationId: string
+      expectedSelectionRevision: number
+      mode: import('./desktop-logical-migration.js').DesktopLogicalMode
+      historyConsent: 'on-demand' | 'inherit' | 'none'
+      remember?: 'conversation' | 'profile' | 'inherit'
+      channelCode?: string
+    }>,
+  ): Promise<NativeSubmissionConfirmation>
+  logicalSourceNavigation(scope: NativeSubmissionScope, sessionId: string): Promise<boolean>
+  logicalPrevious(scope: NativeSubmissionScope): Promise<string | undefined>
+  logicalNext(scope: NativeSubmissionScope): Promise<string | undefined>
   consumeMarkedRequest(request: NativeMarkedRequest): Promise<NativeMarkedRequestConsumption>
   authorizeMarkedRequest(request: NativeReservedRequest): Promise<boolean>
   completeMarkedRequest(
@@ -265,6 +301,10 @@ export interface NativeSubmissionControllerOptions {
   readonly credentials: NativeProviderCredentialBroker
   readonly runtime: NativeSubmissionRuntimeAuthority
   readonly existingThread: NativeExistingThreadSwitch
+  readonly logicalTurns?: ReturnType<
+    typeof import('./desktop-logical-turn-preparation.js').desktopLogicalTurnPreparation
+  >
+  readonly logicalMigration?: ReturnType<typeof import('./desktop-logical-migration.js').desktopLogicalMigration>
   readonly prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
   readonly prepareRemoteProvider?: (
     selection: NativeProviderSelection,

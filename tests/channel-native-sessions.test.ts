@@ -27,6 +27,52 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('does not attribute another turn to a Channel dispatch before its native acknowledgement', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let finish!: (value: unknown) => void
+    const pending = new Promise(resolve => {
+      finish = resolve
+    })
+    const call = vi.fn(() => pending)
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      cwd: '/repo',
+      nativeRequest: async () => ({ thread: { id: 'chat', status: { type: 'idle' } } }),
+      subscribeContinuationEvents: listener => {
+        notify = listener
+        return () => {}
+      },
+    })
+    const dispatch = sessions.start('channel-operation', input, 'chat')
+    await vi.waitFor(() => expect(call).toHaveBeenCalled())
+    notify?.('turn/started', { threadId: 'chat', turn: { id: 'unrelated' } })
+    const unconfirmed = sessions.sourceForLogicalTurn('chat', 'unrelated')
+    sessions.observedDispatch('channel-operation', 'chat', 'intended')
+    expect(await unconfirmed).toBeUndefined()
+    notify?.('turn/started', { threadId: 'chat', turn: { id: 'intended' } })
+    finish({ status: 'sent', sessionId: 'chat', turnId: 'intended' })
+    expect((await dispatch).state).toBe('running')
+    expect(await sessions.sourceForLogicalTurn('chat', 'intended')).toEqual(input.source.event)
+  })
+  it('requires explicit native root provenance for joint history', async () => {
+    let thread: Record<string, unknown> = {
+      id: 'source',
+      forkedFromId: null,
+      parentThreadId: null,
+      attachedToThreadId: null,
+    }
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      cwd: '/repo',
+      nativeRequest: async () => ({ thread }),
+    })
+    const source = { hostId: 'local', appId: 'codex', profileId: 'profile', sessionId: 'source' }
+    expect(await sessions.logicalJointSourceRoot(source)).toBe(true)
+    thread = { ...thread, forkedFromId: 'ancestor' }
+    expect(await sessions.logicalJointSourceRoot(source)).toBe(false)
+    thread = { id: 'source', forkedFromId: null, parentThreadId: null }
+    expect(await sessions.logicalJointSourceRoot(source)).toBe(false)
+  })
   it('enriches admitted desktop models with native Fast metadata without expanding admission', async () => {
     const sessions = new ChannelNativeSessions({
       bridge: () => undefined,
@@ -219,6 +265,26 @@ describe('Channel native task delivery', () => {
     const page = await sessions.continuationHistory('source', { limit: 8 })
     expect(JSON.stringify(page)).not.toContain(token)
     expect(page.entries[0]?.text).toContain('[context redacted]')
+  })
+  it('retires turn identity when the native connection closes', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    const sessions = new ChannelNativeSessions({
+      bridge: () =>
+        ({ call: async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }) }) as unknown as AgentBridge,
+      nativeRequest: async () => ({ thread: { id: 'chat', status: { type: 'active' } } }),
+      cwd: '/tmp',
+      subscribeContinuationEvents: listener => {
+        notify = listener
+        return () => {}
+      },
+    })
+    await sessions.start('operation', input)
+    notify?.('turn/started', { threadId: 'chat', turn: { id: 'turn' } })
+    expect(sessions.sourceFor('chat', 'turn')).toBeDefined()
+    expect(await sessions.logicalTurnActive('chat', 'turn')).toBe(true)
+    notify?.('cordisx/connection/closed', {})
+    expect(sessions.sourceFor('chat', 'turn')).toBeUndefined()
+    expect(await sessions.logicalTurnActive('chat', 'turn')).toBe(false)
   })
   it('correlates the first native approval before the first-turn acknowledgement and forwards scoped model/effort defaults', async () => {
     const message = structuredClone(input)

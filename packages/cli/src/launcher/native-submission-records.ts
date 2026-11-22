@@ -14,6 +14,13 @@ export type SubmissionLease =
   & Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
   & Partial<Pick<RemotePreparedProvider, 'validate' | 'provider'>>
 
+export const remoteConfig = (selection: NativeProviderSelection, lease: SubmissionLease) =>
+  Object.freeze({
+    model_provider: selection.providerId,
+    model: selection.model,
+    [`model_providers.${selection.providerId}`]: lease.provider,
+  })
+
 export interface PreparedBase {
   readonly intentGeneration?: number
   readonly scope: NativeSubmissionScope
@@ -26,6 +33,9 @@ export interface PreparedBase {
 
 export interface Confirmation extends PreparedBase {
   readonly id: string
+  readonly logical?: Readonly<
+    { forkAvailable: boolean; linkedAvailable: boolean; channelBound?: boolean; channelChallenge?: string }
+  >
 }
 
 export interface PreparedOperation extends PreparedBase {
@@ -42,6 +52,7 @@ export interface PreparedOperation extends PreparedBase {
   draftDocumentTimeOrigin?: number
   /** Destination of this one admitted Send; the initiating scope remains the source. */
   continuationThreadId?: string
+  logicalContinuation?: boolean
 }
 
 export interface ActiveBinding {

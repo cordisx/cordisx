@@ -20,6 +20,20 @@ const HELP: Readonly<Record<string, string>> = {
     'Local user only: configure best-effort idle-boundary continuation. Input: {sessionId,policy:{enabled:boolean,threshold:number,reserveTokens:integer,maxAgeMs:integer}}. Disabled by default; no guarantee against compaction.',
   'continuation-start':
     'Local user only: start a fresh Channel task using its explicit checkpoint. Input: {sessionId}. An uncertain result must be inspected, never blindly repeated.',
+  'logical-mode-default':
+    'Local user only: read the profile continuation mode preference. Input: {}. A preference does not grant history access.',
+  'logical-mode-default-set':
+    'Local user only: set or clear the profile continuation mode preference. Input: {mode:"linked"|"fork"|null,expectedRevision:integer}. History still requires explicit consent.',
+  'logical-mode-conversation':
+    'Local user only: read the effective continuation preference and conversation revision. Input: {sessionId}.',
+  'logical-mode-conversation-set':
+    'Local user only: set or clear one conversation override. Input: {sessionId,mode:"linked"|"fork"|null,expectedRevision:integer,expectedConversationId:string}; read both expected values first. History still requires explicit consent.',
+  'logical-status':
+    'Local user only: inspect up to 64 continuation operations for a source session. Input: {sessionId,operationId?}. Unknown results must be checked before any retry.',
+  'logical-chain':
+    'Local user only: inspect confirmed session boundaries ending at a destination. Input: {sessionId}. This does not disclose history or grant access.',
+  'logical-abandon':
+    'Local user only: after inspecting an unknown Desktop operation, accept a possible orphan and release its fence when the owner confirms no outstanding native writes. Input: {sessionId,operationId,confirmOrphanPossible:true}. No destination is deleted or retried.',
   'continuation-checkpoint': 'Active Channel turn with --context only: read this task checkpoint. Input: {}.',
   'continuation-checkpoint-set':
     'Active Channel turn with --context only: save an explicit handoff. Input: {expectedRevision,checkpoint:{goal,constraints,completed,remaining,history,continueAtIdle:boolean}}. Use the revision returned by continuation-checkpoint; it is 0 when no checkpoint exists. Text is bounded; source session is assigned by the Host.',
@@ -67,6 +81,12 @@ const HELP: Readonly<Record<string, string>> = {
     'Read pending task setting requests. Input: {}. Approval is through the authenticated Channel user command or card, never an Agent-claimed user.',
 }
 export function channelCliHelp(operation?: string): string {
+  if (operation === 'memory-guide') {
+    return 'cordisx channel memory guide --context <incoming-context> --input {"topic":"write"}\nOmit topic for navigation; topics: write, organize, recall. Describes implemented operations and missing organization/provider capabilities only.'
+  }
+  if (operation === 'memory') {
+    return 'cordisx channel memory guide|navigate|search-page|batch|remember|get|search|update|forget|index|grant|revoke|grant-list|identity-challenge|identity-confirm|identity-unbind --context <incoming-context> [--profile <id>] --input <JSON>\nStart with guide {}. navigate/search-page support cursor,limit,maxBytes; batch uses ids,maxBytes. Records: {record:{kind,title,summary,tags,entityRefs,evidenceType,confidence,expiresAt?,observedAt?}}. Changes require id/revision. grant input {grant:{source:string,target:{kind:"conversation",id:string},expiresAt?,recordIds?}} uses configured authority and explicit incoming request. identity-challenge {target:accountUserTuple}; identity-confirm {challenge} requires the actual second account request. Actor/admin/intent are never accepted from input.'
+  }
   if (operation && HELP[operation]) {
     return `cordisx channel ${operation} [--profile <id>] [--context <incoming-context>] [--input <JSON>]\n${
       HELP[operation]

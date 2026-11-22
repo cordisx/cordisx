@@ -1,6 +1,7 @@
 import type { NativeAccountCapabilityDescriptor } from './contracts.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import { member, one, parseNativeSource, type SyntaxNode, visitSyntax } from './native-source-structure.js'
+import { discoverRspackAccountCapabilities } from './native-account-rspack.js'
 
 /** Resolve the exported service actually used by the native account query. */
 export function discoverNativeAccountCapabilityFromSyntax(
@@ -68,6 +69,7 @@ export function discoverNativeAccountCapabilityFromSyntax(
       }
     }
   }
+  candidates.push(...discoverRspackAccountCapabilities(resource, ast, resources))
   return one(candidates, 'native-account-service')
 }
 

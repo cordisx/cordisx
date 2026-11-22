@@ -157,6 +157,35 @@ afterEach(async () => {
 })
 
 describe('production renderer generation bootstrap', () => {
+  it('starts the Host while a lazy native submission guard is still pending', async () => {
+    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    let resolve!: (ready: boolean) => void
+    vi.stubGlobal(
+      '__cordisxNativeSubmissionReady',
+      new Promise<boolean>(done => {
+        resolve = done
+      }),
+    )
+    try {
+      const boot = installCordisX([], metadata('lazy-native-ready', 'codex'))
+      let timeout!: ReturnType<typeof setTimeout>
+      const result = await Promise.race([
+        boot,
+        new Promise<'timeout'>(done => {
+          timeout = setTimeout(() => done('timeout'), 3_000)
+        }),
+      ]).finally(() => clearTimeout(timeout))
+      expect(result).not.toBe('timeout')
+      expect(globalThis.__cordisxRuntime).toBeDefined()
+      resolve(false)
+      await disposeRuntime()
+    } finally {
+      resolve(false)
+      dom.window.close()
+    }
+  }, 60_000)
+
   it('does not activate plugins or publish readiness after cancellation during bootstrap', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()

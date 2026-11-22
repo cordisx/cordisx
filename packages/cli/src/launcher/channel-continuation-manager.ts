@@ -6,10 +6,10 @@ import {
   type ContinuationPolicy,
   continuationPolicy,
 } from './channel-continuation.js'
-import type {
-  ChannelConversationState,
+import {
+  type ChannelConversationState,
   ChannelConversationStore,
-  ChannelTaskSetting,
+  type ChannelTaskSetting,
 } from './channel-conversation-store.js'
 import type { ContinuationConfiguration } from './channel-continuation-config.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
@@ -352,6 +352,7 @@ export class ChannelContinuationManager {
     return await this.store.mutate(state => {
       const current = state.continuations[source]
       if (!current?.checkpoint || current.checkpoint.revision !== revision || current.intent) return undefined
+      if (ChannelConversationStore.logicalSourceFenced(state, source)) return undefined
       if (mode === 'auto' && JSON.stringify(current.policy) !== JSON.stringify(entry.policy)) return undefined
       if (!Object.values(state.bindings).some(binding => binding.sessionId === source && binding.state === 'active')) {
         return undefined

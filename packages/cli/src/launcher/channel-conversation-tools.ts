@@ -5,6 +5,7 @@ import type {
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
+import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
 import type { ChannelMessageReadResult } from './channel-message-read.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
@@ -90,11 +91,16 @@ export class ChannelConversationTools {
     private readonly documents?: (input: unknown) => Promise<unknown>,
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
     private readonly pairing?: ChannelAdminPairing,
+    private readonly logicalPreference?: (operation: string, value: unknown) => Promise<unknown>,
   ) {}
 
   /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
   async executionGuard(operation: string, args: Record<string, unknown>, metadata?: unknown) {
     const caller = callerThreadId(metadata)
+    const target = typeof args.sessionId === 'string' ? args.sessionId : caller
+    if (operation.endsWith('-set') && target && this.consumer?.isNativeSourceMigrating(target)) {
+      return { status: 'rejected', code: 'CONTINUATION_PENDING' }
+    }
     const meta = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
     if (
       meta['cordisx/channelContext'] !== undefined
@@ -142,10 +148,96 @@ export class ChannelConversationTools {
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
     if (
+      operation === 'memory-persona-profile' || operation === 'memory-persona-bind'
+      || operation === 'memory-persona-context'
+    ) {
+      if (metadata !== undefined) return { status: 'rejected', code: 'LOCAL_USER_REQUIRED' }
+      if (!this.consumer?.personas) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+      try {
+        const input = object(value)
+        const allowed = operation === 'memory-persona-profile'
+          ? ['personaId', 'name', 'identity', 'style', 'expectedRevision']
+          : operation === 'memory-persona-context'
+          ? ['personaId', 'conversationId', 'style', 'expectedRevision']
+          : ['account', 'personaId', 'expectedRevision']
+        if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('PERSONA_INVALID_REQUEST')
+        const result = operation === 'memory-persona-context'
+          ? await this.consumer.personas.contextSettings(
+            String(input.personaId),
+            String(input.conversationId),
+            input.style as never,
+            input.expectedRevision as number,
+          )
+          : operation === 'memory-persona-profile'
+          ? await this.consumer.personas.profile(
+            String(input.personaId),
+            String(input.name),
+            String(input.identity),
+            input.expectedRevision as number,
+            input.style as never,
+          )
+          : await this.consumer.personas.bind(
+            input.account as never,
+            String(input.personaId),
+            input.expectedRevision as number,
+          )
+        return { status: 'ok', result }
+      } catch (error) {
+        return { status: 'rejected', code: error instanceof Error ? error.message : 'PERSONA_INVALID_REQUEST' }
+      }
+    }
+    if (operation === 'memory-authority-set') {
+      if (metadata !== undefined) return { status: 'rejected', code: 'LOCAL_USER_REQUIRED' }
+      if (!this.consumer?.memoryAuthority) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+      try {
+        const input = object(value)
+        if (Object.keys(input).some(key => !['account', 'scopes', 'expectedRevision'].includes(key))) {
+          throw new Error('MEMORY_INVALID_REQUEST')
+        }
+        const revision = await this.consumer.memoryAuthority.configure(
+          input.account as never,
+          input.scopes as never,
+          input.expectedRevision as number,
+        )
+        return { status: 'ok', revision }
+      } catch (error) {
+        return { status: 'rejected', code: error instanceof Error ? error.message : 'MEMORY_INVALID_REQUEST' }
+      }
+    }
+    if (
       this.consumer?.agentAccess.hasPreparation() && !channelOperationDuringPreparation(operation)
       && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
     ) {
       return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+    }
+    if (
+      [
+        'logical-status',
+        'logical-chain',
+        'logical-abandon',
+        'logical-mode-default',
+        'logical-mode-default-set',
+        'logical-mode-conversation',
+        'logical-mode-conversation-set',
+      ]
+        .includes(operation)
+    ) {
+      if (metadata !== undefined) return { status: 'rejected', code: 'LOCAL_USER_REQUIRED' }
+      if (!this.consumer && !this.logicalPreference) {
+        return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+      }
+      try {
+        return this.consumer
+          ? await this.consumer.logicalProfilePreference(operation, value)
+          : await this.logicalPreference!(operation, value)
+      } catch (error) {
+        return {
+          status: 'rejected',
+          code: error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
+            ? error.message
+            : 'CHANNEL_OPERATION_FAILED',
+        }
+      }
     }
     if (['admin-pair-begin', 'admin-pair-status', 'admin-pair-confirm', 'admin-pair-cancel'].includes(operation)) {
       return channelAdminPairingOperation({
@@ -254,6 +346,21 @@ export class ChannelConversationTools {
           : { status: 'unavailable', code: 'DOCUMENTS_UNAVAILABLE' }
       }
       const input = object(value)
+      if (operation === 'memory') {
+        if (!this.consumer?.memory) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
+        const caller = this.consumer.agentAccess.caller(metadata)
+        const personas = this.consumer.personas
+        const store = caller && personas && await personas.taskConfigured(caller.threadId, caller.source)
+          ? await personas.memoryForTask(caller.threadId, caller.source)
+          : this.consumer.memory
+        return await channelMemoryCommand(
+          store,
+          this.consumer.agentAccess,
+          input,
+          metadata,
+          this.consumer.memoryAuthority,
+        )
+      }
       if (
         this.consumer?.agentAccess.preparation(metadata)
         && !['continuation-history', 'continuation-takeover-ready'].includes(operation)

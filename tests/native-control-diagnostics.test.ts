@@ -12,7 +12,8 @@ it.each([
   ],
   [{ id: 'PRIVATE_ID', type: 'hello', nonce: 'PRIVATE_NONCE' }, 'invalid-authentication', 'hello'],
   [{ type: 'PRIVATE_TYPE', input: 'PRIVATE_CONTENT' }, 'invalid-id', 'unknown'],
-  [{ id: 'PRIVATE_ID', type: { toString: 'PRIVATE_CONTENT' } }, 'control-unavailable', 'unknown'],
+  [{ id: 'PRIVATE_ID', type: 'PRIVATE_TYPE', input: 'PRIVATE_CONTENT' }, 'control-unavailable', 'unknown'],
+  [{ id: 'PRIVATE_ID', type: { toString: 'PRIVATE_CONTENT' } }, 'protocol-validation', 'unknown'],
 ])('retains only a fixed control rejection category', async (message, reason, phase) => {
   const events: DiagnosticEvent[] = []
   const server = await withDiagnostics(

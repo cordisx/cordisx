@@ -5,11 +5,13 @@ import type { startNativeSubmissionControlServer } from './native-submission-con
 import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import { ChannelNativeSessions } from './channel-native-sessions.js'
 import { configuredChannelCliContext } from './channel-cli-context.js'
+import { acquireChannelLogicalNativeLease } from './channel-logical-native-lease.js'
 
 /** Compose the Channel native seam from the same authority as ordinary model tools. */
 export function createChannelNativeSession(input: {
   options: NativeSubmissionCatalogOptions
   codexHome: string
+  nativeVersion?: string
   selection: (
     threadId: string,
   ) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>
@@ -30,6 +32,12 @@ export function createChannelNativeSession(input: {
     models: (operation, value, beforeEffect) => models(operation, value, undefined, beforeEffect),
     sourceConfiguration: input.selection,
     nativeRequest: (method, params) => control.nativeRequest(method, params),
+    logicalOwnerIdentity: () => control.nativeOwnerIdentity(),
+    logicalHandoffWriteGuardReady: () => control.logicalHandoffReady(),
+    ...(options.logicalOwner
+      ? { logicalMigrationLease: (source: string) => acquireChannelLogicalNativeLease(control, source) }
+      : {}),
+    ...(input.nativeVersion ? { nativeVersion: input.nativeVersion } : {}),
     ...(execution ? { execution } : {}),
     ...(input.configuration ? { configuration: input.configuration } : {}),
     ...(options.contextObserver ? { contextObserver: options.contextObserver } : {}),

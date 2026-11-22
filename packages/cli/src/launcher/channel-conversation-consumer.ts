@@ -1,5 +1,6 @@
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
+import { createChannelMemory } from './channel-memory-composition.js'
 import { createChannelFeedback } from './channel-feedback-composition.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
@@ -12,12 +13,38 @@ import { ChannelSessionCommands } from './channel-session-commands.js'
 import { channelCommandHelp } from '../channel-command-registry.js'
 import { CHANNEL_MODEL_COMMANDS } from './channel-model-commands.js'
 import { ChannelNativeApprovals } from './channel-native-approvals.js'
-import { chatExecutionOperation } from './chat-execution-operation.js'
+import { channelExecutionDispatch } from './channel-execution-dispatch.js'
 import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
+import {
+  channelContinuationArguments,
+  channelDispatchHandoff,
+  claimChannelDispatch,
+} from './channel-conversation-dispatch.js'
+import { ensureChannelLogicalPersona } from './channel-logical-persona.js'
+import {
+  callChannelLogicalHistory,
+  channelLogicalHistoryAvailable,
+  createChannelLogicalHistory,
+} from './channel-logical-history.js'
+import {
+  channelBindingNavigation,
+  channelManagementReadback,
+  channelPolicyReadback,
+  channelPolicySet,
+  channelStatusReadback,
+} from './channel-management-readback.js'
+import {
+  type ProfileLogicalConversationOwner,
+  profileLogicalConversationOwner,
+} from './profile-logical-conversation-owner.js'
+import { attachCreatedChannelBinding, channelBindingAction } from './channel-binding-action.js'
+import { channelLogicalCommand } from './channel-logical-command.js'
+import { logicalContinuationManagement } from './logical-continuation-management.js'
+import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
   channelCommandReplyTarget,
@@ -39,18 +66,16 @@ import {
   channelWakePrefix,
   parseChannelConversationPolicy,
 } from './channel-conversation-policy.js'
-import {
-  type ChannelChatBinding,
-  type ChannelConversationInput,
-  type ChannelConversationJob,
-  ChannelConversationStore,
-} from './channel-conversation-store.js'
+import type * as Conversation from './channel-conversation-store.js'
+import { ChannelConversationStore } from './channel-conversation-store.js'
 
 export class ChannelConversationConsumer {
   private readonly lifetime = new AbortController()
   private readonly timer: ReturnType<typeof setInterval>
   private pumping: Promise<void> | undefined
   private readonly sessionClaims = new Set<string>()
+  private readonly logicalOwner: ProfileLogicalConversationOwner
+  private readonly sourceFence: ProfileLogicalConversationOwner['fence']
   private readonly commandUsers = new ChannelCommandUsers()
   private extraNative: (() => ChannelNativeSessions | undefined) | undefined
   private readonly sessionCommands: ChannelSessionCommands
@@ -60,12 +85,27 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
+  private readonly logicalHistory?: ReturnType<typeof createChannelLogicalHistory>
+  readonly memory
+  readonly memoryAuthority
+  readonly personas
   private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
+    this.logicalOwner = profileLogicalConversationOwner(store)
+    this.sourceFence = this.logicalOwner.fence
+    if (input.appId && (input.logicalRuntime || input.logicalRecoveryRequired)) {
+      this.logicalHistory = createChannelLogicalHistory({
+        store,
+        native: () => this.extraNative?.(),
+        appId: input.appId,
+        profileId: input.profileId,
+      })
+    }
+    ;[this.memory, this.memoryAuthority, this.personas] = createChannelMemory(input.file)
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
@@ -107,13 +147,30 @@ export class ChannelConversationConsumer {
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
     return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
   }
-  bindings(): readonly ChannelChatBinding[] {
+  profileLogicalOwner() {
+    return this.logicalOwner
+  }
+  logicalHistoryCall(params: unknown) {
+    return callChannelLogicalHistory(this.logicalHistory, params)
+  }
+  enterNativeSourceOperation(method: string, params: Readonly<Record<string, unknown>>) {
+    return this.sourceFence.enterNative(method, params)
+  }
+  isNativeSourceMigrating(threadId: string) {
+    return this.sourceFence.isMigrating(threadId)
+      || ChannelConversationStore.logicalSessionFenced(this.store.snapshot(), threadId)
+  }
+  assertNativeHandoff(method: string, params: Readonly<Record<string, unknown>>) {
+    assertChannelLogicalHandoff(this.store.snapshot(), method, params, this.extraNative?.()?.logicalHandoffPermits)
+  }
+  bindings(): readonly Conversation.ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)
   }
   commandAllowed(event: ChannelEventRef, command: string): boolean {
     return channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
   }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
+    if (this.personas) native()?.setPersonaRegistry?.(this.personas)
     this.extraNative = native
     this.continuation.attachContext()
     this.approvals.attach(native())
@@ -135,74 +192,42 @@ export class ChannelConversationConsumer {
     )
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
-    if (operation.startsWith('continuation-defaults') || operation.startsWith('continuation-live-policy')) {
-      return this.continuation.defaultsOperation(operation, args)
-    }
-    if (operation.startsWith('channel-execution-defaults')) return this.creationDefaults.operation(operation, args)
-    return chatExecutionOperation(this.extraNative?.(), operation, args)
+    return channelExecutionDispatch(this.continuation, this.creationDefaults, this.extraNative?.(), operation, args)
   }
   managementReadback() {
-    const state = this.store.snapshot()
-    return {
-      revision: state.revision,
-      bindings: Object.values(state.bindings),
-      senders: Object.values(state.inputs).flatMap(record =>
-        record.addressing?.senderName
-          ? [{ event: record.input.source.event, name: record.addressing.senderName }]
-          : []
-      ),
-      deliveries: Object.values(state.jobs).flatMap(job =>
-        job.deliveryId && job.sessionId && state.inputs[job.recordId]
-          ? [{
-            deliveryId: job.deliveryId,
-            sessionId: job.sessionId,
-            event: state.inputs[job.recordId]!.input.source.event,
-          }]
-          : []
-      ),
-    }
+    return channelManagementReadback(this.store.snapshot())
+  }
+  logicalProfilePreference(operation: string, value: unknown) {
+    return logicalContinuationManagement(
+      {
+        owner: this.logicalOwner,
+        ...(this.input.appId ? { appId: this.input.appId } : {}),
+        profileId: this.input.profileId,
+        available: !!(this.input.logicalRuntime || this.input.logicalRecoveryRequired),
+        recoveryRequired: !!this.input.logicalRecoveryRequired,
+      },
+      operation,
+      value,
+    )
   }
   async bindingNavigation(id: string) {
-    const binding = this.bindings().find(binding => binding.id === id)
-    const native = this.extraNative?.()
-    if (!binding || !native || this.lifetime.signal.aborted || !await native.exists(binding.sessionId)) return undefined
-    if (this.lifetime.signal.aborted || this.bindings().find(item => item.id === id)?.sessionId !== binding.sessionId) {
-      return undefined
-    }
-    return binding.sessionId
+    return channelBindingNavigation(() => this.bindings(), this.extraNative?.(), this.lifetime.signal, id)
   }
   async bindingLabels(ids?: readonly string[]) {
     return channelBindingLabels(this.bindings(), this.input.access(), this.extraNative?.(), ids)
   }
   policy() {
-    const state = this.store.snapshot()
-    return { revision: state.policyRevision, policy: state.policy }
+    return channelPolicyReadback(this.store.snapshot())
   }
   async policySet(value: unknown, expectedRevision: number) {
-    const policy = parseChannelConversationPolicy(value)
-    await this.store.mutate(state => {
-      if (state.policyRevision !== expectedRevision) throw new Error('REVISION_CONFLICT')
-      state.policy = policy
-      state.policyRevision += 1
-    })
+    const result = await channelPolicySet(this.store, value, expectedRevision)
     void this.pump()
-    return this.policy()
+    return result
   }
   async bindingAction(action: 'archive' | 'restore' | 'unbind', id: string): Promise<boolean> {
-    return this.store.mutate(state => {
-      const binding = state.bindings[id]
-      if (!binding) return false
-      if (action === 'unbind') delete state.bindings[id]
-      else binding.state = action === 'archive' ? 'archived' : 'active'
-      for (const job of Object.values(state.jobs)) {
-        if (job.bindingId === id && job.state === 'queued' && action !== 'restore') {
-          job.state = 'cancelled'
-        }
-      }
-      return true
-    })
+    return channelBindingAction(this.store, action, id, sessionId => this.sourceFence.isMigrating(sessionId))
   }
-  async bind(value: unknown, sessionId: string): Promise<ChannelChatBinding> {
+  async bind(value: unknown, sessionId: string): Promise<Conversation.ChannelChatBinding> {
     const args = channelRecord(value)
     channelExact(args, ['channel', 'mode', 'autoReply', 'replyMode', 'replyFallbackMode'])
     const channel = thread(args.channel)
@@ -235,6 +260,8 @@ export class ChannelConversationConsumer {
     if (!await this.input.native()?.exists(sessionId)) throw new Error('SESSION_UNAVAILABLE')
     if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
     return this.store.mutate(state => {
+      if (this.sourceFence.isMigrating(sessionId)) throw new Error('CONTINUATION_PENDING')
+      if (ChannelConversationStore.logicalSessionFenced(state, sessionId)) throw new Error('CONTINUATION_PENDING')
       const id = Object.values(state.bindings).find(binding =>
         binding.sessionId === sessionId
         && sameConversation(binding.channel, channel)
@@ -252,7 +279,7 @@ export class ChannelConversationConsumer {
         state.bindings[id] = updated
         return updated
       }
-      const binding: ChannelChatBinding = {
+      const binding: Conversation.ChannelChatBinding = {
         id,
         channel,
         sessionId,
@@ -290,25 +317,7 @@ export class ChannelConversationConsumer {
     })
   }
   status(sessionId?: string) {
-    const state = this.store.snapshot()
-    return {
-      status: 'ok',
-      revision: state.revision,
-      enabled: state.policy.enabled,
-      bindings: Object.values(state.bindings).filter(binding =>
-        sessionId === undefined || binding.sessionId === sessionId
-      ),
-      jobs: Object.values(state.jobs).filter(job => sessionId === undefined || job.sessionId === sessionId)
-        .map(({ id, state, sessionId, turnId, code, replyDefaults, replyMode }) => ({
-          id,
-          state,
-          sessionId,
-          turnId,
-          code,
-          replyDefaults,
-          replyMode,
-        })),
-    }
+    return channelStatusReadback(this.store.snapshot(), sessionId)
   }
   /** Select the final-response route for this exact incoming turn; this operation never sends a message. */
   async selectReplyMode(value: unknown, sessionId: string, turnId?: string) {
@@ -422,6 +431,7 @@ export class ChannelConversationConsumer {
   }
   async pump(): Promise<void> {
     if (this.lifetime.signal.aborted || this.pumping) return this.pumping
+    if (this.input.logicalRecoveryRequired && !this.store.hasCommitBarrier()) return
     this.pumping = (async () => {
       this.approvals.attach(this.extraNative?.())
       this.feedback.sync()
@@ -471,7 +481,7 @@ export class ChannelConversationConsumer {
     })
     return this.pumping
   }
-  private async route(record: ChannelConversationInput): Promise<void> {
+  private async route(record: Conversation.ChannelConversationInput): Promise<void> {
     if (this.lifetime.signal.aborted) return
     const state = this.store.snapshot(), event = record.input.source.event, policy = state.policy
     const text = record.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
@@ -550,7 +560,11 @@ export class ChannelConversationConsumer {
     })
     await this.feedback.routed(record.recordId)
   }
-  private async command(record: ChannelConversationInput, command: string, argument: string): Promise<void> {
+  private async command(
+    record: Conversation.ChannelConversationInput,
+    command: string,
+    argument: string,
+  ): Promise<void> {
     const event = record.input.source.event
     if (
       ![
@@ -571,6 +585,24 @@ export class ChannelConversationConsumer {
     const handled = await this.sessionCommands.handle(event, command, argument)
     if (handled !== undefined) {
       await this.commandReply(record.recordId + ':command', event, handled)
+      return
+    }
+    if (command === 'continue-provider') {
+      const desktopGrant = this.input.logicalRecoveryRequired && this.store.hasCommitBarrier()
+        && argument.trim().startsWith('authorize-desktop ')
+      const message = await channelLogicalCommand({
+        store: this.store,
+        native: this.input.logicalRuntime || desktopGrant ? this.extraNative?.() : undefined,
+        fence: this.sourceFence,
+        claims: this.sessionClaims,
+        ...((this.input.logicalRuntime || desktopGrant) && this.input.appId ? { appId: this.input.appId } : {}),
+        ...(desktopGrant ? { desktopGrants: this.logicalOwner.desktopChannelGrants } : {}),
+        profileId: this.input.profileId,
+        event,
+        recordId: record.recordId,
+        argument,
+      })
+      await this.commandReply(record.recordId + ':command', event, message)
       return
     }
     if (command === 'approvals' || command === 'approve' || command === 'deny') {
@@ -705,7 +737,7 @@ export class ChannelConversationConsumer {
         : `/${command}: completed`,
     )
   }
-  private async advance(job: ChannelConversationJob): Promise<void> {
+  private async advance(job: Conversation.ChannelConversationJob): Promise<void> {
     const state = this.store.snapshot(), record = state.inputs[job.recordId], native = this.input.native()
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
@@ -727,7 +759,7 @@ export class ChannelConversationConsumer {
           if (recovered.turnId) current.turnId = recovered.turnId
           if (recovered.code) current.code = recovered.code
           if (job.autoCreate && recovered.sessionId) {
-            this.attachCreatedBinding(state, current, record, recovered.sessionId)
+            attachCreatedChannelBinding(state, current, record, recovered.sessionId, this.input.profileId)
           }
         })
       }
@@ -735,6 +767,7 @@ export class ChannelConversationConsumer {
     }
     if (job.state === 'queued') {
       if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)) return
+      if (job.sessionId && ChannelConversationStore.logicalSourceFenced(state, job.sessionId)) return
       if (job.bindingId && state.bindings[job.bindingId]?.state !== 'active') {
         await this.store.mutate(state => {
           state.jobs[job.id]!.state = 'cancelled'
@@ -758,19 +791,8 @@ export class ChannelConversationConsumer {
         continuation = job.sessionId
           ? await this.continuation.reserve(job.sessionId, 'auto')
           : undefined
-        await this.store.mutate(state => {
-          const current = state.jobs[job.id]!
-          current.state = 'dispatching'
-          const binding = current.bindingId === undefined ? undefined : state.bindings[current.bindingId]
-          current.finalDeliveryEnabled = state.policy.autoReply && (binding?.autoReply ?? current.autoCreate)
-          current.replyDefaults ??= channelReplyDefaults(
-            state.policy,
-            event,
-            current.bindingId === undefined
-              ? undefined
-              : state.bindings[current.bindingId],
-          )
-        })
+        const dispatching = await this.store.mutate(state => claimChannelDispatch(state, job, event, continuation))
+        if (!dispatching) return
         if (this.lifetime.signal.aborted) {
           await this.store.mutate(state => {
             if (continuation) {
@@ -793,6 +815,10 @@ export class ChannelConversationConsumer {
           : record.input
         const context = await this.input.access()?.messageContext?.(message, record.addressing)
           .catch(() => undefined) ?? channelMessageContext(message, record.addressing)
+        const logicalHistory = !continuation && channelLogicalHistoryAvailable(captured, event, job.sessionId)
+        if (!await ensureChannelLogicalPersona(this.personas, this.store, job.id, event, this.input)) return
+        const handoff = await channelDispatchHandoff(this.store, job.id, event)
+        if (handoff === false) return
         const result = await native.start(
           job.id,
           message,
@@ -805,13 +831,7 @@ export class ChannelConversationConsumer {
           context,
           job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
           job.autoCreate ? this.creationDefaults.read().settings : undefined,
-          ...(continuation
-            ? [{
-              operationId: continuation.operationId,
-              brief: this.continuation.brief(continuation),
-              configuration: continuation.configuration,
-            }]
-            : []),
+          ...channelContinuationArguments(continuation, this.continuation, logicalHistory, handoff),
         )
         const sourceCurrent = !continuation
           || result.state === 'running' && await this.continuation.sourceCurrent(continuation)
@@ -833,12 +853,15 @@ export class ChannelConversationConsumer {
               sourceCurrent ? result : { ...result, state: 'reconciliation-required' },
             )
           ) return
+          if (result.state === 'running' && result.sessionId && result.turnId) {
+            confirmChannelLogicalHandoff(state, job.id, result.sessionId, result.turnId)
+          }
           current.state = result.state === 'busy' ? 'queued' : result.state
           if (result.sessionId) current.sessionId = result.sessionId
           if (result.turnId) current.turnId = result.turnId
           if (result.code) current.code = result.code
           if (job.autoCreate && result.sessionId) {
-            this.attachCreatedBinding(state, current, record, result.sessionId)
+            attachCreatedChannelBinding(state, current, record, result.sessionId, this.input.profileId)
           }
         })
       } catch (error) {
@@ -920,34 +943,6 @@ export class ChannelConversationConsumer {
       })
     }
   }
-  private attachCreatedBinding(
-    state: import('./channel-conversation-store.js').ChannelConversationState,
-    job: ChannelConversationJob,
-    record: ChannelConversationInput,
-    sessionId: string,
-  ): void {
-    // A removed binding must not be resurrected by later native reconciliation.
-    if (job.bindingId !== undefined) return
-    const channel = eventThread(record.input.source.event)
-    const id = Object.values(state.bindings).find(binding =>
-      binding.sessionId === sessionId
-      && sameConversation(binding.channel, channel)
-    )?.id ?? bindingIdentity(this.input.profileId, channel, sessionId)
-    job.bindingId = id
-    state.bindings[id] ??= {
-      id,
-      channel,
-      sessionId,
-      hostId: 'local',
-      profileId: this.input.profileId,
-      createdAt: new Date().toISOString(),
-      fromSequence: record.sequence,
-      mode: 'deliver',
-      // Automatically created bindings inherit the profile's opt-in; this flag cannot enable it alone.
-      autoReply: true,
-      state: 'active',
-    }
-  }
   private async reply(
     operation: string,
     event: ChannelEventRef,
@@ -992,6 +987,7 @@ export class ChannelConversationConsumer {
     this.sessionCommands.dispose()
     this.approvals.dispose()
     this.continuation.dispose()
+    this.logicalOwner.desktopChannelGrants.clear()
     await this.store.close()
   }
   sendAllowed(event: ChannelEventRef): boolean {
