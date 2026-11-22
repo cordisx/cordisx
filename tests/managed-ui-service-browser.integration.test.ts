@@ -376,6 +376,58 @@ it.skipIf(
         expect(await page.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
           .toBe('available')
       }
+      const changePackage = async (kind: 'plugin-disable' | 'plugin-enable' | 'plugin-uninstall') => {
+        const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'plan',
+          request: { kind, pluginId: 'lifecycle-fixture' },
+        }) as any
+        expect(planned.status).toBe('planned')
+        const result = await requestPluginManagementRpc(rpcPaths, endpoint, {
+          kind: 'execute',
+          request: planned.executionRequest,
+          expectedRevision: planned.snapshot.revision,
+        }) as any
+        expect(result.status, JSON.stringify(result.error ?? result.lifecycle?.error ?? {})).toBe('applied')
+      }
+      const checkPackage = async (expected: { enabled: boolean; version: string } | undefined) => {
+        for (const page of [first, second]) {
+          const item = await page.evaluate<{ enabled: boolean; version: string } | undefined>(
+            'globalThis.__cordisxRuntime.activePluginGeneration().plugins.find(item => item.id === "lifecycle-fixture")',
+          )
+          if (expected === undefined) expect(item).toBeUndefined()
+          else expect(item).toMatchObject(expected)
+          expect(await managementState(page)).toEqual({ source: await alias(page), operations: [] })
+          expect(await page.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
+            .toBe('available')
+        }
+      }
+      await changePackage('plugin-disable')
+      await checkPackage({ enabled: false, version: '1.0.0' })
+      await changePackage('plugin-enable')
+      await checkPackage({ enabled: true, version: '1.0.0' })
+      const updatedSource = await localPackage({
+        root,
+        id: 'lifecycle-fixture',
+        version: '1.1.0',
+        code: 'export function apply() { globalThis.__lifecycleFixtureUpdated = true }',
+      })
+      const updatePlan = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory: updatedSource },
+      }) as any
+      expect(updatePlan.status).toBe('planned')
+      const updated = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'execute',
+        request: updatePlan.executionRequest,
+        expectedRevision: updatePlan.snapshot.revision,
+      }) as any
+      expect(updated.status, JSON.stringify(updated.error ?? updated.lifecycle?.error ?? {})).toBe('applied')
+      await checkPackage({ enabled: true, version: '1.1.0' })
+      for (const page of [first, second]) {
+        expect(await page.evaluate('globalThis.__lifecycleFixtureUpdated === true')).toBe(true)
+      }
+      await changePackage('plugin-uninstall')
+      await checkPackage(undefined)
       await first.evaluate('document.querySelector("[data-settings-navigation-item^=fixture-service]").click()')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
       await first.send('Page.reload')
@@ -465,16 +517,22 @@ it.skipIf(
       expect(await second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
         .toBe('Other page draft')
       for (const label of [['Use latest version', '使用最新版本'], ['Undo changes', '撤销修改']]) {
-        await expect.poll(() =>
-          second.evaluate([
-            '(() => {',
-            "  const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>",
-            '    ' + JSON.stringify(label) + '.includes(item.textContent.trim()))',
-            '  if (!button || button.disabled) return false',
-            '  button.click(); return true',
-            '})()',
-          ].join('\n'))
-        ).toBe(true)
+        try {
+          await expect.poll(() =>
+            second.evaluate([
+              '(() => {',
+              "  const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>",
+              '    ' + JSON.stringify(label) + '.includes(item.textContent.trim()))',
+              '  if (!button || button.disabled) return false',
+              '  button.click(); return true',
+              '})()',
+            ].join('\n')), { timeout: 10_000 }).toBe(true)
+        } catch (cause) {
+          const buttons = await second.evaluate<unknown>(
+            '[...document.querySelectorAll("[data-channel-connection-form] button")].map(item => ({ text: item.textContent.trim(), disabled: item.disabled }))',
+          )
+          throw new Error('Channel draft controls unavailable: ' + JSON.stringify(buttons), { cause })
+        }
       }
       await expect.poll(() => second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
         .toBe('Managed fixture channel')
