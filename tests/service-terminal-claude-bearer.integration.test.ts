@@ -1,5 +1,5 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { parse as parseToml } from 'smol-toml'
@@ -11,6 +11,7 @@ import {
   readPluginManagementRpcEndpoint,
   requestPluginManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
+import { managedServiceHome } from '../packages/cli/src/launcher/managed-service-process.js'
 import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 
 // Explicit opt-in: the child is restricted to a synthetic loopback gateway and private test roots.
@@ -27,7 +28,7 @@ async function removeFixture(directory: string): Promise<void> {
   await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
 
-it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without disturbing another lease', async () => {
+it.skipIf(!enabled)('runs real terminal clients against a bearer gateway across owner loss', async () => {
   const cli = path.resolve('packages/cli/dist/src/cli.js')
   const node = await realpath(process.execPath)
   const claude = await realpath(claudeEntry!)
@@ -130,9 +131,15 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
       request: { kind: 'prepare', providerId: 'fixture-provider', model: 'fixture-model' },
     }) as { kind: string; leaseId: string }
     expect(other.kind).toBe('prepared')
-    if (codex) {
-      const gate = path.join(root, 'codex-gate.sh')
-      await writeFile(gate, '#!/bin/sh\nkill -STOP $$\nexec "$@"\n', { mode: 0o700 })
+    const gate = path.join(root, 'codex-gate.sh')
+    await writeFile(gate, '#!/bin/sh\nprintf "fixture-gate-ready\\n" >&2\nIFS= read -r _ || exit 1\nexec "$@"\n', {
+      mode: 0o700,
+    })
+    const startCodex = (prompt = 'Reply with one word.') => {
+      if (!codex) return undefined
+      clearTimeout(codexTimer)
+      codexOutput = ''
+      codexErrors = ''
       codexResult = runCordisXCli([
         'start',
         '--mode',
@@ -147,7 +154,7 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
         '--skip-git-repo-check',
         '--sandbox',
         'read-only',
-        'Reply with one word.',
+        prompt,
       ], {
         env,
         cwd: root,
@@ -165,7 +172,7 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
             gate,
             ...(codexScript ? [node, codex] : [codex]),
             ...args,
-          ], { cwd: root, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
+          ], { cwd: root, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] })
           codexChild.stdout!.setEncoding('utf8').on('data', chunk => {
             codexOutput += chunk
           })
@@ -176,57 +183,63 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
           return codexChild
         }) as typeof spawn,
       }).then(() => ({ ok: true }), error => ({ ok: false, error }))
-      await expect.poll(async () => {
-        if (!codexChild?.pid) return false
-        const state = await run('/bin/ps', ['-o', 'state=', '-p', String(codexChild.pid)]).catch(() => undefined)
-        return state?.stdout.trim().startsWith('T') === true
-      }, { timeout: 10_000 }).toBe(true)
+      return codexResult
     }
-    await runCordisXCli([
-      'start',
-      '--mode',
-      'cli',
-      'claude-code',
-      '-s',
-      'fixture-provider',
-      '-m',
-      'fixture-model',
-      '--',
-      '--print',
-      'Reply with one word.',
-    ], {
-      env,
-      cwd: root,
-      homedir: userHome,
-      internalCheckTerminalClient: async () => claude,
-      internalSpawnTerminal: ((executable: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
-        expect(executable).toBe(claude)
-        const policy = policyFor(options.env.ANTHROPIC_BASE_URL!)
-        child = spawn('/usr/bin/sandbox-exec', [
-          '-p',
-          policy,
-          ...(claudeScript ? [node, claude] : [claude]),
-          ...args,
-        ], { cwd: root, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
-        child.stdout!.setEncoding('utf8').on('data', chunk => {
-          output += chunk
-        })
-        child.stderr!.setEncoding('utf8').on('data', chunk => {
-          errors += chunk
-        })
-        childTimer = setTimeout(() => child?.kill('SIGKILL'), 30_000)
-        return child
-      }) as typeof spawn,
-    }).catch(error => {
-      const diagnostic = (errors + '\n' + output).slice(0, 1_500).replace(/[A-Za-z0-9_-]{20,}/gu, '[redacted]')
-      throw new Error('Isolated Claude failed: ' + diagnostic, { cause: error })
-    })
-    expect(output).toContain('local fixture response')
+    const waitForCodex = async () =>
+      await expect.poll(() => codexErrors.includes('fixture-gate-ready'), { timeout: 10_000 }).toBe(true)
+    const firstCodex = startCodex()
+    if (firstCodex) await waitForCodex()
+    const runClaude = async () => {
+      clearTimeout(childTimer)
+      output = ''
+      errors = ''
+      await runCordisXCli([
+        'start',
+        '--mode',
+        'cli',
+        'claude-code',
+        '-s',
+        'fixture-provider',
+        '-m',
+        'fixture-model',
+        '--',
+        '--print',
+        'Reply with one word.',
+      ], {
+        env,
+        cwd: root,
+        homedir: userHome,
+        internalCheckTerminalClient: async () => claude,
+        internalSpawnTerminal: ((executable: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
+          expect(executable).toBe(claude)
+          const policy = policyFor(options.env.ANTHROPIC_BASE_URL!)
+          child = spawn('/usr/bin/sandbox-exec', [
+            '-p',
+            policy,
+            ...(claudeScript ? [node, claude] : [claude]),
+            ...args,
+          ], { cwd: root, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
+          child.stdout!.setEncoding('utf8').on('data', chunk => {
+            output += chunk
+          })
+          child.stderr!.setEncoding('utf8').on('data', chunk => {
+            errors += chunk
+          })
+          childTimer = setTimeout(() => child?.kill('SIGKILL'), 30_000)
+          return child
+        }) as typeof spawn,
+      }).catch(error => {
+        const diagnostic = (errors + '\n' + output).slice(0, 1_500).replace(/[A-Za-z0-9_-]{20,}/gu, '[redacted]')
+        throw new Error('Isolated Claude failed: ' + diagnostic, { cause: error })
+      })
+      expect(output).toContain('local fixture response')
+    }
+    await runClaude()
     expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: other.leaseId } }))
       .toEqual({ kind: 'renewed' })
-    if (codexResult) {
-      codexChild!.kill('SIGCONT')
-      const completed = await codexResult
+    const finishCodex = async (result: NonNullable<typeof firstCodex>) => {
+      codexChild!.stdin!.end('\n')
+      const completed = await result
       if (!completed.ok) {
         const diagnostic = (codexErrors + '\n' + codexOutput).slice(0, 1_500).replace(
           /[A-Za-z0-9_-]{20,}/gu,
@@ -236,7 +249,49 @@ it.skipIf(!enabled)('runs real Claude against a bearer plugin gateway without di
       }
       expect(codexOutput).toContain('local fixture response')
     }
-    await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: other.leaseId } })
+    if (firstCodex) await finishCodex(firstCodex)
+    const interrupted = startCodex('hold-open-fixture')
+    if (interrupted) {
+      await waitForCodex()
+      codexChild!.stdin!.end('\n')
+      await expect.poll(async () =>
+        await access(path.join(
+          managedServiceHome(home, 'fixture-service', 'gateway'),
+          'fixture-response-open',
+        )).then(
+          () => true,
+          () => false,
+        ), { timeout: 20_000 }).toBe(true)
+    }
+    expect(JSON.parse((await serviceCommand('stop')).stdout)).toMatchObject({ status: 'stopped' })
+    if (interrupted) {
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        const result = await Promise.race([
+          interrupted,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error('Client did not stop after owner loss')), 25_000)
+          }),
+        ])
+        expect(result.ok).toBe(false)
+        expect((result.error as Error).message).toContain('CordisX provider retired')
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+    expect(JSON.parse((await serviceCommand('start')).stdout)).toMatchObject({ status: 'ready', mode: 'service' })
+    const recoveredEndpoint = (await readPluginManagementRpcEndpoint(paths))!
+    expect(recoveredEndpoint.generation).not.toBe(endpoint.generation)
+    await expect(requestPluginManagementRpc(paths, recoveredEndpoint, {
+      kind: 'terminal-provider',
+      request: { kind: 'renew', leaseId: other.leaseId },
+    })).rejects.toThrow()
+    await runClaude()
+    const recoveredCodex = startCodex()
+    if (recoveredCodex) {
+      await waitForCodex()
+      await finishCodex(recoveredCodex)
+    }
   } finally {
     clearTimeout(childTimer)
     clearTimeout(codexTimer)

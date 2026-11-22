@@ -17,6 +17,8 @@ import { declaration, definition } from '../managed-service-runtime-fixture.js'
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 export const backend = String.raw`#!/usr/bin/env node
 import { createServer } from 'node:http'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 const server = createServer(async (request, response) => {
   if (request.headers.authorization !== 'Bearer ' + process.env.SERVICE_TOKEN) return response.writeHead(401).end()
   if (request.url === '/health') return response.writeHead(204).end()
@@ -26,6 +28,12 @@ const server = createServer(async (request, response) => {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks))
+  if (Array.isArray(body.input) && JSON.stringify(body.input).includes('hold-open-fixture')) {
+    writeFileSync(path.join(process.env.HOME, 'fixture-response-open'), 'ready')
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.flushHeaders()
+    return
+  }
   if (body.input === 'hold-open-fixture') {
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     response.write('data: fixture-ready\n\n')
