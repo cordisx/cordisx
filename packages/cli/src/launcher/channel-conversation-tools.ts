@@ -14,6 +14,20 @@ import { type ChannelReplyCapabilities, channelReplyMode, channelReplyTarget } f
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
 
 export interface ChannelConversationAccess {
+  feedbackReact?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    emoji: string,
+  ): Promise<import('./channel-feedback.js').ChannelReactionReceipt>
+  feedbackRemove?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    reactionId: string,
+  ): Promise<import('./channel-feedback.js').ChannelReactionReceipt>
+  feedbackWait?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    target: ChannelThreadRef,
+    text: string,
+    recordId: string,
+  ): Promise<void>
   readonly generation: string
   readonly runtime: ChannelRuntime
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
@@ -195,6 +209,25 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (operation === 'reaction') {
+        if (!source || !this.consumer || !this.consumer.commandAllowed(source, 'send')) {
+          throw new Error('CHANNEL_PERMISSION_DENIED')
+        }
+        if (Object.keys(input).some(key => !['action', 'emojiType', 'reactionId'].includes(key))) {
+          throw new Error('INVALID_REQUEST')
+        }
+        const access = this.access()
+        if (!access?.feedbackReact || !access.feedbackRemove) {
+          return { status: 'unavailable', code: 'CHANNEL_REACTION_UNAVAILABLE' }
+        }
+        if (input.action === 'remove') {
+          return { status: 'ok', receipt: await access.feedbackRemove(source, text(input.reactionId, 512)) }
+        }
+        if (input.action !== 'add') throw new Error('INVALID_REQUEST')
+        const emoji = text(input.emojiType, 64)
+        if (!/^[A-Za-z0-9_]{1,64}$/u.test(emoji)) throw new Error('INVALID_EMOJI')
+        return { status: 'ok', receipt: await access.feedbackReact(source, emoji) }
+      }
       if (operation === 'continuation-takeover-ready') {
         const turnId = scopedCaller?.turnId ?? callerTurnId(metadata)
         if (

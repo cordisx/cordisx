@@ -1,4 +1,5 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
+import { channelFeedbackOutbound, createFeedbackSdkAccess, instrumentFeedbackRuntime } from './channel-feedback.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -201,6 +202,7 @@ export function createLocalChannelService(input: {
     (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>
   >()
   const key = (ref: ChannelTenantRef) => JSON.stringify([ref.adapterId, ref.accountId, ref.tenantId])
+  const feedbackAccess = new WeakMap<ActiveRuntime, ReturnType<typeof createFeedbackSdkAccess>>()
   const caller = (generation: string) => ({ source: input.source, pluginId: 'channel', generation })
   const definitions = (configuration: ReturnType<typeof parseChannelServiceConfig>, current: ActiveRuntime) =>
     feishuDefinitionsForConfig(configuration, {
@@ -243,6 +245,7 @@ export function createLocalChannelService(input: {
       storePath: path.join(input.dataDir, 'transport.json'),
     })
     const host = new LauncherChannelServiceHost(runtime)
+    instrumentFeedbackRuntime(runtime)
     const identities = new ChannelAccountIdentityStore()
     const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
     display.retainAccounts(configuration.connections.map(connection => connection.ref))
@@ -494,7 +497,18 @@ export function createLocalChannelService(input: {
     conversationAccess: () => {
       const current = active, configuration = activeConfiguration
       if (!current || disposed) return undefined
+      let feedback = feedbackAccess.get(current)
+      if (!feedback) {
+        feedback = createFeedbackSdkAccess(
+          event => current.directory.channel(event),
+          () => active === current && !disposed,
+        )
+        feedbackAccess.set(current, feedback)
+      }
       return {
+        feedbackReact: feedback.react,
+        feedbackRemove: feedback.remove,
+        feedbackWait: feedback.wait,
         generation: current.generation,
         runtime: current.runtime,
         accounts: () =>
@@ -517,6 +531,7 @@ export function createLocalChannelService(input: {
         conversationIdentity: event => current.directory.conversationIdentity(event),
         replyCapabilities: event => current.directory.replyCapabilities(event),
         sendCard: async (event, card) => {
+          channelFeedbackOutbound(event)
           const channel = current.directory.channel(event)
           if (!channel) throw new Error('CHANNEL_CARD_UNAVAILABLE')
           return (await channel.send(event.conversationId, { card })).messageId

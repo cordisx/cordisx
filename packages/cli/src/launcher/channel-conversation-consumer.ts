@@ -1,4 +1,5 @@
 import { ChannelQuestions } from './channel-questions.js'
+import { ChannelFeedback } from './channel-feedback.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
@@ -43,6 +44,7 @@ import {
 
 /** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {
+  private readonly feedback: ChannelFeedback
   private readonly lifetime = new AbortController()
   private readonly timer: ReturnType<typeof setInterval>
   private pumping: Promise<void> | undefined
@@ -61,6 +63,17 @@ export class ChannelConversationConsumer {
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput,
   ) {
+    this.feedback = new ChannelFeedback({
+      store: this.store,
+      access: this.input.access,
+      turnState: async (sessionId: string, turnId: string) =>
+        this.extraNative?.()?.liveTurnControl().turnState(sessionId, turnId) ?? 'unknown',
+      allows: channelPolicyAllows,
+      replyDefaults: channelReplyDefaults,
+      replyTarget: channelReplyTarget,
+      signal: this.lifetime.signal,
+      report: this.input.report,
+    })
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
@@ -447,6 +460,10 @@ export class ChannelConversationConsumer {
       await Promise.all(selected.map(async job => {
         try {
           await this.advance(job)
+          this.feedback.jobUpdated(job.recordId)
+          await this.feedback.completed(job.recordId).catch(() =>
+            this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
+          )
         } catch {
           await this.store.mutate(state => {
             const current = state.jobs[job.id]
@@ -458,6 +475,15 @@ export class ChannelConversationConsumer {
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
+      for (
+        const record of Object.values(this.store.snapshot().inputs).filter(record =>
+          record.feedback?.reaction && !record.feedback.completionAttempted
+        ).slice(0, 100)
+      ) {
+        await this.feedback.completed(record.recordId).catch(() =>
+          this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
+        )
+      }
       await this.continuation.pumpLive()
     })().catch(error =>
       this.input.report?.(
@@ -546,6 +572,7 @@ export class ChannelConversationConsumer {
     await this.store.mutate(state => {
       state.inputs[record.recordId]!.routed = true
     })
+    await this.feedback.routed(record.recordId)
   }
   private async command(record: ChannelConversationInput, command: string, argument: string): Promise<void> {
     const event = record.input.source.event
@@ -985,6 +1012,7 @@ export class ChannelConversationConsumer {
     }
   }
   async dispose(): Promise<void> {
+    this.feedback.dispose()
     this.lifetime.abort()
     clearInterval(this.timer)
     await this.pumping

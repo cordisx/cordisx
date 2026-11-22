@@ -30,6 +30,7 @@ const OPERATIONS = [
   'ask',
   'question-cancel',
   'receipt',
+  'reaction',
   'policy',
   'policy-set',
   'execution-defaults',

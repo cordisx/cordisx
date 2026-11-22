@@ -29,7 +29,8 @@ The bundled revision and owning source for this entry are recorded in
   verification, read
   [cordisx-plugin-development](../cordisx-plugin-development/SKILL.md).
 - For Channel connection listing, chat bindings, message listening/history, or
-  sending through a configured account, read [the Channel guide](references/channel.md).
+  sending through a configured account, inbound image/audio/file/video handling,
+  or bot-owned reactions, read [the Channel guide](references/channel.md).
 - For a mixed request, use each relevant guide in dependency order. Resolve
   product facts before applying experience or changing plugin code.
 
