@@ -36,6 +36,10 @@ export interface ManagerRendererChannelContext {
 export interface ManagerRendererChannel {
   prepare(payload: unknown, context: ManagerRendererChannelContext): {
     readonly mode: 'read' | 'write'
+    /** Owner-validated reads outside the configured Channel graph still drain at retirement. */
+    readonly channelConfigurationIndependent?: true
+    /** A bounded owner-controlled observation may wait without occupying an ordinary request slot. */
+    readonly longLivedRead?: true
     dispatch(): Promise<unknown>
   }
 }
@@ -56,7 +60,10 @@ interface Session {
   admitted?: boolean
   retirement?: Promise<boolean>
   inFlight: number
+  longLivedReads: number
 }
+
+const MAX_LONG_LIVED_READS = 32
 
 interface ActiveWriteContext {
   readonly token: symbol
@@ -282,7 +289,7 @@ export class ManagerRendererSessions {
     let session: Session
     const timer = setTimeout(() => this.retire(session), lifetime)
     timer.unref()
-    session = { gateway: { ...gateway }, browserSessionId, handle, controller, timer, inFlight: 0 }
+    session = { gateway: { ...gateway }, browserSessionId, handle, controller, timer, inFlight: 0, longLivedReads: 0 }
     this.usedBrowserSessions.add(browserSessionId)
     this.sessions.set(handle.rendererId, session)
     if (this.input.participant !== undefined) {
@@ -440,6 +447,7 @@ export class ManagerRendererSessions {
     let write: ActiveWriteContext | undefined
     let finishWrite: (() => void) | undefined
     let finishRead: (() => void) | undefined
+    let longLivedRead = false
     const unknown = (): ManagerRendererCallResult => {
       this.mutationUncertain = true
       this.fenceMutations()
@@ -461,6 +469,12 @@ export class ManagerRendererSessions {
         admitted: session.admitted === true && session.peer !== undefined && !session.peer.closed,
       })
       if (prepared.mode !== 'read' && prepared.mode !== 'write') return unavailable
+      if (prepared.longLivedRead) {
+        if (prepared.mode !== 'read' || session.longLivedReads >= MAX_LONG_LIVED_READS) return unavailable
+        session.inFlight--
+        session.longLivedReads++
+        longLivedRead = true
+      }
       if (prepared.mode === 'write') {
         if (
           this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
@@ -473,7 +487,10 @@ export class ManagerRendererSessions {
         write = { token: Symbol('manager-write'), session }
         this.activeWrites.set(write.token, session)
       } else {
-        finishRead = this.readLifetimes.begin(session.handle.rendererId)
+        finishRead = this.readLifetimes.begin(
+          session.handle.rendererId,
+          prepared.channelConfigurationIndependent === true,
+        )
         if (!finishRead) return unavailable
       }
       dispatched = prepared.mode
@@ -500,7 +517,8 @@ export class ManagerRendererSessions {
         finishWrite?.()
       }
       finishRead?.()
-      session.inFlight--
+      if (longLivedRead) session.longLivedReads--
+      else session.inFlight--
     }
   }
 

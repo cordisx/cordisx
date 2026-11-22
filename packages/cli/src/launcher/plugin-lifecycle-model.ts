@@ -168,6 +168,7 @@ export interface ManagedServiceUICapabilityMutation {
   readonly pluginId: string
   readonly pluginGeneration: string
   readonly token: string
+  readonly startup?: true
 }
 
 /** Owner-only admission before any lifecycle transaction or renderer work begins. */

@@ -143,6 +143,20 @@ export function installIndependentHostBindings(input: {
           if (channel === 'service-config') return envelope.operation === 'list'
           if (channel === 'marketplace') return true
           if (channel === 'channel-actions') return (envelope as { action?: unknown }).action === 'snapshot'
+          if (channel === 'managed-service-ui') {
+            // Startup subscriptions are renderer-owned observations; the owner
+            // confirms their cleanup before allowing the renderer to resume.
+            return [
+              'get',
+              'snapshot',
+              'readCatalog',
+              'nativeProviders',
+              'startupRead',
+              'startupSubscribe',
+              'startupNext',
+              'startupClose',
+            ].includes(String(envelope.operation))
+          }
           if (channel !== 'plugin-management') return false
           const operation = envelope.operation as { kind?: unknown } | undefined
           return isRendererManagementRead(operation?.kind)

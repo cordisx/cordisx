@@ -38,8 +38,23 @@ const codex = (process.env.PATH ?? '').split(path.delimiter).map(directory => pa
   .find(executable)
 
 const fixture = [
-  "export const inject = ['pages', 'routes', 'slots', 'i18n', 'managedServices']",
+  "export const inject = ['pages', 'routes', 'slots', 'i18n', 'managedServices', 'startup']",
   'export async function apply(ctx) {',
+  '  const fetch = globalThis.fetch.bind(globalThis)',
+  '  const transport = globalThis.__fixtureTransport = []',
+  '  globalThis.fetch = (url, options) => {',
+  '    let operation',
+  "    if (url === '/api/renderer/binding' && typeof options?.body === 'string') {",
+  '      const payload = JSON.parse(JSON.parse(options.body).payload)',
+  "      operation = typeof payload.operation === 'object' ? payload.operation.kind : payload.operation",
+  "      transport.push({ operation, status: 'started' })",
+  '    }',
+  '    return fetch(url, options).then(async response => {',
+  '      const error = !response.ok ? (await response.clone().json().catch(() => ({}))).error : undefined',
+  '      if (operation) transport.push({ operation, status: response.status, ...(error ? { error } : {}) })',
+  '      return response',
+  '    })',
+  '  }',
   "  ctx.i18n.define({ namespace: 'managed-fixture', locale: 'en', default: true,",
   "    messages: { title: 'Managed fixture', description: 'Managed backend status' } })",
   "  const title = { namespace: 'managed-fixture', key: 'title', fallback: 'Managed fixture' }",
@@ -66,6 +81,12 @@ const fixture = [
   "  const result = await ctx.managedServices.get({ serviceId: 'gateway' })",
   '  globalThis.__fixtureManagedStatus = result.status',
   "  if (result.status === 'available') globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status",
+  '  globalThis.__fixtureStartup = ctx.startup',
+  '  globalThis.__fixtureStartupSnapshot = await ctx.startup.read()',
+  '  globalThis.__fixtureStartupEvents = []',
+  '  globalThis.__fixtureStartupSubscription = await ctx.startup.subscribe(event =>',
+  '    globalThis.__fixtureStartupEvents.push(event.kind))',
+  '  globalThis.__fixtureStartupSubscribed = true',
   '}',
 ].join('\n')
 
@@ -108,6 +129,14 @@ it.skipIf(
         .toBe('true')
       await expect.poll(() => page.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 20_000 })
         .toBe('available')
+      await expect.poll(() => page.evaluate('globalThis.__fixtureStartupSubscribed'), { timeout: 20_000 })
+        .toBe(true)
+      await expect.poll(() =>
+        page.evaluate('globalThis.__fixtureTransport.some(item => item.operation === "startupNext")')
+      ).toBe(true)
+      expect(await page.evaluate('globalThis.__fixtureStartupSnapshot.contract'))
+        .toBe('cordisx.startup-snapshot/v1')
+      expect(await page.evaluate('globalThis.__fixtureStartupEvents.includes("snapshot")')).toBe(true)
       await expect.poll(() =>
         page.evaluate('Boolean(document.querySelector("[data-settings-navigation-item^=channel]"))')
       )
@@ -205,7 +234,10 @@ it.skipIf(
           '      if (response.requestId !== id) return old?.(raw)',
           '      clearTimeout(timer); window.__cordisxPluginManagementReceiveV1 = old',
           "      const item = response.value?.plugins.find(value => value.id === 'fixture-service')",
-          '      if (!response.ok || !item) return reject(new Error("management unavailable"))',
+          '      if (!response.ok || !item) return reject(new Error("management unavailable: " + JSON.stringify({',
+          '        code: response.code, error: response.error, transport: globalThis.__fixtureTransport.slice(-20),',
+          '        events: globalThis.__fixtureStartupEvents.slice(-20)',
+          '      })))',
           '      resolve({ source: item.canonicalSource, operations: item.availableOperations })',
           '    }',
           '    window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId: id,',
@@ -243,7 +275,10 @@ it.skipIf(
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
       const channelForm = async (page: CdpClient) => {
         await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
-        await expect.poll(() => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'))
+        await expect.poll(
+          () => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'),
+          { timeout: 15_000 },
+        )
           .toBe(true)
         await expect.poll(() =>
           page.evaluate([
@@ -254,10 +289,10 @@ it.skipIf(
             '  if (!button) return false',
             '  button.click(); return true',
             '})()',
-          ].join('\n'))
-        ).toBe(true)
-        await expect.poll(() =>
-          page.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))')
+          ].join('\n')), { timeout: 15_000 }).toBe(true)
+        await expect.poll(
+          () => page.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
+          { timeout: 15_000 },
         )
           .toBe(true)
       }
@@ -309,6 +344,10 @@ it.skipIf(
       }
       await expect.poll(() => second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
         .toBe('Managed fixture channel')
+      for (const page of [first, second]) {
+        expect(await page.evaluate('globalThis.__fixtureStartup.read().then(value => value.contract)'))
+          .toBe('cordisx.startup-snapshot/v1')
+      }
       expect(await managementState(first)).toEqual({ source: await alias(first), operations: [] })
       await run('stop', '--mode', 'service', 'codex', 'default', '--json')
       for (const page of [first, second]) {

@@ -98,12 +98,16 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     return value
   }
 
-  private assertIdle(): void {
+  private assertSnapshotAvailable(): void {
     if (
-      !this.initialized || !this.active || this.closed || this.requiresReconciliation || this.joining > 0
-      || this.reservation
-      || this.transaction
+      !this.initialized || !this.active || this.closed || this.requiresReconciliation
+      || this.reservation || this.transaction
     ) throw new Error('service renderer lifecycle is unavailable')
+  }
+
+  private assertIdle(): void {
+    this.assertSnapshotAvailable()
+    if (this.joining > 0) throw new Error('service renderer lifecycle is unavailable')
   }
 
   private assertMutationAuthority(): void {
@@ -113,9 +117,9 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     throw new Error(current === undefined ? 'service renderer fence is active' : 'service renderer fence is stale')
   }
 
-  /** Trusted owner bootstrap can bind a renderer to this exact idle snapshot. */
+  /** Joining peers cannot mutate the active snapshot, so existing readers may continue. */
   snapshot(): Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }> {
-    this.assertIdle()
+    this.assertSnapshotAvailable()
     return { active: structuredClone(this.active!), registryEpoch: this.registryEpoch }
   }
 

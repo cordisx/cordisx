@@ -481,12 +481,15 @@ it('reserves the real lifecycle while the sole originating Manager receives its 
     const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
     const browserSessionId = secret()
     const handle = (await sessions.open(gateway, browserSessionId))!
-    participants.confirmBootstrap(handle.rendererId, f.lifecycle.snapshot())
+    const beforeJoin = f.lifecycle.snapshot()
+    participants.confirmBootstrap(handle.rendererId, beforeJoin)
     const invocation = { gateway, browserSessionId, handle }
     const admission = sessions.admit(invocation)
     const peer = participants.peer(handle.rendererId)!
     const synchronize = (await peer.next())!
     expect(synchronize.method).toBe('synchronize')
+    expect(f.lifecycle.snapshot()).toEqual(beforeJoin)
+    expect(() => f.lifecycle.reserveExternalMutation([peer])).toThrow('service renderer lifecycle is unavailable')
     expect(peer.acknowledge({
       id: synchronize.id,
       sequence: synchronize.sequence,

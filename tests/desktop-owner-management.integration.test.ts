@@ -537,6 +537,7 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
         const capabilityText = /["']?managedServiceCapabilities["']?\s*:\s*(\[[^\]]+\])/u.exec(text)?.[1] ?? ''
         token = /["']?token["']?\s*:\s*["']([a-f0-9]{64})["']/u.exec(capabilityText)?.[1] ?? ''
         expect(token).toMatch(/^[a-f0-9]{64}$/u)
+        expect(/["']?startup["']?\s*:\s*(?:true|!0)/u.test(capabilityText)).toBe(true)
       } finally {
         bytes.fill(0)
       }
@@ -565,8 +566,23 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
         }),
       )
       expect(response).toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+      const startupRequest = (requestId: string, operation: string, subscriptionId?: string) =>
+        JSON.stringify({
+          version: 1,
+          token,
+          requestId,
+          operation,
+          scope: { profileId, runtimeGeneration: generation, pluginGeneration: active.plugins[0]!.moduleGeneration },
+          ...(subscriptionId === undefined ? {} : { subscriptionId }),
+        })
+      expect(await call('managed-service-ui', startupRequest('desktop-startup-read', 'startupRead')))
+        .toMatchObject({ status: 'ok', value: { ok: true, value: { contract: 'cordisx.startup-snapshot/v1' } } })
+      expect(await call('managed-service-ui', startupRequest('desktop-startup-subscribe', 'startupSubscribe', 'view')))
+        .toMatchObject({ status: 'ok', value: { ok: true, value: { subscriptionId: 'view' } } })
+      const observation = call('managed-service-ui', startupRequest('desktop-startup-next', 'startupNext', 'view'))
       unregister()
       unregister = undefined
+      expect(['ok', 'unavailable']).toContain((await observation).status)
       expect(await call('manager-bootstrap', { action: 'status' })).toEqual({ status: 'unavailable' })
     } finally {
       await composition?.close().catch(() => undefined)

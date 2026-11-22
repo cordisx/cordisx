@@ -158,7 +158,6 @@ describe('manager managed-service UI bridge', () => {
         'startOAuth',
         'readWebEntry',
         'consoleView',
-        'startupSubscribe',
         'toggleAccount',
       ]
     ) {

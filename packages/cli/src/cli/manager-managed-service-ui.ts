@@ -5,12 +5,15 @@ import {
   parseManagedServiceUIBindingRequest,
 } from '../launcher/managed-service-ui-rpc.js'
 import type { ManagedServiceUICapabilityMutation } from '../launcher/plugin-lifecycle-model.js'
+import type { StartupUIRequest } from '../launcher/startup-ui-rpc.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import { ManagerStartupObservation } from './manager-startup-observation.js'
 
 const secret = /^[a-f0-9]{64}$/u
 const localId = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 const opaqueId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
 const readOperations = new Set(['get', 'snapshot', 'readCatalog', 'nativeProviders'])
+const startupOperations = new Set(['startupRead', 'startupSubscribe', 'startupNext', 'startupClose'])
 const errorCodes = new Set([
   'service-not-declared',
   'binding-replaced',
@@ -26,6 +29,7 @@ export interface ManagerManagedServiceUICapability {
   readonly pluginId: string
   readonly pluginGeneration: string
   readonly token: string
+  readonly startup?: true
 }
 
 interface OwnerCapability extends ManagerManagedServiceUICapability {}
@@ -38,6 +42,7 @@ interface Session {
   readonly fence: number
   readonly aliases: ReadonlyMap<string, Alias>
   readonly capabilities: readonly OwnerCapability[]
+  readonly startup: ManagerStartupObservation
   readonly onAbort: () => void
 }
 
@@ -67,7 +72,12 @@ function copyCapabilities(value: readonly ManagedServiceUICapabilityMutation[]):
     ) throw unavailable()
     plugins.add(item.pluginId)
     tokens.add(item.token)
-    return { pluginId: item.pluginId, pluginGeneration: item.pluginGeneration, token: item.token }
+    return {
+      pluginId: item.pluginId,
+      pluginGeneration: item.pluginGeneration,
+      token: item.token,
+      ...(item.startup === true ? { startup: true as const } : {}),
+    }
   })
   if (
     copied.some(item =>
@@ -80,7 +90,10 @@ function copyCapabilities(value: readonly ManagedServiceUICapabilityMutation[]):
 function sameCapabilities(left: readonly OwnerCapability[], right: readonly OwnerCapability[]): boolean {
   return left.length === right.length
     && left.every(a =>
-      right.some(b => a.pluginId === b.pluginId && a.pluginGeneration === b.pluginGeneration && a.token === b.token)
+      right.some(b =>
+        a.pluginId === b.pluginId && a.pluginGeneration === b.pluginGeneration && a.token === b.token
+        && a.startup === b.startup
+      )
     )
 }
 
@@ -159,6 +172,8 @@ export function createManagerManagedServiceUIBridge(input: {
   const sessions = new Map<string, Session>()
   const usedRenderers = new Set<string>()
   const usedAliases = new Set<string>()
+  const usedStartupIds = new Set<string>()
+  const retirements = new Map<string, Promise<boolean>>()
   let disposed = false
 
   function fence(): number {
@@ -176,6 +191,7 @@ export function createManagerManagedServiceUIBridge(input: {
     if (!session) return
     sessions.delete(id)
     session.context.signal.removeEventListener('abort', session.onAbort)
+    retirements.set(id, session.startup.retire())
   }
 
   function validContext(context: ManagerRendererChannelContext): boolean {
@@ -196,6 +212,19 @@ export function createManagerManagedServiceUIBridge(input: {
       retire(context.rendererId)
       throw unavailable()
     }
+  }
+
+  function sanitize(session: Session, value: unknown, requestId: string): Record<string, unknown> {
+    const response = object(checkedResponse(value, session.capabilities.map(item => item.token)))
+    if (response.requestId !== requestId || typeof response.ok !== 'boolean') throw unavailable()
+    if (response.ok === false) {
+      return {
+        requestId,
+        ok: false,
+        code: typeof response.code === 'string' && errorCodes.has(response.code) ? response.code : 'owner-unavailable',
+      }
+    }
+    return { requestId, ok: true, value: response.value }
   }
 
   function projectInitial(context: ManagerRendererChannelContext): readonly ManagerManagedServiceUICapability[] {
@@ -223,14 +252,36 @@ export function createManagerManagedServiceUIBridge(input: {
       do token = randomBytes(32).toString('hex')
       while (usedAliases.has(token) || capabilities.some(item => token.includes(item.token)))
       usedAliases.add(token)
-      const projected = Object.freeze({ pluginId: owner.pluginId, pluginGeneration: owner.pluginGeneration, token })
+      const projected = Object.freeze({
+        pluginId: owner.pluginId,
+        pluginGeneration: owner.pluginGeneration,
+        token,
+        ...(owner.startup === true ? { startup: true as const } : {}),
+      })
       aliases.set(token, { public: projected, ownerToken: owner.token })
     }
-    const session: Session = {
+    let session!: Session
+    const startup = new ManagerStartupObservation({
+      context,
+      runtimeGeneration: input.runtimeGeneration,
+      allocateId: () => {
+        if (usedStartupIds.size >= 16_384) throw unavailable()
+        let id: string
+        do id = randomBytes(32).toString('hex')
+        while (usedStartupIds.has(id) || usedAliases.has(id) || capabilities.some(item => item.token === id))
+        usedStartupIds.add(id)
+        return id
+      },
+      assertCurrent: () => assertCurrent(session, context),
+      invoke: async (value, signal) => await input.runtime.managedServiceUI.handleBindingValue(value, signal),
+      sanitize: (value, requestId) => sanitize(session, value, requestId),
+    })
+    session = {
       context,
       fence: currentFence,
       aliases,
       capabilities,
+      startup,
       onAbort: () => retire(context.rendererId),
     }
     usedRenderers.add(context.rendererId)
@@ -260,6 +311,14 @@ export function createManagerManagedServiceUIBridge(input: {
           || scope.pluginGeneration !== alias.public.pluginGeneration
         ) throw unavailable()
         const requestId = request.requestId
+        if (startupOperations.has(request.operation) && alias.public.startup) {
+          const forwarded = { ...request, token: alias.ownerToken }
+          const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
+          const validation = validator(alias.ownerToken, input.profileId, input.runtimeGeneration)
+          const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
+          if (!startupOperations.has(parsed.operation)) throw unavailable()
+          return session.startup.prepare(parsed as StartupUIRequest, alias)
+        }
         if (!readOperations.has(request.operation)) {
           return {
             mode: 'read',
@@ -288,18 +347,8 @@ export function createManagerManagedServiceUIBridge(input: {
               throw unavailable()
             }
             assertCurrent(session, context)
-            const privateTokens = session.capabilities.map(item => item.token)
-            const response = object(checkedResponse(result, privateTokens))
-            if (response.requestId !== requestId || typeof response.ok !== 'boolean') throw unavailable()
-            if (response.ok === false) {
-              return {
-                requestId,
-                ok: false,
-                code: typeof response.code === 'string' && errorCodes.has(response.code)
-                  ? response.code
-                  : 'owner-unavailable',
-              }
-            }
+            const response = sanitize(session, result, requestId)
+            if (response.ok === false) return response
             if (parsed.operation !== 'get') return { requestId, ok: true, value: response.value }
             const value = object(response.value)
             if (value.status === 'unavailable') {
@@ -351,6 +400,9 @@ export function createManagerManagedServiceUIBridge(input: {
       const session = sessions.get(context.rendererId)
       if (session?.context.signal === context.signal) retire(context.rendererId)
     },
+    waitForRetirement(rendererId: string): Promise<boolean> {
+      return retirements.get(rendererId) ?? Promise.resolve(true)
+    },
     /** Check the owner-built renderer source before any bytes reach a browser. */
     assertBundleSafe(context: ManagerRendererChannelContext, source: string): void {
       const session = sessions.get(context.rendererId)
@@ -365,6 +417,7 @@ export function createManagerManagedServiceUIBridge(input: {
       for (const id of sessions.keys()) retire(id)
       usedRenderers.clear()
       usedAliases.clear()
+      usedStartupIds.clear()
     },
   }
 }

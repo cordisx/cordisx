@@ -262,11 +262,15 @@ export class ServiceRendererBootstrap {
         )
         const writesSettled = await writes
         await reads
+        const managedSettled = entry.managedContext
+          ? await (this.managedServiceUI?.waitForRetirement(rendererId) ?? Promise.resolve(false))
+          : true
         const releases = [entry.releasePermissionFence, entry.releasePluginConfigFence]
         delete entry.releasePermissionFence
         delete entry.releasePluginConfigFence
         const results = await Promise.allSettled(releases.map(async release => await release?.()))
-        return writesSettled && !entry.cleanupFailed && results.every(result => result.status === 'fulfilled')
+        return writesSettled && managedSettled && !entry.cleanupFailed
+          && results.every(result => result.status === 'fulfilled')
       })().catch(() => false)
       this.retirements.set(rendererId, entry.retirement)
     }

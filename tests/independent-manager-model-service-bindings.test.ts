@@ -20,8 +20,10 @@ it('allows refresh during a model-service read but not while a save is pending',
     binding(JSON.stringify({ requestId: 'read', operation: 'read' }))
     expect(dispose.canResume()).toBe(true)
     binding(JSON.stringify({ requestId: 'save', operation: 'save' }))
-    expect(dispose.canResume()).toBe(false)
+    // A queued write can still be canceled before it reaches the owner.
+    expect(dispose.canResume()).toBe(true)
     await Promise.resolve()
+    expect(dispose.canResume()).toBe(false)
     dispose()
     expect(receive).toHaveBeenCalledTimes(2)
     expect(JSON.parse(receive.mock.calls[1]![0])).toMatchObject({
@@ -57,7 +59,7 @@ it('waits for owner admission before dispatching a model-service write', async (
     binding(JSON.stringify({ requestId: 'read', operation: 'read' }))
     binding(JSON.stringify({ requestId: 'save', operation: 'save' }))
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
-    expect(dispose.canResume()).toBe(false)
+    expect(dispose.canResume()).toBe(true)
     admit(true)
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
   } finally {
@@ -114,5 +116,36 @@ it('waits for admission for a Channel snapshot while keeping it safe to refresh'
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
   } finally {
     dispose()
+  }
+})
+
+it('allows refresh while renderer-owned startup observation requests are pending', async () => {
+  const fetch = vi.fn((_path: string, options: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+    })
+  )
+  const onSessionLost = vi.fn()
+  const browser = { fetch, __cordisxManagedServiceUIReceiveV1: vi.fn() } as unknown as Window
+  const dispose = installIndependentHostBindings({
+    window: browser,
+    sessionToken: 'a'.repeat(64),
+    channels: ['managed-service-ui'],
+    onSessionLost,
+  })
+  const binding = (browser as unknown as { __cordisxManagedServiceUIRequestV1: (value: string) => void })
+    .__cordisxManagedServiceUIRequestV1
+  try {
+    for (const operation of ['startupRead', 'startupSubscribe', 'startupNext', 'startupClose']) {
+      binding(JSON.stringify({ requestId: operation, operation }))
+    }
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4))
+    expect(dispose.canResume()).toBe(true)
+    binding(JSON.stringify({ requestId: 'write', operation: 'authenticate' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5))
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+    expect(onSessionLost).not.toHaveBeenCalled()
   }
 })
