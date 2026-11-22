@@ -87,23 +87,26 @@ async function fixture() {
     hasPreparation: () => false,
     isPreparing: () => false,
   }
-  const tasks = new ChannelTaskSettings({
-    store,
-    native: () => native as never,
-    agent: new ChannelAgentAccess(() => store.snapshot(), () => native as never),
-    access: () =>
-      ({
-        sendCard: async (_event: unknown, card: object) => {
-          cards.push(card)
-          return 'om_card'
-        },
-        updateCard: async (_event: unknown, _id: string, card: object) => {
-          cards.push(card)
-        },
-      }) as never,
-  })
+  const tasksFor = (activeStore: ChannelConversationStore) =>
+    new ChannelTaskSettings({
+      store: activeStore,
+      native: () => native as never,
+      agent: new ChannelAgentAccess(() => activeStore.snapshot(), () => native as never),
+      access: () =>
+        ({
+          sendCard: async (_event: unknown, card: object) => {
+            cards.push(card)
+            return 'om_card'
+          },
+          updateCard: async (_event: unknown, _id: string, card: object) => {
+            cards.push(card)
+          },
+        }) as never,
+    })
+  const tasks = tasksFor(store)
   return {
     tasks,
+    tasksFor,
     store,
     file,
     native,
@@ -311,7 +314,10 @@ describe('exact Channel task changes', () => {
     stores.push(reopened)
     expect(reopened.snapshot().taskSettings.chat!.application).toBe('unknown')
     expect(reopened.snapshot().taskRequests[result.requestId!]!.state).toBe('unknown')
-    await expect(f.tasks.request(source, 'chat', { model: 'new' }, 0)).rejects.toThrow('REVISION_CONFLICT')
+    const restartedTasks = f.tasksFor(reopened)
+    await restartedTasks.pump()
+    expect(f.native.applyTaskSelection).toHaveBeenCalledOnce()
+    await expect(restartedTasks.request(source, 'chat', { model: 'new' }, 0)).rejects.toThrow('REVISION_CONFLICT')
   })
 
   it('saves effort for the next turn and waits for an independently observed matching value', async () => {

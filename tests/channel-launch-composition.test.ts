@@ -106,7 +106,9 @@ describe('Channel dry-run boundary', () => {
       expect(await first.tools.callLocal('logical-mode-default-set', { mode: 'fresh', expectedRevision: 0 }, {}))
         .toMatchObject({ status: 'rejected', code: 'LOCAL_USER_REQUIRED' })
       expect(await first.tools.callLocal('logical-mode-default-set', { mode: 'fresh', expectedRevision: 0 }))
-        .toMatchObject({ status: 'ok', preference: { mode: 'fresh' } })
+        .toMatchObject({ status: 'rejected', code: 'INVALID_REQUEST' })
+      expect(await first.tools.callLocal('logical-mode-default-set', { mode: 'fork', expectedRevision: 0 }))
+        .toMatchObject({ status: 'ok', preference: { mode: 'fork' } })
       const choice = await first.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }) as {
         conversationId: string
       }
@@ -146,7 +148,7 @@ describe('Channel dry-run boundary', () => {
       const reopened = await createConfiguredChannelConsumer(input)
       expect(reopened.logicalOwner!.store.snapshot().inputCursor).toBe('fixture-cursor')
       expect(await reopened.tools.callLocal('logical-mode-default', {}))
-        .toMatchObject({ status: 'ok', preference: { mode: 'fresh' } })
+        .toMatchObject({ status: 'ok', preference: { mode: 'fork' } })
       expect(await reopened.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }))
         .toMatchObject({ status: 'ok', revision: 1, preference: { mode: 'linked' } })
       expect(
@@ -158,7 +160,7 @@ describe('Channel dry-run boundary', () => {
         }),
       ).toMatchObject({ status: 'ok', revision: 2, preference: null })
       expect(await reopened.tools.callLocal('logical-mode-conversation', { sessionId: 'source' }))
-        .toMatchObject({ status: 'ok', revision: 2, preference: { mode: 'fresh' } })
+        .toMatchObject({ status: 'ok', revision: 2, preference: { mode: 'fork' } })
       expect(native).not.toHaveBeenCalled()
       await reopened.dispose()
     } finally {

@@ -74,10 +74,12 @@ test(
       },
     })
     const agent = new ChannelAgentAccess(() => ({ jobs: {}, bindings: {}, inputs: {} }) as never, () => undefined)
+    let migrating = false
     const consumer = {
       agentAccess: agent,
       taskSettings: { isBound: (id: string) => id === 'channel-chat' },
       executionOperation: settings,
+      isNativeSourceMigrating: () => migrating,
     }
     const tools = new ChannelConversationTools(() => undefined, consumer as never)
     const nativeRead = vi.fn(async (method: string, input: Record<string, unknown>) => {
@@ -205,6 +207,10 @@ test(
           code: 0,
           result: { status: 'ok', revision: 1, settings: { providerId: 'configured', model: 'model', fast: false } },
         })
+      migrating = true
+      expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '0', '--fast', 'true'], 'current'))
+        .toMatchObject({ code: 1, result: { status: 'rejected', code: 'CONTINUATION_PENDING' } })
+      migrating = false
       expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '0', '--fast', 'true'], 'current'))
         .toMatchObject({ code: 0, result: { status: 'applied', fast: true, revision: 1 } })
       expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '1', '--fast', 'false'], 'current'))
