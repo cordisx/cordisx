@@ -165,6 +165,7 @@ async function reserve(
   let started = false
   let wrote = false
   let completing = false
+  let originReleaseAttempted = false
   const transition = { isCurrent: () => current() }
   const current = () => {
     try {
@@ -189,6 +190,14 @@ async function reserve(
     try {
       origin.fence()
     } catch { /* continue fencing every participant */ }
+    if (originReleaseAttempted) {
+      // The origin may already have released the lifecycle fence, so its
+      // fence() can no longer prevent a fresh attachment after an uncertain
+      // final consumer release. Require owner reconciliation instead.
+      try {
+        input.lifecycle.terminal(new Error('renderer-permission-handoff-unavailable'))
+      } catch { /* continue closing the Manager cohort */ }
+    }
     for (const { entry, peer } of cohort) {
       if (entry.lifecycleTransition === transition) delete entry.lifecycleTransition
       peer.close()
@@ -279,11 +288,14 @@ async function reserve(
           }
           for (const { entry } of cohort) entry.policies = candidate
           for (const item of cohort) await item.configured.handoff(reservation!.forRenderer(item.id))
-          if (!current() || !consumers.release() || !reservation!.release()) {
+          if (!current() || !reservation!.release()) {
             throw new Error('renderer-permission-handoff-unavailable')
           }
           for (const { entry } of cohort) delete entry.lifecycleTransition
+          originReleaseAttempted = true
           if (!origin.release()) throw new Error('renderer-permission-handoff-unavailable')
+          // Keep other consumers fenced until every earlier release succeeds.
+          if (!consumers.release()) throw new Error('renderer-permission-handoff-unavailable')
           ended = true
           return true
         } catch {

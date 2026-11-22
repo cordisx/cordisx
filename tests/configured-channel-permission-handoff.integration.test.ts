@@ -274,6 +274,60 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
 )
 
 it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'keeps non-Manager consumers fenced when Channel release is not confirmed',
+  async () => {
+    const { f, second, consumers } = await setup()
+    const bridge = f.channelBridge!
+    const suspend = bridge.suspendAll.bind(bridge)
+    vi.spyOn(bridge, 'suspendAll').mockImplementation(async (ids, timeout) => {
+      const reservation = await suspend(ids, timeout)
+      return { ...reservation, release: () => false }
+    })
+    try {
+      const peerPoll = f.sessions.poll(second, 10_000)
+      const writerPoll = f.sessions.poll(f.invocation, 10_000)
+      const saving = f.sessions.call(f.invocation, 'fixture-write', {})
+      await acknowledge(f, second, (await peerPoll as any).value.command)
+      await acknowledge(f, f.invocation, (await writerPoll as any).value.command)
+      expect(await saving).toEqual({ status: 'unknown' })
+      expect(consumers.adopt).toHaveBeenCalledOnce()
+      expect(consumers.release).not.toHaveBeenCalled()
+      expect(consumers.fence).toHaveBeenCalled()
+      expect(f.participants.ownerPeers()).toEqual([])
+    } finally {
+      await f.close()
+    }
+  },
+  60_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'requires reconciliation if the last consumer cannot release after the owner write',
+  async () => {
+    const { f, second, consumers } = await setup()
+    consumers.release.mockReturnValueOnce(false)
+    try {
+      const peerPoll = f.sessions.poll(second, 10_000)
+      const writerPoll = f.sessions.poll(f.invocation, 10_000)
+      const saving = f.sessions.call(f.invocation, 'fixture-write', {})
+      await acknowledge(f, second, (await peerPoll as any).value.command)
+      await acknowledge(f, f.invocation, (await writerPoll as any).value.command)
+      expect(await saving).toEqual({ status: 'unknown' })
+      expect(consumers.release).toHaveBeenCalledOnce()
+      expect(consumers.fence).toHaveBeenCalled()
+      expect((await loadHomeConfig(f.configPath)).permissions).toContainEqual(expect.objectContaining({
+        policy: 'deny-persistent',
+      }))
+      expect(f.lifecycle.requiresReconciliation).toBe(true)
+      expect(() => f.lifecycle.snapshot()).toThrow('service renderer lifecycle is unavailable')
+    } finally {
+      await f.close()
+    }
+  },
+  60_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
   'fences the cohort when a peer gives an incorrect receipt after the owner write',
   async () => {
     const { f, second, consumers } = await setup()
