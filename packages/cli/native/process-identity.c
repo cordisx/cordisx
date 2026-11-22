@@ -1,10 +1,12 @@
 #include <errno.h>
 #include <libproc.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/proc_info.h>
 #include <time.h>
 #include <unistd.h>
@@ -23,8 +25,69 @@ static bool disappeared(pid_t pid) {
   return kill(pid, 0) == -1 && errno == ESRCH;
 }
 
-int main(void) {
+static const char *read_identity(pid_t pid, uid_t user, struct process_identity *item) {
+  struct proc_bsdinfo info = {0};
+  errno = 0;
+  int received = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+  if (received != (int)sizeof(info)) {
+    if ((errno == ESRCH || errno == ENOENT || errno == 0) && disappeared(pid)) return "disappeared";
+    return "identity-unavailable";
+  }
+  if (info.pbi_pid != (uint32_t)pid || info.pbi_uid != user || info.pbi_start_tvsec == 0) {
+    return "invalid-identity";
+  }
+  struct tm started;
+  time_t seconds = (time_t)info.pbi_start_tvsec;
+  if (localtime_r(&seconds, &started) == NULL ||
+      !strftime(item->started, sizeof(item->started), "%a %b %e %H:%M:%S %Y", &started)) {
+    return "invalid-identity";
+  }
+  item->pid = pid;
+  item->parent = info.pbi_ppid;
+  return NULL;
+}
+
+static void print_identity(const struct process_identity *item) {
+  printf("{\"pid\":%d,\"parentPid\":%u,\"startedAt\":\"%s\"}",
+         item->pid, item->parent, item->started);
+}
+
+int main(int argc, char **argv) {
   const uid_t user = getuid();
+  if (argc == 3 && strcmp(argv[1], "--pid") == 0) {
+    const char *text = argv[2];
+    if (*text == '\0') {
+      unavailable("invalid-identity");
+      return 0;
+    }
+    for (const char *cursor = text; *cursor; cursor++) {
+      if (*cursor < '0' || *cursor > '9') {
+        unavailable("invalid-identity");
+        return 0;
+      }
+    }
+    errno = 0;
+    char *end = NULL;
+    long parsed = strtol(text, &end, 10);
+    if (errno != 0 || *end != '\0' || parsed <= 0 || parsed > INT_MAX) {
+      unavailable("invalid-identity");
+      return 0;
+    }
+    struct process_identity item = {0};
+    const char *reason = read_identity((pid_t)parsed, user, &item);
+    if (reason != NULL) {
+      unavailable(strcmp(reason, "disappeared") == 0 ? "identity-unavailable" : reason);
+    } else {
+      printf("{\"version\":1,\"status\":\"complete\",\"processes\":[");
+      print_identity(&item);
+      puts("]}");
+    }
+    return ferror(stdout) ? 1 : 0;
+  }
+  if (argc != 1) {
+    unavailable("invalid-identity");
+    return 0;
+  }
   const int maximum = 1024 * 1024;
   errno = 0;
   int estimated = proc_listpids(PROC_UID_ONLY, user, NULL, 0);
@@ -62,28 +125,12 @@ int main(void) {
       reason = "invalid-identity";
       break;
     }
-    struct proc_bsdinfo info = {0};
-    errno = 0;
-    int received = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
-    if (received != (int)sizeof(info)) {
-      if ((errno == ESRCH || errno == ENOENT || errno == 0) && disappeared(pid)) continue;
-      reason = "identity-unavailable";
-      break;
+    reason = read_identity(pid, user, &identities[collected]);
+    if (reason != NULL && strcmp(reason, "disappeared") == 0) {
+      reason = NULL;
+      continue;
     }
-    if (info.pbi_pid != (uint32_t)pid || info.pbi_uid != user || info.pbi_start_tvsec == 0) {
-      reason = "invalid-identity";
-      break;
-    }
-    struct tm started;
-    time_t seconds = (time_t)info.pbi_start_tvsec;
-    struct process_identity *item = &identities[collected];
-    if (localtime_r(&seconds, &started) == NULL ||
-        !strftime(item->started, sizeof(item->started), "%a %b %e %H:%M:%S %Y", &started)) {
-      reason = "invalid-identity";
-      break;
-    }
-    item->pid = pid;
-    item->parent = info.pbi_ppid;
+    if (reason != NULL) break;
     collected++;
   }
   if (reason != NULL || collected == 0) {
@@ -92,8 +139,8 @@ int main(void) {
     printf("{\"version\":1,\"status\":\"complete\",\"processes\":[");
     for (size_t index = 0; index < collected; index++) {
       const struct process_identity *item = &identities[index];
-      printf("%s{\"pid\":%d,\"parentPid\":%u,\"startedAt\":\"%s\"}",
-             index ? "," : "", item->pid, item->parent, item->started);
+      if (index) printf(",");
+      print_identity(item);
     }
     puts("]}");
   }

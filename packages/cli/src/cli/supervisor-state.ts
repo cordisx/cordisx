@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import path from 'node:path'
-import { processIdentitiesAfterPsDenied } from '../launcher/process-identity.js'
+import { processIdentityAfterPsDenied } from '../launcher/process-identity.js'
 import { compareProcessStartTimes, processIdentityEnvironment } from '../launcher/process-start-identity.js'
 
 export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
@@ -274,7 +274,7 @@ export async function processStartIdentity(pid: number): Promise<string | undefi
     return output === '' ? undefined : output
   } catch (error) {
     try {
-      return processIdentitiesAfterPsDenied(error)?.processes.find(item => item.pid === pid)?.startedAt
+      return processIdentityAfterPsDenied(error, pid)?.startedAt
     } catch {
       return undefined
     }
