@@ -1,6 +1,6 @@
 import { readChannelCompletion } from './channel-legacy-completion.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTranscriptPage, codexTurn } from './agent-bridge-codex-history.js'
@@ -602,7 +602,7 @@ export class ChannelNativeSessions {
       if (metadata?.status && object(metadata.status).type === 'active') return { state: 'busy' }
     }
     const event = message.source.event
-    const personaTask = sessionId ?? operationId
+    const personaTask = sessionId ?? `dispatch-${createHash('sha256').update(operationId).digest('hex')}`
     const capsule = this.personaRegistry && await this.personaRegistry.taskConfigured(personaTask, event)
       ? await this.personaRegistry.bootstrap(personaTask, event, event.conversationId)
       : undefined
