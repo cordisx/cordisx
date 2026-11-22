@@ -10,6 +10,17 @@ import {
 import { channelReplyDefaults } from './channel-reply-routing.js'
 import { channelLogicalHandoffForJob, reserveChannelLogicalHandoff } from './channel-logical-handoff.js'
 
+/** No native effect occurred, so release this job's checkpoint reservation. */
+export function failChannelLogicalPersona(state: ChannelConversationState, jobId: string) {
+  const job = state.jobs[jobId]
+  if (!job || job.state !== 'dispatching') return
+  job.state = 'failed'
+  job.code = 'CONTINUATION_PERSONA_UNAVAILABLE'
+  for (const intent of Object.values(state.logicalContinuations?.intents ?? {})) {
+    if (intent.handoffJobId === jobId && !intent.handoffTurnId) delete intent.handoffJobId
+  }
+}
+
 export async function channelDispatchHandoff(store: ChannelConversationStore, jobId: string, event: ChannelEventRef) {
   const handoff = channelLogicalHandoffForJob(store.snapshot(), jobId, event)
   if (handoff === false) {

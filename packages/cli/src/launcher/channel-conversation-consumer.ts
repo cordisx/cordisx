@@ -24,6 +24,7 @@ import {
   channelDispatchHandoff,
   claimChannelDispatch,
 } from './channel-conversation-dispatch.js'
+import { ensureChannelLogicalPersona } from './channel-logical-persona.js'
 import {
   callChannelLogicalHistory,
   channelLogicalHistoryAvailable,
@@ -34,6 +35,7 @@ import {
   channelManagementReadback,
   channelPolicyReadback,
   channelPolicySet,
+  channelStatusReadback,
 } from './channel-management-readback.js'
 import {
   type ProfileLogicalConversationOwner,
@@ -315,25 +317,7 @@ export class ChannelConversationConsumer {
     })
   }
   status(sessionId?: string) {
-    const state = this.store.snapshot()
-    return {
-      status: 'ok',
-      revision: state.revision,
-      enabled: state.policy.enabled,
-      bindings: Object.values(state.bindings).filter(binding =>
-        sessionId === undefined || binding.sessionId === sessionId
-      ),
-      jobs: Object.values(state.jobs).filter(job => sessionId === undefined || job.sessionId === sessionId)
-        .map(({ id, state, sessionId, turnId, code, replyDefaults, replyMode }) => ({
-          id,
-          state,
-          sessionId,
-          turnId,
-          code,
-          replyDefaults,
-          replyMode,
-        })),
-    }
+    return channelStatusReadback(this.store.snapshot(), sessionId)
   }
   /** Select the final-response route for this exact incoming turn; this operation never sends a message. */
   async selectReplyMode(value: unknown, sessionId: string, turnId?: string) {
@@ -826,6 +810,7 @@ export class ChannelConversationConsumer {
         const context = await this.input.access()?.messageContext?.(message, record.addressing)
           .catch(() => undefined) ?? channelMessageContext(message, record.addressing)
         const logicalHistory = !continuation && channelLogicalHistoryAvailable(captured, event, job.sessionId)
+        if (!await ensureChannelLogicalPersona(this.personas, this.store, job.id, event, this.input)) return
         const handoff = await channelDispatchHandoff(this.store, job.id, event)
         if (handoff === false) return
         const result = await native.start(

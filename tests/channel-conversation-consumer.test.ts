@@ -151,6 +151,11 @@ describe('persistent Channel chat consumer', () => {
       continueAtIdle: false,
     }, 0)
     const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await f.consumer.personas.profile('atlas', 'Atlas', 'Original persona', 0)
+    await f.consumer.personas.profile('nova', 'Nova', 'New persona', 0)
+    await f.consumer.personas.bind(account, 'atlas', 0)
+    await f.consumer.personas.resolveTask(a, account)
+    await f.consumer.personas.bind(account, 'nova', 1)
     const tools = new ChannelConversationTools(() => f.access, f.consumer)
     expect(await tools.callLocal('logical-mode-default-set', { mode: 'linked', expectedRevision: 0 }))
       .toMatchObject({ status: 'ok', revision: 1 })
@@ -201,8 +206,19 @@ describe('persistent Channel chat consumer', () => {
     expect(native.createLogicalDestination).toHaveBeenCalledOnce()
     expect(f.consumer.bindings()[0]?.sessionId).toBe(b)
     expect(Object.values(store.snapshot().logicalContinuations?.relations ?? {})).toHaveLength(1)
+    const pin = vi.spyOn(f.consumer.personas, 'pinAlias').mockRejectedValueOnce(new Error('PERSONA_UNAVAILABLE'))
+    await f.consumer.receive('inbox:persona-failure', message('om_persona_failure'))
+    await settle(f.consumer)
+    expect(f.native.start).not.toHaveBeenCalled()
+    expect(f.consumer.status().jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: 'failed', code: 'CONTINUATION_PERSONA_UNAVAILABLE' }),
+    ]))
+    const intent = Object.values(store.snapshot().logicalContinuations!.intents)[0]!
+    expect(intent.handoffJobId).toBeUndefined()
+    pin.mockRestore()
     await f.consumer.receive('inbox:after-logical', message('om_after_logical'))
     await settle(f.consumer)
+    expect((await f.consumer.personas.bootstrap(b, account)).personaId).toBe('atlas')
     expect(f.native.start).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Object),

@@ -24,6 +24,7 @@ const projectMode = process.env.CORDISX_LOGICAL_NATIVE_PROJECT === '1'
 const chainMode = process.env.CORDISX_LOGICAL_NATIVE_CHAIN === '1'
 const initialModeUnset = process.env.CORDISX_LOGICAL_NATIVE_UNSET_MODE === '1'
 const longSource = process.env.CORDISX_LOGICAL_NATIVE_LONG_SOURCE === '1'
+const personaMode = process.env.CORDISX_LOGICAL_NATIVE_PERSONA === '1'
 describe.skipIf(!executable)('isolated native Channel continuation', () => {
   it('moves a real owned native session and retrieves authorized synthetic history', async () => {
     if (
@@ -51,6 +52,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       },
     })
     let modelCalls = 0, markerReturned = false, checkpointObserved = false, chainPromptContainedMarker = false
+    let personaObservedOnTarget = false
     const reports: string[] = []
     const historyDiagnostics: Array<
       { success: boolean; marker: boolean; next: boolean; entries?: unknown; truncated?: unknown }
@@ -60,6 +62,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       let body = ''
       for await (const chunk of request) body += chunk
       modelCalls++
+      if (personaMode && modelCalls > 1 && body.includes('SYNTHETIC_ATLAS')) personaObservedOnTarget = true
       if (chainMode && modelCalls === 3) chainPromptContainedMarker = body.includes('PAPERKITE')
       const toolCallNumber = chainMode || initialModeUnset ? 3 : 2
       if (modelCalls === toolCallNumber && body.includes('SYNTHETIC_CHECKPOINT')) checkpointObserved = true
@@ -219,6 +222,11 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         },
       })
       const consumer = service.channel!.consumer!
+      if (personaMode) {
+        await consumer.personas.profile('atlas', 'SYNTHETIC_ATLAS', 'Synthetic original persona', 0)
+        await consumer.personas.profile('nova', 'SYNTHETIC_NOVA', 'Synthetic new persona', 0)
+        await consumer.personas.bind(ref, 'atlas', 0)
+      }
       await consumer.policySet({
         enabled: true,
         autoCreate: true,
@@ -292,6 +300,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(Object.values(state.jobs).some((job: any) => job.sessionId === source && job.state === 'completed'))
           .toBe(true)
       }, { timeout: 30000 })
+      if (personaMode) await consumer.personas.bind(ref, 'nova', 1)
       if (initialModeUnset) {
         await emit(
           'om_unconfirmed',
@@ -382,6 +391,10 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(Object.values(state.jobs).some((job: any) => job.sessionId === target && job.state === 'completed'))
           .toBe(true)
       }, { timeout: realTarget ? 90000 : 10000 })
+      if (personaMode) {
+        expect((await consumer.personas.bootstrap(target, ref)).personaId).toBe('atlas')
+        expect(personaObservedOnTarget).toBe(true)
+      }
       if (sectionMode) {
         const native = (consumer as any).extraNative()
         const list = () =>

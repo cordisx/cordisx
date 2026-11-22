@@ -17,6 +17,27 @@ export function channelPolicyReadback(state: ChannelConversationState) {
   return { revision: state.policyRevision, policy: state.policy }
 }
 
+export function channelStatusReadback(state: ChannelConversationState, sessionId?: string) {
+  return {
+    status: 'ok',
+    revision: state.revision,
+    enabled: state.policy.enabled,
+    bindings: Object.values(state.bindings).filter(binding =>
+      sessionId === undefined || binding.sessionId === sessionId
+    ),
+    jobs: Object.values(state.jobs).filter(job => sessionId === undefined || job.sessionId === sessionId)
+      .map(({ id, state, sessionId, turnId, code, replyDefaults, replyMode }) => ({
+        id,
+        state,
+        sessionId,
+        turnId,
+        code,
+        replyDefaults,
+        replyMode,
+      })),
+  }
+}
+
 export function channelManagementReadback(state: ChannelConversationState) {
   return {
     revision: state.revision,
