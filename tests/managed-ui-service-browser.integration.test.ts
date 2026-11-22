@@ -9,10 +9,16 @@ import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/sr
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
+import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 
 const exec = promisify(execFile)
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
@@ -309,6 +315,67 @@ it.skipIf(
       ].join('\n'))
       expect(refusal).toMatchObject({ ok: false, error: expect.stringContaining('read-only') })
       expect(await managementState(first)).toEqual({ source: await alias(first), operations: [] })
+      for (const page of [first, second]) {
+        await page.evaluate(`(() => {
+          const forward = window.fetch.bind(window)
+          const trace = globalThis.__fixtureLifecycleTrace = []
+          window.fetch = (url, options) => {
+            const route = typeof url === 'string' ? url : ''
+            if (route === '/api/renderer/acknowledge') {
+              const receipt = JSON.parse(options.body).receipt
+              trace.push({ action: 'acknowledge', ok: receipt.ok })
+            }
+            return forward(url, options).then(response => {
+              if (route === '/api/renderer/poll') {
+                if (!response.ok) trace.push({ action: 'poll', status: response.status })
+                else void response.clone().json().then(value => {
+                  if (value.command) trace.push({ action: 'command', method: value.command.method })
+                }).catch(() => {})
+              }
+              if (route === '/api/renderer/acknowledge') trace.push({ action: 'response', status: response.status })
+              return response
+            })
+          }
+        })()`)
+      }
+      // Both pages hold real startup and service observations. An unrelated
+      // package change must finish without losing those existing projections.
+      const sourceDirectory = await localPackage({
+        root,
+        id: 'lifecycle-fixture',
+        code: 'export function apply() { globalThis.__lifecycleFixtureReady = true }',
+      })
+      const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      const endpoint = await readPluginManagementRpcEndpoint(rpcPaths)
+      if (!endpoint) throw new Error('isolated management endpoint is unavailable')
+      const plan = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory },
+      }) as any
+      expect(plan.status).toBe('planned')
+      const applied = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'execute',
+        request: plan.executionRequest,
+        expectedRevision: plan.snapshot.revision,
+      }).catch(async cause => {
+        const details = await Promise.all(
+          [first, second].map(async page =>
+            await page.evaluate(
+              `({ trace: globalThis.__fixtureLifecycleTrace, failure: globalThis.__fixtureLifecycleFailure })`,
+            )
+              .catch(() => ({ trace: [], failure: 'page-unavailable' }))
+          ),
+        )
+        throw new Error('Isolated lifecycle failed: ' + JSON.stringify(details), { cause })
+      }) as any
+      expect(applied.status).toBe('applied')
+      for (const page of [first, second]) {
+        await expect.poll(() => page.evaluate('globalThis.__lifecycleFixtureReady === true'), { timeout: 20_000 })
+          .toBe(true)
+        expect(await managementState(page)).toEqual({ source: await alias(page), operations: [] })
+        expect(await page.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
+          .toBe('available')
+      }
       await first.evaluate('document.querySelector("[data-settings-navigation-item^=fixture-service]").click()')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
       await first.send('Page.reload')

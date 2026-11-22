@@ -16,6 +16,8 @@ import { createServiceRendererProjector } from '../../packages/cli/src/cli/servi
 import { ManagerRendererSessions } from '../../packages/cli/src/cli/manager-renderer-sessions.js'
 import { createProductionManagedServiceLifecycle } from '../../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../../packages/cli/src/cli/manager-managed-service-ui.js'
+import { reserveServiceOwnerLifecycle } from '../../packages/cli/src/cli/service-owner-lifecycle-fence.js'
+import { ServiceOwnerLifecycleRuntime } from '../../packages/cli/src/cli/service-owner-lifecycle-runtime.js'
 import {
   createDefaultHomeConfig,
   type HomeConfigProfile,
@@ -66,6 +68,7 @@ export async function fixture(
     channelCredentialCleanupFails?: boolean
     channelCredentialCommitUnknown?: boolean
     browserManagement?: boolean
+    coordinateLifecycle?: boolean
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -196,6 +199,9 @@ export async function fixture(
   }
   const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
   const participants = new ServiceRendererParticipants(scope)
+  let bootstrap!: ServiceRendererBootstrap
+  let sessions!: ManagerRendererSessions
+  let managedUI!: ReturnType<typeof createManagerManagedServiceUIBridge>
   const leaseReady = defer<PluginGenerationGraphLease>()
   const releaseLease = defer<void>()
   const lifecycle = new ServiceRendererLifecycle({
@@ -206,6 +212,11 @@ export async function fixture(
       generation,
       isLive: identity => participants.isLive(identity),
       canMutate: identity => participants.canMutate(identity),
+      canProjectIdentity: identity => bootstrap?.canProjectLifecycle(identity) === true,
+      projectIdentity: async (mutation, identity, stage) => {
+        if (!bootstrap) throw new Error('renderer-projection-session-unavailable')
+        return await bootstrap.projectLifecycleMutation(mutation, identity, stage)
+      },
     }),
     async createArtifactServer() {
       const server = await startPluginGenerationArtifactServer()
@@ -245,12 +256,32 @@ export async function fixture(
     dryRun: false,
     requireOwnedProcess: true,
   })
+  const coordinatedRuntime = options.coordinateLifecycle
+    ? new ServiceOwnerLifecycleRuntime({
+      runtime: managed,
+      reserve: mutation => {
+        if (!sessions?.hasLiveRenderers()) return undefined
+        return reserveServiceOwnerLifecycle({
+          mutation,
+          management: {
+            hasLive: () => sessions.hasLiveRenderers(),
+            admitted: peer => sessions.hasAdmittedPeer(peer),
+            reserveWrites: async () => await sessions.suspendMutationsForLifecycle(),
+          },
+          bootstrap,
+          managedUI,
+          lifecycle,
+          participants,
+        })
+      },
+    })
+    : managed
   const coordinator = new PluginLifecycleCoordinator({
     homeDir,
     profileId,
     runtimeGeneration: generation,
     permissionPolicies: [],
-    runtime: managed,
+    runtime: coordinatedRuntime,
     headless: true,
     reservedPluginIds: configuredChannel === undefined ? [] : [configuredChannel.plugin.id],
   })
@@ -259,7 +290,7 @@ export async function fixture(
   const startup = await managed.initialize(await store.loadActive())
   await Promise.all([startup.coreReady, startup.adopted])
   await vi.waitFor(() => expect(managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
-  const managedUI = createManagerManagedServiceUIBridge({
+  managedUI = createManagerManagedServiceUIBridge({
     profileId,
     runtimeGeneration: generation,
     ownerGeneration: generation,
@@ -267,7 +298,7 @@ export async function fixture(
     readLifecycleFence: () => managed.readManagedServiceUIFence(),
     runtime: managed,
   })
-  const bootstrap = new ServiceRendererBootstrap({
+  bootstrap = new ServiceRendererBootstrap({
     homeDir,
     configPath,
     appId: 'codex',
@@ -292,7 +323,6 @@ export async function fixture(
     }),
   })
   const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
-  let sessions!: ManagerRendererSessions
   const configuredOwner = configuredChannel === undefined ? undefined : createConfiguredChannelOwner({
     homeDir,
     configPath,
@@ -452,6 +482,15 @@ export async function fixture(
       },
     )
   }
+  async function installThroughManagement(id: string) {
+    if (!management) throw new Error('fixture management is unavailable')
+    const sourceDirectory = await localPackage({ root, id })
+    const planned = await management.plan({ kind: 'plugin-plan-local', sourceDirectory })
+    if (planned.status !== 'planned' || !planned.executionRequest) {
+      throw new Error('fixture management planning failed')
+    }
+    return await management.execute(planned.executionRequest, planned.snapshot.revision)
+  }
   return {
     root,
     homeDir,
@@ -471,6 +510,7 @@ export async function fixture(
     handle,
     call,
     install,
+    installThroughManagement,
     leaseReady,
     releaseLease,
     configuredChannel,

@@ -36,8 +36,8 @@ function sameInputs(first: Captured, second: Captured): boolean {
  * Proves that a settled owner transaction retained the exact service sources
  * and capabilities, including during the interval where the ordinary fleet
  * observer is replaced. It does not suspend Manager calls or authorize any
- * mutation; a caller must independently drain and fence all affected readers,
- * writers and subscriptions before using the resulting fence.
+ * mutation; a caller must independently drain affected reads and writes and
+ * fence or park subscription results before using the resulting fence.
  */
 export class ManagedServiceUIContinuity {
   private reservation: symbol | undefined

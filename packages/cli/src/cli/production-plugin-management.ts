@@ -20,6 +20,7 @@ import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
 import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
+import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
@@ -42,6 +43,11 @@ export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
   /** Owner-only Manager portion of a wider profile mutation barrier. */
   readonly fenceManagers?: () => Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
+  readonly lifecycleParticipants?: {
+    hasLive(): boolean
+    admitted(peer: ManagerRendererCommandPeer): boolean
+    reserveWrites(): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
+  }
   close(): Promise<void>
 }
 export async function openProductionPluginManagementComposition(input: {
@@ -264,6 +270,14 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
     ...(input.rendererParticipants === undefined ? {} : {
+      lifecycleParticipants: {
+        hasLive: () => !closed && rendererSessions.hasLiveRenderers(),
+        admitted: (peer: ManagerRendererCommandPeer) => !closed && rendererSessions.hasAdmittedPeer(peer),
+        reserveWrites: async () => {
+          if (closed) throw new Error('manager-lifecycle-fence-unavailable')
+          return await rendererSessions.suspendMutationsForLifecycle()
+        },
+      },
       fenceManagers: async () => {
         if (closed) throw new Error('manager-consumer-fence-unavailable')
         return await fenceManagerConsumers({

@@ -39,6 +39,13 @@ and a verified browser graph. Each Manager receives only matching existing
 Manager UI permissions. Managed-service reads and subscriptions are available;
 the service owner can coordinate an explicit login across admitted Managers.
 Desktop login and dynamic changes to those managed packages remain unavailable.
+In service mode, an unrelated capability-free v1 package may be changed through
+the owner while all admitted Manager pages retain their projected identities.
+The owner waits for the participating pages' receipts and holds outstanding
+subscription results until service continuity is confirmed. If a participant
+disconnects or continuity cannot be confirmed, affected pages are retired and
+the operation may require reconciliation. The installed managed packages remain
+read-only in these Manager pages.
 A Desktop owner must own the profile exclusively, have a ready Desktop renderer
 and not be in attach mode. On macOS or Linux, either owner can project one
 configured Channel archive when its staged browser graph has an initial

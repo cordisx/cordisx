@@ -558,6 +558,17 @@ export class ManagerRendererSessions {
     return { rendererId: origin.session.handle.rendererId, ...fence }
   }
 
+  /** Keep the originating Manager write alive while fencing every other writer and admission. */
+  async suspendMutationsForLifecycle(timeoutMs = 15_000): Promise<{
+    isCurrent(): boolean
+    release(): boolean
+    fence(): void
+  }> {
+    return this.writeContext.getStore() === undefined
+      ? await this.suspendMutations(timeoutMs)
+      : await this.suspendMutationsForCurrentWrite(timeoutMs)
+  }
+
   private async reserveMutationFence(
     timeoutMs: number,
     origin?: ActiveWriteContext,

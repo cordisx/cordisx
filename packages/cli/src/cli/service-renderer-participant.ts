@@ -137,6 +137,26 @@ export class ServiceRendererParticipants {
     return this.isLive(identity) && entry?.readOnlyIdentity !== true
   }
 
+  /** Candidate identity projections are supplied only by the profile owner. */
+  offerIdentityCandidate(
+    identity: RendererAttachmentIdentity,
+    candidate: Parameters<ServiceRendererLifecycleProjection['offer']>[0],
+  ): void {
+    const entry = this.entries.get(identity.rendererId)
+    if (!this.isLive(identity) || !entry?.identityProjection) throw new Error('renderer-participants-unavailable')
+    entry.identityProjection.offer(candidate)
+  }
+
+  discardIdentityCandidate(identity: RendererAttachmentIdentity, transactionId: string): boolean {
+    const entry = this.entries.get(identity.rendererId)
+    return this.isLive(identity) && entry?.identityProjection?.discard(transactionId) === true
+  }
+
+  confirmedIdentitySnapshot(identity: RendererAttachmentIdentity): Snapshot | undefined {
+    const entry = this.entries.get(identity.rendererId)
+    return this.isLive(identity) ? entry?.identityProjection?.confirmedSnapshot() : undefined
+  }
+
   /** Owner-only lookup after ManagerRendererSessions authenticated the caller. */
   peer(rendererId: string): ManagerRendererCommandPeer | undefined {
     const entry = this.entries.get(rendererId)

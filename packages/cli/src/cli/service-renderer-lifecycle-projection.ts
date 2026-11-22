@@ -148,10 +148,17 @@ export class ServiceRendererLifecycleProjection {
   }
 
   /** A rejected preflight has not dispatched anything and can be discarded. */
-  discard(transactionId: string): void {
-    if (this.candidate?.id === transactionId && this.candidate.phase === 'offered' && !this.awaiting) {
-      this.candidate = undefined
-    }
+  discard(transactionId: string): boolean {
+    if (!this.candidate) return !this.awaiting
+    if (this.candidate.id !== transactionId || this.candidate.phase !== 'offered' || this.awaiting) return false
+    this.candidate = undefined
+    return true
+  }
+
+  /** Available only after the owner has received the final or recovery acknowledgement. */
+  confirmedSnapshot(): Snapshot | undefined {
+    this.live()
+    return this.synchronized && !this.awaiting && !this.candidate ? structuredClone(this.owner) : undefined
   }
 
   private confirmed(payload: unknown, expected: unknown, result: unknown, advance: () => void) {
@@ -212,9 +219,42 @@ export class ServiceRendererLifecycleProjection {
     if (payload.authorizationDecision !== undefined) {
       const decision = record(payload.authorizationDecision)
       const identity = record(decision.identity)
+      const v7 = decision.schemaVersion === 7
+      const binding = v7 ? record(decision.binding) : undefined
       if (
-        decision.schemaVersion !== 1 || !Array.isArray(decision.decisions) || decision.decisions.length !== 0
+        (decision.schemaVersion !== 1 && !v7)
+        || !Array.isArray(decision.decisions) || decision.decisions.length !== 0
         || identity.pluginId !== candidate.targetId || !aliasMatches(identity.source)
+        || (v7 && (
+          payload.package === undefined
+          || decision.$schema
+            !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json'
+          || Object.keys(decision).some(key =>
+            ![
+              '$schema',
+              'schemaVersion',
+              'origin',
+              'planId',
+              'operation',
+              'profileId',
+              'identity',
+              'binding',
+              'decisions',
+            ]
+              .includes(key)
+          )
+          || Object.keys(identity).some(key => !['source', 'pluginId'].includes(key))
+          || decision.origin !== 'host-no-decision' || decision.operation !== payload.operation
+          || !['install', 'update', 'enable'].includes(String(decision.operation))
+          || decision.profileId !== candidate.owner.profileId
+          || decision.planId !== `${candidate.owner.runtimeGeneration}:${candidate.targetId}`
+          || Object.keys(binding!).some(key =>
+            !['operationId', 'runtimeGeneration', 'moduleGeneration', 'requestId'].includes(key)
+          )
+          || typeof binding!.operationId !== 'string' || !/^review:[a-f0-9]{64}$/u.test(binding!.operationId)
+          || binding!.runtimeGeneration !== candidate.owner.runtimeGeneration
+          || binding!.moduleGeneration !== target.moduleGeneration || binding!.requestId !== candidate.id
+        ))
       ) throw new Error('renderer-identity-lifecycle-unavailable')
     }
     this.live()

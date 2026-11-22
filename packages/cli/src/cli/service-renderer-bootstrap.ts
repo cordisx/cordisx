@@ -3,7 +3,7 @@ import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
 import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
-import { type CordisXConfig, type CordisXConfigPlugin, loadConfig } from '../launcher/config.js'
+import { type CordisXConfig, loadConfig } from '../launcher/config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
@@ -13,13 +13,14 @@ import {
 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import type { RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
+import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import type { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
-import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
@@ -32,44 +33,16 @@ import {
   projectManagementRequest,
 } from './service-renderer-management-projection.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
-import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 import { readSettledProfileInputs } from './service-renderer-profile-inputs.js'
-
-type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
-type ConfiguredChannel = {
-  readonly plugin: CordisXConfigPlugin
-  readonly service: LocalChannelService
-  readonly bridge: ReadonlyChannelRendererBridge
-}
-type Entry = {
-  readonly peer: ManagerRendererCommandPeer
-  readonly leases: PluginGenerationGraphLease[]
-  readonly checks: Set<Promise<boolean>>
-  readonly unsubscribe: () => void
-  stale: boolean
-  bootstrapConfirmed: boolean
-  snapshot?: Snapshot
-  config?: CordisXConfig
-  plugins?: readonly CordisXConfigPlugin[]
-  packageInputs?: Map<string, string>
-  policies?: readonly CordisXPersistedPermissionPolicyRecord[]
-  managedOwners?: ReadonlyMap<string, string>
-  managedContext?: ManagerRendererChannelContext
-  identity?: ServiceRendererIdentityProjection
-  identityAliases?: ReadonlyMap<string, string>
-  needsIdentityProjection?: boolean
-  releasePermissionFence?: () => Promise<void>
-  releasePluginConfigFence?: () => Promise<void>
-  retirement?: Promise<boolean>
-  cleanupFailed?: boolean
-  configuredChannel?: ServiceRendererConfiguredChannel
-  channelTransition?: { readonly isCurrent: () => boolean }
-  preparing?: Promise<unknown>
-  completing?: Promise<unknown>
-}
+import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
+import type {
+  ServiceRendererBootstrapEntry as Entry,
+  ServiceRendererConfiguredChannelInput as ConfiguredChannel,
+  ServiceRendererSnapshot as Snapshot,
+} from './service-renderer-bootstrap-state.js'
 const MAX_INITIAL_GRAPHS = 256
 function emptyConfig(value: unknown): boolean {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
@@ -90,6 +63,7 @@ export class ServiceRendererBootstrap {
   private readonly permissionFence: SharedProfilePermissionFence | undefined
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
   private readonly ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>
+  private readonly lifecycleHandoff: ServiceRendererLifecycleHandoff
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
   private closed = false
@@ -127,6 +101,20 @@ export class ServiceRendererBootstrap {
     this.pluginConfigFence = input.protectProfileInputs
       ? new SharedProfilePluginConfigFence(input.configPath, input.profileId)
       : undefined
+    this.lifecycleHandoff = new ServiceRendererLifecycleHandoff({
+      homeDir: input.homeDir,
+      configPath: input.configPath,
+      profileId: input.profileId,
+      store: input.store,
+      entries: this.entries,
+      participants: input.participants,
+      readLifetimes: this.readLifetimes,
+      configuredChannel: () => this.configuredChannel,
+      snapshot: () => input.lifecycle.snapshot(),
+      policies: async () => await this.policies(),
+      profileInputs: async snapshot => await this.profileInputs(snapshot),
+      current: (rendererId, entry) => this.current(rendererId, entry),
+    })
     this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active => {
       for (const entry of this.entries.values()) {
         for (let index = entry.leases.length - 1; index >= 0; index--) {
@@ -339,7 +327,7 @@ export class ServiceRendererBootstrap {
   }> {
     const entry = this.entries.get(context.rendererId)
     if (
-      !entry?.configuredChannel || !entry.bootstrapConfirmed || entry.channelTransition
+      !entry?.configuredChannel || !entry.bootstrapConfirmed || entry.channelTransition || entry.lifecycleTransition
       || !this.current(context.rendererId, entry) || !await this.channelAuthorityCurrent(context.rendererId, entry)
     ) throw new Error('renderer-configured-channel-unavailable')
     return entry.configuredChannel.serviceIdentity(context, alias)
@@ -376,7 +364,7 @@ export class ServiceRendererBootstrap {
       const entry = this.entries.get(id)
       const configured = entry?.configuredChannel
       if (
-        !entry || entry.peer !== peer || !configured || entry.channelTransition
+        !entry || entry.peer !== peer || !configured || entry.channelTransition || entry.lifecycleTransition
         || !this.current(id, entry) || !configured.isCurrent()
       ) throw new Error('renderer-configured-channel-unavailable')
       return { id, entry, configured, peer }
@@ -461,7 +449,7 @@ export class ServiceRendererBootstrap {
   async prepare(rendererId: string): Promise<unknown> {
     if (this.closed || this.retirements.has(rendererId)) throw new Error('renderer-bootstrap-unavailable')
     const existing = this.entries.get(rendererId)
-    if (existing?.channelTransition) throw new Error('renderer-bootstrap-unavailable')
+    if (existing?.channelTransition || existing?.lifecycleTransition) throw new Error('renderer-bootstrap-unavailable')
     if (existing?.preparing) {
       const result = await existing.preparing
       if (!await this.unchanged(rendererId, existing)) throw new Error('renderer-bootstrap-stale')
@@ -616,7 +604,9 @@ export class ServiceRendererBootstrap {
   ): Promise<unknown> {
     const rendererId = context.rendererId
     const entry = this.entries.get(rendererId)
-    if (!entry || !entry.preparing || entry.channelTransition) throw new Error('renderer-bootstrap-unavailable')
+    if (!entry || !entry.preparing || entry.channelTransition || entry.lifecycleTransition) {
+      throw new Error('renderer-bootstrap-unavailable')
+    }
     await entry.preparing
     if (entry.completing) {
       const result = await entry.completing
@@ -670,6 +660,7 @@ export class ServiceRendererBootstrap {
             isCurrent: () => this.current(rendererId, entry),
           })
           entry.identity = identity
+          entry.identityContext = context
           const aliases = new Map<string, string>()
           for (const plugin of entry.plugins) {
             const item = snapshot.active.plugins.find(value => value.id === plugin.id)
@@ -806,7 +797,7 @@ export class ServiceRendererBootstrap {
     if (!entry) return undefined
     return {
       confirmed: entry.bootstrapConfirmed,
-      current: () => this.current(context.rendererId, entry),
+      current: () => this.current(context.rendererId, entry) && !entry.lifecycleTransition,
       unchanged: async () => await this.unchanged(context.rendererId, entry),
       identity: entry.identity,
       aliases: entry.identityAliases,
@@ -832,6 +823,23 @@ export class ServiceRendererBootstrap {
     })
   }
 
+  /** Owner-only lifecycle handoff; the caller must already hold the wider profile fences. */
+  async reserveLifecycleHandoff(input: Parameters<ServiceRendererLifecycleHandoff['reserve']>[0]) {
+    return await this.lifecycleHandoff.reserve(input)
+  }
+
+  canProjectLifecycle(identity: RendererAttachmentIdentity): boolean {
+    return this.lifecycleHandoff.canProject(identity)
+  }
+
+  async projectLifecycleMutation(
+    mutation: PluginRuntimeMutation,
+    identity: RendererAttachmentIdentity,
+    stage?: Record<string, unknown>,
+  ): Promise<unknown> {
+    return await this.lifecycleHandoff.project(mutation, identity, stage)
+  }
+
   /** Not exposed as a generic browser binding. The sidecar supplies graph mappings. */
   channel(): ManagerRendererChannel {
     return {
@@ -851,6 +859,11 @@ export class ServiceRendererBootstrap {
               const peer = this.input.participants.peer(context.rendererId)
               if (!peer) throw new Error('renderer-bootstrap-unavailable')
               const entry = this.entries.get(context.rendererId)
+              if (entry?.lifecycleTransition) {
+                const current = this.current(context.rendererId, entry) && entry.lifecycleTransition.isCurrent()
+                if (!current) entry.peer.close()
+                return { status: 'ok', current }
+              }
               if (entry?.channelTransition) {
                 const current = this.current(context.rendererId, entry) && entry.channelTransition.isCurrent()
                 if (!current) entry.peer.close()
@@ -890,6 +903,7 @@ export class ServiceRendererBootstrap {
   close(): Promise<boolean> {
     if (this.closing) return this.closing
     this.closed = true
+    this.lifecycleHandoff.close()
     this.unsubscribeFinalization()
     for (const [rendererId, entry] of this.entries) {
       entry.peer.close()

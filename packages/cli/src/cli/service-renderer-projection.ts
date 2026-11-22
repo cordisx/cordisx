@@ -122,9 +122,19 @@ export function createServiceRendererProjector(input: {
   readonly isLive: (identity: RendererAttachmentIdentity) => boolean
   /** A read-only identity snapshot cannot participate in package mutations. */
   readonly canMutate: (identity: RendererAttachmentIdentity) => boolean
+  /** Only a reserved owner handoff may project a session-specific identity. */
+  readonly canProjectIdentity?: (identity: RendererAttachmentIdentity) => boolean
+  readonly projectIdentity?: (
+    mutation: PluginRuntimeMutation,
+    identity: RendererAttachmentIdentity,
+    stage?: Record<string, unknown>,
+  ) => Promise<unknown>
 }): (mutation: PluginRuntimeMutation, identity: RendererAttachmentIdentity) => Promise<unknown> {
   return async (mutation, identity) => {
-    if (!input.isLive(identity) || !input.canMutate(identity)) {
+    const identityProjection = !input.canMutate(identity)
+    if (
+      !input.isLive(identity) || identityProjection && (!input.canProjectIdentity?.(identity) || !input.projectIdentity)
+    ) {
       throw new Error('renderer-projection-session-unavailable')
     }
     const before = mutation.previous
@@ -159,7 +169,10 @@ export function createServiceRendererProjector(input: {
       mutation.package !== undefined && target !== undefined
       && (mutation.package.digest !== target.digest || !attachmentEqual(mutation.package.manifest, target.manifest))
     ) throw new Error('renderer-projection-package-stale')
-    if (preflight) return undefined
+    if (preflight) {
+      if (identityProjection) await input.projectIdentity!(mutation, identity)
+      return undefined
+    }
     const leases = [...new Map([
       ...(mutation.runtimeArtifactLease === undefined ? [] : [mutation.runtimeArtifactLease]),
       ...(mutation.runtimeArtifactLeases ?? []),
@@ -197,6 +210,6 @@ export function createServiceRendererProjector(input: {
       privateGraphs: leases.map(serviceRendererPrivateGraph),
     }
     if (!input.isLive(identity)) throw new Error('renderer-projection-session-unavailable')
-    return result
+    return identityProjection ? await input.projectIdentity!(mutation, identity, result) : result
   }
 }

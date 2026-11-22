@@ -43,7 +43,7 @@ export class ManagerStartupObservation {
       readonly context: ManagerRendererChannelContext
       readonly runtimeGeneration: string
       readonly allocateId: () => string
-      readonly assertCurrent: () => void
+      readonly assertCurrent: (parkable?: boolean) => void
       readonly invoke: (value: string, signal?: AbortSignal) => Promise<Record<string, unknown>>
       /** Validate and redact the owner's response before it leaves this process. */
       readonly sanitize: (value: unknown, requestId: string) => Record<string, unknown>
@@ -113,7 +113,7 @@ export class ManagerStartupObservation {
     if (!alias.public.startup || this.closed) throw unavailable()
     const current = () => {
       if (this.closed) throw unavailable()
-      this.input.assertCurrent()
+      this.input.assertCurrent(request.operation === 'startupNext')
     }
     if (request.operation === 'startupRead') {
       return {

@@ -85,7 +85,7 @@ export class ManagerManagedServiceObservation {
       readonly context: ManagerRendererChannelContext
       readonly runtimeGeneration: string
       readonly allocateId: () => string
-      readonly assertCurrent: () => void
+      readonly assertCurrent: (parkable?: boolean) => void
       readonly invoke: (value: string, signal?: AbortSignal) => Promise<Record<string, unknown>>
       readonly sanitize: (value: unknown, requestId: string) => Record<string, unknown>
     },
@@ -213,7 +213,9 @@ export class ManagerManagedServiceObservation {
     if (this.closed) throw unavailable()
     const current = () => {
       if (this.closed) throw unavailable()
-      this.input.assertCurrent()
+      this.input.assertCurrent(
+        request.operation === 'next' || request.operation === 'pull' || request.operation === 'closed',
+      )
     }
     if (request.operation === 'subscribe') {
       return {

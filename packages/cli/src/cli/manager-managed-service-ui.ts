@@ -282,6 +282,21 @@ export function createManagerManagedServiceUIBridge(input: {
     }
   }
 
+  // A previously dispatched observation may complete while a transition is
+  // fenced. Its result stays private until continuity is confirmed below.
+  function assertObservationCurrent(session: Session, context: ManagerRendererChannelContext): void {
+    if (!gate.parked) return assertCurrent(session, context)
+    try {
+      if (
+        !validContext(context) || context.signal !== session.context.signal
+        || sessions.get(context.rendererId) !== session || !input.ownerCurrent()
+      ) throw unavailable()
+    } catch {
+      retire(context.rendererId)
+      throw unavailable()
+    }
+  }
+
   function sanitize(session: Session, value: unknown, requestId: string): Record<string, unknown> {
     const response = object(checkedResponse(value, session.capabilities.map(item => item.token)))
     if (response.requestId !== requestId || typeof response.ok !== 'boolean') throw unavailable()
@@ -341,7 +356,8 @@ export function createManagerManagedServiceUIBridge(input: {
       context,
       runtimeGeneration: input.runtimeGeneration,
       allocateId,
-      assertCurrent: () => assertCurrent(session, context),
+      assertCurrent: (parkable = false) =>
+        parkable ? assertObservationCurrent(session, context) : assertCurrent(session, context),
       invoke: async (value: string, signal?: AbortSignal) =>
         await input.runtime.managedServiceUI.handleBindingValue(value, signal),
       sanitize: (value: unknown, requestId: string) => sanitize(session, value, requestId),
@@ -640,6 +656,23 @@ export function createManagerManagedServiceUIBridge(input: {
       return {
         ...prepared,
         async dispatch() {
+          if (prepared.longLivedRead) {
+            if (!gate.open) throw unavailable()
+            const result = await prepared.dispatch().then(
+              value => ({ ok: true as const, value }),
+              error => ({ ok: false as const, error }),
+            )
+            const finish = await gate.beginWhenOpen(context.signal)
+            try {
+              const session = sessions.get(context.rendererId)
+              if (!session) throw unavailable()
+              assertCurrent(session, context)
+              if (!result.ok) throw result.error
+              return result.value
+            } finally {
+              finish()
+            }
+          }
           const finish = gate.begin()
           try {
             return await prepared.dispatch()

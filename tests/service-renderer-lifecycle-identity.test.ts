@@ -122,8 +122,11 @@ function setup(first = '1', second = '2') {
 describe('owner-scoped lifecycle identity observations', () => {
   it('maps the confirmed stage, publication and cleanup back to the owner and advances the snapshot', () => {
     const f = setup()
+    expect(f.projection.confirmedSnapshot()).toEqual({ active: previous, registryEpoch: 7 })
     f.offer()
+    expect(f.projection.confirmedSnapshot()).toBeUndefined()
     f.prepare()
+    expect(f.projection.discard('change-1')).toBe(false)
     const stage = f.stage()
     expect(JSON.stringify(stage.payload)).not.toContain(provider.canonicalSource)
     expect(stage.receipt!(f.stagedReceipt)).toEqual({ ...f.stagedReceipt, observation: candidate })
@@ -161,6 +164,7 @@ describe('owner-scoped lifecycle identity observations', () => {
     void _id
     void _rendererId
     const next = { active: { ...ownerActive, recordKind: 'active', lastGoodRevision: 4 }, registryEpoch: 8 }
+    expect(f.projection.confirmedSnapshot()).toEqual(next)
     const sync = f.projection.project('synchronize', next)
     expect(sync.payload).toEqual({
       active: { ...rendererActive, recordKind: 'active', lastGoodRevision: 4 },
@@ -261,6 +265,46 @@ describe('owner-scoped lifecycle identity observations', () => {
     ).toThrow()
     const stage = f.projection.project('stage', payload)
     expect(stage.receipt!(f.stagedReceipt)).toMatchObject({ observation: candidate })
+
+    const modern = setup()
+    modern.offer()
+    modern.prepare()
+    const decision = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+      schemaVersion: 7,
+      origin: 'host-no-decision',
+      planId: `${candidate.runtimeGeneration}:${extra.id}`,
+      operation: 'install',
+      profileId: candidate.profileId,
+      identity: { pluginId: extra.id, source: alias('2') },
+      binding: {
+        operationId: `review:${'c'.repeat(64)}`,
+        runtimeGeneration: candidate.runtimeGeneration,
+        moduleGeneration: extra.moduleGeneration,
+        requestId: candidate.transactionId,
+      },
+      decisions: [],
+    }
+    for (
+      const invalid of [
+        { ...decision, origin: 'explicit-user' },
+        { ...decision, decisions: [{ decision: 'allow' }] },
+        { ...decision, identity: { ...decision.identity, source: alias('1') } },
+        { ...decision, binding: { ...decision.binding, requestId: 'another-transaction' } },
+        { ...decision, binding: { ...decision.binding, moduleGeneration: 'another-generation' } },
+        { ...decision, $schema: 'unknown' },
+        { ...decision, extra: 'unexpected' },
+      ]
+    ) {
+      expect(() => modern.projection.project('stage', { ...payload, authorizationDecision: invalid }))
+        .toThrow()
+    }
+    expect(() =>
+      modern.projection.project('stage', { ...payload, package: undefined, authorizationDecision: decision })
+    ).toThrow('renderer-identity-lifecycle-unavailable')
+    const accepted = modern.projection.project('stage', { ...payload, authorizationDecision: decision })
+    expect(accepted.receipt!(modern.stagedReceipt)).toMatchObject({ observation: candidate })
   })
 
   it('rejects stale, unissued and incomplete candidates before any command is dispatched', () => {

@@ -246,6 +246,12 @@ export class ServiceRendererIdentityProjection {
     return alias
   }
 
+  currentAlias(context: ManagerRendererChannelContext, pluginId: string): string {
+    const alias = this.current(context) ? this.plugins.get(pluginId) : undefined
+    if (!alias) throw new Error('renderer-identity-unavailable')
+    return alias
+  }
+
   /** Promote only the exact durable activation after all renderer receipts. */
   commitCandidate(
     context: ManagerRendererChannelContext,

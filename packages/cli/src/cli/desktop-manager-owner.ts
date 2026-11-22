@@ -43,6 +43,7 @@ export function createDesktopManagerOwner(input: {
     generation: input.generation,
   }
   const participants = new ServiceRendererParticipants(scope)
+  let bootstrap!: ServiceRendererBootstrap
   const lifecycle = new DesktopOwnerRendererLifecycle({
     scope,
     cdp: input.cdp,
@@ -53,6 +54,11 @@ export function createDesktopManagerOwner(input: {
       generation: input.generation,
       isLive: identity => participants.isLive(identity),
       canMutate: identity => participants.canMutate(identity),
+      canProjectIdentity: identity => bootstrap?.canProjectLifecycle(identity) === true,
+      projectIdentity: async (mutation, identity, stage) => {
+        if (!bootstrap) throw new Error('renderer-projection-session-unavailable')
+        return await bootstrap.projectLifecycleMutation(mutation, identity, stage)
+      },
     }),
   })
   participants.bind(lifecycle)
@@ -75,7 +81,7 @@ export function createDesktopManagerOwner(input: {
       generation: input.generation,
       isCurrent: context => !closed && participants.peer(context.rendererId) !== undefined,
     })
-  const bootstrap = new ServiceRendererBootstrap({
+  bootstrap = new ServiceRendererBootstrap({
     homeDir: input.homeDir,
     configPath: input.configPath,
     appId: input.appId,

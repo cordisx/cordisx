@@ -30,6 +30,8 @@ import { createProductionManagedServiceLifecycle } from './production-managed-se
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
 import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
 import { createConfiguredChannelOwner } from './configured-channel-owner.js'
+import { reserveServiceOwnerLifecycle } from './service-owner-lifecycle-fence.js'
+import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -96,6 +98,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             generation,
             isLive: identity => rendererParticipants!.isLive(identity),
             canMutate: identity => rendererParticipants!.canMutate(identity),
+            canProjectIdentity: identity => rendererBootstrap?.canProjectLifecycle(identity) === true,
+            projectIdentity: async (mutation, identity, stage) => {
+              if (!rendererBootstrap) throw new Error('renderer-projection-session-unavailable')
+              return await rendererBootstrap.projectLifecycleMutation(mutation, identity, stage)
+            },
           }),
         })
         rendererParticipants.bind(rendererLifecycle)
@@ -122,11 +129,29 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)
+        const coordinatorRuntime = new ServiceOwnerLifecycleRuntime({
+          runtime: services,
+          reserve: mutation => {
+            const managers = management?.lifecycleParticipants
+            if (!managers || !managers.hasLive()) return undefined
+            if (!rendererBootstrap || !rendererManagedServiceUI || !rendererLifecycle || !rendererParticipants) {
+              throw new Error('manager-lifecycle-fence-unavailable')
+            }
+            return reserveServiceOwnerLifecycle({
+              mutation,
+              management: managers,
+              bootstrap: rendererBootstrap,
+              managedUI: rendererManagedServiceUI,
+              lifecycle: rendererLifecycle,
+              participants: rendererParticipants,
+            })
+          },
+        })
         const coordinator = new PluginLifecycleCoordinator({
           homeDir,
           profileId,
           runtimeGeneration: generation,
-          runtime: services,
+          runtime: coordinatorRuntime,
           headless: true,
           permissionPolicies: await loadPolicies(),
           loadPermissionPolicies: loadPolicies,

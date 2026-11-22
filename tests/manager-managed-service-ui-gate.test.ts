@@ -16,6 +16,44 @@ describe('managed service UI transition gate', () => {
     gate.begin()()
   })
 
+  it('parks an observation result and fences its delivery against the next transition', async () => {
+    const gate = new ManagerManagedServiceUIGate()
+    const first = await gate.reserve(() => true)
+    const controller = new AbortController()
+    let delivered = false
+    const delivery = gate.beginWhenOpen(controller.signal).then(finish => {
+      delivered = true
+      return finish
+    })
+    await Promise.resolve()
+    expect(delivered).toBe(false)
+    expect(gate.parked).toBe(true)
+    expect(first.release()).toBe(true)
+    const finishDelivery = await delivery
+    let reserved = false
+    const next = gate.reserve(() => true).then(value => {
+      reserved = true
+      return value
+    })
+    await Promise.resolve()
+    expect(reserved).toBe(false)
+    finishDelivery()
+    expect((await next).release()).toBe(true)
+  })
+
+  it('rejects parked results when their renderer leaves or the transition is fenced', async () => {
+    const gate = new ManagerManagedServiceUIGate()
+    const held = await gate.reserve(() => true)
+    const controller = new AbortController()
+    const aborted = gate.beginWhenOpen(controller.signal)
+    const fenced = gate.beginWhenOpen(new AbortController().signal)
+    controller.abort()
+    await expect(aborted).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    held.fence()
+    await expect(fenced).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(gate.open).toBe(false)
+  })
+
   it('reopens after a drain timeout before any owner transaction begins', async () => {
     const gate = new ManagerManagedServiceUIGate()
     const finishRead = gate.begin()

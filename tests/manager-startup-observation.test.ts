@@ -34,6 +34,8 @@ const request = (token: string, operation: string, requestId: string, extra: Rec
 function fixture(options: { delayedSubscribe?: boolean; failCleanup?: boolean; startup?: boolean } = {}) {
   const listeners = new Set<(event: StartupEventV1) => void>()
   const close = vi.fn()
+  let fence = 1
+  let continuity = true
   let release!: () => void
   const gate = new Promise<void>(resolve => release = resolve)
   const observer: StartupObserverV1 = {
@@ -79,14 +81,58 @@ function fixture(options: { delayedSubscribe?: boolean; failCleanup?: boolean; s
     runtimeGeneration: 'runtime',
     ownerGeneration: 'owner',
     ownerCurrent: () => true,
-    readLifecycleFence: () => 1,
+    readLifecycleFence: () => fence,
     runtime: {
       capabilities: () => [{ ...owner, token: ownerToken, ...(options.startup === false ? {} : { startup: true }) }],
       managedServiceUI: { handleBindingValue: invoke },
+      reserveManagedServiceUIContinuity: () => ({
+        finish: () => continuity ? ++fence : undefined,
+        cancel: () => true,
+      }),
     },
   })
-  return { bridge, calls, close, handler, listeners, release }
+  return { bridge, calls, close, handler, listeners, release, failContinuity: () => continuity = false }
 }
+
+it.each(['resume', 'fence'] as const)(
+  'holds an in-flight startup observation until the transition can %s',
+  async outcome => {
+    const f = fixture()
+    const controller = new AbortController()
+    const renderer = context('6', controller.signal)
+    const token = f.bridge.projectInitial(renderer)[0]!.token
+    try {
+      await f.bridge.channel.prepare(
+        request(token, 'startupSubscribe', 'subscribe', { subscriptionId: 'stream' }),
+        renderer,
+      ).dispatch()
+      const waiting = f.bridge.channel.prepare(
+        request(token, 'startupNext', 'pending', { subscriptionId: 'stream' }),
+        renderer,
+      ).dispatch()
+      let settled = false
+      void waiting.then(() => settled = true, () => settled = true)
+      await vi.waitFor(() => expect(f.calls.filter(call => call.operation === 'startupNext')).toHaveLength(1))
+      const transition = await f.bridge.reserveTransition()
+      for (const listener of f.listeners) listener({ kind: 'snapshot', reason: 'initial', snapshot })
+      await new Promise(resolve => setImmediate(resolve))
+      expect(settled).toBe(false)
+      if (outcome === 'resume') {
+        expect(transition.resume()).toBe(true)
+        expect(await waiting).toMatchObject({ requestId: 'pending', ok: true, value: { kind: 'snapshot' } })
+      } else {
+        f.failContinuity()
+        expect(transition.resume()).toBe(false)
+        await expect(waiting).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+        expect(() => f.bridge.projectInitial(renderer)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      }
+    } finally {
+      controller.abort()
+      f.bridge.dispose()
+      await f.handler.dispose()
+    }
+  },
+)
 
 it('isolates observation streams per renderer and cleans up an in-flight next on retirement', async () => {
   const f = fixture()
