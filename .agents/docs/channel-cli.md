@@ -502,15 +502,31 @@ path outside that sandbox. Fresh continuation retains its existing
 confirmed configuration/cwd flow; native sidebar project membership inheritance
 has not been established by this change.
 
-For headless deployments with provider configuration external to the native
-model catalog, an operator can supply `CORDISX_HEADLESS_PROVIDER_ID` and
+Headless service startup merges every enabled shared `model-service` declaration
+that supports Codex Responses and has Codex model IDs. There is no two-provider
+limit. Save these services through the normal Model Services configuration or
+`cordisx models services save`, then restart that service instance. Startup
+projects their provider tables into the selected Codex home without changing
+the native default provider or model. Only saved environment variables needed
+by these services' API keys and headers are added to the native app-server
+environment; Channel credentials remain excluded. A missing key/header keeps
+that declaration out of the admitted catalog and records
+`HEADLESS_MODEL_SERVICE_CREDENTIAL_UNAVAILABLE:<provider-id>` without its value.
+Disabled services, other-client-only services and empty Codex catalogs are omitted.
+
+For headless deployments with provider configuration external to shared
+declarations, an operator can still supply `CORDISX_HEADLESS_PROVIDER_ID` and
 `CORDISX_HEADLESS_MODEL_ID`, plus the optional pair
 `CORDISX_HEADLESS_EXTRA_PROVIDER` and comma-separated
-`CORDISX_HEADLESS_EXTRA_MODELS`. These variables declare the admitted IDs; they
-do not configure provider authentication or prove model capabilities. Only
-native catalog metadata establishes supported reasoning efforts. A loaded chat
-cannot switch providers through this path unless the underlying app-server
-supports and confirms that change; an unsupported switch is rejected.
+`CORDISX_HEADLESS_EXTRA_MODELS`. The legacy primary/extra entries are merged
+with shared declarations and retain their default model and ordering. These
+variables declare the admitted IDs; they do not configure provider authentication
+or prove model capabilities. Only native catalog metadata establishes supported
+reasoning efforts. An existing chat, including a `notLoaded` chat, cannot switch
+providers through this path unless the underlying app-server supports and
+confirms that change; an unsupported switch is rejected. Catalog availability
+permits new conversations with the requested provider, not cross-provider replay
+of an existing conversation.
 
 Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
 response, final-message delivery reads the exact completed turn with
