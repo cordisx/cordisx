@@ -9,6 +9,8 @@ import type { ChannelUserInput } from '@cordisx/channel-runtime'
 import type { AgentBridge } from '../packages/cli/src/launcher/agent-bridge.js'
 import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
 import { channelRemoteHistory } from '../packages/cli/src/launcher/channel-remote-history.js'
+import { channelMessageRead } from '../packages/cli/src/launcher/channel-message-read.js'
+import { ChannelLiveDirectory } from '../packages/cli/src/launcher/channel-live-directory.js'
 import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channel-conversation-consumer.js'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runConfiguredChannelCommand } from '../packages/cli/src/cli/channel-configured-command.js'
@@ -34,8 +36,8 @@ describe('configured Channel CLI production endpoint', () => {
       ...ref,
       conversationId: 'oc_fixture',
       kind: 'group' as const,
-      threadId: 'oc_fixture',
-      semantics: 'conversation' as const,
+      threadId: 'om_parent',
+      semantics: 'reply-chain' as const,
       eventId: 'om_fixture',
       messageId: 'om_fixture',
     }
@@ -102,12 +104,28 @@ describe('configured Channel CLI production endpoint', () => {
         }],
       },
     }))
-    const remoteChannel = { rawClient: { im: { v1: { message: { list: remoteList } } } } } as never
+    const remoteGet = vi.fn(async ({ path: { message_id } }: { path: { message_id: string } }) => ({
+      code: 0,
+      data: {
+        items: [{
+          chat_id: source.conversationId,
+          message_id,
+          ...(message_id === source.messageId ? { parent_id: 'om_parent' } : {}),
+          body: { content: '{"text":"quoted"}' },
+          sender: { id: 'ou_sender', id_type: 'open_id', sender_type: 'user', sender_name: 'Alice' },
+        }],
+      },
+    }))
+    const remoteChannel = { rawClient: { im: { v1: { message: { list: remoteList, get: remoteGet } } } } } as never
+    const directory = new ChannelLiveDirectory()
+    directory.connected(ref, remoteChannel)
     const access = {
       generation: 'fixture-runtime',
       runtime,
       accounts: () => [{ ref, state: 'ready' }],
       remoteHistory: vi.fn((account, request) => channelRemoteHistory(account, request, remoteChannel)),
+      readMessage: vi.fn((event, messageId) => channelMessageRead(event, messageId, remoteChannel)),
+      messageContext: (message, addressing) => directory.messageContext(message, addressing),
       drain: vi.fn(async () => {}),
     } as unknown as ChannelConversationAccess
     const nativeRequest = vi.fn(async (method: string, params: Record<string, unknown>) => {
@@ -124,6 +142,10 @@ describe('configured Channel CLI production endpoint', () => {
         expect(request.prompt).toContain('Automatic final-response delivery is disabled')
         expect(request.prompt).toContain("send --profile 'default'")
         expect(request.prompt).toContain('remote-history')
+        expect(request.prompt).toContain('message-get')
+        expect(request.prompt).toContain('"referencedMessage"')
+        expect(request.prompt).toContain('"name":"Alice"')
+        expect(request.prompt).toContain('quoted')
         contextToken = /--context '([a-f0-9]{48})'/u.exec(request.prompt)?.[1]
         expect(contextToken).toBeDefined()
         native.observedDispatch(request.operationId, sessionId, 'fixture-turn')
@@ -150,6 +172,18 @@ describe('configured Channel CLI production endpoint', () => {
         })
         expect(remoteList).toHaveBeenCalledTimes(2)
         await expect(command('remote-history', { ...remote, conversationId: 'oc_other' }, contextToken)).rejects
+          .toThrow('CHANNEL_SOURCE_SCOPE_MISMATCH')
+        const referenced = {
+          account: ref,
+          conversationId: source.conversationId,
+          kind: source.kind,
+          messageId: 'om_parent',
+        }
+        expect(await command('message-get', referenced, contextToken)).toMatchObject({
+          status: 'ok',
+          message: { messageId: 'om_parent', sender: { name: 'Alice' }, content: '{"text":"quoted"}' },
+        })
+        await expect(command('message-get', { ...referenced, conversationId: 'oc_other' }, contextToken)).rejects
           .toThrow('CHANNEL_SOURCE_SCOPE_MISMATCH')
         const ask = {
           account: ref,
@@ -234,6 +268,8 @@ describe('configured Channel CLI production endpoint', () => {
         'remote-history',
         'remote-history',
         'remote-history',
+        'message-get',
+        'message-get',
         'ask',
         'receipt',
         'send',
@@ -246,6 +282,7 @@ describe('configured Channel CLI production endpoint', () => {
       })
       expect(await readFile(configPath, 'utf8')).toBe(before)
     } finally {
+      directory.clear()
       tools.dispose()
       await consumer.dispose()
       await server.close()

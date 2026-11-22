@@ -10,6 +10,8 @@ import {
 import { feishuProfileHttp } from '../packages/cli/src/launcher/feishu-profile-http.js'
 import { projectLocalChannelManager } from '../packages/cli/src/launcher/channel-service.js'
 import { CordisXChannelManagerService } from '../packages/cli/src/renderer/channel-manager.js'
+import { PublicChannelManagerController } from '../packages/cli/src/renderer/channel-manager-public.js'
+import type { ChannelManagerProjectionV1 } from '../packages/cli/src/renderer/channel-manager-projection.js'
 import { createChannelActionsBridgeHandler } from '../packages/cli/src/launcher/channel-actions-rpc.js'
 import { createFeishuAdapterDefinition } from '../packages/cli/src/launcher/feishu-adapter.js'
 import type { ChannelAdapterHost } from '@cordisx/channel-runtime'
@@ -148,6 +150,85 @@ describe('Channel account identity', () => {
       status: 'unavailable',
     })
     await store.dispose()
+  })
+
+  it('exposes a pending account as incomplete without exposing a fabricated tenant or offering tenant operations', () => {
+    const projection = projectLocalChannelManager({
+      configuration: {
+        contract: 'cordisx.channel-service-config/v3',
+        schemaVersion: 3,
+        connections: [],
+        pendingConnections: [{
+          account: { adapterId: 'feishu', accountId: 'cli_pending' },
+          adapterKind: 'feishu',
+          secretRef: 'host-secret:channel/test/draft-a',
+          displayName: 'Pending',
+        }],
+      },
+      revision: 1,
+      lastGoodRevision: 1,
+      writable: true,
+    })
+    const service = new CordisXChannelManagerService(new Context(), projection)
+    const account = service.snapshot().accounts[0]!
+    expect(account).toMatchObject({
+      configurationState: 'incomplete',
+      connectionState: 'unavailable',
+      lastErrorCode: 'TENANT_IDENTIFICATION_PENDING',
+    })
+    expect(account.availableOperations).not.toContain('connection.reconnect')
+    expect(JSON.stringify(account)).not.toMatch(/cli_pending|host-secret|tenantId/)
+  })
+
+  it('keeps the opaque Manager target stable through pending-to-resolved migration', () => {
+    const pending = { adapterId: 'feishu', accountId: 'cli_pending', tenantId: '' }
+    const resolved = { ...pending, tenantId: 'tenant-real' }
+    const service = {
+      configurationKind: 'host' as const,
+      configApplies: 'service-restart' as const,
+      revision: 1,
+      lastGoodRevision: 1,
+      writable: true,
+    }
+    let projection: ChannelManagerProjectionV1 = {
+      contract: 'cordisx.channel-manager-projection/v1' as const,
+      schemaVersion: 1 as const,
+      status: 'implemented' as const,
+      service,
+      routes: [],
+      accounts: [],
+      bindings: [],
+      diagnostics: [],
+      connections: [{
+        ref: pending,
+        pendingTenant: true as const,
+        adapterKind: 'feishu',
+        enabled: false,
+        transportMode: 'websocket',
+        secretState: 'unavailable' as const,
+      }],
+    }
+    const controller = new PublicChannelManagerController({
+      profileId: 'test',
+      hostGeneration: 'one',
+      projection: () => projection,
+      actionsAvailable: () => true,
+      runAction: async () => ({ status: 'applied' }),
+    })
+    const token = controller.snapshot().accounts[0]!.connectionToken
+    controller.resolvePendingToken(pending, resolved)
+    projection = {
+      ...projection,
+      connections: [{
+        ref: resolved,
+        adapterKind: 'feishu',
+        enabled: true,
+        transportMode: 'websocket',
+        secretState: 'ready',
+      }],
+    }
+    expect(controller.snapshot().accounts[0]!.connectionToken).toBe(token)
+    expect(controller.target(token)).toEqual(resolved)
   })
 
   it('passes authenticated adapter identity to only its configured account without a second profile request', async () => {

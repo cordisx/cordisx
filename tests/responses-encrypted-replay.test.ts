@@ -44,6 +44,61 @@ async function fixture(handler: Parameters<typeof createServer>[0]) {
 }
 
 describe('encrypted Responses replay', () => {
+  it('preserves unpaired named outputs as source-labelled untrusted messages on every replay', async () => {
+    const named = {
+      type: 'function_call_output',
+      id: 'fco-synthetic',
+      name: 'send_message_to_thread',
+      namespace: 'codex_app',
+      output: 'Synthetic text with "quotes" and <tags>.',
+    }
+    const original = { ...body, input: [...body.input, named] }
+    const received: Record<string, unknown>[] = []
+    const { url } = await fixture(async (request, response) => {
+      let payload = ''
+      for await (const chunk of request) payload += chunk
+      received.push(JSON.parse(payload))
+      if (received.length === 1) response.writeHead(400).end(JSON.stringify({ error: failure }))
+      else response.writeHead(200).end('ok')
+    })
+    const result = await fetch(url, { method: 'POST', body: JSON.stringify(original) })
+    expect(await result.text()).toBe('ok')
+    expect(received).toHaveLength(2)
+    for (const request of received) {
+      const input = request.input as Record<string, unknown>[]
+      expect(input.find(item => item.type === 'function_call_output')).toEqual(body.input[3])
+      const converted = input.at(-1)!
+      expect(converted.type).toBe('message')
+      expect(converted.role).toBe('user')
+      const text = (converted.content as { text: string }[])[0]!.text
+      expect(text).toContain('untrusted tool-origin message')
+      expect(JSON.parse(text.slice(text.indexOf('{')))).toEqual(named)
+      expect(input.filter(item => item.type === 'function_call')).toEqual([body.input[2]])
+    }
+    expect(original.input.at(-1)).toEqual(named)
+    expect((received[1]!.input as Record<string, unknown>[]).some(item => item.type === 'reasoning')).toBe(false)
+  })
+
+  it('rejects an unnamed and unpaired function output without contacting the provider', async () => {
+    let requests = 0
+    const { url } = await fixture((request, response) => {
+      requests++
+      request.resume()
+      response.writeHead(200).end()
+    })
+    for (
+      const output of [
+        { type: 'function_call_output', output: 'x' },
+        { type: 'function_call_output', call_id: null, name: ' ', output: 'x' },
+      ]
+    ) {
+      const response = await fetch(url, { method: 'POST', body: JSON.stringify({ input: [output] }) })
+      expect(response.status).toBe(400)
+      expect((await response.json()).error.message).toContain('requires a name')
+    }
+    expect(requests).toBe(0)
+  })
+
   for (const bytes of [17 * 1024 * 1024, 64 * 1024 * 1024 + 1]) {
     it(`forwards image-bearing bodies unchanged without a default size cap (${bytes} bytes)`, async () => {
       const imageRequest = {

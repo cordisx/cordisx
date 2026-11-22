@@ -175,6 +175,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
         },
         target: token => state.publicController!.target(token),
         connectionToken: ref => state.publicController!.tokenFor(ref),
+        rekeyConnection: (pending, resolved) => state.publicController!.resolvePendingToken(pending, resolved),
         prompt: input => captureChannelCredential({ ...input, document: wrapped.document! }),
         request: wrapped.credentialRequest,
         adopt: projection => {

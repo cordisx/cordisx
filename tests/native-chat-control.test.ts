@@ -18,6 +18,24 @@ function fixture() {
   return { control, controlCall, events, writes }
 }
 describe('exact native approval and execution bridge', () => {
+  it('carries project runtime roots and lets the Host replace old root grants while retaining private config', async () => {
+    const f = fixture()
+    f.controlCall.mockResolvedValueOnce({
+      fields: { runtimeWorkspaceRoots: ['/new'], config: { 'sandbox_workspace_write.writable_roots': ['/new'] } },
+      captureId: 'capture',
+    })
+    const result = await f.control.prepare('thread/resume', {
+      threadId: 'chat',
+      runtimeWorkspaceRoots: ['/old'],
+      config: { api_key: 'private', 'sandbox_workspace_write.writable_roots': ['/old'] },
+    })
+    expect(result.params).toMatchObject({
+      runtimeWorkspaceRoots: ['/new'],
+      config: { api_key: 'private', 'sandbox_workspace_write.writable_roots': ['/new'] },
+    })
+    expect(JSON.stringify(f.controlCall.mock.calls)).not.toContain('private')
+    f.control.dispose()
+  })
   it('forwards creation effort and safe nested thread observations without credential fields', async () => {
     const f = fixture()
     await f.control.prepare('thread/start', { config: { model_reasoning_effort: 'high', api_key: 'fixture-secret' } })

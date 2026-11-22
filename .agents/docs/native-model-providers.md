@@ -675,6 +675,22 @@ candidate provider table. The candidate lease replaces the thread binding only
 after native resume succeeds; other native errors and failed retries leave the
 existing binding unchanged. When the Host cannot vouch for the provider, the
 native failure stands.
+
+The Desktop may also request `model/list` for a thread's saved provider, while
+managed providers are attached to threads rather than registered in the native
+server's startup configuration. For the exact structured
+`modelProviderNotConfigured` error matching that request, the intermediary may
+return the current, locally owned Host catalog using the native response shape.
+Pagination is bounded and cursors are fenced to the exact catalog snapshot.
+Native successes, other errors, configured or remote providers, and unscoped
+requests remain native. If the complete provider catalog or its reasoning
+defaults are unavailable, the original error is preserved. The recovery emits
+only fixed diagnostic categories, without request contents or credentials.
+Managed catalogs do not yet provide authoritative input modalities, so recovered
+rows conservatively advertise text only; image or audio attachment controls may
+be unavailable until that metadata is supported. Fixture and schema checks do
+not establish acceptance in a running Desktop.
+
 Recovery restores the persisted provider without preparing a new Send or a
 provider change. It must not add a new-thread first-turn association fence:
 unchanged-provider sends and retries intentionally pass through without an
@@ -718,8 +734,19 @@ reports resource hashes; it does not prove a native submission or account read.
 
 ## Verification Boundaries
 
-Session display snapshots are scoped by Host and thread and are presentation
-hints, not selection or submission authority. A live, bound local Composer can
+Session display snapshots are scoped by Host and thread (or the profile's new-chat
+draft) and are presentation hints, not selection or submission authority. Confirmed
+provider/model labels are stored even when effort or Fast metadata is still unknown.
+Cached labels can occupy the disabled native loading seat; they cannot enable
+selection or sending. Thread and configuration reads run concurrently, and the
+model directory refresh does not block the confirmed selection display. Bounded
+`composer-readiness` records in the launch journal identify native read, binding,
+and control waits without including request or response contents.
+The native permissions label is retained separately by Host, chat and locale.
+When policy/configuration is pending, the known label replaces only the loading
+placeholder; the native control still owns permission changes. A `permissions`
+timing phase records the wait and restores the native trigger when it settles.
+A live, bound local Composer can
 supply a source tuple for ordinary native task creation when its provider, model,
 effort and Fast value are all known and consistent with the Host binding. The admitted native task route carries that tuple through start and first turn;
 explicit native choices take precedence. An ordinary fork with a matching live

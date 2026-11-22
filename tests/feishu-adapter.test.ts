@@ -3,7 +3,11 @@ import { normalize, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import type { ChannelAdapterHost, ChannelInboundEnvelope, ChannelOutboundDelivery } from '@cordisx/channel-runtime'
 import { validateInput } from '../packages/channel-runtime/src/runtime-validation.js'
 import { createFeishuAdapterDefinition } from '../packages/cli/src/launcher/feishu-adapter.js'
-import { LauncherSecretResolutionError, resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
+import {
+  LauncherSecretResolutionError,
+  resolveLauncherSecret,
+  withoutLauncherSecrets,
+} from '../packages/cli/src/launcher/secret-resolver.js'
 
 const connection = {
   ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
@@ -14,18 +18,91 @@ const connection = {
 }
 
 describe('launcher private secret resolution', () => {
-  it('accepts only the explicit environment reference without returning reference data', async () => {
-    await expect(resolveLauncherSecret('host-secret:env/CORDISX_FEISHU_TEST_SECRET', {
-      environment: { CORDISX_FEISHU_TEST_SECRET: 'not-a-real-secret' },
-    })).resolves.toBe('not-a-real-secret')
-    await expect(resolveLauncherSecret('host-secret:env/MISSING', { environment: {} }))
-      .rejects.toMatchObject({ code: 'SECRET_MISSING' } satisfies Partial<LauncherSecretResolutionError>)
-    await expect(resolveLauncherSecret('inline:secret', { environment: {} }))
-      .rejects.toMatchObject({ code: 'SECRET_REF_INVALID' } satisfies Partial<LauncherSecretResolutionError>)
+  it.each(['linux', 'darwin', 'win32'] as const)(
+    'resolves environment credentials on %s without Keychain',
+    async platform => {
+      const readKeychain = vi.fn()
+      await expect(resolveLauncherSecret('host-secret:env/CORDISX_FEISHU_TEST_SECRET', {
+        platform,
+        readKeychain,
+        environment: { CORDISX_FEISHU_TEST_SECRET: 'not-a-real-secret' },
+      })).resolves.toBe('not-a-real-secret')
+      expect(readKeychain).not.toHaveBeenCalled()
+      await expect(resolveLauncherSecret('host-secret:env/MISSING', { environment: {} }))
+        .rejects.toMatchObject({ code: 'SECRET_MISSING' } satisfies Partial<LauncherSecretResolutionError>)
+      await expect(resolveLauncherSecret('inline:secret', { environment: {} }))
+        .rejects.toMatchObject({ code: 'SECRET_REF_INVALID' } satisfies Partial<LauncherSecretResolutionError>)
+    },
+  )
+  it('removes referenced credentials from model subprocess environments without mutating the launcher', () => {
+    const environment = { PATH: '/bin', CODEX_HOME: '/codex', CHANNEL_KEY: 'fixture', OTHER: 'retained' }
+    expect(withoutLauncherSecrets(environment, ['host-secret:env/CHANNEL_KEY', undefined, 'keychain:service/key']))
+      .toEqual({ PATH: '/bin', CODEX_HOME: '/codex', OTHER: 'retained' })
+    expect(environment.CHANNEL_KEY).toBe('fixture')
   })
 })
 
 describe('official Feishu direct-message adapter', () => {
+  it('consumes pairing control text before durable ingress while preserving ordinary messages', async () => {
+    let listener: ((message: NormalizedMessage) => Promise<void>) | undefined
+    const receive = vi.fn(async () => ({ recordId: 'inbound', duplicate: false, status: 'queued' as const }))
+    const send = vi.fn(async () => ({ messageId: 'reply' }))
+    const pairing = vi.fn(async (_ref, message: NormalizedMessage) => ({
+      accepted: true,
+      reply: message.chatType === 'p2p',
+    }))
+    const definition = createFeishuAdapterDefinition({
+      connection,
+      configurationRevision: 1,
+      source: 'test',
+      resolveSecret: async () => 'fixture',
+      onPairingInput: pairing,
+      createChannel: () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          send,
+          on: (name: string, callback: typeof listener) => {
+            if (name === 'message') listener = callback
+            return () => {}
+          },
+        }) as never,
+    })
+    const active = await definition.start({
+      generation: 1,
+      ref: connection.ref,
+      receive,
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    })
+    try {
+      const message = {
+        messageId: 'om_pair',
+        chatId: 'oc_direct',
+        chatType: 'p2p',
+        senderId: 'ou_user',
+        content: '/pair AAAAAAAAAAAAAAAAAAAAAA',
+        createTime: 1,
+        mentionedBot: false,
+      } as NormalizedMessage
+      await listener!(message)
+      expect(pairing).toHaveBeenCalledOnce()
+      expect(receive).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledOnce()
+      expect(JSON.stringify(send.mock.calls)).not.toContain('AAAAAAAAAAAAAAAAAAAAAA')
+      await listener!({ ...message, messageId: 'om_mixed', content: 'extra text\n/pair AAAAAAAAAAAAAAAAAAAAAA' })
+      expect(receive).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledTimes(2)
+      await listener!({ ...message, messageId: 'om_normal', content: 'normal request' })
+      expect(receive).toHaveBeenCalledOnce()
+      expect(receive.mock.calls[0]?.[0].input.content).toEqual([{ type: 'text', text: 'normal request' }])
+      await listener!({ ...message, chatType: 'group' })
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(receive).toHaveBeenCalledOnce()
+    } finally {
+      await active.stop('disposed')
+    }
+  })
   it.each([true, false])('preserves main, quoted and topic Markdown sends with raw SDK=%s', async raw => {
     const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_created' } }))
     const reply = vi.fn(async () => ({ code: 0, data: { message_id: 'om_replied' } }))
@@ -203,7 +280,7 @@ describe('official Feishu direct-message adapter', () => {
     })
     try {
       const message = await normalize({
-        sender: { sender_id: { open_id: 'ou_sender' }, sender_type: 'user', tenant_key: 'tenant-test' },
+        sender: { sender_id: { open_id: 'ou_sender' }, sender_type: 'user', tenant_key: 'external-tenant' },
         message: {
           message_id: 'om_test',
           chat_id: 'oc_test',
@@ -218,6 +295,10 @@ describe('official Feishu direct-message adapter', () => {
       expect(message.rootId).toBe('')
       expect(message.threadId).toBe('')
       await listener!(message)
+      expect(received[0]!.input.source.event).toMatchObject({
+        tenantId: 'tenant-test',
+        actor: { tenantId: 'tenant-test', userId: 'ou_sender' },
+      })
       await listener!({ ...message, rootId: '  ', threadId: '\t' })
       expect(received.map(value => value.input.source.event)).toEqual([
         expect.objectContaining({ threadId: 'oc_test', semantics: 'conversation' }),

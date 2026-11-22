@@ -8,6 +8,7 @@ import { CordisXAgentContextService, CordisXAgentTurnControlService } from './ag
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { installModelProviderSelector } from './install-model-provider-selector.js'
+import { installNativePermissionDisplay } from './native-permission-display.js'
 import { reportNativeModelSelectionUnavailable } from './native-model-availability-notice.js'
 import type {
   NativeProviderSelectionCommandChannel,
@@ -900,6 +901,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
           runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
         ))
       }
+      runtimeScope.registrySubscriptions()!.push(installNativePermissionDisplay(document))
       const disposeModelProviderSelector = await installModelProviderSelector(
         document,
         runtimeScope.modelProviders()!,

@@ -9,6 +9,7 @@ import { nativeComposerCreationPending } from './adapter/native-composer-creatio
 import {
   hideNativeModelProviderTrigger,
   locateNativeModelProviderMountSeat,
+  locateNativeModelSelectionControl,
   nativeModelProviderComposers,
   nativeModelProviderExecutionHost,
 } from './adapter/native-model-provider-seat.js'
@@ -25,7 +26,8 @@ export function canReplaceNativeModelProviderTrigger(
   state: ProviderSelectionSnapshot,
   catalog: ReturnType<ModelProviderRegistry['snapshot']>,
 ): boolean {
-  return catalog.startup !== undefined || state.available || catalog.providers.length > 0 || catalog.entries.length > 0
+  return state.cachedDisplay !== undefined || catalog.startup !== undefined || state.available
+    || catalog.providers.length > 0 || catalog.entries.length > 0
 }
 
 /** One independently owned selector per native composer, including side chats. */
@@ -173,7 +175,13 @@ async function installComposerModelProviderSelector(
       root.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} suspended />)
       return
     }
-    if (!seat || (!root && !canReplaceNativeModelProviderTrigger(state, catalog))) {
+    // A native skeleton provides a display seat, never interaction authority.
+    // Retain it on a cold first visit; replace it only when cached labels exist.
+    if (
+      !seat || (!root && !canReplaceNativeModelProviderTrigger(state, catalog))
+      || seat.trigger.getAttribute('aria-busy') === 'true'
+        && !locateNativeModelSelectionControl(seat.trigger) && !state.cachedDisplay
+    ) {
       unmount()
       return
     }
@@ -207,7 +215,8 @@ async function installComposerModelProviderSelector(
         registry={registry}
         transport={transport}
         locale={locale()}
-        suspended={!nativeModelProviderInteractionAllowed(seat.trigger)}
+        suspended={seat.trigger.getAttribute('aria-busy') === 'true'
+          || !nativeModelProviderInteractionAllowed(seat.trigger)}
       />,
     )
   }

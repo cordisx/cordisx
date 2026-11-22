@@ -1,11 +1,17 @@
 # Agent creation with a configured provider
 
-Status: experimental source implementation. Synthetic tests and read-only
-source composition are evidence for the adapter; real native task visibility
-and first-provider inference remain user acceptance gates.
+Status: experimental implementation. Real native task creation, sidebar
+registration and first-provider inference have been verified for the specific
+Desktop build and candidate described below; other builds and providers require
+their own compatibility evidence.
 
 `cordisx_models.create_thread_with_provider` supplements native `create_thread`.
-Use it only for an explicitly requested new task and configured provider/model.
+The [supplemental CLI](codex-cli.md#provider-aware-creation) exposes this same
+operation without duplicating native creation or inventing a source turn.
+Use it only for an explicitly requested new task. Omitted provider/model/Fast
+values use the selected profile's `chatCreation` defaults; explicit fields win.
+Changing provider without a model uses that provider's own default. When neither
+the request nor defaults resolve a catalog pair, use native `create_thread`.
 First call `list_model_providers`; its `threadCreation.status` must be
 `available`. Pass an exact catalog pair, original prompt, native project/local
 or worktree target, or a projectless target. Cloud and remote execution are
@@ -15,7 +21,8 @@ endpoints, credentials or a native thread id.
 
 The tool requires executor thread and call metadata plus a retained unique
 `operationId`. Equal requests join or read their saved result. Reusing an id
-with different input is rejected. The Host writes a private intent before native
+with different input is rejected. A completed replay retains its original result
+even if creation defaults have changed. The Host writes a private intent before native
 dispatch; a timeout, restart, missing receipt or first-turn failure never
 automatically creates or sends again. A pending worktree result retains its
 native client task id. Pending/unknown operations require native inspection;
@@ -55,17 +62,34 @@ cleanup fences. Source drift or unavailable native bridges disables this
 capability without changing native `create_thread` or global defaults.
 
 Read-only source composition and offline replay of Desktop `26.1023.51421`
-(build `22530`) verify the current dispatcher and helper routing. Synthetic
+(build `22530`) verified the dispatcher and helper routing at that time. Synthetic
 regressions cover renamed bindings/assets, original arguments with shadowed
 target locals, concurrent call identity, guard rejection and dynamic module
-availability. These checks do not establish real native sidebar registration
+availability. These checks alone do not establish real native sidebar registration
 or first-provider inference.
+
+On 2026-11-20, an isolated shared-data instance of Desktop `26.1103.60933`
+(build `25894`) exercised the actual Agent tool and native `create_thread` path.
+The new task appeared in the native sidebar, its original first message was
+present, and its first turn completed with the expected response using Aiden
+`gpt-6.1-terra`. The tested product code was candidate `c7fc8815`, included in
+[#622](https://github.com/cordisx/cordisx/pull/622) and merged as `b0a3ea63`;
+the subsequent candidate changes before merge affected tests only. This is
+acceptance evidence for that build and provider, not a claim about every
+supported configuration or a release or installation record.
+
+An earlier isolated request returned `reconciliation-required` without a task
+id. A later read-only check found its source not loaded in a separate app-server;
+the original instance's processes were terminated, and no matching local task
+was found. Its remote outcome remains unknown and is not resolved by the later
+successful independent acceptance.
 
 The [dated creation assessment](history/agent-provider-task-creation-2026-10-28.md)
 retains the investigation and exact source provenance. Focused operation,
 credential, transform, stdio and intermediary fixtures cover the integration
-boundaries. They do not establish native UI acceptance or real model inference.
-No release, installation or live App validation is implied by this source work.
+boundaries. Those fixtures do not by themselves establish native UI acceptance
+or real model inference. The later live acceptance is limited to the build and
+provider stated above; it does not imply a release or installation.
 
 ## MCP endpoint source evidence
 
@@ -88,5 +112,6 @@ The installed bundled app-tools proxy (SHA-256 in the dated assessment) reads
 places them in its native `tools/call` request. The native main pipe and renderer
 dispatchers preserve that call identity to the audited handler. Those source
 observations and protocol declarations establish the intended endpoint and
-metadata flow. No real endpoint invocation was performed; native execution,
-authorization and visible-registration acceptance remain unverified.
+metadata flow. No real endpoint invocation was performed as part of that
+earlier source inspection. The later isolated native execution and visible
+registration are recorded above.

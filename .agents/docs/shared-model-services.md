@@ -20,6 +20,10 @@ it does not rotate a running service's credential or preparation snapshot.
 
 ## Declaring a model service
 
+The [supplemental CLI and tools](codex-cli.md#shared-model-services) read and save
+these declarations through the same Manager store, with write-only credentials
+and its existing restart apply scope.
+
 Top-level `providers` in `~/.cordisx/config.json` holds two kinds of entry.
 `cli-proxy-api` entries run a launcher-owned gateway
 ([multi-provider sessions](multi-provider-sessions.md)). `model-service`

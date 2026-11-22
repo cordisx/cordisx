@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
   currentNativeComposerThreadId,
+  locateNativeModelProviderMountSeat,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
   nativeModelProviderComposers,
@@ -9,6 +10,21 @@ import {
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it('recognizes the disabled loading seat for cached display without enabling native interaction', () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://fixture.invalid' })
+    const { trigger } = composer(dom.window.document, 'loading-thread', 'model-a', false)
+    delete trigger.dataset.codexIntelligenceTrigger
+    trigger.removeAttribute('aria-haspopup')
+    trigger.dataset.composerNavigationTarget = 'reasoning'
+    trigger.setAttribute('aria-busy', 'true')
+    trigger.setAttribute('disabled', '')
+    expect(locateNativeModelProviderMountSeat(dom.window.document)?.trigger).toBe(trigger)
+    expect(currentNativeComposerThreadId(dom.window.document)).toBe('loading-thread')
+    expect(locateNativeModelSelectionControl(trigger)).toBeUndefined()
+    trigger.removeAttribute('aria-busy')
+    expect(locateNativeModelProviderMountSeat(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
   it('mounts the unified reasoning trigger through deep native wrappers and rejects reasoning-only controls', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const { trigger } = composer(dom.window.document)
@@ -185,6 +201,33 @@ describe('native model provider seat', () => {
     })
     dom.window.close()
   })
+
+  it.each([['simple', 2], ['advanced', 1], ['advanced', 0]] as const)(
+    'recognizes the 26.1117 unified picker in %s mode with %i power choices',
+    async (menuView, powerChoiceCount) => {
+      const dom = new JSDOM('<!doctype html><body></body>')
+      const { trigger, selectModel } = composer(dom.window.document)
+      delete trigger.dataset.codexIntelligenceTrigger
+      trigger.dataset.composerNavigationTarget = 'reasoning'
+      trigger.dataset.selectedReasoningEffort = 'high'
+      const fiber = (trigger as unknown as Record<string, unknown>)['__reactFiber$test'] as {
+        return: { memoizedProps: Record<string, unknown> }
+      }
+      fiber.return.memoizedProps.menuView = menuView
+      // The installed 26.1117 composer automatically picks advanced when
+      // there are too few power selections and no alternate service tier.
+      fiber.return.memoizedProps.powerSelections = [
+        { model: 'model-a', reasoningEffort: 'high' },
+        { model: 'model-a', reasoningEffort: 'low' },
+      ].slice(0, powerChoiceCount)
+      expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
+      await locateNativeModelSelectionControl(trigger)!.selectModel('model-b', 'high')
+      expect(selectModel).toHaveBeenCalledWith('model-b', 'high')
+      fiber.return.memoizedProps.menuView = 'unrecognized'
+      expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+      dom.window.close()
+    },
+  )
 
   it.each([true, false])(
     'awaits unified selection with default action %s and preserves native rejection',

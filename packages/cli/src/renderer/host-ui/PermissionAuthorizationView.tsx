@@ -77,6 +77,12 @@ function PermissionItem({
           </dl>
         </section>
       )}
+      {item.legacyReason === undefined ? null : (
+        <div className="cxp-rationale">
+          <p className="cxp-rationale-label">{item.legacyReason.label}</p>
+          <p className="cxp-rationale-description">{item.legacyReason.description}</p>
+        </div>
+      )}
       <fieldset className="cxp-decisions">
         <legend id={`cxp-label-${item.capability}`}>{item.authorizationLabel}</legend>
         <div

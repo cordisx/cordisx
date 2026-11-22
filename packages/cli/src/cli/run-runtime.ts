@@ -18,6 +18,8 @@ import type { runInjectedHost } from './run-injected-host.js'
 export interface CordisXCliRuntime {
   /** Test-only spawn seam; production inherits terminal stdio without a shell. */
   readonly internalSpawnTerminal?: typeof import('node:child_process').spawn
+  /** Test-only terminal version probe; production validates the selected executable. */
+  readonly internalCheckTerminalClient?: typeof import('./terminal-client-check.js').checkTerminalClient
   /** Test-only app installation destination. */
   readonly internalAppOutput?: import('../app-launcher/runtime-install.js').AppCommandOutputOptions
   /** Test-only exact-path replacement for `/usr/bin/open`. */

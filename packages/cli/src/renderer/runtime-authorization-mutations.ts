@@ -229,6 +229,7 @@ import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
 import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
+import { authorizeCandidateMutation } from './runtime-candidate-authorization.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 import {
   cloneRendererValue,
@@ -682,52 +683,7 @@ export const createRuntimeStagePluginMutation = (
         runtimeScope.registerController()!(candidate.controller, candidate.registerAuthority)
         runtimeScope.controllers()!.push(candidate.controller)
         candidates.push(candidate.controller)
-        if (
-          candidate.controller.item.id === mutation.targetId
-          && mutation.authorizationDecision !== undefined
-          && (mutation.operation === 'install' || mutation.operation === 'update'
-            || mutation.operation === 'enable')
-        ) {
-          if (mutation.authorizationDecision.schemaVersion === 4) {
-            if (
-              candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6
-              && candidate.controller.manifest.schemaVersion !== 7
-              && candidate.controller.manifest.schemaVersion !== 8 && candidate.controller.manifest.schemaVersion !== 9
-              && (candidate.controller.manifest.schemaVersion !== 10
-                && candidate.controller.manifest.schemaVersion !== 11
-                && candidate.controller.manifest.schemaVersion !== 12
-                && candidate.controller.manifest.schemaVersion !== 13
-                && candidate.controller.manifest.schemaVersion !== 16)
-            ) {
-              throw new Error(
-                'permission v4 decision requires manifest-v5, manifest-v6, manifest-v7 through manifest-v12',
-              )
-            }
-            await runtimeScope.broker()!.authorizeActivationV4(
-              candidate.controller.identity,
-              mutation.authorizationDecision,
-              mutation.operation as 'install' | 'update' | 'enable',
-              candidate.controller.generationView,
-            )
-          } else if (mutation.authorizationDecision.schemaVersion === 2) {
-            if (candidate.controller.manifest.schemaVersion !== 4) {
-              throw new Error('permission v2 decision requires manifest-v4')
-            }
-            await runtimeScope.broker()!.authorizeActivationV2(
-              candidate.controller.identity,
-              mutation.authorizationDecision,
-              mutation.operation as 'install' | 'update' | 'enable',
-              candidate.controller.generationView,
-            )
-          } else {
-            await runtimeScope.broker()!.authorizeActivation(
-              candidate.controller.identity,
-              mutation.authorizationDecision,
-              mutation.operation as 'install' | 'update' | 'enable',
-              candidate.controller.generationView,
-            )
-          }
-        }
+        await authorizeCandidateMutation(runtimeScope, candidate.controller, mutation)
       }
       await runtimeScope.broker()!.settled()
       const candidateById = new Map(candidates.map(controller => [controller.item.id, controller]))

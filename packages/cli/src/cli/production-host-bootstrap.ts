@@ -1,3 +1,7 @@
+import { prepareDesktopReviewCatalog } from '../launcher/desktop-review-catalog.js'
+import path from 'node:path'
+import { installConfiguredSkills } from '../launcher/configured-skills.js'
+import { effectiveHomeForCordisXSkill } from '../launcher/builtin-skill.js'
 import { diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -18,11 +22,12 @@ import {
 import { releaseHostProfileLease, stopPrelaunchedHost } from './injected-host-cleanup.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
-import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
+import { captureMainInspectorUrl, codexHome, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import { codexHomeOfPlan, projectModelServicesBeforeLaunch } from '../launcher/model-service-projection.js'
+import { projectMcpToCodex } from '../launcher/mcp-projection.js'
 import { prepareDesktopStaticCatalog } from '../launcher/desktop-static-catalog.js'
 
 export interface ProductionHostBootstrap {
@@ -97,6 +102,7 @@ export async function prepareProductionHostBootstrap(
   let profileLease: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>> | undefined
   let nativeSubmissionBootstrap: NativeSubmissionBootstrap | undefined
   let nativeSubmissionUnavailable = false
+  let reviewCatalog: Awaited<ReturnType<typeof prepareDesktopReviewCatalog>>
   let child: ChildProcess | undefined
   try {
     profileLease = profile === undefined
@@ -104,12 +110,39 @@ export async function prepareProductionHostBootstrap(
       : await acquireCodexProfileLaunchLease(profile.userDataDir, { stdout })
     await adapter.prepareLaunch(plan)
     const configured = await loadHomeConfig(configPath)
+    if (adapter.id === 'codex' && configured.skills?.length) {
+      await installConfiguredSkills({
+        sources: configured.skills,
+        cacheDir: path.join(rootFromConfigPath(configPath), 'cache', 'skills'),
+        skillsDir: path.join(effectiveHomeForCordisXSkill(plan, runtime.internalSharedHomeDir), '.agents', 'skills'),
+        report: stdout,
+        env: { ...environment, ...plan.environment },
+      })
+    }
     const configuredEnvironment = hostModelServiceEnvironment(
       environment,
       configured.environmentVariables,
       plan.environment,
       configured.providers,
     )
+    if (adapter.id === 'codex') {
+      await projectMcpToCodex(configured.mcp, codexHome(configuredEnvironment), configuredEnvironment)
+    }
+    if (adapter.id === 'codex' && configured.apps.codex?.profiles[selection.profileId]?.approvalReview?.settings) {
+      if (
+        !input.prepareNativeSubmission || !shouldEnableNativeSubmission({
+          platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
+          adapterId: adapter.id,
+          preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
+        })
+      ) throw new Error('REVIEW_NATIVE_ROUTING_UNAVAILABLE')
+      reviewCatalog = await prepareDesktopReviewCatalog({
+        configPath,
+        profileId: selection.profileId,
+        executable: plan.executable,
+        environment: configuredEnvironment,
+      })
+    }
     if (
       input.prepareNativeSubmission
       && shouldEnableNativeSubmission({
@@ -127,11 +160,16 @@ export async function prepareProductionHostBootstrap(
           cwd: process.cwd(),
           environment: configuredEnvironment,
         })
+        if (catalog && reviewCatalog) {
+          await catalog.close()
+          throw new Error('REVIEW_CATALOG_BUDGET_CONFLICT')
+        }
         try {
           nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable, {
             ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
             environment: configuredEnvironment,
             ...(catalog === undefined ? {} : { staticCatalog: catalog }),
+            ...(reviewCatalog === undefined ? {} : { reviewCatalog }),
             ...(runtime.internalRemoteTerminalProvider === undefined
               ? {}
               : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
@@ -143,6 +181,7 @@ export async function prepareProductionHostBootstrap(
         }
       } catch (error) {
         input.signal?.throwIfAborted()
+        if (reviewCatalog) throw error
         nativeSubmissionUnavailable = true
         stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
@@ -225,6 +264,7 @@ export async function prepareProductionHostBootstrap(
   } catch (error) {
     const termination = await stopPrelaunchedHost(child, profile)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
+    await reviewCatalog?.close().catch(() => undefined)
     if (!retainProfileLeaseAfterHiddenHostFailure(error)) {
       await releaseHostProfileLease(profileLease?.release, termination).catch(() => undefined)
     }

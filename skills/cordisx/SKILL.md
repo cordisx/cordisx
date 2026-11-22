@@ -30,6 +30,10 @@ The bundled revision and owning source for this entry are recorded in
   [cordisx-plugin-development](../cordisx-plugin-development/SKILL.md).
 - For Channel connection listing, chat bindings, message listening/history, or
   sending through a configured account, read [the Channel guide](references/channel.md).
+- For supplemental chat settings, explicit creation defaults or shared model-service
+  commands, read [the Codex CLI guide](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/codex-cli.md).
+  Prefer native tools for ordinary chat operations; an omitted session never means
+  global defaults, and Channel-originated mutations retain Channel authorization.
 - For a mixed request, use each relevant guide in dependency order. Resolve
   product facts before applying experience or changing plugin code.
 

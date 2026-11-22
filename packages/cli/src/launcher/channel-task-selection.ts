@@ -26,6 +26,7 @@ export function validateChannelTaskSelection(
   const provider = providers.find(provider => provider.providerId === selection.providerId)
   const model = provider?.models.find(model => model.id === selection.model)
   if (!model) throw new Error('SELECTION_OUTSIDE_CATALOG')
+  if (selection.fast === true && model.supportsFastMode !== true) throw new Error('FAST_NOT_SUPPORTED')
   if (selection.effort && selection.effort !== 'inherit') {
     const capabilities = parseModelReasoningCapabilities(model.reasoningCapabilities)
     if (!capabilities) throw new Error('MODEL_EFFORT_UNAVAILABLE')
@@ -57,13 +58,14 @@ export function resolveChannelTaskSelection(
       : String(provider.models[0]?.id ?? '')
   }
   const model = provider?.models.find(model => model.id === selection.model)
+  if (patch.fast === undefined && selection.fast === true && model?.supportsFastMode !== true) selection.fast = false
   if (patch.effort === undefined && selection.effort && selection.effort !== 'inherit' && model) {
     const efforts = parseModelReasoningCapabilities(model.reasoningCapabilities)?.efforts
     if (!efforts || !(efforts as readonly string[]).includes(selection.effort)) selection.effort = 'inherit'
   }
   validateChannelTaskSelection(providers, selection)
-  const authorizedPatch: Record<string, string> = { ...patch }
-  for (const field of ['providerId', 'model', 'effort'] as const) {
+  const authorizedPatch: Record<string, string | boolean> = { ...patch }
+  for (const field of ['providerId', 'model', 'effort', 'fast', 'projectId'] as const) {
     if (selection[field] !== current[field] && selection[field] !== undefined) {
       authorizedPatch[field] = selection[field]!
     }
@@ -71,7 +73,7 @@ export function resolveChannelTaskSelection(
   return { selection, patch: authorizedPatch as ChannelTaskPatch }
 }
 export function channelTaskSelectionMatches(left: ChannelTaskPatch, right: ChannelTaskPatch): boolean {
-  return ['providerId', 'model', 'effort'].every(field =>
+  return ['providerId', 'model', 'effort', 'fast', 'projectId'].every(field =>
     left[field as keyof ChannelTaskPatch] === right[field as keyof ChannelTaskPatch]
   )
 }

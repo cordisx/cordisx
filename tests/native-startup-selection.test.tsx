@@ -102,7 +102,7 @@ describe('actual selector installation with deferred native initial reads', () =
   it('mounts the core marker before bridge reads finish and keeps unready providers out of the menu', async () => {
     const h = await setup()
     try {
-      expect(h.requests.map(request => request.method)).toEqual(['thread/read'])
+      expect(h.requests.map(request => request.method)).toEqual(['thread/read', 'config/read'])
       expect(document.querySelector('.cxmp-selector[data-cordisx-model-selector-ready="true"]')).not.toBeNull()
       vi.stubGlobal('__cordisxStartupDocument', {
         snapshot: () => ({ phase: 'covered', receipt: { nonce: 'owned', timeOrigin: performance.timeOrigin } }),

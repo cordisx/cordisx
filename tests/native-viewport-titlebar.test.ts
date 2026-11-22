@@ -90,4 +90,24 @@ describe('native viewport titlebar positioning', () => {
     frame.getBoundingClientRect = () => original
     expect(resolveNativeViewportTitlebarOwner(header)).toBeDefined()
   })
+
+  it('recognizes the 26.1111 collapsed thread gutter only with its native layout markers', () => {
+    const { document, header } = fixture()
+    const owners = placeNativeWorkspaceTitlebar(header)
+    owners.frame.dataset.appShellCompactPageGutter = 'false'
+    owners.frame.dataset.appShellSidebarOpen = 'false'
+    owners.frame.dataset.appShellPageSidebar = 'false'
+    header.dataset.appShellHeaderLayout = 'thread-edge-scroll'
+    const before = document.body.innerHTML
+    expect(resolveNativeViewportTitlebarOwner(header)).toEqual({ position: 'absolute', ...owners })
+    expect(document.body.innerHTML).toBe(before)
+    header.dataset.appShellHeaderLayout = 'default'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    header.dataset.appShellHeaderLayout = 'thread-edge-scroll'
+    owners.frame.dataset.appShellSidebarOpen = 'true'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    owners.frame.dataset.appShellSidebarOpen = 'false'
+    owners.surface.dataset.appShellUnifiedTabStrip = 'true'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+  })
 })

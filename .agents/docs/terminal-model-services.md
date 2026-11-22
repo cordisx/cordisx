@@ -140,8 +140,24 @@ history or instantly replace a running thread's instructions.
 
 ## Availability and verification
 
-- Missing Codex CLI: install a compatible CLI or select it with
-  `--codex-executable /absolute/path/to/codex`.
+- Before launching a terminal, CordisX runs a captured `--version` check of the
+  selected client with a five-second timeout. A missing CLI, broken launcher,
+  permission failure or failed check reports installation/PATH guidance before
+  preparing a model-service credential lease. Client output is not forwarded by
+  this check. `--help` and `--list` do not require an installed client.
+  If the executable disappears or execution is denied after the check,
+  CordisX catches the launch error, gives repair guidance and releases any
+  prepared provider lease.
+- Missing Codex CLI: install it with `npm install -g @openai/codex@latest`, then
+  run `codex --version` in the same terminal. See the
+  [official installation guide](https://learn.chatgpt.com/docs/codex/cli) for
+  standalone and Homebrew alternatives.
+- A pnpm launcher may survive removal of the global package directory it points
+  to. Repair that installation with `pnpm add -g @openai/codex@latest --force`
+  and verify `codex --version`. If an old entry still takes precedence, correct
+  PATH or open a new terminal. CordisX does not silently select another install.
+  To select a known working entry, add `--executable /absolute/path/to/codex`
+  (or `--codex-executable`) before the `--` argument boundary.
 - Missing or older live Host: `--service`/`--list` report unavailable. They never
   start another App, fabricate an inactive runtime, or fall back to stale login.
 - A gateway that does not implement Codex's required wire contract may fail even

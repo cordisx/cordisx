@@ -1,4 +1,6 @@
+import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
+import { createChannelFeedback } from './channel-feedback-composition.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
@@ -8,6 +10,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { type ChannelCommandAddressing, ChannelCommandUsers } from './channel-command-users.js'
 import { ChannelSessionCommands } from './channel-session-commands.js'
 import { channelCommandHelp } from '../channel-command-registry.js'
+import { CHANNEL_MODEL_COMMANDS } from './channel-model-commands.js'
 import { ChannelNativeApprovals } from './channel-native-approvals.js'
 import { chatExecutionOperation } from './chat-execution-operation.js'
 import { ChannelCreationDefaults } from './channel-creation-defaults.js'
@@ -26,7 +29,9 @@ import {
 import {
   CHANNEL_COMMANDS,
   channelCommandDenied,
+  channelCommandScope,
   channelExact,
+  channelGlobalCommandAllowed,
   channelPolicyAllows,
   channelRecord,
   channelSameScope,
@@ -56,11 +61,13 @@ export class ChannelConversationConsumer {
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
   readonly continuation: ChannelContinuationManager
+  private readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
-    private readonly input: ChannelConversationConsumerInput,
+    private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
+    this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
@@ -166,18 +173,7 @@ export class ChannelConversationConsumer {
     return binding.sessionId
   }
   async bindingLabels(ids?: readonly string[]) {
-    const native = this.extraNative?.()
-    return Promise.all(
-      this.bindings().filter(binding => ids === undefined || ids.includes(binding.id)).map(async binding => {
-        const event: ChannelEventRef = { ...binding.channel, eventId: 'display' }
-        const conversationName = await this.input.access()?.name?.(event).catch(() => undefined)
-        return {
-          bindingId: binding.id,
-          sessionName: await native?.label(binding.sessionId).catch(() => undefined) ?? 'Codex 对话',
-          conversationName: conversationName ?? (binding.channel.kind === 'direct' ? '私聊' : '群聊'),
-        }
-      }),
-    )
+    return channelBindingLabels(this.bindings(), this.input.access(), this.extraNative?.(), ids)
   }
   policy() {
     const state = this.store.snapshot()
@@ -429,6 +425,7 @@ export class ChannelConversationConsumer {
     if (this.lifetime.signal.aborted || this.pumping) return this.pumping
     this.pumping = (async () => {
       this.approvals.attach(this.extraNative?.())
+      this.feedback.sync()
       await this.approvals.expire()
       void this.taskSettings.pump().catch(() => this.input.report?.('CHANNEL_TASK_SETTINGS_UNAVAILABLE'))
       await this.catchup()
@@ -542,6 +539,7 @@ export class ChannelConversationConsumer {
         return false
       })
       if (waiting) return
+      void this.feedback.routed(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
     }
     await this.store.mutate(state => {
       state.inputs[record.recordId]!.routed = true
@@ -554,13 +552,7 @@ export class ChannelConversationConsumer {
         'choose',
         'permissions',
         'work-mode',
-        'models',
-        'model',
-        'provider',
-        'task-settings',
-        'task-requests',
-        'task-approve',
-        'task-deny',
+        ...CHANNEL_MODEL_COMMANDS,
       ].includes(command)
       && !channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
     ) {
@@ -626,6 +618,10 @@ export class ChannelConversationConsumer {
     } else if (['messages-on', 'messages-off', 'allow-user', 'deny-user', 'reset-user', 'wake'].includes(command)) {
       const parts = argument.trim().split(/\s+/u).filter(Boolean)
       const global = parts.includes('--global')
+      if (global && !channelGlobalCommandAllowed(this.store.snapshot().policy, event, command)) {
+        await this.commandReply(record.recordId + ':command-denied', event, '当前用户没有修改全局策略的权限。')
+        return
+      }
       let userArgument = parts.filter(part => part !== '--global').join(' ')
       if (
         ['messages-on', 'messages-off'].includes(command) && userArgument
@@ -656,16 +652,14 @@ export class ChannelConversationConsumer {
         }
         userArgument = resolved.userId
       }
-      const scope = global ? {} : {
-        adapterId: event.adapterId,
-        accountId: event.accountId,
-        tenantId: event.tenantId,
-        conversationId: event.conversationId,
-      }
+      const scope = channelCommandScope(event, global)
       if (this.lifetime.signal.aborted) return
       const applied = await this.store.mutate(state => {
         // Name lookup is asynchronous. A policy change during lookup must still control this effect.
-        if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)) return false
+        if (
+          !state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)
+          || global && !channelGlobalCommandAllowed(state.policy, event, command)
+        ) return false
         const id = `command:${identity([scope, command.includes('user') ? userArgument : 'messages'])}`
         const rules = state.policy.rules.filter(rule => rule.id !== id)
         if (command === 'messages-off' || command === 'allow-user' || command === 'deny-user') {
@@ -986,6 +980,7 @@ export class ChannelConversationConsumer {
   }
   async dispose(): Promise<void> {
     this.lifetime.abort()
+    this.feedback.dispose()
     clearInterval(this.timer)
     await this.pumping
     this.commandUsers.dispose()

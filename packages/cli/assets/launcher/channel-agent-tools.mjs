@@ -61,6 +61,8 @@ const taskSettings = {
     providerId: { ...string, maxLength: 128 },
     model: string,
     effort: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
+    fast: { type: 'boolean' },
+    projectId: string,
   },
 }
 export const channelAgentTools = [
@@ -114,7 +116,7 @@ export const channelAgentTools = [
   ),
   tool(
     'task-settings-set',
-    "Request exact provider/model/effort changes for the current or bound task, only on the sender's request. The authenticated incoming user's field and model permissions apply. Authorized users queue directly; otherwise returns approval-required. Human approval must explicitly cover these exact values. Never approve for the user or retry unknown application.",
+    "Request exact provider/model/effort/Fast/project changes for the current or bound task, only on the sender's request. Use model-list to inspect native project IDs. The authenticated incoming user's field and target-value permissions apply. Authorized users queue directly; otherwise returns approval-required. Human approval must explicitly cover these exact values. Never approve for the user or retry unknown application.",
     { sessionId: string, settings: taskSettings, expectedRevision: { type: 'integer', minimum: 0 } },
     ['settings'],
   ),

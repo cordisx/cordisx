@@ -30,6 +30,7 @@ export interface ChannelCredentialWorkflowInput {
   readonly advance: () => void
   readonly target: (token: string) => ChannelCredentialRef | undefined
   readonly connectionToken: (ref: ChannelCredentialRef) => string
+  readonly rekeyConnection?: (pending: ChannelCredentialRef, resolved: ChannelCredentialRef) => void
   readonly available: () => boolean
   readonly prompt: (
     input: {
@@ -79,6 +80,40 @@ export class ChannelCredentialWorkflow {
           () => {},
         )
       }
+    }
+  }
+  /** Resolve a saved pending account without exposing its stored credential to the renderer. */
+  async resolveTenant(input: {
+    owner: string
+    account: ChannelCredentialRef
+    tenantId: string
+    expectedServiceRevision: number
+    signal: AbortSignal
+    authorize: ChannelCredentialAuthorizer
+    live: () => boolean
+  }): Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }> {
+    if (this.busy || input.signal.aborted || !input.live() || this.lifetime.signal.aborted) {
+      return this.fail('STALE_GENERATION', 'unavailable')
+    }
+    this.busy = true
+    try {
+      if (!await input.authorize(input.account)) return this.fail('PERMISSION_DENIED')
+      if (input.signal.aborted || !input.live()) return this.fail('STALE_GENERATION', 'unavailable')
+      const result = await this.input.request({
+        operation: 'resolve-tenant',
+        owner: input.owner,
+        account: input.account,
+        tenantId: input.tenantId,
+        expectedRevision: input.expectedServiceRevision,
+      })
+      if (result.status === 'applied' && !input.signal.aborted && input.live()) {
+        if (result.projection && result.ref) this.input.rekeyConnection?.(input.account, result.ref)
+        if (result.projection) this.input.adopt(result.projection)
+        this.input.advance()
+      }
+      return { status: result.status, code: result.code }
+    } finally {
+      this.busy = false
     }
   }
   async issue(request: ChannelManagerTargetRequestV1, owner: string): Promise<Partial<ChannelManagerTargetResultV1>> {

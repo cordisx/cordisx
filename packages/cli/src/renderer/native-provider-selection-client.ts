@@ -5,6 +5,7 @@ import {
 import type { NormalizedNativeSubmissionAction } from './native-provider-submission-policy.js'
 import type { CatalogManagementChannel } from '../model-catalog-management.js'
 import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { logComposerTiming } from './native-composer-diagnostics.js'
 
 export interface NativeSubmissionScope {
   readonly targetId: string
@@ -264,9 +265,16 @@ export class NativeProviderSelectionClient {
     this.selectionOperations.add(operation)
     this.emit()
     try {
+      const startedAt = performance.now()
       const next = await this.channel.selectionRead({
         scope,
         ...(authority.effective === undefined ? {} : { effective: authority.effective }),
+      }).then(next => {
+        logComposerTiming('selection/read', next.available ? 'ready' : 'failed', startedAt)
+        return next
+      }, error => {
+        logComposerTiming('selection/read', 'failed', startedAt)
+        throw error
       })
       if (this.projectionCurrent(scope, generation, next.revision)) {
         this.replace(next)

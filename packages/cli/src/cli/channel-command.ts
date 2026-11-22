@@ -5,7 +5,7 @@ import { runConfiguredChannelCommand } from './channel-configured-command.js'
 import { channelCliHelp } from './channel-command-help.js'
 
 const HELP =
-  `cordisx channel connections|conversations|bind|unbind|bind-status|reply-mode|history|remote-history|listen|send|send-many|ask|question-cancel|receipt|policy|policy-set [--profile <id>] [--input <JSON>]
+  `cordisx channel connections|conversations|bind|unbind|bind-status|reply-mode|history|remote-history|message-get|listen|send|send-many|ask|question-cancel|receipt|policy|policy-set [--profile <id>] [--input <JSON>]
   Uses the existing configured Channel runtime. Bind/history support sessionId; operationId identifies a send.
 Diagnostic-only:
 cordisx channel serve --directory <new-absolute-directory> --adapter <feishu|lark> --account <id> --tenant <id> --conversation <id> --actor <id> --match <text> --duration <seconds>

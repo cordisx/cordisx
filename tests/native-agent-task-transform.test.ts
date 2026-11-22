@@ -158,6 +158,80 @@ describe('structural native task creation', () => {
     expect(results.map(r => r.collaborationMode.settings.model)).toEqual(['first-model', 'second-model'])
   })
 
+  it('links duplicated Rspack factories and preserves the correlated native creation path', async () => {
+    const worktree = /async function worktree\([\s\S]+?\n\}/u.exec(taskInitialSource)![0]
+      .replace('async function worktree(', 'async function(')
+    const initial = taskInitialSource
+      .replace(/async function worktree\([\s\S]+?\n\}/u, '')
+      .replace('return worktree(', `return (${worktree})(`)
+      .replace('settings!=null&&source!=null', 'null!=settings&&null!=source')
+      .replace('async function create(', 'require.d(exports,{},{Nw:async function(')
+      .replace('}\nasync function local(', '}});\nasync function local(')
+      .replace('export {create as nativeCreate};', '')
+      .replace(
+        'globalThis.create=create;globalThis.local=local;globalThis.worktree=worktree;globalThis.first=first;',
+        '',
+      )
+    const dispatcher = `var native=require('helper');
+      async function dispatch(message){return await (async function({scope:store,argumentsValue:args,sourceThreadId:source,parentTurnId:parent,rootTurnId:root}) {
+        const parsed=parse(args), target=parsed.target;
+        return await (0,native.Nw)({scope:store,turnTrigger:'app_tool_create_thread',sourceThreadId:source,target:target,model:parsed.model,prompt:parsed.prompt,parentTurnId:parent,rootTurnId:root});
+      })({scope:state,argumentsValue:message.arguments,sourceThreadId:'source',parentTurnId:'parent',rootTurnId:'root'})};
+      globalThis.dispatch=dispatch;`
+    const source =
+      `export const __webpack_modules__={helper:function(module,exports,require){${initial}},dispatcher:function(module,exports,require){${dispatcher}}};`
+    const duplicate = `export const __webpack_modules__={helper:function(module,exports,require){${initial}}};`
+    const resources = [
+      { url: 'app://-/assets/combined.js', source },
+      { url: 'app://-/assets/duplicate.js', source: duplicate },
+    ]
+    const firstTurn = {
+      url: 'app://-/assets/carrier.js',
+      sha256: 'unused',
+      taskFirstTurnCarrier: true,
+      transform: () => {
+        throw Error('not called')
+      },
+    }
+    const result = nativeAgentTaskTransforms('future', 'unknown', resources, [firstTurn])
+    expect(result.available).toBe(true)
+    expect(result.transforms.filter(t => t.taskExecutionUrl).map(t => t.url)).toEqual(resources.map(r => r.url))
+    expect(nativeAgentTaskTransforms('future', 'unknown', resources, []).available).toBe(false)
+    const wrongLink = resources.map((r, i) =>
+      i ? r : { ...r, source: r.source.replace("require('helper')", "require('different')") }
+    )
+    expect(nativeAgentTaskTransforms('future', 'unknown', wrongLink, [firstTurn]).available).toBe(false)
+    const { value, handle, start, queue } = world()
+    const code = result.transforms.find(t => t.url === resources[0]!.url)!.transform(source).source
+      .replace('export const __webpack_modules__=', 'globalThis.modules=')
+    runInNewContext(code, value)
+    const exports: Record<string, any> = {}
+    const requireModule: any = (id: string) => {
+      if (id !== 'helper') throw Error('wrong module')
+      return exports
+    }
+    requireModule.d = (target: any, ...objects: any[]) => Object.assign(target, ...objects)
+    value.modules.helper({}, exports, requireModule)
+    value.modules.dispatcher({}, {}, requireModule)
+    await value.dispatch({
+      callId: 'cordisx-task-rspack',
+      arguments: { target: { type: 'projectless' }, model: 'native', prompt: 'fixture' },
+    })
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ config: { 'cordisx.operation_token': handle.token } }))
+    await value.dispatch({
+      callId: 'cordisx-task-worktree',
+      arguments: { target: { type: 'worktree' }, model: 'native', prompt: 'fixture' },
+    })
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      startConversationParamsInput: expect.objectContaining({
+        configOverrides: expect.objectContaining({ 'cordisx.operation_token': handle.token }),
+      }),
+    }))
+    await expect(exports.Nw({ config: { unsafe: true }, sourceThreadId: 'source', target: {} })).rejects.toThrow(
+      'delegated',
+    )
+  })
+
   it('fails only creation when structures are absent, ambiguous or prior composition is invalid', () => {
     const resources = [{ url: 'app://-/assets/initial.js', source: taskInitialSource }, {
       url: 'app://-/assets/execution.js',
@@ -173,6 +247,7 @@ describe('structural native task creation', () => {
     expect(nativeAgentTaskTransforms('future', 'unknown', resources, base)).toEqual({
       available: false,
       transforms: base,
+      reason: 'composition',
     })
     expect(
       nativeAgentTaskTransforms('future', 'unknown', [...resources, {
