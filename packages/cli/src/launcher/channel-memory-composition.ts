@@ -5,9 +5,9 @@ import { ChannelMemoryPersonas } from './channel-memory-personas.js'
 
 export function createChannelMemory(file: string) {
   const directory = path.dirname(file)
-  return {
-    memory: new ChannelMemoryStore(path.join(directory, 'memory')),
-    memoryAuthority: new ChannelMemoryAuthority(path.join(directory, 'memory-authority')),
-    personas: new ChannelMemoryPersonas(path.join(directory, 'personas')),
-  }
+  return [
+    new ChannelMemoryStore(path.join(directory, 'memory')),
+    new ChannelMemoryAuthority(path.join(directory, 'memory-authority')),
+    new ChannelMemoryPersonas(path.join(directory, 'personas')),
+  ] as const
 }

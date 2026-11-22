@@ -66,10 +66,7 @@ export class ChannelConversationConsumer {
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput & { readonly file: string },
   ) {
-    const memory = createChannelMemory(input.file)
-    this.memory = memory.memory
-    this.memoryAuthority = memory.memoryAuthority
-    this.personas = memory.personas
+    ;[this.memory, this.memoryAuthority, this.personas] = createChannelMemory(input.file)
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
