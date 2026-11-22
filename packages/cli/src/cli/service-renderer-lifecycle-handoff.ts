@@ -8,6 +8,7 @@ import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contra
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import type {
   ServiceRendererBootstrapEntry,
   ServiceRendererConfiguredChannelInput,
@@ -98,7 +99,7 @@ export class ServiceRendererLifecycleHandoff {
       if (
         !entry || entry.peer !== peer || !entry.bootstrapConfirmed || entry.channelTransition
         || entry.lifecycleTransition || entry.pendingIdentity || !input.admitted(peer) || !this.input.current(id, entry)
-        || entry.identity && !attachmentEqual(entry.snapshot, snapshot)
+        || (entry.identity || entry.managementPlans) && !attachmentEqual(entry.snapshot, snapshot)
       ) throw new Error('renderer-lifecycle-handoff-unavailable')
       return { id, entry }
     })
@@ -272,13 +273,13 @@ export class ServiceRendererLifecycleHandoff {
     try {
       if (!attachmentEqual(this.input.snapshot(), snapshot)) return false
       await Promise.all(reservation.cohort.map(async ({ id, entry }) => {
-        if (!entry.identity) return
+        if (!entry.identity && !entry.managementPlans) return
         await this.track(entry, async () => {
           const pending = entry.pendingIdentity
           const context = entry.identityContext
           if (
-            !pending || !context || pending.transactionId !== reservation.transactionId
-            || !attachmentEqual(this.input.participants.confirmedIdentitySnapshot(entry.peer.identity), snapshot)
+            entry.identity && (!pending || !context || pending.transactionId !== reservation.transactionId
+              || !attachmentEqual(this.input.participants.confirmedIdentitySnapshot(entry.peer.identity), snapshot))
           ) throw new Error('renderer-lifecycle-handoff-unavailable')
           const inputs = await this.readInputs(snapshot)
           if (
@@ -290,26 +291,37 @@ export class ServiceRendererLifecycleHandoff {
           ) {
             throw new Error('renderer-lifecycle-handoff-unavailable')
           }
-          const { transactionId: _transactionId, ...candidate } = pending.candidate
-          void _transactionId
-          const committed = { ...candidate, recordKind: 'active', lastGoodRevision: candidate.revision }
-          if (attachmentEqual(snapshot.active, committed)) {
-            entry.identity!.commitCandidate(context, pending.transactionId, snapshot.active)
-          } else {
-            entry.identity!.cancelCandidate(context, pending.transactionId)
-            if (!attachmentEqual(snapshot.active.plugins, pending.previous.plugins)) {
-              throw new Error('renderer-lifecycle-handoff-unavailable')
+          if (entry.identity && pending && context) {
+            const { transactionId: _transactionId, ...candidate } = pending.candidate
+            void _transactionId
+            const committed = { ...candidate, recordKind: 'active', lastGoodRevision: candidate.revision }
+            if (attachmentEqual(snapshot.active, committed)) {
+              entry.identity.commitCandidate(context, pending.transactionId, snapshot.active)
+            } else {
+              entry.identity.cancelCandidate(context, pending.transactionId)
+              if (!attachmentEqual(snapshot.active.plugins, pending.previous.plugins)) {
+                throw new Error('renderer-lifecycle-handoff-unavailable')
+              }
             }
+            const aliases = new Map(snapshot.active.plugins.map(plugin => [
+              plugin.id,
+              entry.identity!.currentAlias(context, plugin.id),
+            ]))
+            entry.identity.projectActivation(context, snapshot.active)
+            entry.identityAliases = aliases
           }
-          const aliases = new Map(snapshot.active.plugins.map(plugin => [
-            plugin.id,
-            entry.identity!.currentAlias(context, plugin.id),
-          ]))
-          entry.identity!.projectActivation(context, snapshot.active)
-          entry.identityAliases = aliases
+          const eligible = entry.managementPlans
+            ? await restrictedLifecycleIds(this.input.homeDir, snapshot, inputs.plugins)
+            : undefined
+          if (!reservation.current() || !attachmentEqual(this.input.snapshot(), snapshot)) {
+            throw new Error('renderer-lifecycle-handoff-unavailable')
+          }
           entry.snapshot = structuredClone(snapshot)
           entry.plugins = inputs.plugins
           entry.packageInputs = inputs.inputs
+          if (eligible) {
+            entry.restrictedLifecycleIds = eligible
+          }
           delete entry.pendingIdentity
           if (!reservation.current()) {
             throw new Error('renderer-lifecycle-handoff-unavailable')

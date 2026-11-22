@@ -310,6 +310,17 @@ export async function fixture(
     store,
     managedServiceUI: managedUI,
     protectProfileInputs: options.protectProfileInputs === true,
+    ...(options.browserManagement && options.coordinateLifecycle
+      ? {
+        restrictedManagement: {
+          available: () => management?.discardExecutionPlan !== undefined,
+          discardPlan: (token: string) => {
+            if (!management?.discardExecutionPlan) throw new Error('fixture plan cleanup unavailable')
+            management.discardExecutionPlan(token)
+          },
+        },
+      }
+      : {}),
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
     experimentalChannelCredentials: options.channelCredentials === true,
     ...(configuredChannel === undefined ? {} : {

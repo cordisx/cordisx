@@ -77,6 +77,79 @@ function enablePlan(source: string) {
 }
 
 describe('React Manager plugin actions', () => {
+  it('uses the standalone owner plan only for the exact supported plugin and confirmed action', async () => {
+    const fixture = reactManagerFixture()
+    const dialogs = await installLifecycleDialogHost(fixture)
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const { StandalonePluginLifecycleContext } = await import(
+      '../packages/cli/src/renderer/manager/model/standalone-plugin-lifecycle.js'
+    )
+    const alias = 'https://renderer.cordisx.invalid/plugin/' + 'a'.repeat(64)
+    const digest = ('sha256:' + 'b'.repeat(64)) as any
+    const installed = {
+      ...plugin(),
+      source: alias,
+      package: {
+        version: '1.0.0',
+        digest,
+        moduleGeneration: 'demo-generation',
+        dependencies: [],
+        canonicalSource: alias,
+      },
+    }
+    const state = managerSnapshot({
+      plugins: [installed],
+      pluginLifecycle: { profileId: 'test', revision: 1, runtimeGeneration: 'runtime', operationsAvailable: false },
+    })
+    const projected: any = {
+      profileId: 'test',
+      revision: 4,
+      activationRevision: 1,
+      rendererLifecycleAccess: 'session-scoped-v1',
+      runtime: { kind: 'active', mode: 'service' },
+      plugins: [{ ...installed.package, id: 'demo', enabled: true, availableOperations: ['disable', 'uninstall'] }],
+    }
+    const executionRequest = { kind: 'plugin-execute-plan', executionToken: 'session-plan' }
+    const planLifecycle = vi.fn().mockResolvedValue({
+      status: 'planned',
+      snapshot: projected,
+      executionRequest,
+      affectedPluginIds: ['demo'],
+    })
+    const executeLifecycle = vi.fn().mockResolvedValue({ status: 'applied', snapshot: projected })
+    const native = vi.fn()
+    const binding: any = { planLifecycle, executeLifecycle }
+    try {
+      const render = async (managementSnapshot: any) =>
+        await fixture.render(
+          <StandalonePluginLifecycleContext.Provider value={{ binding, snapshot: managementSnapshot }}>
+            <PluginsPage
+              model={managerModel(state, { requestPluginLifecycle: native })}
+              snapshot={state}
+              router={managerRouter()}
+            />
+          </StandalonePluginLifecycleContext.Provider>,
+        )
+      await render({ ...projected, activationRevision: 0 })
+      expect(fixture.element('[aria-label="Disable plugin"]').classList.contains('t-is-disabled')).toBe(true)
+      await render(projected)
+      await fixture.click('[aria-label="Disable plugin"]')
+      const center = dialogs.center(fixture.document)!
+      const confirmation = center.visible()[0]!
+      expect(confirmation.chrome.description).toBe('This action affects: demo. Continue?')
+      expect(executeLifecycle).not.toHaveBeenCalled()
+      await act(async () => center.run(confirmation, confirmation.chrome.footer!.primaryAction!))
+      expect(planLifecycle).toHaveBeenCalledExactlyOnceWith({ kind: 'plugin-disable', pluginId: 'demo' })
+      expect(executeLifecycle).toHaveBeenCalledExactlyOnceWith(executionRequest, 4)
+      expect(native).not.toHaveBeenCalled()
+      await render({ ...projected, plugins: [{ ...projected.plugins[0], availableOperations: [] }] })
+      expect(fixture.element('[aria-label="Disable plugin"]').classList.contains('t-is-disabled')).toBe(true)
+    } finally {
+      await act(async () => dialogs.dispose())
+      await fixture.dispose()
+    }
+  })
+
   it('keeps navigation separate from lifecycle actions and submits the exact confirmed dependency impact', async () => {
     const fixture = reactManagerFixture()
     const dialogs = await installLifecycleDialogHost(fixture)

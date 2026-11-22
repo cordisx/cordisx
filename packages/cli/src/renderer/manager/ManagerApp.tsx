@@ -24,6 +24,7 @@ import { projectManagerContentBreadcrumbs } from './model/manager-content-breadc
 import { useManagerSnapshot } from './model/store.js'
 import { MarketplaceInstallerProvider, useMarketplaceInstaller } from './model/use-marketplace-installer.js'
 import { type ManagerPluginManagementBinding, usePluginManagementSnapshot } from './model/plugin-management.js'
+import { StandalonePluginLifecycleContext } from './model/standalone-plugin-lifecycle.js'
 import type { ManagerRoute } from './model/routes.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
 import { nativeRouteIdentity, type NativeRouteSource, observeNativeRouteTransition } from './native-route-transition.js'
@@ -507,7 +508,10 @@ export function ManagerApp(
 ) {
   const standaloneMode = presentationMode === 'standalone'
   const snapshot = useManagerSnapshot(model)
-  const management = usePluginManagementSnapshot(pluginManagement)
+  const management = usePluginManagementSnapshot(
+    pluginManagement,
+    standaloneMode ? snapshot.pluginLifecycle?.revision : undefined,
+  )
   const notificationCenter = notificationCenterForDocument(triggerSeat.ownerDocument)
   const unavailableFeedback = useMemo(() =>
     notificationCenter?.bind({
@@ -884,18 +888,24 @@ export function ManagerApp(
                     : 'document'}
                 >
                   <MarketplaceInstallerProvider installer={installer}>
-                    <Content
-                      model={model}
-                      marketplace={marketplace}
-                      snapshot={snapshot}
-                      route={router}
-                      notificationCenter={notificationCenter}
-                      pluginManagement={pluginManagement}
-                      pluginManagementSnapshot={management.snapshot}
-                      pluginManagementError={management.error}
-                      headerActionsSeat={headerActionsSeat}
-                      onModelServicesSecondaryPageChange={setModelServicesSecondaryPage}
-                    />
+                    <StandalonePluginLifecycleContext.Provider
+                      value={standaloneMode && pluginManagement
+                        ? { binding: pluginManagement, snapshot: management.snapshot }
+                        : undefined}
+                    >
+                      <Content
+                        model={model}
+                        marketplace={marketplace}
+                        snapshot={snapshot}
+                        route={router}
+                        notificationCenter={notificationCenter}
+                        pluginManagement={pluginManagement}
+                        pluginManagementSnapshot={management.snapshot}
+                        pluginManagementError={management.error}
+                        headerActionsSeat={headerActionsSeat}
+                        onModelServicesSecondaryPageChange={setModelServicesSecondaryPage}
+                      />
+                    </StandalonePluginLifecycleContext.Provider>
                   </MarketplaceInstallerProvider>
                 </div>
               </main>

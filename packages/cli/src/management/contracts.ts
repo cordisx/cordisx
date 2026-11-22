@@ -112,6 +112,8 @@ export interface PluginManagementSnapshot {
   readonly runtime: PluginManagementRuntimeState
   readonly activationRevision: number
   readonly plugins: readonly PluginManagementPlugin[]
+  /** Owner-issued only on a Manager session with restricted, scoped lifecycle plans. */
+  readonly rendererLifecycleAccess?: 'session-scoped-v1'
 }
 
 export type PluginManagementConfigRequest =

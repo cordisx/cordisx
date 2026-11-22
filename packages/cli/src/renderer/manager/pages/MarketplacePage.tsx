@@ -230,7 +230,8 @@ export function MarketplacePage(
             ? copy.install
             : copy.installUnavailable
           const primaryDisabled = !installing && (installedVersion !== undefined
-            ? !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin?.id
+            ? installedPlugin === undefined || !lifecycle.canRun(installedPlugin, 'uninstall')
+              || lifecycle.busyPluginId === installedPlugin.id
             : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
               || !installer.available)
           const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
@@ -240,7 +241,10 @@ export function MarketplacePage(
                 id: installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
                 label: installedPlugin.status === 'configured-disabled' ? copy.enable : copy.disable,
                 icon: installedPlugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin',
-                disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
+                disabled: !lifecycle.canRun(
+                  installedPlugin,
+                  installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
+                ) || lifecycle.busyPluginId === installedPlugin.id,
                 onSelect: () =>
                   void lifecycle.run(
                     installedPlugin,

@@ -15,6 +15,7 @@ import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-a
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
 import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
+import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
@@ -38,6 +39,8 @@ import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 import { readSettledProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
+import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
+import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import type {
   ServiceRendererBootstrapEntry as Entry,
   ServiceRendererConfiguredChannelInput as ConfiguredChannel,
@@ -90,6 +93,11 @@ export class ServiceRendererBootstrap {
       readonly experimentalChannelServiceConfig?: boolean
       /** The owner also supplied the private, coordinated credential bridge. */
       readonly experimentalChannelCredentials?: boolean
+      /** Service owner only: the full lifecycle federation and owner plan cleanup are available. */
+      readonly restrictedManagement?: {
+        readonly available: () => boolean
+        readonly discardPlan: (token: string) => void
+      }
     },
   ) {
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
@@ -304,6 +312,11 @@ export class ServiceRendererBootstrap {
     } catch {
       entry.cleanupFailed = true
     }
+    try {
+      entry.managementPlans?.close()
+    } catch {
+      entry.cleanupFailed = true
+    }
     entry.identity?.close()
     for (const lease of entry.leases) {
       try {
@@ -463,7 +476,17 @@ export class ServiceRendererBootstrap {
     const unsubscribe = peer.onDisconnect(() => {
       if (entry !== undefined) this.retire(rendererId, entry)
     })
-    entry = { peer, leases, checks: new Set(), unsubscribe, stale: false, bootstrapConfirmed: false }
+    entry = {
+      peer,
+      leases,
+      checks: new Set(),
+      unsubscribe,
+      stale: false,
+      bootstrapConfirmed: false,
+      ...(this.input.protectProfileInputs && this.input.restrictedManagement
+        ? { managementPlans: new ServiceRendererManagementPlans(this.input.restrictedManagement.discardPlan) }
+        : {}),
+    }
     this.entries.set(rendererId, entry)
     if (peer.closed) {
       this.retire(rendererId, entry)
@@ -582,6 +605,9 @@ export class ServiceRendererBootstrap {
         entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
         entry.needsIdentityProjection = needsIdentityProjection
+        if (entry.managementPlans) {
+          entry.restrictedLifecycleIds = await restrictedLifecycleIds(this.input.homeDir, snapshot, plugins)
+        }
         if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
         return {
           status: 'ok',
@@ -795,6 +821,12 @@ export class ServiceRendererBootstrap {
   private managementEntry(context: ManagerRendererChannelContext): ManagementProjectionEntry | undefined {
     const entry = this.entries.get(context.rendererId)
     if (!entry) return undefined
+    let restricted: ManagementProjectionEntry['restricted']
+    try {
+      if (
+        entry.managementPlans?.available && entry.restrictedLifecycleIds && this.input.restrictedManagement?.available()
+      ) restricted = { plans: entry.managementPlans, writableIds: entry.restrictedLifecycleIds }
+    } catch { /* A missing owner authority never opens the lifecycle path. */ }
     return {
       confirmed: entry.bootstrapConfirmed,
       current: () => this.current(context.rendererId, entry) && !entry.lifecycleTransition,
@@ -802,23 +834,25 @@ export class ServiceRendererBootstrap {
       identity: entry.identity,
       aliases: entry.identityAliases,
       snapshot: entry.snapshot,
+      scopedLifecycle: this.input.restrictedManagement !== undefined,
+      restricted,
     }
   }
 
-  allowsManagementWrite(context: ManagerRendererChannelContext, kind: string): boolean {
-    return allowsManagementWrite(this.managementEntry(context), kind)
+  allowsManagementWrite(context: ManagerRendererChannelContext, operation: PluginManagementRpcOperation): boolean {
+    return allowsManagementWrite(this.managementEntry(context), operation)
   }
 
   async managementRequest(
     context: ManagerRendererChannelContext,
-    kind: string,
-    dispatch: () => Promise<unknown>,
+    operation: PluginManagementRpcOperation,
+    dispatch: (operation?: PluginManagementRpcOperation) => Promise<unknown>,
   ): Promise<unknown> {
     return await projectManagementRequest({
       context,
-      kind,
+      operation,
       dispatch,
-      entry: this.managementEntry(context),
+      entry: () => this.managementEntry(context),
       ownerSnapshot: () => this.input.lifecycle.snapshot(),
     })
   }

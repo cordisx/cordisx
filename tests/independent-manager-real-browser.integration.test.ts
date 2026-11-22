@@ -107,6 +107,13 @@ it.skipIf(chrome === undefined)(
       // renderer's acknowledgement that the write and readback completed.
       await first.send('Page.addScriptToEvaluateOnNewDocument', {
         source: `if (location.origin === ${JSON.stringify(new URL(firstUrl).origin)}) {
+          globalThis.__fixtureDialogRoots = []
+          const attachShadow = Element.prototype.attachShadow
+          Element.prototype.attachShadow = function(options) {
+            const root = attachShadow.call(this, options)
+            globalThis.__fixtureDialogRoots.push(root)
+            return root
+          }
           if (!sessionStorage.getItem('fixture-migration-seeded')) {
             sessionStorage.setItem('fixture-migration-seeded', '1')
             localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
@@ -266,7 +273,50 @@ it.skipIf(chrome === undefined)(
       }
       // The owner and renderer may enumerate this dependency closure in
       // opposite order. Both real pages must still confirm the same members.
-      await change('plugin-disable', 'first-browser-plugin')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('Boolean(document.querySelector("[data-plugin-id=first-browser-plugin]"))'))
+          .toBe(true)
+      }, { timeout: 20_000 })
+      await first.evaluate('document.querySelector("[data-plugin-id=first-browser-plugin]").click()')
+      await first.evaluate([
+        '(() => {',
+        '  const receive = window.__cordisxPluginManagementReceiveV1',
+        '  window.__cordisxPluginManagementReceiveV1 = raw => {',
+        '    const response = JSON.parse(raw)',
+        "    if (response.ok && response.value?.status === 'applied'",
+        "      && response.value.request?.kind === 'plugin-disable') globalThis.__fixtureDisableApplied = true",
+        '    receive?.(raw)',
+        '  }',
+        '})()',
+      ].join('\n'))
+      await vi.waitFor(async () => {
+        const clicked = await first!.evaluate([
+          '(() => {',
+          "  const button = document.querySelector('[data-plugin-lifecycle-action=disable]')",
+          "  if (!button || button.hasAttribute('disabled') || button.classList.contains('t-is-disabled')) return false",
+          '  button.click()',
+          '  return true',
+          '})()',
+        ].join('\n'))
+        expect(clicked).toBe(true)
+      }, { timeout: 20_000 })
+      await vi.waitFor(async () => {
+        const description = await first!.evaluate<string>([
+          'globalThis.__fixtureDialogRoots',
+          "  .find(root => root.querySelector('dialog[open] [data-action=confirm]'))",
+          "  ?.querySelector('dialog')?.textContent ?? ''",
+        ].join('\n'))
+        expect(description).toContain('first-browser-plugin')
+        expect(description).toContain('dependent-browser-plugin')
+      }, { timeout: 20_000 })
+      await first.evaluate([
+        'globalThis.__fixtureDialogRoots',
+        "  .find(root => root.querySelector('dialog[open] [data-action=confirm]'))",
+        "  .querySelector('[data-action=confirm]').click()",
+      ].join('\n'))
+      await vi.waitFor(async () => expect(await first!.evaluate('globalThis.__fixtureDisableApplied')).toBe(true), {
+        timeout: 45_000,
+      })
       for (const page of [first, second]) {
         expect((await snapshot(page)).active.plugins.map((item: { enabled: boolean }) => item.enabled))
           .toEqual([false, false])

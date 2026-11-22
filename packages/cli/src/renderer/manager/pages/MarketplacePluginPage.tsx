@@ -326,7 +326,11 @@ export function MarketplacePluginPage({
                 icon={installed.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'}
                 label={installed.status === 'configured-disabled' ? copy.enable : copy.disable}
                 loading={lifecycle.busyPluginId === installed.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === installed.id || installing}
+                disabled={!lifecycle.canRun(
+                  installed,
+                  installed.status === 'configured-disabled' ? 'enable' : 'disable',
+                )
+                  || lifecycle.busyPluginId === installed.id || installing}
                 onClick={() =>
                   void lifecycle.run(
                     installed,
@@ -343,7 +347,8 @@ export function MarketplacePluginPage({
                 icon="uninstall-plugin"
                 label={copy.uninstall}
                 loading={lifecycle.busyPluginId === installed.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === installed.id || installing}
+                disabled={!lifecycle.canRun(installed, 'uninstall') || lifecycle.busyPluginId === installed.id
+                  || installing}
                 onClick={() =>
                   void lifecycle.run(installed, { kind: 'uninstall', pluginId: installed.id, impactToken: '' })}
               />

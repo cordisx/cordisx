@@ -57,7 +57,10 @@ const fixture = [
   '    }',
   '    return fetch(url, options).then(async response => {',
   '      const error = !response.ok ? (await response.clone().json().catch(() => ({}))).error : undefined',
-  '      if (operation) transport.push({ operation, status: response.status, ...(error ? { error } : {}) })',
+  "      const reply = response.ok && ['plan', 'execute'].includes(operation)",
+  '        ? await response.clone().json().catch(() => ({})) : undefined',
+  '      if (operation) transport.push({ operation, status: response.status, ...(error ? { error } : {}),',
+  '        ...(reply ? { ok: reply.ok, outcome: reply.value?.status, code: reply.value?.error?.code } : {}) })',
   '      return response',
   '    })',
   '  }',
@@ -245,6 +248,19 @@ it.skipIf(
       pages.push(first)
       await first.send('Runtime.enable')
       await first.send('Page.enable')
+      // The Host dialog uses a closed shadow root. Capture it only in this
+      // isolated browser so the test can confirm the actual user control.
+      await first.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: [
+          'globalThis.__fixtureDialogRoots = []',
+          'const fixtureAttachShadow = Element.prototype.attachShadow',
+          'Element.prototype.attachShadow = function(options) {',
+          '  const root = fixtureAttachShadow.call(this, options)',
+          '  globalThis.__fixtureDialogRoots.push(root)',
+          '  return root',
+          '}',
+        ].join('\n'),
+      })
       await first.send('Page.navigate', { url: await open() })
       await ready(first)
       const port = Number((await readFile(path.join(browserProfile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
@@ -376,18 +392,84 @@ it.skipIf(
         expect(await page.evaluate('globalThis.__fixtureManagedService.snapshot().then(value => value.status)'))
           .toBe('available')
       }
-      const changePackage = async (kind: 'plugin-disable' | 'plugin-enable' | 'plugin-uninstall') => {
-        const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
-          kind: 'plan',
-          request: { kind, pluginId: 'lifecycle-fixture' },
-        }) as any
-        expect(planned.status).toBe('planned')
-        const result = await requestPluginManagementRpc(rpcPaths, endpoint, {
-          kind: 'execute',
-          request: planned.executionRequest,
-          expectedRevision: planned.snapshot.revision,
-        }) as any
-        expect(result.status, JSON.stringify(result.error ?? result.lifecycle?.error ?? {})).toBe('applied')
+      const pageManagement = async (page: CdpClient, operation: unknown) =>
+        await page.evaluate<any>([
+          '(async () => {',
+          '  const operation = ' + JSON.stringify(operation),
+          "  const id = 'fixture-session-plan-' + crypto.randomUUID()",
+          '  const old = window.__cordisxPluginManagementReceiveV1',
+          '  return await new Promise((resolve, reject) => {',
+          '    const timer = setTimeout(() => { window.__cordisxPluginManagementReceiveV1 = old; reject(new Error("timeout")) }, 15000)',
+          '    window.__cordisxPluginManagementReceiveV1 = raw => {',
+          '      const response = JSON.parse(raw)',
+          '      if (response.requestId !== id) return old?.(raw)',
+          '      clearTimeout(timer); window.__cordisxPluginManagementReceiveV1 = old',
+          '      resolve(response)',
+          '    }',
+          '    window.__cordisxPluginManagementRequestV1(JSON.stringify({ version: 1, requestId: id,',
+          "      token: 'renderer-binding-placeholder', profileId: 'default', operation }))",
+          '  })',
+          '})()',
+        ].join('\n'))
+      const openPlugin = async (page: CdpClient) => {
+        await expect.poll(() =>
+          page.evaluate(
+            'Boolean(document.querySelector("[data-plugin-id=lifecycle-fixture]"))',
+          ), { timeout: 20_000 }).toBe(true)
+        await page.evaluate('document.querySelector("[data-plugin-id=lifecycle-fixture]").click()')
+        await expect.poll(() =>
+          page.evaluate(
+            'Boolean(document.querySelector("[data-plugin-detail=lifecycle-fixture]"))',
+          )
+        ).toBe(true)
+      }
+      const clickLifecycle = async (page: CdpClient, action: 'enable' | 'disable' | 'uninstall') => {
+        const selector = '[data-plugin-lifecycle-action="' + action + '"]'
+        const previousReceipts = await page.evaluate<number>(
+          'globalThis.__fixtureTransport.filter(item => item.operation === "execute" && item.status === 200).length',
+        )
+        await expect.poll(() =>
+          page.evaluate([
+            '(() => {',
+            '  const button = document.querySelector(' + JSON.stringify(selector) + ')',
+            '  if (!button || button.disabled || button.hasAttribute("disabled") ||',
+            '      button.classList.contains("t-is-disabled") || button.getAttribute("aria-disabled") === "true") return false',
+            '  button.click()',
+            '  return true',
+            '})()',
+          ].join('\n')), { timeout: 20_000 }).toBe(true)
+        if (action !== 'enable') {
+          try {
+            await expect.poll(() =>
+              page.evaluate(
+                'globalThis.__fixtureDialogRoots.some(root => root.querySelector("dialog[open] [data-action=confirm]"))',
+              ), { timeout: 20_000 }).toBe(true)
+          } catch (cause) {
+            const state = await page.evaluate<unknown>([
+              '({',
+              '  roots: globalThis.__fixtureDialogRoots.length,',
+              '  hosts: document.querySelectorAll("[data-cordisx-dialog]").length,',
+              '  dialogs: globalThis.__fixtureDialogRoots.map(root => root.querySelector("dialog")?.outerHTML.slice(0, 200)),',
+              '  transport: globalThis.__fixtureTransport.filter(item => ["plan", "execute", "query"].includes(item.operation)).slice(-20),',
+              '  button: document.querySelector(' + JSON.stringify(selector) + ')?.outerHTML.slice(0, 500),',
+              '  status: globalThis.__cordisxRuntime.snapshot().plugins.map(({ id, status }) => ({ id, status })),',
+              '  alerts: [...document.querySelectorAll("[role=alert]")].map(node => node.textContent)',
+              '})',
+            ].join('\n'))
+            throw new Error('Lifecycle confirmation did not open: ' + JSON.stringify(state), { cause })
+          }
+          await page.evaluate([
+            'globalThis.__fixtureDialogRoots.find(root =>',
+            '  root.querySelector("dialog[open] [data-action=confirm]"))',
+            '  .querySelector("dialog[open] [data-action=confirm]").click()',
+          ].join('\n'))
+        }
+        // The renderer publishes the candidate before the owner finishes its
+        // cross-page handoff; wait for the action's final receipt as well.
+        await expect.poll(() =>
+          page.evaluate<number>(
+            'globalThis.__fixtureTransport.filter(item => item.operation === "execute" && item.status === 200).length',
+          ), { timeout: 45_000 }).toBeGreaterThan(previousReceipts)
       }
       const checkPackage = async (expected: { enabled: boolean; version: string } | undefined) => {
         for (const page of [first, second]) {
@@ -401,9 +483,35 @@ it.skipIf(
             .toBe('available')
         }
       }
-      await changePackage('plugin-disable')
+      const scoped = await pageManagement(first, {
+        kind: 'plan',
+        request: { kind: 'plugin-disable', pluginId: 'lifecycle-fixture' },
+      })
+      expect(scoped).toMatchObject({ ok: true, value: { status: 'planned' } })
+      const scopedExecute = {
+        kind: 'execute',
+        request: scoped.value.executionRequest,
+        expectedRevision: scoped.value.snapshot.revision,
+      }
+      expect(await pageManagement(second, scopedExecute)).toMatchObject({ ok: false })
+      await openPlugin(first)
+      await openPlugin(second)
+      await clickLifecycle(first, 'disable')
+      await expect.poll(
+        async () =>
+          (await first.evaluate<any>('globalThis.__cordisxRuntime.activePluginGeneration()')).plugins
+            .find((item: { id: string }) => item.id === 'lifecycle-fixture')?.enabled,
+        { timeout: 30_000 },
+      ).toBe(false)
       await checkPackage({ enabled: false, version: '1.0.0' })
-      await changePackage('plugin-enable')
+      expect(await pageManagement(first, scopedExecute)).toMatchObject({ ok: false })
+      await clickLifecycle(second, 'enable')
+      await expect.poll(
+        async () =>
+          (await second.evaluate<any>('globalThis.__cordisxRuntime.activePluginGeneration()')).plugins
+            .find((item: { id: string }) => item.id === 'lifecycle-fixture')?.enabled,
+        { timeout: 30_000 },
+      ).toBe(true)
       await checkPackage({ enabled: true, version: '1.0.0' })
       const updatedSource = await localPackage({
         root,
@@ -426,7 +534,13 @@ it.skipIf(
       for (const page of [first, second]) {
         expect(await page.evaluate('globalThis.__lifecycleFixtureUpdated === true')).toBe(true)
       }
-      await changePackage('plugin-uninstall')
+      await clickLifecycle(first, 'uninstall')
+      await expect.poll(
+        async () =>
+          (await first.evaluate<any>('globalThis.__cordisxRuntime.activePluginGeneration()')).plugins
+            .some((item: { id: string }) => item.id === 'lifecycle-fixture'),
+        { timeout: 30_000 },
+      ).toBe(false)
       await checkPackage(undefined)
       await first.evaluate('document.querySelector("[data-settings-navigation-item^=fixture-service]").click()')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)

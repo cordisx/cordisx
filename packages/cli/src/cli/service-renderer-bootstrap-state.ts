@@ -9,6 +9,7 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
 import type { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
+import type { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 
 export type ServiceRendererSnapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
 export type ServiceRendererConfiguredChannelInput = {
@@ -40,6 +41,8 @@ export type ServiceRendererBootstrapEntry = {
   identity?: ServiceRendererIdentityProjection
   identityContext?: ManagerRendererChannelContext
   identityAliases?: ReadonlyMap<string, string>
+  managementPlans?: ServiceRendererManagementPlans
+  restrictedLifecycleIds?: ReadonlySet<string>
   pendingIdentity?: ServiceRendererPendingIdentity
   needsIdentityProjection?: boolean
   releasePermissionFence?: () => Promise<void>

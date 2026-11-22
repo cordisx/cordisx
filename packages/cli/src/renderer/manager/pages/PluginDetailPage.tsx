@@ -213,7 +213,7 @@ export function PluginDetailPage(
                 data-plugin-lifecycle-action="enable"
                 icon={<HostIcon token="enable-plugin" />}
                 loading={lifecycle.busyPluginId === plugin.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.canRun(plugin, 'enable') || lifecycle.busyPluginId === plugin.id}
                 onClick={() => void lifecycle.run(plugin, { kind: 'enable', pluginId: plugin.id })}
               />
             )
@@ -226,7 +226,7 @@ export function PluginDetailPage(
                 data-plugin-lifecycle-action="disable"
                 icon={<HostIcon token="disable-plugin" />}
                 loading={lifecycle.busyPluginId === plugin.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.canRun(plugin, 'disable') || lifecycle.busyPluginId === plugin.id}
                 onClick={() => void lifecycle.run(plugin, { kind: 'disable', pluginId: plugin.id, impactToken: '' })}
               />
             )}
@@ -239,7 +239,7 @@ export function PluginDetailPage(
             data-plugin-lifecycle-action="uninstall"
             icon={<HostIcon token="uninstall-plugin" />}
             loading={lifecycle.busyPluginId === plugin.id}
-            disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+            disabled={!lifecycle.canRun(plugin, 'uninstall') || lifecycle.busyPluginId === plugin.id}
             onClick={() => void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' })}
           />
         </span>

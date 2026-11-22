@@ -257,6 +257,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           store,
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
+          restrictedManagement: {
+            available: () =>
+              ownerOpen && !lifetime.signal.aborted
+              && management?.lifecycleParticipants !== undefined
+              && management.handler.service.discardExecutionPlan !== undefined,
+            discardPlan: token => {
+              const discard = management?.handler.service.discardExecutionPlan
+              if (!discard) throw new Error('renderer-management-plan-cleanup-unavailable')
+              discard(token)
+            },
+          },
           experimentalChannelServiceConfig: configuredServiceOwner !== undefined,
           experimentalChannelCredentials: configuredServiceOwner !== undefined && managerChannel !== undefined,
           ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {

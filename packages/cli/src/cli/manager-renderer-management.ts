@@ -57,7 +57,10 @@ export function createManagerRendererManagementChannel(
       ) {
         throw new Error('MANAGER_RENDERER_UNAVAILABLE')
       }
-      if (writes.includes(kind) && authority !== undefined && !authority.allowsManagementWrite(context, kind)) {
+      if (
+        writes.includes(kind) && authority !== undefined
+        && !authority.allowsManagementWrite(context, request.operation)
+      ) {
         // No write was dispatched. Return a definite refusal so the browser
         // does not retire a healthy session as an unknown mutation result.
         return {
@@ -72,13 +75,14 @@ export function createManagerRendererManagementChannel(
       return {
         mode: writes.includes(kind) ? 'write' : 'read',
         dispatch: async () => {
-          const dispatch = async () => await handlePluginManagementRpcRequest(service, request)
+          const dispatch = async (operation = request.operation) =>
+            await handlePluginManagementRpcRequest(service, { ...request, operation })
           return {
             requestId: request.requestId,
             ok: true,
             value: authority === undefined
               ? await dispatch()
-              : await authority.managementRequest(context, kind, dispatch),
+              : await authority.managementRequest(context, request.operation, dispatch),
           }
         },
       }

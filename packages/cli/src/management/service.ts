@@ -69,6 +69,8 @@ export interface PluginManagementService {
   >
   plan(request: PluginManagementRequest): Promise<PluginManagementResult>
   execute(request: PluginManagementRequest, expectedRevision?: number): Promise<PluginManagementResult>
+  /** Owner-only cleanup for a plan that will no longer be exposed to a renderer. */
+  discardExecutionPlan?(token: string): void
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult>
   subscribe(listener: (snapshot: PluginManagementSnapshot) => void): () => void
   close(): void
@@ -642,6 +644,9 @@ export async function openPluginManagementService(
     pluginInfo: catalog.pluginInfo,
     plan,
     execute,
+    discardExecutionPlan(token) {
+      executionPlans.delete(token)
+    },
     async migrateLegacySources(input) {
       const result = await migrateLegacyPluginManagementSources(options, input)
       const snapshot = await query()

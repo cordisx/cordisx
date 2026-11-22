@@ -122,7 +122,8 @@ export function PluginsPage(
                     plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable',
                   )}
                   loading={lifecycle.busyPluginId === plugin.id}
-                  disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                  disabled={!lifecycle.canRun(plugin, plugin.status === 'configured-disabled' ? 'enable' : 'disable')
+                    || lifecycle.busyPluginId === plugin.id}
                   onClick={() =>
                     void lifecycle.run(
                       plugin,
@@ -155,7 +156,7 @@ export function PluginsPage(
                       id: 'uninstall',
                       label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'),
                       icon: 'uninstall-plugin',
-                      disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id,
+                      disabled: !lifecycle.canRun(plugin, 'uninstall') || lifecycle.busyPluginId === plugin.id,
                       onSelect: () =>
                         void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }),
                     },

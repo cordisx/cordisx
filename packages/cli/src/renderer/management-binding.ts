@@ -2,12 +2,18 @@ import type {
   PluginManagementConfigRequest,
   PluginManagementLegacySourceMigration,
   PluginManagementMigrationResult,
+  PluginManagementRequest,
   PluginManagementResult,
   PluginManagementSnapshot,
 } from '../management/contracts.js'
 
 const BINDING = '__cordisxPluginManagementRequestV1'
 const RECEIVER = '__cordisxPluginManagementReceiveV1'
+
+export type PluginManagementLifecycleRequest = Extract<
+  PluginManagementRequest,
+  { readonly kind: 'plugin-enable' | 'plugin-disable' | 'plugin-uninstall' }
+>
 
 declare global {
   interface Window {
@@ -20,6 +26,8 @@ export interface PluginManagementBinding {
   query(): Promise<PluginManagementSnapshot>
   subscribe(listener: (snapshot: PluginManagementSnapshot) => void): () => void
   mutate(request: PluginManagementConfigRequest, expectedRevision: number): Promise<PluginManagementResult>
+  planLifecycle?(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult>
+  executeLifecycle?(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult>
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult>
 }
 
@@ -50,6 +58,18 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     return this.send({ kind: 'execute', request, expectedRevision })
   }
 
+  async planLifecycle(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({ kind: 'plan', request })
+    this.publish(result.snapshot)
+    return result
+  }
+
+  async executeLifecycle(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({ kind: 'execute', request, expectedRevision })
+    this.publish(result.snapshot)
+    return result
+  }
+
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult> {
     return this.send({ kind: 'migrate-legacy-sources', input })
   }
@@ -64,6 +84,10 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     }
     this.pending.clear()
     this.listeners.clear()
+  }
+
+  private publish(snapshot: PluginManagementSnapshot): void {
+    for (const listener of this.listeners) listener(snapshot)
   }
 
   private send<Value>(operation: object): Promise<Value> {
@@ -98,7 +122,7 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     }
     if (response.kind === 'snapshot' && response.profileId === this.profileId) {
       const snapshot = response.snapshot as PluginManagementSnapshot
-      for (const listener of this.listeners) listener(snapshot)
+      this.publish(snapshot)
       return
     }
     if (typeof response.requestId !== 'string') return
