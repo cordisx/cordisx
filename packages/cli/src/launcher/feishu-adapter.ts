@@ -1,4 +1,5 @@
 import { channelQuestionCard } from './channel-question-card.js'
+import { renderFeishuMarkdown } from './feishu-markdown.js'
 import { createHash } from 'node:crypto'
 import {
   type CardActionEvent,
@@ -338,10 +339,11 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
                 file: data => channel.rawClient!.im.v1.file.create({ data }),
               })
               : undefined
-            const content = media?.content ?? JSON.stringify(
-              delivery.questionCard ? channelQuestionCard(delivery.questionCard) : { text: delivery.text },
-            )
-            const msg_type = media?.msg_type ?? (delivery.questionCard ? 'interactive' as const : 'text' as const)
+            const rendered = delivery.questionCard
+              ? { msg_type: 'interactive' as const, content: channelQuestionCard(delivery.questionCard) }
+              : renderFeishuMarkdown(delivery.text)
+            const content = media?.content ?? JSON.stringify(rendered.content)
+            const msg_type = media?.msg_type ?? rendered.msg_type
             const response = delivery.target.semantics !== 'conversation'
               ? await channel.rawClient.im.v1.message.reply({
                 path: { message_id: delivery.target.threadId },
