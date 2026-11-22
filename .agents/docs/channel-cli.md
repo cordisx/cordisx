@@ -490,6 +490,9 @@ uncertain native creation never automatically retries with another mode.
 Channel dispatch and task-setting permissions are checked again at commit, and
 eligible queued messages move with the binding. Group and multiple-binding
 migration are unavailable.
+Because the Desktop confirmation is entered by a cross-provider Send, the
+currently verified same-provider fork is not offered there; Channel can offer
+it within the same-provider, same-model scope above.
 
 Desktop support requires `CORDISX_EXPERIMENTAL_LOGICAL_CONTINUATION=1` at launch.
 Its confirmation offers a one-time choice, a conversation override, or a profile
@@ -515,6 +518,11 @@ Channel-bound Desktop modes and Desktop checkpoint transfer are unavailable. The
 owner coordinates its own native operations and compares bounded source
 snapshots; another independent native process modifying the source is outside
 that coordination.
+The source must be idle and its effective security settings and default work
+mode must be observable. Some native versions do not report an implicit default
+mode; explicitly selecting default and completing a source turn can establish
+it. If the mode remains unconfirmed, continuation is unavailable. Plan mode
+is not supported by this experimental path.
 
 When Desktop explicitly selects a target reasoning effort, the target model
 must advertise that effort. The Host preserves the original source setting,

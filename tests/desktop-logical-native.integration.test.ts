@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { chmod, copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { harness } from './fixtures/native-intermediary-harness.js'
 import { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
 import { profileLogicalConversationOwner } from '../packages/cli/src/launcher/profile-logical-conversation-owner.js'
@@ -217,6 +217,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           if (!capture.captureId) throw new Error('SOURCE_CAPTURE_UNAVAILABLE')
           await persistedExecution.complete(capture.captureId, true, started)
           expect(persistedExecution.read('local', source)?.application).toBe('applied')
+          h.server.bindChatExecution(persistedExecution)
         }
         const execution = persistedExecution ?? fixtureExecution
         const expectWriteBlocked = async (id: string, threadId: string) => {
@@ -272,7 +273,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
             })),
           }),
           execution: execution as never,
-          confirmedWorkMode: () => 'default',
+          ...(persistedExecution ? {} : { confirmedWorkMode: () => 'default' as const }),
           subscribeContinuationEvents: listener => h.server.subscribeContinuationEvents(listener),
         })
         h.server.bindLogicalHandoffPermits(native.logicalHandoffPermits)
@@ -334,9 +335,25 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
         h.send({
           id: 'source-turn',
           method: 'turn/start',
-          params: { threadId: source, input: [{ type: 'text', text: 'Remember PAPERKITE', text_elements: [] }] },
+          params: {
+            threadId: source,
+            input: [{ type: 'text', text: 'Remember PAPERKITE', text_elements: [] }],
+            ...(persistedExecution
+              ? {
+                collaborationMode: {
+                  mode: 'default',
+                  settings: { model: 'fixture-model', reasoning_effort: 'low', developer_instructions: null },
+                },
+              }
+              : {}),
+          },
         })
         await waitTurn(source, 'source')
+        if (persistedExecution) {
+          await vi.waitFor(async () => {
+            expect((await native.continuationConfiguration(source))?.execution.workMode).toBe('default')
+          }, { timeout: 5000 })
+        }
         let projectId: string | undefined, sectionId: string | undefined
         if (placementMode) {
           // This fixture request uses the same public client connection as Desktop;
@@ -608,7 +625,6 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
             profileId: 'fixture',
           })
           expect(reopened.read('local', destination)).toMatchObject({ override: { effort: 'high' } })
-          h.server.bindChatExecution(persistedExecution!)
         }
         if (placementMode) {
           const targetRead = await h.server.nativeRequest('thread/read', {
