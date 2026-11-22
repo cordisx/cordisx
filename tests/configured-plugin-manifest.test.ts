@@ -13,6 +13,10 @@ import {
   loadServiceConfiguredChannelArchive,
 } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
+import { createManagerRendererPermissionChannel } from '../packages/cli/src/cli/manager-renderer-permission.js'
+import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../packages/cli/src/standalone-permission-contract.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const temporary: string[] = []
@@ -205,6 +209,66 @@ describe('direct configured package provenance', () => {
       expect(projected).toHaveLength(2)
       expect(projected.every(record => record.key.identity.source === alias)).toBe(true)
       expect(JSON.stringify(projected)).not.toContain(source)
+      const admitted = { ...firstContext, admitted: true }
+      expect(firstProjection.resolveManagerPolicies(admitted, alias, 'demo', projected)).toEqual(policies.slice(0, 2))
+      const ownerConfig = path.join(f.root, 'owner-config.json')
+      await ensureHomeConfig(ownerConfig)
+      await persistPermissionPolicies({ configPath: ownerConfig }, policies.slice(0, 2))
+      let completed = false
+      const permission = createManagerRendererPermissionChannel({
+        profileId: 'default',
+        configPath: ownerConfig,
+        identityAllowed: value => value.id === 'demo' && value.source === alias,
+        identityProjection: {
+          resolve: (records, context) => firstProjection.resolveManagerPolicies(context, alias, 'demo', records),
+          project: (records, context) => firstProjection.projectManagerPolicies(context, alias, 'demo', records),
+        },
+        // This fixture tests the real mapping; user-action proof and peer handoff remain separate.
+        authority: {
+          isAdmitted: context => context.admitted === true,
+          snapshot: () => policies.slice(0, 2),
+          authorize: () => true,
+          acquire: () => ({
+            isCurrent: () => true,
+            run: async action => await action(),
+            complete: () => {
+              completed = true
+              return true
+            },
+            fence: () => {},
+          }),
+        },
+      })
+      const desired = { ...projected[0]!, policy: 'deny-persistent' }
+      const result = await permission.prepare(
+        JSON.stringify({
+          requestId: 'mapped-policy',
+          token: STANDALONE_PERMISSION_BINDING_MARKER,
+          records: [desired],
+        }),
+        admitted,
+      ).dispatch()
+      expect(result).toEqual({ requestId: 'mapped-policy', ok: true, value: [desired] })
+      expect(completed).toBe(true)
+      expect(JSON.stringify(result)).not.toContain(source)
+      expect((await loadHomeConfig(ownerConfig)).permissions).toContainEqual({
+        ...policies[0],
+        policy: 'deny-persistent',
+      })
+      expect(() => firstProjection.resolveManagerPolicies(firstContext, alias, 'demo', projected)).toThrow()
+      expect(() =>
+        firstProjection.resolveManagerPolicies({ ...secondContext, admitted: true }, alias, 'demo', projected)
+      )
+        .toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, other, 'demo', projected)).toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', [projected[0]!, projected[0]!]))
+        .toThrow()
+      const tampered = {
+        ...projected[0]!,
+        key: { ...projected[0]!.key, securityFingerprint: `sha256:${'a'.repeat(64)}` },
+      }
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', [tampered])).toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', policies)).toThrow()
       const unrelated = policies.map(record => ({ ...record, key: { ...record.key, profileId: 'other' } }))
       expect(firstProjection.projectManagerPolicies(firstContext, alias, 'demo', unrelated)).toEqual([])
       const wrongSource = policies.map(record => ({

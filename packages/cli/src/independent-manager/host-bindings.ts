@@ -199,6 +199,7 @@ export function installIndependentHostBindings(input: {
       void Promise.resolve().then(async () => {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
+          || channel === 'permission-policy'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')
             && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {

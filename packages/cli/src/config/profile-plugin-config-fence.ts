@@ -6,6 +6,7 @@ import { acquireKernelOperationLock, KernelOperationBusyError } from '../launche
 import type { HomeConfig, HomeConfigPlugin, JsonValue } from './home-config.js'
 import { SharedProfileFence } from './shared-profile-fence.js'
 import { createOwnedPackageWrite, type OwnedPackageWrite } from './owned-profile-package-write.js'
+import { hasOwnedProfileWrite, runOwnedProfileWrite } from './owned-profile-write-context.js'
 import {
   isOwnedHomeServiceChange,
   isOwnedServiceChange,
@@ -52,7 +53,7 @@ async function runOwnedServiceWrite<T>(input: {
   readonly serviceId: string
   readonly isCurrent: () => boolean
 }, action: () => Promise<T>): Promise<T> {
-  if (ownedServiceWrites.getStore() !== undefined || currentOwnedPackageWrite()) {
+  if (hasOwnedProfileWrite() || ownedServiceWrites.getStore() !== undefined || currentOwnedPackageWrite()) {
     throw new Error('owned service write is unavailable')
   }
   let accepting = true
@@ -88,7 +89,7 @@ async function runOwnedServiceWrite<T>(input: {
   let failure: unknown
   let failed = false
   try {
-    value = await ownedServiceWrites.run(owner, action)
+    value = await runOwnedProfileWrite(async () => await ownedServiceWrites.run(owner, action))
   } catch (error) {
     failed = true
     failure = error
@@ -112,14 +113,14 @@ async function runOwnedPackageWrite<T>(input: {
   readonly pluginId: string
   readonly isCurrent: () => boolean
 }, action: () => Promise<T>): Promise<T> {
-  if (currentOwnedPackageWrite()) throw new Error('owned package write is unavailable')
+  if (hasOwnedProfileWrite() || currentOwnedPackageWrite()) throw new Error('owned package write is unavailable')
   const scope = createOwnedPackageWrite(input)
   if (!scope.owner.current()) throw new Error('owned package write is unavailable')
   let value: T | undefined
   let failure: unknown
   let failed = false
   try {
-    value = await ownedPackageWrites.run(scope.owner, action)
+    value = await runOwnedProfileWrite(async () => await ownedPackageWrites.run(scope.owner, action))
   } catch (error) {
     failed = true
     failure = error
@@ -173,6 +174,9 @@ export async function fencePackageProfileWrite(
     ) throw new ProfilePluginConfigFenceBusyError()
     return owner.borrow()
   }
+  // A different owner scope (for example a permission-policy write) must not
+  // acquire an unrelated package fence and mutate another profile.
+  if (hasOwnedProfileWrite()) throw new ProfilePluginConfigFenceBusyError()
   if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return async () => {}
   }
@@ -296,7 +300,8 @@ export class SharedProfilePluginConfigFence extends SharedProfileFence {
     readonly isCurrent: () => boolean
   }, action: () => Promise<T>): Promise<T> {
     if (
-      process.platform !== 'darwin' && process.platform !== 'linux' || !PROFILE.test(this.profileId)
+      process.platform !== 'darwin' && process.platform !== 'linux' || hasOwnedProfileWrite()
+      || !PROFILE.test(this.profileId)
       || !LOCAL_ID.test(input.pluginId) || !LOCAL_ID.test(input.serviceId)
     ) throw new Error('owned service write is unavailable')
     return await this.runWhileHeld(async held =>
@@ -316,7 +321,8 @@ export class SharedProfilePluginConfigFence extends SharedProfileFence {
     readonly isCurrent: () => boolean
   }, action: () => Promise<T>): Promise<T> {
     if (
-      process.platform !== 'darwin' && process.platform !== 'linux' || !PROFILE.test(this.profileId)
+      process.platform !== 'darwin' && process.platform !== 'linux' || hasOwnedProfileWrite()
+      || !PROFILE.test(this.profileId)
       || !LOCAL_ID.test(input.pluginId) || ownedServiceWrites.getStore() !== undefined
     ) throw new Error('owned package write is unavailable')
     return await this.runWhileHeld(async held =>

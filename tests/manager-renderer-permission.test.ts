@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { SharedProfilePermissionFence } from '../packages/cli/src/config/profile-permission-fence.js'
 import {
   PermissionPolicyConflictError,
   persistPermissionPolicies,
@@ -15,6 +16,8 @@ import {
   type ManagerPermissionPolicyAuthority,
 } from '../packages/cli/src/cli/manager-renderer-permission.js'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
+import type { ManagerRendererChannelContext } from '../packages/cli/src/cli/manager-renderer-sessions.js'
+import type { CordisXPluginIdentity } from '../packages/cli/src/platform-contracts.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../packages/cli/src/standalone-permission-contract.js'
 import { BindingPermissionPolicyStore } from '../packages/cli/src/renderer/permission-binding.js'
 
@@ -55,15 +58,20 @@ afterEach(async () => {
   temporary.clear()
 })
 
-async function fixture(input: { authority?: ManagerPermissionPolicyAuthority; allowed?: () => boolean } = {}) {
+async function fixture(input: {
+  authority?: ManagerPermissionPolicyAuthority
+  allowed?: (candidate: CordisXPluginIdentity, context: ManagerRendererChannelContext) => boolean
+  identityProjection?: Parameters<typeof createManagerRendererPermissionChannel>[0]['identityProjection']
+} = {}) {
   const configPath = await home()
   const channel = createManagerRendererPermissionChannel({
     profileId: 'work',
     configPath,
-    identityAllowed: candidate =>
-      (input.allowed?.() ?? true) && candidate.id === identity.id
-      && candidate.source === identity.source,
+    identityAllowed: (candidate, context) =>
+      input.allowed?.(candidate, context)
+        ?? (candidate.id === identity.id && candidate.source === identity.source),
     ...(input.authority === undefined ? {} : { authority: input.authority }),
+    ...(input.identityProjection === undefined ? {} : { identityProjection: input.identityProjection }),
   })
   const sessions = new ManagerRendererSessions({
     profileId: 'work',
@@ -79,6 +87,116 @@ async function fixture(input: { authority?: ManagerPermissionPolicyAuthority; al
   })
   return { configPath, sessions, open }
 }
+
+it('resolves each renderer alias before a policy write and projects the receipt back', async () => {
+  const fake = simulatedAuthority()
+  const aliases = new Map<string, string>()
+  const mapSource = (records: readonly CordisXPersistedPermissionPolicyRecord[], source: string) =>
+    records.map(item => ({
+      ...item,
+      key: { ...item.key, identity: { ...item.key.identity, source } },
+    }))
+  const test = await fixture({
+    authority: fake.authority,
+    allowed: (candidate, context) =>
+      candidate.id === identity.id && candidate.source === aliases.get(context.rendererId),
+    identityProjection: {
+      resolve: (records, context) => {
+        if (records.some(item => item.key.identity.source !== aliases.get(context.rendererId))) throw new Error('alias')
+        return mapSource(records, identity.source)
+      },
+      project: (records, context) => mapSource(records, aliases.get(context.rendererId)!),
+    },
+  })
+  try {
+    const first = await test.open('b'.repeat(64))
+    const second = await test.open('c'.repeat(64))
+    const firstAlias = 'https://renderer.cordisx.invalid/plugin/' + 'a'.repeat(64)
+    const secondAlias = 'https://renderer.cordisx.invalid/plugin/' + 'b'.repeat(64)
+    aliases.set(first.handle.rendererId, firstAlias)
+    aliases.set(second.handle.rendererId, secondAlias)
+    fake.snapshots.set(first.handle.rendererId, [])
+    fake.snapshots.set(second.handle.rendererId, [])
+    const request = (id: string, alias: string, policy: 'allow' | 'deny') =>
+      JSON.stringify({
+        requestId: id,
+        token: STANDALONE_PERMISSION_BINDING_MARKER,
+        records: mapSource([record(policy)], alias),
+      })
+    const firstResult = await test.sessions.call(first, 'permission-policy', request('first', firstAlias, 'allow'))
+    expect(firstResult).toEqual({
+      status: 'ok',
+      value: { requestId: 'first', ok: true, value: mapSource([record('allow')], firstAlias) },
+    })
+    expect(JSON.stringify(firstResult)).not.toContain(identity.source)
+    expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('allow')])
+    expect(await test.sessions.call(second, 'permission-policy', request('spoof', firstAlias, 'deny')))
+      .toEqual({ status: 'unavailable' })
+    expect(await test.sessions.call(second, 'permission-policy', request('second', secondAlias, 'deny')))
+      .toEqual({
+        status: 'ok',
+        value: { requestId: 'second', ok: true, value: mapSource([record('deny')], secondAlias) },
+      })
+    expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('deny')])
+  } finally {
+    test.sessions.dispose()
+  }
+})
+
+it('fences an already committed policy if its receipt cannot be safely projected', async () => {
+  const fake = simulatedAuthority()
+  const alias = 'https://renderer.cordisx.invalid/plugin/' + 'a'.repeat(64)
+  let projectionCount = 0
+  const mapSource = (item: CordisXPersistedPermissionPolicyRecord, source: string) => ({
+    ...item,
+    key: { ...item.key, identity: { ...item.key.identity, source } },
+  })
+  const test = await fixture({
+    authority: fake.authority,
+    allowed: candidate => candidate.id === identity.id && candidate.source === alias,
+    identityProjection: {
+      resolve: records => records.map(item => mapSource(item, identity.source)),
+      // The initial projection is valid, but a later broken projector must not
+      // send the owner-private source to a browser after the commit.
+      project: records => ++projectionCount === 1 ? records.map(item => mapSource(item, alias)) : records,
+    },
+  })
+  try {
+    const first = await test.open('b'.repeat(64))
+    fake.snapshots.set(first.handle.rendererId, [])
+    const request = JSON.stringify({
+      requestId: 'one',
+      token: STANDALONE_PERMISSION_BINDING_MARKER,
+      records: [mapSource(record('allow'), alias)],
+    })
+    expect(await test.sessions.call(first, 'permission-policy', request)).toEqual({ status: 'unknown' })
+    expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('allow')])
+    expect(fake.fenced).toHaveBeenCalledOnce()
+    expect(await test.sessions.call(first, 'permission-policy', request)).toEqual({ status: 'unavailable' })
+  } finally {
+    test.sessions.dispose()
+  }
+})
+
+it('rejects an unavailable identity resolver before publishing a policy', async () => {
+  const fake = simulatedAuthority()
+  const test = await fixture({
+    authority: fake.authority,
+    identityProjection: {
+      resolve: () => undefined as never,
+      project: records => records,
+    },
+  })
+  try {
+    const first = await test.open('b'.repeat(64))
+    fake.snapshots.set(first.handle.rendererId, [])
+    expect(await test.sessions.call(first, 'permission-policy', payload('one', 'allow')))
+      .toEqual({ status: 'unavailable' })
+    expect((await loadHomeConfig(test.configPath)).permissions).toEqual([])
+  } finally {
+    test.sessions.dispose()
+  }
+})
 
 function simulatedAuthority() {
   const snapshots = new Map<string, readonly CordisXPersistedPermissionPolicyRecord[]>()
@@ -97,6 +215,7 @@ function simulatedAuthority() {
       let finished = false
       return {
         isCurrent: () => !finished && !context.signal.aborted,
+        run: async action => await action(),
         complete: policies => {
           completed(policies)
           for (const id of snapshots.keys()) snapshots.set(id, policies)
@@ -194,6 +313,60 @@ it('persists through the shared ledger only after a simulated owner synchronizes
   }
 })
 
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'uses the owner-held profile fence when publishing an authorized two-session policy',
+  async () => {
+    const snapshots = new Map<string, readonly CordisXPersistedPermissionPolicyRecord[]>()
+    let fence!: SharedProfilePermissionFence
+    const authority: ManagerPermissionPolicyAuthority = {
+      isAdmitted: context => !context.signal.aborted && snapshots.has(context.rendererId),
+      snapshot: context => snapshots.get(context.rendererId),
+      authorize: () => true,
+      acquire: (context, request, expected) => {
+        let active = true
+        const current = () => active && !context.signal.aborted
+        return {
+          isCurrent: current,
+          run: async action =>
+            await fence.runPolicyMutation({ expected, updates: request.records, isCurrent: current }, action),
+          complete: policies => {
+            for (const id of snapshots.keys()) snapshots.set(id, policies)
+            active = false
+            return true
+          },
+          fence: () => {
+            active = false
+          },
+        }
+      },
+    }
+    const test = await fixture({ authority })
+    fence = new SharedProfilePermissionFence(test.configPath, 'work')
+    try {
+      const first = await test.open('b'.repeat(64))
+      const second = await test.open('c'.repeat(64))
+      snapshots.set(first.handle.rendererId, [])
+      snapshots.set(second.handle.rendererId, [])
+      const releaseFirst = await fence.acquire()
+      const releaseSecond = await fence.acquire()
+      expect(await test.sessions.call(first, 'permission-policy', payload('one', 'allow'))).toEqual({
+        status: 'ok',
+        value: { requestId: 'one', ok: true, value: [record('allow')] },
+      })
+      expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('allow')])
+      expect(snapshots.get(second.handle.rendererId)).toEqual([record('allow')])
+      await expect(persistPermissionPolicies({ configPath: test.configPath }, [record('deny')]))
+        .rejects.toThrow('permission policy is in use')
+      await releaseFirst()
+      await releaseSecond()
+    } finally {
+      test.sessions.dispose()
+      await fence.close()
+    }
+  },
+  30_000,
+)
+
 it('uses the existing BindingPermissionPolicyStore over the admitted owner channel', async () => {
   const fake = simulatedAuthority()
   const test = await fixture({ authority: fake.authority })
@@ -247,8 +420,8 @@ it('rejects a stale pending client action even if another client finishes synchr
   const acquire = fake.authority.acquire
   const authority: ManagerPermissionPolicyAuthority = {
     ...fake.authority,
-    acquire: async context => {
-      const barrier = await acquire(context)
+    acquire: async (context, request, expected) => {
+      const barrier = await acquire(context, request, expected)
       if (!barrier) return undefined
       if (++calls !== 1) return barrier
       return {
@@ -367,8 +540,8 @@ it('reports unknown and fences consumers if the session ends after the durable c
   const test = await fixture({
     authority: {
       ...fake.authority,
-      acquire: async context => {
-        const barrier = await acquire(context)
+      acquire: async (context, request, expected) => {
+        const barrier = await acquire(context, request, expected)
         return barrier && {
           ...barrier,
           complete: async policies => {
@@ -403,8 +576,8 @@ it('fences all consumers and reports unknown when the reply cannot be synchroniz
   const test = await fixture({
     authority: {
       ...fake.authority,
-      acquire: async context => {
-        const barrier = await acquire(context)
+      acquire: async (context, request, expected) => {
+        const barrier = await acquire(context, request, expected)
         return barrier && { ...barrier, complete: async () => false }
       },
     },

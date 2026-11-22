@@ -221,6 +221,30 @@ it('admits the private credential channel before dispatch and blocks refresh whi
   }
 })
 
+it('does not dispatch a permission write before the owner admits the renderer', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const fetch = vi.fn(() => new Promise(() => {}))
+  const target = { fetch, __cordisxPermissionPolicyReceiveV1: vi.fn() } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['permission-policy'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'policy', records: [] }))
+    await Promise.resolve()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(dispose.canResume()).toBe(true)
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+  }
+})
+
 it('cancels a queued write before retaining refresh and never dispatches it later', async () => {
   let admit!: (value: boolean) => void
   const admission = new Promise<boolean>(resolve => admit = resolve)

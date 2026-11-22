@@ -3,9 +3,8 @@ import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import { updateHomeConfigAtomic } from '../config/home-config.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
-  isPermissionPolicyRecordV2,
+  mergePersistedPermissionPolicies,
   normalizePersistedPermissionPolicyRecord,
-  persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 
@@ -121,24 +120,9 @@ export async function persistPermissionPolicies(
   const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
   const updated = await updateHomeConfigAtomic(current => ({
     ...current,
-    permissions: mergePermissionPolicies(current.permissions, normalized),
+    permissions: mergePersistedPermissionPolicies(current.permissions, normalized),
   }), context.configPath)
   return readbackPermissionPolicies(updated.permissions, normalized)
-}
-
-function mergePermissionPolicies(
-  existing: readonly CordisXPersistedPermissionPolicyRecord[],
-  normalized: readonly CordisXPersistedPermissionPolicyRecord[],
-): readonly CordisXPersistedPermissionPolicyRecord[] {
-  const keys = new Set(normalized.map(persistedPermissionRecordKey))
-  const migrated = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
-  return [
-    ...existing.filter(item =>
-      !keys.has(persistedPermissionRecordKey(item))
-      && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
-    ),
-    ...normalized,
-  ]
 }
 
 function readbackPermissionPolicies(
@@ -202,7 +186,7 @@ export async function persistPermissionPoliciesIfUnchanged(
     if (policySnapshot(current.permissions, context.profileId) !== expectedSnapshot) {
       throw new PermissionPolicyConflictError()
     }
-    return { ...current, permissions: mergePermissionPolicies(current.permissions, normalized) }
+    return { ...current, permissions: mergePersistedPermissionPolicies(current.permissions, normalized) }
   }, context.configPath)
   return {
     records: readbackPermissionPolicies(updated.permissions, normalized),

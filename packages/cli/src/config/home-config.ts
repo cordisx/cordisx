@@ -37,6 +37,7 @@ import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-
 import { captureHomeProfileInputs, fenceChangedHomeProfileInputs } from './home-profile-input-fence.js'
 import { type HomeConfigPlugin, parseHomeConfigPlugin } from './home-config-plugin.js'
 import { captureOwnedHomeServiceWriteCheck } from './profile-plugin-config-fence.js'
+import { captureOwnedHomePermissionWriteCheck } from './owned-profile-permission-write.js'
 
 export type { JsonValue } from './home-config-values.js'
 export type {
@@ -754,9 +755,11 @@ export async function updateHomeConfigAtomic(
       current = createDefaultHomeConfig()
     }
     const checkOwnedServiceWrite = captureOwnedHomeServiceWriteCheck(configPath, current)
+    const checkOwnedPermissionWrite = captureOwnedHomePermissionWriteCheck(configPath, current)
     const previousInputs = captureHomeProfileInputs(current)
     const updated = parseHomeConfig(await updater(current))
     checkOwnedServiceWrite(updated)
+    checkOwnedPermissionWrite(updated)
     const releaseProfileInputs = await fenceChangedHomeProfileInputs(
       configPath,
       previousInputs,

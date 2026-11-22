@@ -20,6 +20,8 @@ import type { ManagerRendererChannel, ManagerRendererChannelContext } from './ma
  */
 export interface ManagerPermissionPolicyBarrier {
   isCurrent(): boolean | Promise<boolean>
+  /** Run the exact policy publication while retaining the owner's profile fence. */
+  run<T>(action: () => Promise<T>): Promise<T>
   complete(policies: readonly CordisXPersistedPermissionPolicyRecord[]): boolean | Promise<boolean>
   /** Fence all possibly stale consumers if publication or commit is uncertain. */
   fence(): void | Promise<void>
@@ -43,7 +45,11 @@ export interface ManagerPermissionPolicyAuthority {
     expected: readonly CordisXPersistedPermissionPolicyRecord[],
   ): boolean | Promise<boolean>
   /** Enter the shared barrier before comparing and writing. */
-  acquire(context: ManagerRendererChannelContext):
+  acquire(
+    context: ManagerRendererChannelContext,
+    request: PermissionBindingRequest,
+    expected: readonly CordisXPersistedPermissionPolicyRecord[],
+  ):
     | ManagerPermissionPolicyBarrier
     | undefined
     | Promise<ManagerPermissionPolicyBarrier | undefined>
@@ -63,6 +69,17 @@ export function createManagerRendererPermissionChannel(input: {
   readonly configPath: string
   readonly identityAllowed: (identity: CordisXPluginIdentity, context: ManagerRendererChannelContext) => boolean
   readonly authority?: ManagerPermissionPolicyAuthority
+  /** Owner-only identity mapping. Both directions must be supplied together. */
+  readonly identityProjection?: {
+    readonly resolve: (
+      records: readonly CordisXPersistedPermissionPolicyRecord[],
+      context: ManagerRendererChannelContext,
+    ) => readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly project: (
+      records: readonly CordisXPersistedPermissionPolicyRecord[],
+      context: ManagerRendererChannelContext,
+    ) => readonly CordisXPersistedPermissionPolicyRecord[]
+  }
 }): ManagerRendererChannel {
   let fenced = false
   const requests = new Set<string>()
@@ -73,6 +90,16 @@ export function createManagerRendererPermissionChannel(input: {
       identities: [],
       identityAllowed: identity => input.identityAllowed(identity, context),
     })
+  const normalize = (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
+    Object.freeze(records.map(item => normalizePersistedPermissionPolicyRecord(item)))
+  const resolve = (
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+    context: ManagerRendererChannelContext,
+  ) => normalize(input.identityProjection ? input.identityProjection.resolve(records, context) : records)
+  const project = (
+    records: readonly CordisXPersistedPermissionPolicyRecord[],
+    context: ManagerRendererChannelContext,
+  ) => normalize(input.identityProjection ? input.identityProjection.project(records, context) : records)
   return {
     prepare(payload, context) {
       if (
@@ -81,6 +108,11 @@ export function createManagerRendererPermissionChannel(input: {
       ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
       const parsedValue: unknown = JSON.parse(payload)
       const request = parse(parsedValue, context)
+      const requested = normalize(request.records)
+      const resolved = resolve(requested, context)
+      if (
+        resolved.length !== requested.length || JSON.stringify(project(resolved, context)) !== JSON.stringify(requested)
+      ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
       // Capture the owner's record of the renderer snapshot before waiting on
       // a writer. The user-action proof must cover browser transport too.
       const observed = input.authority.snapshot(context)
@@ -100,36 +132,50 @@ export function createManagerRendererPermissionChannel(input: {
             }
           }
           await assertAdmission()
+          const authorized = {
+            requestId: request.requestId,
+            records: resolved,
+          }
           if (
             !await authority.authorize(
               context,
-              {
-                requestId: request.requestId,
-                records: request.records.map(item => normalizePersistedPermissionPolicyRecord(item)),
-              },
+              authorized,
               expected.map(item => normalizePersistedPermissionPolicyRecord(item)),
             )
           ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
           await assertAdmission()
-          const barrier = await authority.acquire(context)
+          const barrier = await authority.acquire(
+            context,
+            authorized,
+            expected.map(item => normalizePersistedPermissionPolicyRecord(item)),
+          )
           if (!barrier) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
           try {
             await assertAdmission()
             if (!await barrier.isCurrent() || context.signal.aborted) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
-            const result = await persistPermissionPoliciesIfUnchanged({
-              configPath: input.configPath,
-              profileId: input.profileId,
-              expected,
-              assertCurrent: async () => {
-                await assertAdmission()
-                if (!await barrier.isCurrent() || context.signal.aborted) {
-                  throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
-                }
-                // Package identity can change while waiting for the config lock.
-                parse(parsedValue, context)
-              },
-            }, request.records)
+            const result = await barrier.run(async () =>
+              await persistPermissionPoliciesIfUnchanged({
+                configPath: input.configPath,
+                profileId: input.profileId,
+                expected,
+                assertCurrent: async () => {
+                  await assertAdmission()
+                  if (!await barrier.isCurrent() || context.signal.aborted) {
+                    throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+                  }
+                  // Package identity can change while waiting for the config lock.
+                  const current = parse(parsedValue, context)
+                  if (JSON.stringify(resolve(current.records, context)) !== JSON.stringify(resolved)) {
+                    throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+                  }
+                },
+              }, resolved)
+            )
             await assertAdmission()
+            const responseRecords = project(result.records, context)
+            if (JSON.stringify(responseRecords) !== JSON.stringify(requested)) {
+              throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+            }
             if (
               !await barrier.isCurrent()
               || !await barrier.complete(result.policies.map(item => normalizePersistedPermissionPolicyRecord(item)))
@@ -137,7 +183,7 @@ export function createManagerRendererPermissionChannel(input: {
             ) {
               throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
             }
-            return { requestId: request.requestId, ok: true, value: result.records }
+            return { requestId: request.requestId, ok: true, value: responseRecords }
           } catch (error) {
             fenced = true
             await Promise.resolve().then(() => barrier.fence()).catch(() => undefined)

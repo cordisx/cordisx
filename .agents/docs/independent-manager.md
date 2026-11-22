@@ -240,6 +240,15 @@ admitting another renderer. An uncertain review keeps coordination closed.
 Other permission writers and native or external consumers are not yet covered
 by a profile-wide barrier.
 
+The owner can borrow its held permission fence for one exact policy batch while
+keeping other profile and Home changes excluded. This internal primitive does
+not provide user-action proof or synchronize renderer policy caches, so it does
+not by itself enable persistent permission changes from the Host page. The
+experimental permission channel can resolve a renderer-scoped Manager UI
+identity to the verified owner source and project its receipt back without
+exposing that source. The channel remains disabled until an owner-held user
+decision and all affected consumers can be coordinated.
+
 On macOS and Linux, an experimental service-mode renderer or an eligible
 Desktop renderer holds profile-scoped fences while its
 startup snapshot is in use. Current Home

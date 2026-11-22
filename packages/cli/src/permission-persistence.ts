@@ -64,3 +64,19 @@ export function persistedPermissionMigrationKey(record: CordisXPersistedPermissi
     normalized.key.scope,
   ])
 }
+
+/** Apply exact policy replacements and retire the matching v1 record only after v2 migration. */
+export function mergePersistedPermissionPolicies(
+  existing: readonly CordisXPersistedPermissionPolicyRecord[],
+  updates: readonly CordisXPersistedPermissionPolicyRecord[],
+): readonly CordisXPersistedPermissionPolicyRecord[] {
+  const keys = new Set(updates.map(persistedPermissionRecordKey))
+  const migrated = new Set(updates.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
+  return [
+    ...existing.filter(item =>
+      !keys.has(persistedPermissionRecordKey(item))
+      && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
+    ),
+    ...updates,
+  ]
+}

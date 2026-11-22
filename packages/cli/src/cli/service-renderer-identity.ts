@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
+import { domPermissionAuthorizationKeyV3 } from '../permission-model-v3.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV3,
@@ -327,6 +329,52 @@ export class ServiceRendererIdentityProjection {
     }
     if (!this.current(context)) throw new Error('renderer-identity-unavailable')
     return projected
+  }
+
+  /** Resolve a renderer-local Manager UI policy to the owner-selected source.
+   * This only resolves identity; the caller must separately authorize and
+   * coordinate the exact write across every policy consumer.
+   */
+  resolveManagerPolicies(
+    context: ManagerRendererChannelContext,
+    alias: string,
+    pluginId: string,
+    records: readonly unknown[],
+  ): readonly CordisXPersistedPermissionPolicyRecord[] {
+    if (context.admitted !== true || !Array.isArray(records) || records.length < 1 || records.length > 2) {
+      throw new Error('renderer-identity-unavailable')
+    }
+    const original = this.resolve(context, alias, pluginId)
+    const resolved: CordisXPersistedPermissionPolicyRecord[] = []
+    const keys = new Set<string>()
+    for (const raw of records) {
+      const record = normalizePersistedPermissionPolicyRecord(raw)
+      if (
+        !isPermissionPolicyRecordV3(record) || record.key.profileId !== context.profileId
+        || record.key.identity.pluginId !== pluginId || record.key.identity.source !== alias
+        || record.key.capability !== 'ui.extension-points.render' || record.key.scope.extensionPoints?.length !== 1
+        || !['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+      ) throw new Error('renderer-identity-unavailable')
+      const expected = domPermissionAuthorizationKeyV3({
+        profileId: context.profileId,
+        identity: { source: alias, pluginId },
+        pointId: record.key.scope.extensionPoints[0]!,
+        catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+      })
+      if (record.key.securityFingerprint !== expected.securityFingerprint) {
+        throw new Error('renderer-identity-unavailable')
+      }
+      const value = normalizePersistedPermissionPolicyRecord({
+        ...record,
+        key: { ...record.key, identity: { ...record.key.identity, source: original.source } },
+      })
+      const key = persistedPermissionRecordKey(value)
+      if (keys.has(key)) throw new Error('renderer-identity-unavailable')
+      keys.add(key)
+      resolved.push(value)
+    }
+    if (!this.current(context)) throw new Error('renderer-identity-unavailable')
+    return resolved
   }
 
   close(): void {
