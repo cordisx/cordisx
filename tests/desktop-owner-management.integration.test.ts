@@ -33,6 +33,8 @@ import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-p
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { decision, FormalRuntime, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
+import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const secret = () => randomBytes(32).toString('hex')
 
@@ -116,8 +118,9 @@ it('attaches the real management composition to one existing Desktop owner and r
     const recovered = await coordinator.prepareRecovery()
     expect(recovered).toHaveLength(0)
     const active = await store.bindRuntimeGeneration()
-    owner.initialize(active, false)
+    owner.initialize(active, false, managed)
     await (await managed.initialize(active)).coreReady
+    expect(owner.bindManagedServiceRuntime(managed)).toBe(false)
     composition = await openProductionPluginManagementComposition({
       homeDir,
       configPath,
@@ -169,7 +172,13 @@ it('attaches the real management composition to one existing Desktop owner and r
     unregister = cdp.register(session as never)
     const browserSessionId = secret()
     const opened = await open(browserSessionId)
-    expect(opened).toMatchObject({ status: 'ok', commands: true, channels: ['plugin-management'] })
+    expect(opened).toMatchObject({
+      status: 'ok',
+      commands: true,
+      channels: process.platform === 'darwin' || process.platform === 'linux'
+        ? ['plugin-management', 'managed-service-ui']
+        : ['plugin-management'],
+    })
     const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
     const call = async (payload: unknown) =>
       await requestPluginManagementRpc(rpcPaths, endpoint, {
@@ -376,4 +385,200 @@ it.each([false, true])(
     }
   },
   90_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'binds the running Desktop managed-service authority to an admitted Manager',
+  async () => {
+    const root = await mkdtemp('/tmp/cx-desktop-managed-owner-')
+    const homeDir = path.join(root, 'home')
+    const configPath = path.join(homeDir, 'config.json')
+    const profileId = 'default'
+    const generation = 'desktop-managed-fixture'
+    const source = 'https://example.test/fixtures'
+    await mkdir(homeDir, { mode: 0o700 })
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    await stageServiceModePlugin(root, homeDir, profileId, true, source, 'export function apply() {}', {
+      version: 15,
+      uiPoints: ['manager.content', 'manager.settings.navigation-items'],
+    })
+    const policies = exactDomPermissionPolicies(profileId, [{
+      id: 'fixture-service',
+      entry: '/fixture/entry.js',
+      pointIds: ['manager.content', 'manager.settings.navigation-items'],
+    }]).map(policy => ({ ...policy, key: { ...policy.key, identity: { ...policy.key.identity, source } } }))
+    await persistPermissionPolicies({ configPath }, policies)
+    const processStartedAt = (await processStartIdentity(process.pid))!
+    const paths = managerRendererGatewayPaths(homeDir, profileId)
+    const state: SupervisorState = {
+      schemaVersion: 1,
+      appId: 'manager',
+      profileId,
+      phase: 'ready',
+      pid: process.pid,
+      processStartedAt,
+      instanceToken: secret(),
+      createdAt: new Date().toISOString(),
+      version: 'fixture',
+      effectiveConfig: effectiveConfigFingerprint({ appId: 'codex', generation }),
+    }
+    const gateway = { pid: state.pid, processStartedAt, instanceToken: state.instanceToken }
+    await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
+    const control = await startSupervisorControlServer({
+      socketPath: paths.socket,
+      token: state.instanceToken,
+      stop: () => {},
+    })
+    const artifactServer = await startPluginGenerationArtifactServer()
+    const cdp = new CdpPluginLifecycleRuntime()
+    const store = new PluginActivationStore(homeDir, profileId, generation)
+    const owner = await createDesktopManagerOwnerIfEligible({
+      homeDir,
+      configPath,
+      appId: 'codex',
+      profileId,
+      generation,
+      cdp,
+      artifactServer,
+      store,
+      ownerVerified: true,
+      attach: false,
+      configuredPlugins: [],
+    })
+    if (!owner) throw new Error('managed Desktop profile was unexpectedly refused')
+    const managed = createProductionManagedServiceLifecycle({
+      runtime: new PlatformProviderPluginLifecycleRuntime(owner.lifecycle),
+      homeDir,
+      profileId,
+      generation,
+      environment: { PATH: process.env.PATH, HOME: root },
+      store,
+      dryRun: false,
+      requireOwnedProcess: true,
+    })
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId,
+      runtimeGeneration: generation,
+      permissionPolicies: policies,
+      runtime: managed,
+    })
+    let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+    let unregister: (() => void) | undefined
+    try {
+      await writeSupervisorState(paths, state)
+      expect(await coordinator.prepareRecovery()).toHaveLength(0)
+      const active = await store.bindRuntimeGeneration()
+      owner.initialize(active, false)
+      const startup = await managed.initialize(active)
+      await Promise.all([startup.coreReady, startup.adopted])
+      await vi.waitFor(() => expect(managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
+      expect(owner.bindManagedServiceRuntime(managed)).toBe(true)
+      // The native CDP seat is represented by a fixture responding with its
+      // authoritative activation; real app injection is a separate gate.
+      unregister = cdp.register({
+        async send() {
+          return { result: { value: { ok: true, result: { active, registryEpoch: 0 } } } }
+        },
+      } as never)
+      composition = await openProductionPluginManagementComposition({
+        homeDir,
+        configPath,
+        appId: 'codex',
+        profileId,
+        runtimeGeneration: generation,
+        token: secret(),
+        coordinator,
+        ...owner.managementOptions,
+        processStartedAt,
+      })
+      const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', profileId)
+      const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
+      const browserSessionId = secret()
+      const opened = await requestPluginManagementRpc(rpcPaths, endpoint, {
+        kind: 'manager-renderer',
+        action: 'open',
+        gateway,
+        browserSessionId,
+      }) as any
+      expect(opened).toMatchObject({ status: 'ok', channels: ['plugin-management', 'managed-service-ui'] })
+      const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
+      const call = async (channel: string, payload: unknown) =>
+        await requestPluginManagementRpc(rpcPaths, endpoint, {
+          ...common,
+          action: 'call',
+          channel,
+          payload,
+        }) as any
+      const prepared = await call('manager-bootstrap', { action: 'prepare' })
+      expect(prepared.status).toBe('ok')
+      const graph = prepared.value.privateGraphs[0]
+      const baseUrl = `http://127.0.0.1:43123/api/renderer/graphs/${secret()}/`
+      const projected = {
+        leaseId: secret(),
+        pluginId: graph.pluginId,
+        moduleGeneration: graph.moduleGeneration,
+        baseUrl,
+        entryUrl: baseUrl + graph.entryUrl.slice(graph.baseUrl.length),
+        initialStyleUrls: graph.initialStyleUrls.map((url: string) => baseUrl + url.slice(graph.baseUrl.length)),
+      }
+      const completed = await call('manager-bootstrap', {
+        action: 'complete',
+        managerOrigin: 'http://127.0.0.1:43123',
+        graphs: [projected],
+      })
+      expect(completed.status).toBe('ok')
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      let token = ''
+      try {
+        const text = bytes.toString('utf8')
+        expect(text).not.toContain(source)
+        expect(text).not.toContain(managed.capabilities()[0]!.token)
+        const capabilityText = /["']?managedServiceCapabilities["']?\s*:\s*(\[[^\]]+\])/u.exec(text)?.[1] ?? ''
+        token = /["']?token["']?\s*:\s*["']([a-f0-9]{64})["']/u.exec(capabilityText)?.[1] ?? ''
+        expect(token).toMatch(/^[a-f0-9]{64}$/u)
+      } finally {
+        bytes.fill(0)
+      }
+      const poll = requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'poll', timeoutMs: 3000 })
+      const admit = requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'admit' })
+      const command = (await poll as any).value.command
+      expect(command.method).toBe('synchronize')
+      expect(command.payload.active.plugins[0].canonicalSource).not.toBe(source)
+      expect(
+        await requestPluginManagementRpc(rpcPaths, endpoint, {
+          ...common,
+          action: 'acknowledge',
+          receipt: { id: command.id, sequence: command.sequence, ok: true, value: command.payload },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      expect(await admit).toEqual({ status: 'ok', value: { admitted: true } })
+      const response = await call(
+        'managed-service-ui',
+        JSON.stringify({
+          version: 1,
+          token,
+          requestId: 'desktop-get',
+          operation: 'get',
+          scope: { profileId, runtimeGeneration: generation, pluginGeneration: active.plugins[0]!.moduleGeneration },
+          serviceId: 'gateway',
+        }),
+      )
+      expect(response).toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+      unregister()
+      unregister = undefined
+      expect(await call('manager-bootstrap', { action: 'status' })).toEqual({ status: 'unavailable' })
+    } finally {
+      await composition?.close().catch(() => undefined)
+      unregister?.()
+      await owner.close()
+      await managed.dispose()
+      await artifactServer.close()
+      await control.close()
+      const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
+      await Promise.all(digests.map(async value => await removeStagedPluginPackage(homeDir, `sha256:${value}`)))
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+  120_000,
 )

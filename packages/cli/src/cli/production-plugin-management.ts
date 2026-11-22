@@ -62,6 +62,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererLifecycle?: ServiceRendererLifecycle
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
+  readonly rendererManagementAuthority?: Pick<ServiceRendererBootstrap, 'managementRequest' | 'allowsManagementWrite'>
   /** Owner resource retirement must finish before a renderer revocation is acknowledged. */
   readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
   readonly rendererWriteLifetimes?: ManagerRendererWriteLifetimes
@@ -158,7 +159,7 @@ export async function openProductionPluginManagementComposition(input: {
     ...(input.rendererWriteLifetimes === undefined ? {} : { writeLifetimes: input.rendererWriteLifetimes }),
     ...(input.rendererReadLifetimes === undefined ? {} : { readLifetimes: input.rendererReadLifetimes }),
     channels: new Map([
-      ['plugin-management', createManagerRendererManagementChannel(service)],
+      ['plugin-management', createManagerRendererManagementChannel(service, input.rendererManagementAuthority)],
       ...(input.rendererBootstrap === undefined
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),

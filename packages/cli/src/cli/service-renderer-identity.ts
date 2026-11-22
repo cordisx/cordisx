@@ -6,16 +6,24 @@ import {
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
+import { stagedPluginModulePath } from '../launcher/plugin-package.js'
+import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
-import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
+import { loadServiceConfiguredArchive, loadServiceRendererInitialPackage } from './service-renderer-projection.js'
 
 /**
  * Owner-private reverse mapping. Neither source nor staged paths are sent to a renderer.
  * The owner must invalidate `isCurrent` on graph, policy, configuration, or service changes.
  */
 export class ServiceRendererIdentityProjection {
-  private readonly aliases = new Map<string, { pluginId: string; source: string; digest: string }>()
-  private readonly plugins = new Set<string>()
+  private readonly aliases = new Map<string, {
+    pluginId: string
+    source: string
+    digest: string
+    activation?: CordisXPluginActivationItemV1
+  }>()
+  private readonly plugins = new Map<string, string>()
   private closed = false
   private readonly context: ManagerRendererChannelContext
   private readonly onAbort = () => this.close()
@@ -59,15 +67,70 @@ export class ServiceRendererIdentityProjection {
     const alias = `https://renderer.cordisx.invalid/plugin/${randomBytes(32).toString('hex')}`
     if (this.aliases.has(alias)) throw new Error('renderer-identity-unavailable')
     this.aliases.set(alias, { pluginId: captured.id, source: staged.identitySource, digest: staged.digest })
-    this.plugins.add(captured.id)
+    this.plugins.set(captured.id, alias)
     return alias
+  }
+
+  /** Only the owner's exact activation and staged package can receive an alias. */
+  async issueInstalled(
+    context: ManagerRendererChannelContext,
+    plugin: CordisXConfigPlugin,
+    item: CordisXPluginActivationItemV1,
+  ): Promise<string> {
+    if (!this.current(context) || this.aliases.size >= 256 || this.plugins.has(item.id)) {
+      throw new Error('renderer-identity-unavailable')
+    }
+    const captured = structuredClone(item)
+    const staged = await loadServiceRendererInitialPackage(this.input.homeDir, captured)
+    if (
+      !this.current(context) || this.plugins.has(captured.id) || this.aliases.size >= 256
+      || plugin.id !== captured.id || plugin.enabled !== captured.enabled || !plugin.package
+      || plugin.entry !== stagedPluginModulePath(this.input.homeDir, captured.digest)
+      || plugin.source !== staged.identitySource || !attachmentEqual(plugin.manifest, staged.manifest.runtimeManifest)
+      || plugin.package.version !== captured.version || plugin.package.digest !== captured.digest
+      || plugin.package.moduleGeneration !== captured.moduleGeneration
+      || plugin.package.canonicalSource !== captured.canonicalSource
+      || plugin.package.artifactIntegrity !== staged.artifactIntegrity
+      || !attachmentEqual(plugin.package.dependencies, captured.dependencies)
+    ) throw new Error('renderer-identity-unavailable')
+    const alias = `https://renderer.cordisx.invalid/plugin/${randomBytes(32).toString('hex')}`
+    if (this.aliases.has(alias)) throw new Error('renderer-identity-unavailable')
+    this.aliases.set(alias, {
+      pluginId: captured.id,
+      source: staged.identitySource,
+      digest: staged.digest,
+      activation: captured,
+    })
+    this.plugins.set(captured.id, alias)
+    return alias
+  }
+
+  /** Map the complete owner snapshot, retaining every non-identity field verbatim. */
+  projectActivation(
+    context: ManagerRendererChannelContext,
+    active: CordisXPluginActivationRecordV1,
+  ): CordisXPluginActivationRecordV1 {
+    if (
+      !this.current(context) || active.recordKind !== 'active' || active.profileId !== context.profileId
+      || active.runtimeGeneration !== context.ownerGeneration || active.plugins.length !== this.plugins.size
+    ) throw new Error('renderer-identity-unavailable')
+    const plugins = active.plugins.map(item => {
+      const alias = this.plugins.get(item.id)
+      const original = alias === undefined ? undefined : this.aliases.get(alias)
+      if (!alias || !original?.activation || !attachmentEqual(original.activation, item)) {
+        throw new Error('renderer-identity-unavailable')
+      }
+      return { ...item, ...(item.canonicalSource === undefined ? {} : { canonicalSource: alias }) }
+    })
+    if (!this.current(context)) throw new Error('renderer-identity-unavailable')
+    return { ...active, plugins }
   }
 
   /** Resolve only inside the owner after authenticating this exact renderer session. */
   resolve(context: ManagerRendererChannelContext, alias: string, pluginId: string) {
     const value = this.current(context) ? this.aliases.get(alias) : undefined
     if (!value || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
-    return { ...value }
+    return { pluginId: value.pluginId, source: value.source, digest: value.digest }
   }
 
   /** Project only existing owner-approved Manager UI policies; this never creates a grant. */

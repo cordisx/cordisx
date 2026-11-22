@@ -3,7 +3,10 @@ import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.j
 import { attachmentEqual, type RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
 import { loadStagedPluginPackage, stagedPluginModulePath } from '../launcher/plugin-package.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../launcher/latest-runtime-manifest.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
+} from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
 
@@ -82,8 +85,9 @@ async function loadAllowedRendererPackage(
   const manifest = staged.manifest.runtimeManifest
   const legacy = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && manifest.schemaVersion === 1
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
-  const managed = allowReadOnlyManaged
-    && manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
+  const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
+    || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
+  const managed = allowReadOnlyManaged && managedVersion
     && manifest.services.length > 0
     && manifest.services.every(service => service.kind === 'managed-backend' && service.owner === 'host')
     && staged.serviceModules.length === manifest.services.length
@@ -93,7 +97,12 @@ async function loadAllowedRendererPackage(
   if (
     staged.manifest.id !== item.id || staged.manifest.version !== item.version
     || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
-    || (!legacy && !managed) || manifest.capabilities.length !== 0 || staged.entityTemplates.length !== 0
+    || staged.manifest.canonicalSource !== item.canonicalSource
+    || (!legacy && !managed)
+    || (legacy
+      ? manifest.capabilities.length !== 0
+      : manifest.capabilities.some(capability => capability.name !== 'ui.extension-points.render'))
+    || staged.entityTemplates.length !== 0
     || (staged.documents?.length ?? 0) !== 0 || staged.browserArtifact === undefined
   ) throw new Error('renderer-projection-plugin-unsupported')
   return staged
@@ -110,9 +119,13 @@ export function createServiceRendererProjector(input: {
   readonly generation: string
   /** This lookup is populated only by an authenticated owner-side session. */
   readonly isLive: (identity: RendererAttachmentIdentity) => boolean
+  /** A read-only identity snapshot cannot participate in package mutations. */
+  readonly canMutate: (identity: RendererAttachmentIdentity) => boolean
 }): (mutation: PluginRuntimeMutation, identity: RendererAttachmentIdentity) => Promise<unknown> {
   return async (mutation, identity) => {
-    if (!input.isLive(identity)) throw new Error('renderer-projection-session-unavailable')
+    if (!input.isLive(identity) || !input.canMutate(identity)) {
+      throw new Error('renderer-projection-session-unavailable')
+    }
     const before = mutation.previous
     const after = mutation.candidate
     const preflight = mutation.transactionEpoch === `${mutation.transactionId}:preflight`

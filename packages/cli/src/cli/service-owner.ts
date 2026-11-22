@@ -94,6 +94,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             profileId,
             generation,
             isLive: identity => rendererParticipants!.isLive(identity),
+            canMutate: identity => rendererParticipants!.canMutate(identity),
           }),
         })
         rendererParticipants.bind(rendererLifecycle)
@@ -258,6 +259,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererParticipants,
           rendererLifecycle,
           rendererBootstrap: rendererBootstrap.channel(),
+          rendererManagementAuthority: rendererBootstrap,
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,
           rendererReadLifetimes: rendererBootstrap.readLifetimes,

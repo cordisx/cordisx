@@ -332,7 +332,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const { activatedPlugins } = packageGraphs
     hasManagedBackends = packageGraphs.hasManagedBackends
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
-    desktopManager?.initialize(activeLifecycleActivation, recoveryPlan !== undefined)
+    desktopManager?.initialize(activeLifecycleActivation, recoveryPlan !== undefined, managedServiceLifecycleRuntime)
     const startupSession = await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     startupBridge = createStartupHostBridge(managedServiceLifecycleRuntime, selection.profileId, lifecycleGeneration)
     const permissionIdentities = new PluginPermissionIdentityRegistry([

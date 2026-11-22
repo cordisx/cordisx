@@ -4,6 +4,7 @@ import type { PluginActivationStore } from '../launcher/plugin-activation.js'
 import type { PluginGenerationArtifactServer } from '../launcher/plugin-generation-artifact-server.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
+import type { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
 import { attachmentEqual, attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
 import { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
@@ -11,8 +12,9 @@ import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import {
   createServiceRendererProjector,
   loadServiceConfiguredChannelArchive,
-  loadServiceRendererPackage,
+  loadServiceRendererInitialPackage,
 } from './service-renderer-projection.js'
+import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { supportsReadonlyConfiguredChannel } from './readonly-headless-channel.js'
@@ -48,6 +50,7 @@ export function createDesktopManagerOwner(input: {
       profileId: input.profileId,
       generation: input.generation,
       isLive: identity => participants.isLive(identity),
+      canMutate: identity => participants.canMutate(identity),
     }),
   })
   participants.bind(lifecycle)
@@ -62,6 +65,7 @@ export function createDesktopManagerOwner(input: {
   }
   let closed = false
   let closing: Promise<boolean> | undefined
+  let managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   const channelBridge = input.configuredChannel === undefined
     ? undefined
     : new ReadonlyChannelRendererBridge({
@@ -89,16 +93,37 @@ export function createDesktopManagerOwner(input: {
       isCurrent: context => !closed && participants.peer(context.rendererId) !== undefined,
       call: input.codex,
     })
+  const bindManagedServiceRuntime = (runtime: ManagedServicePluginLifecycleRuntime): boolean => {
+    if (closed || managedServiceUI) return false
+    const bridge = createManagerManagedServiceUIBridge({
+      profileId: input.profileId,
+      runtimeGeneration: input.generation,
+      ownerGeneration: input.generation,
+      ownerCurrent: () => !closed,
+      readLifecycleFence: () => runtime.readManagedServiceUIFence(),
+      runtime,
+    })
+    if (!bootstrap.bindManagedServiceUI(bridge)) {
+      bridge.dispose()
+      return false
+    }
+    managedServiceUI = bridge
+    return true
+  }
   return {
     lifecycle,
-    managementOptions: {
-      rendererParticipant: participant,
-      rendererBootstrap: bootstrap.channel(),
-      rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
-      rendererWriteLifetimes: bootstrap.writeLifetimes,
-      rendererReadLifetimes: bootstrap.readLifetimes,
-      ...(rendererModelServices === undefined ? {} : { rendererModelServices }),
-      ...(channelBridge === undefined ? {} : { rendererReadonlyChannel: channelBridge.channel }),
+    get managementOptions() {
+      return {
+        rendererParticipant: participant,
+        rendererBootstrap: bootstrap.channel(),
+        rendererManagementAuthority: bootstrap,
+        rendererRetirement: (rendererId: string) => bootstrap.waitForRetirement(rendererId),
+        rendererWriteLifetimes: bootstrap.writeLifetimes,
+        rendererReadLifetimes: bootstrap.readLifetimes,
+        ...(managedServiceUI === undefined ? {} : { rendererManagedServiceUI: managedServiceUI.channel }),
+        ...(rendererModelServices === undefined ? {} : { rendererModelServices }),
+        ...(channelBridge === undefined ? {} : { rendererReadonlyChannel: channelBridge.channel }),
+      }
     },
     bindConfiguredChannel(plugin: CordisXConfigPlugin, service: LocalChannelService): boolean {
       const owner = service.managementOwner()
@@ -109,14 +134,24 @@ export function createDesktopManagerOwner(input: {
       ) return false
       return bootstrap.bindConfiguredChannel({ plugin, service, bridge: channelBridge })
     },
-    initialize(active: CordisXPluginActivationRecordV1, recoveryPending: boolean) {
+    bindManagedServiceRuntime,
+    initialize(
+      active: CordisXPluginActivationRecordV1,
+      recoveryPending: boolean,
+      runtime?: ManagedServicePluginLifecycleRuntime,
+    ) {
       lifecycle.initialize(active, recoveryPending)
+      if (runtime) bindManagedServiceRuntime(runtime)
     },
     close(): Promise<boolean> {
       if (closing) return closing
       closed = true
       unsubscribeNoSeats()
-      closing = bootstrap.close()
+      closing = (async () => {
+        const retired = await bootstrap.close()
+        managedServiceUI?.dispose()
+        return retired
+      })()
       channelBridge?.close()
       participants.close()
       lifecycle.close()
@@ -136,7 +171,14 @@ export async function createDesktopManagerOwnerIfEligible(
   if (!input.ownerVerified || input.attach) return undefined
   const active = await input.store.loadActive()
   try {
-    for (const plugin of active.plugins) await loadServiceRendererPackage(input.homeDir, plugin)
+    for (const plugin of active.plugins) {
+      const staged = await loadServiceRendererInitialPackage(input.homeDir, plugin)
+      if (
+        (staged.manifest.runtimeManifest.capabilities.length > 0
+          || staged.manifest.runtimeManifest.schemaVersion === 15)
+        && process.platform !== 'darwin' && process.platform !== 'linux'
+      ) return undefined
+    }
   } catch {
     return undefined
   }

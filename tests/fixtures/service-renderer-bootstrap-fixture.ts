@@ -46,6 +46,8 @@ export async function fixture(
   options: {
     delayLease?: boolean
     managedBackend?: boolean
+    managedUiVersion?: 14 | 15
+    managedUiGrant?: boolean
     protectProfileInputs?: boolean
     writeDispatch?: () => Promise<unknown>
     readDispatch?: () => Promise<unknown>
@@ -138,7 +140,7 @@ export async function fixture(
       await persistPermissionPolicies({ configPath }, policies)
     }
   }
-  if (options.managedBackend) {
+  if (options.managedBackend || options.managedUiVersion) {
     await stageServiceModePlugin(
       root,
       homeDir,
@@ -151,7 +153,22 @@ export async function fixture(
          globalThis.__fixtureManagedStatus = result.status;
          if (result.status === 'available') globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status;
        }`,
+      options.managedUiVersion === undefined ? {} : {
+        version: options.managedUiVersion,
+        uiPoints: ['manager.settings.navigation-items', 'manager.content', 'workspace.toolbar.items'],
+      },
     )
+    if (options.managedUiGrant) {
+      const policies = exactDomPermissionPolicies(profileId, [{
+        id: 'fixture-service',
+        entry: '/fixture/entry.js',
+        pointIds: ['manager.settings.navigation-items', 'manager.content', 'workspace.toolbar.items'],
+      }]).map(policy => ({
+        ...policy,
+        key: { ...policy.key, identity: { ...policy.key.identity, source: 'https://example.test/fixtures' } },
+      }))
+      await persistPermissionPolicies({ configPath }, policies)
+    }
   }
   const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
   const participants = new ServiceRendererParticipants(scope)
@@ -164,6 +181,7 @@ export async function fixture(
       profileId,
       generation,
       isLive: identity => participants.isLive(identity),
+      canMutate: identity => participants.canMutate(identity),
     }),
     async createArtifactServer() {
       const server = await startPluginGenerationArtifactServer()
@@ -363,7 +381,7 @@ export async function fixture(
     channels: new Map([
       ...(management === undefined
         ? []
-        : [['plugin-management', createManagerRendererManagementChannel(management)] as const]),
+        : [['plugin-management', createManagerRendererManagementChannel(management, bootstrap)] as const]),
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
       ...(channelBridge === undefined ? [] : [['channel-actions', channelBridge.channel] as const]),

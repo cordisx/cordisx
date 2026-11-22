@@ -34,6 +34,12 @@ export interface ManagerRendererCommand {
   readonly payload: unknown
 }
 
+/** Installed only by the authenticated owner before the peer is admitted. */
+export type OwnerCommandProjection = (method: ManagerRendererCommandMethod, payload: unknown) => {
+  readonly payload: unknown
+  readonly receipt?: (value: unknown) => unknown
+}
+
 const methods = new Set<ManagerRendererCommandMethod>([
   'synchronize',
   'prepare',
@@ -69,6 +75,7 @@ export class ManagerRendererCommandPeer {
   readonly sessionId: string
   private readonly timeoutMs: number
   private readonly listeners = new Set<() => void>()
+  private projection: OwnerCommandProjection | undefined
   private sequence = 0
   private ended = false
   private pending: {
@@ -76,6 +83,7 @@ export class ManagerRendererCommandPeer {
     readonly timer: ReturnType<typeof setTimeout>
     readonly resolve: (value: unknown) => void
     readonly reject: (error: Error) => void
+    readonly receipt?: (value: unknown) => unknown
     offered: boolean
   } | undefined
   private waiter: {
@@ -119,13 +127,26 @@ export class ManagerRendererCommandPeer {
     return this.ended
   }
 
+  bindOwnerProjection(projection: OwnerCommandProjection): void {
+    if (this.ended || this.pending || this.sequence !== 0 || this.projection || typeof projection !== 'function') {
+      throw new Error('renderer-command-projection-unavailable')
+    }
+    this.projection = projection
+  }
+
   request(method: ManagerRendererCommandMethod, payload: unknown): Promise<unknown> {
     if (this.ended || this.pending !== undefined || !methods.has(method) || this.sequence >= Number.MAX_SAFE_INTEGER) {
       return Promise.reject(new Error('renderer-command-unavailable'))
     }
     let cloned: unknown
+    let receipt: ((value: unknown) => unknown) | undefined
     try {
-      cloned = cloneBounded(payload, method === 'channel-configuration' ? MAX_CHANNEL_COMMAND_BYTES : MAX_COMMAND_BYTES)
+      const projected = this.projection?.(method, payload) ?? { payload }
+      cloned = cloneBounded(
+        projected.payload,
+        method === 'channel-configuration' ? MAX_CHANNEL_COMMAND_BYTES : MAX_COMMAND_BYTES,
+      )
+      receipt = projected.receipt
     } catch {
       return Promise.reject(new Error('renderer-command-invalid'))
     }
@@ -138,7 +159,7 @@ export class ManagerRendererCommandPeer {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => this.close(), this.timeoutMs)
       timer.unref()
-      this.pending = { command, timer, resolve, reject, offered: false }
+      this.pending = { command, timer, resolve, reject, offered: false, ...(receipt === undefined ? {} : { receipt }) }
       if (this.waiter !== undefined) {
         this.pending.offered = true
         this.finishWaiter(command)
@@ -195,6 +216,7 @@ export class ManagerRendererCommandPeer {
     let result: unknown
     try {
       result = cloneBounded(item.value, MAX_RESULT_BYTES)
+      if (pending.receipt) result = cloneBounded(pending.receipt(result), MAX_RESULT_BYTES)
     } catch {
       this.close()
       return false

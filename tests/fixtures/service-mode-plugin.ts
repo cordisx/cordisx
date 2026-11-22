@@ -3,8 +3,14 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
 import { allowedDecisionV4 } from '../../packages/cli/src/launcher/plugin-lifecycle-model.js'
-import { PLUGIN_PACKAGE_SCHEMA_V14 } from '../../packages/cli/src/launcher/packages/manifest.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
+import {
+  PLUGIN_PACKAGE_SCHEMA_V14,
+  PLUGIN_PACKAGE_SCHEMA_V15,
+} from '../../packages/cli/src/launcher/packages/manifest.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
+} from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 import { declaration, definition } from '../managed-service-runtime-fixture.js'
 
@@ -32,6 +38,7 @@ export async function stageServiceModePlugin(
   withService: boolean,
   canonicalSource: string | null = 'https://example.test/fixtures',
   browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
+  options: { readonly version?: 14 | 15; readonly uiPoints?: readonly string[] } = {},
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
   const dir = path.join(root, id)
@@ -44,26 +51,54 @@ export async function stageServiceModePlugin(
     routes,
   }
   const value = definition('gateway')
-  const service = `
+  const version = options.version ?? 14
+  const registration = `
 export async function apply(ctx, input) {
   const handle = await ctx.managedServices.register(${JSON.stringify(value)}, { revision: '${
     digest(JSON.stringify(value))
   }' })
   ctx.effect(() => () => handle.dispose())
+  ${
+    version === 15 ? '' : `
   const ready = await handle.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')
   const result = await handle.publishNativeProvider({
     providerId: 'fixture-provider', compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
   })
   if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
+  `
+  }
 }
 apply.inject = ['managedServices']
 `
+  const service = version === 14 ? registration : `${registration}
+export async function prepare(ctx, input) {
+  const ready = await input.registration.ensureReady({ signal: input.signal })
+  if (ready.status !== 'ready') throw new Error('Fixture did not start')
+  await input.startup.reportCatalog({
+    contract: 'cordisx.startup-catalog-report/v1',
+    target: { pluginId: input.owner.pluginId, capabilityId: input.capability.id },
+    generation: input.generation, sequence: 1,
+    catalog: { state: 'known', generation: 'fixture', modelIds: ['fixture'], digest: '${
+    digest(JSON.stringify(['fixture', ['fixture']]))
+  }' },
+  })
+  const result = await input.registration.publishNativeProvider({
+    providerId: input.capability.providerId, compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
+  })
+  if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
+}
+`
+  const runtimeSchema = version === 15 ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 : CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
   const runtime = JSON.stringify({
-    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
-    schemaVersion: 14,
+    $schema: runtimeSchema,
+    schemaVersion: version,
     id,
-    capabilities: [],
+    capabilities: options.uiPoints === undefined ? [] : [{
+      name: 'ui.extension-points.render',
+      required: true,
+      scope: { extensionPoints: options.uiPoints },
+    }],
     services: withService
       ? [{
         ...declaration('gateway', id, []),
@@ -75,6 +110,29 @@ apply.inject = ['managedServices']
         }],
       }]
       : [],
+    ...(version === 15
+      ? {
+        startup: {
+          contract: 'cordisx.startup-declaration/v1',
+          pages: [],
+          capabilities: withService
+            ? [{
+              id: 'provider',
+              serviceId: 'gateway',
+              kind: 'provider',
+              providerId: 'fixture-provider',
+              compositionOrigin: 'api',
+              dependsOn: [],
+              milestones: [],
+              wait: { interactive: 'background', command: 'when-selected' },
+              success: {
+                allOf: [{ kind: 'service-ready' }, { kind: 'catalog-known' }, { kind: 'provider-published' }],
+              },
+            }]
+            : [],
+        },
+      }
+      : {}),
   })
   await Promise.all([
     writeFile(
@@ -87,18 +145,18 @@ apply.inject = ['managedServices']
     writeFile(
       path.join(dir, 'cordisx-package.json'),
       JSON.stringify({
-        $schema: PLUGIN_PACKAGE_SCHEMA_V14,
-        schemaVersion: 14,
+        $schema: version === 15 ? PLUGIN_PACKAGE_SCHEMA_V15 : PLUGIN_PACKAGE_SCHEMA_V14,
+        schemaVersion: version,
         id,
         version: '1.0.0',
         ...(canonicalSource === null ? {} : { canonicalSource }),
         entry: './index.mjs',
         distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-        compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14] },
+        compatibility: { runtimeAbi: 1, protocolSchemas: [runtimeSchema] },
         dependencies: [],
         runtimeManifest: {
           path: './runtime.json',
-          schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+          schema: runtimeSchema,
           digest: digest(runtime),
         },
       }),
@@ -125,7 +183,7 @@ apply.inject = ['managedServices']
     ...identity,
     target: { kind: 'candidate', candidateId: staged.candidateId },
   })
-  if (!plan || plan.declarations.some(declaration => declaration.decisionRequired)) {
+  if (!plan || options.uiPoints === undefined && plan.declarations.some(declaration => declaration.decisionRequired)) {
     throw new Error('Unexpected fixture permission review')
   }
   const applied = await coordinator.applyPermissionReviewV4({
