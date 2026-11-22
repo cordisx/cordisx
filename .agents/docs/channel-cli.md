@@ -655,7 +655,12 @@ session. For an explicitly ordered native section, it places the destination
 immediately before the source and checks the order using both model providers.
 The native unsectioned list uses recency rather than a movable position; App
 pinning and unsectioned order are not established by this path. The previous
-native session remains available.
+native session remains available, and both sessions can appear in the list.
+
+Codex 0.171.0-alpha.13 can create a hidden attached fork before the first turn,
+but that fork cannot register the dynamic history tool through the native fork
+request. It also prevents deletion of the parent while the attachment exists.
+It is not used as a substitute for the linked path.
 
 For an unconfirmed Desktop result, first inspect the source and any target:
 

@@ -33,8 +33,8 @@ export function NativeLogicalContinuationDialog(input: {
       className="cxmp-confirm"
       title={zh ? '切换模型服务' : 'Switch model service'}
       description={zh
-        ? '选择如何接续这段对话。原对话会保留。'
-        : 'Choose how to continue this conversation. The original is kept.'}
+        ? '选择如何接续这段对话。原对话会保留，列表可能显示两条；未分组对话的位置可能变化。'
+        : 'Choose how to continue this conversation. The original is kept; both sessions may appear in the list, and ungrouped order may change.'}
       onClose={() => input.finish(undefined)}
       actions={
         <>

@@ -42,6 +42,7 @@ describe('logical continuation confirmation', () => {
       },
     })
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog.textContent).toContain('both sessions may appear in the list, and ungrouped order may change')
     expect(dialog.textContent).toContain('Target service: second')
     expect(dialog.textContent).toContain('Model: shared')
     expect(dialog.textContent).toContain('earlier → t1')
