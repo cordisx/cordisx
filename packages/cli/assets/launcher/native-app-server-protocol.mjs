@@ -18,6 +18,18 @@ import { createNativeChatControl } from './native-chat-control.mjs'
 import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
 import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
 import { dispatchNativeTaskTool, normalizeNativeTaskFirstTurn } from './native-task-dispatch.mjs'
+import { dispatchLogicalHistory, forwardLogicalTurn } from './native-logical-history.mjs'
+import { dispatchNativeBridgeRequest, dispatchNativeIdle } from './native-bridge-methods.mjs'
+import { dispatchNativeOwnerIdentity } from './native-owner-account.mjs'
+import { NativeLogicalDestinationReservations } from './native-logical-destination-reservations.mjs'
+import { createLogicalTurnEvents } from './native-logical-turn-events.mjs'
+import { prepareManagedNativeDispatch } from './native-managed-dispatch.mjs'
+import { createNativeIntermediaryWriter } from './native-intermediary-writer.mjs'
+import {
+  dispatchLogicalFence,
+  forwardWithLogicalFence,
+  NativeLogicalWriteFence,
+} from './native-logical-write-fence.mjs'
 
 const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs, reviewRouting } =
   nativeLaunchConfiguration(
@@ -27,12 +39,15 @@ const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs
 const marker = 'cordisx.operation_token'
 const maxControlLineBytes = 8 * 1024 * 1024
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
+const logicalWriteFence = new NativeLogicalWriteFence()
+const destinationReservations = new NativeLogicalDestinationReservations(logicalWriteFence)
 const nativeTransport = createNativeProviderTransport(child, {
   executable,
   args: nativeArgs,
   env: process.env,
   reviewRouting,
   diagnostic: details => nativeLifecycle(details.phase, details),
+  uncertain: id => logicalWriteFence.uncertain(id),
 })
 const control = net.connect(socketPath)
 const controlCalls = new Map()
@@ -160,25 +175,18 @@ const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.
 const lifecyclePending = threadId =>
   lifecycleUncertain || uncertainSwitches.has(threadId)
   || [...lifecycleCalls.values()].includes(threadId)
-const write = (stream, value) =>
-  new Promise((resolve, reject) => {
-    if (stream.destroyed) {
-      reject(new Error('Native transport is closed'))
-      return
-    }
-    if (stream === nativeTransport.stdin) {
-      try {
-        const message = typeof value === 'string' ? JSON.parse(value) : value
-        if (message?.method === 'initialize') {
-          initializeRequestId = message.id
-          nativeLifecycle('initialize-issued')
-        }
-        turnDiagnostics.issued(message)
-      } catch {}
-    }
-    stream.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`, error =>
-      error ? reject(error) : resolve())
-  })
+let logicalHandoffGuard = false
+const write = createNativeIntermediaryWriter({
+  nativeStream: () => nativeTransport.stdin,
+  fence: logicalWriteFence,
+  initializing: message => {
+    initializeRequestId = message.id
+    nativeLifecycle('initialize-issued')
+  },
+  issued: message => turnDiagnostics.issued(message),
+  handoffEnabled: () => logicalHandoffGuard,
+  controlCall,
+})
 
 function rejectAll(calls) {
   for (const call of calls.values()) {
@@ -216,7 +224,7 @@ function stop(reason = 'transport-closed') {
   nativeTransport.close()
   if (child.exitCode === null) child.kill('SIGTERM')
 }
-function call(stream, calls, request, timeout = 30_000, beforeSend) {
+function call(stream, calls, request, timeout = 30_000, beforeSend, logicalLease, logicalSourceThreadId) {
   if (closed || calls.size >= 32) return Promise.reject(new Error('Native transport unavailable'))
   const id = `${privatePrefix}${++sequence}`
   beforeSend?.(id)
@@ -230,13 +238,13 @@ function call(stream, calls, request, timeout = 30_000, beforeSend) {
     }
     const timer = setTimeout(() => settle(new Error('Native transport timeout')), timeout)
     calls.set(id, { resolve, reject, timer })
-    void write(stream, { ...request, id }).catch(error => settle(error))
+    void write(stream, { ...request, id }, logicalLease, logicalSourceThreadId).catch(error => settle(error))
   })
 }
 function controlCall(type, input = {}) {
   return call(control, controlCalls, { type, ...input })
 }
-async function nativeCall(method, params) {
+async function nativeCall(method, params, logicalLease, reserveDestination = false, logicalSourceThreadId) {
   const prepared = await chatControl.prepare(method, params)
   params = prepared.params
   if (object(params?.config)?.[optionsAuthority] !== undefined) {
@@ -245,14 +253,29 @@ async function nativeCall(method, params) {
   try {
     await contextCapture?.invalidate(method, params)
     const preflight = await contextCapture?.prepare(method, params)
-    let requestId, handle
-    const result = await call(nativeTransport.stdin, privateCalls, { method, params }, 30_000, id => {
-      requestId = id
-      handle = contextCapture?.bind(preflight, id, params)
-    })
+    let requestId, handle, destinationReservation
+    const result = await call(
+      nativeTransport.stdin,
+      privateCalls,
+      { method, params },
+      30_000,
+      id => {
+        if (reserveDestination) {
+          if (!logicalWriteFence.owns(logicalSourceThreadId, logicalLease)) throw new Error('Native source lease lost')
+          destinationReservation = destinationReservations.register(id)
+        }
+        requestId = id
+        handle = contextCapture?.bind(preflight, id, params)
+      },
+      logicalLease,
+      reserveDestination ? logicalSourceThreadId : undefined,
+    )
     await contextCapture?.finish(handle, requestId, params, result)
     await chatControl.complete(prepared.captureId, true, result)
-    return result
+    if (reserveDestination && !destinationReservation?.lease) {
+      throw new Error('Native destination reservation unavailable')
+    }
+    return reserveDestination ? { result, destinationLease: destinationReservation.lease } : result
   } catch (error) {
     await chatControl.complete(prepared.captureId, false, undefined).catch(() => undefined)
     throw error
@@ -284,6 +307,7 @@ let authenticate
 const ready = new Promise((resolve, reject) => {
   authenticate = { resolve, reject }
 })
+const logicalTurnEvents = createLogicalTurnEvents({ ready, writeControl: value => write(control, value) })
 // A rejected readiness promise must also be observed when no desktop request is queued.
 void ready.catch(() => undefined)
 child.once('spawn', () => nativeLifecycle('child-spawned'))
@@ -291,6 +315,7 @@ control.once('connect', () => {
   nativeLifecycle('control-connected')
   void controlCall('hello', { nonce, sourcePid: process.pid, parentPid: process.ppid, method: 'app-server-stdio' })
     .then(value => {
+      logicalHandoffGuard = value?.logicalHandoffGuard === true
       nativeLifecycle('control-authenticated')
       authenticate.resolve(value)
     }, error => {
@@ -562,7 +587,7 @@ async function forward(line) {
     await write(nativeTransport.stdin, forwarded === message ? line : forwarded)
     return
   }
-  let admitted = false
+  let admitted = false, logicalTurn = false
   const token = config[marker]
   try {
     if (
@@ -575,51 +600,34 @@ async function forward(line) {
       requestId: message.id,
       ...(typeof params.threadId === 'string' ? { threadId: params.threadId } : {}),
     })
+    if (dispatch?.kind === 'logical-turn' && message.method === 'turn/start' && typeof params.threadId === 'string') {
+      admitted = true
+      logicalTurn = true
+      await forwardLogicalTurn(message, params, config, token, {
+        controlCall,
+        desktopCalls,
+        writeNative: value => write(nativeTransport.stdin, value),
+        transform: value => withStableComputerUseCli(value, nativeCliEntry, executable),
+      })
+      return
+    }
     if (
       dispatch?.kind !== 'dispatch' || typeof dispatch.model !== 'string' || typeof dispatch.providerId !== 'string'
     ) throw new Error('Managed request rejected')
     admitted = true
     turnDiagnostics.selected(message.id, dispatch)
-    const nextConfig = { ...config }
-    delete nextConfig[marker]
-    if (dispatch.agentTask && (dispatch.serviceTier === 'priority' || dispatch.serviceTier === null)) {
-      params.serviceTier = dispatch.serviceTier
-    }
-    if (message.method === 'thread/start') {
-      params.modelProvider = dispatch.providerId
-      params.model = dispatch.model
-      params.config = dispatch.providerSource === 'config'
-        ? configuredOverrides(nextConfig, dispatch.configOverrides)
-        : { ...nextConfig, ...dispatch.configOverrides }
-      if (typeof dispatch.reasoningEffort === 'string') {
-        params.config.model_reasoning_effort = dispatch.reasoningEffort
-      }
-    } else {
-      // The private resume sets provider config. The original turn retains all user input and controls.
-      params.model = dispatch.model
-      if (typeof dispatch.reasoningEffort === 'string') params.effort = dispatch.reasoningEffort
-      if (Object.keys(nextConfig).length === 0) delete params.config
-      else params.config = nextConfig
-      const mode = object(params.collaborationMode)
-      if (mode && object(mode.settings)) {
-        params.collaborationMode = {
-          ...mode,
-          settings: {
-            ...mode.settings,
-            model: dispatch.model,
-            ...(typeof dispatch.reasoningEffort === 'string'
-              ? { reasoning_effort: dispatch.reasoningEffort }
-              : {}),
-          },
-        }
-      }
-    }
+    prepareManagedNativeDispatch(message, params, config, dispatch, marker, { object, configuredOverrides })
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
     if (message.method === 'turn/start' && dispatch.agentTask && dispatch.providerId !== 'openai') {
       normalizeNativeTaskFirstTurn(params)
     }
-    desktopCalls.set(message.id, { token, method: message.method, agentTask: dispatch.agentTask === true })
+    desktopCalls.set(message.id, {
+      token,
+      method: message.method,
+      agentTask: dispatch.agentTask === true,
+      ...(dispatch.logicalAttached === true ? { logicalAttached: true, threadId: params.threadId } : {}),
+    })
     if (message.method === 'turn/start') {
       firstTurns.delete(params.threadId)
       agentFirstTurns.delete(params.threadId)
@@ -634,7 +642,12 @@ async function forward(line) {
     if (message?.id !== undefined) {
       await write(process.stdout, {
         id: message.id,
-        error: { code: -32000, message: 'Provider switch could not be applied. Original request was not sent.' },
+        error: {
+          code: -32000,
+          message: logicalTurn
+            ? 'Conversation request could not be confirmed. Check thread history before retrying.'
+            : 'Provider switch could not be applied. Original request was not sent.',
+        },
       })
     }
   }
@@ -801,7 +814,7 @@ readLines(nativeInput, line => {
   } catch {}
   inputQueue = inputQueue.then(async () => {
     await ready
-    await forward(line)
+    await forwardWithLogicalFence(line, forward, value => write(process.stdout, value))
   }).catch(stop)
 })
 nativeInput.once('end', () => {
@@ -823,6 +836,19 @@ readLines(nativeTransport.stdout, line => {
   }
   turnDiagnostics.received(message)
   chatControl.received(message)
+  logicalTurnEvents.observe(message)
+  logicalWriteFence.complete(message)
+  destinationReservations.observe(message)
+  if (
+    dispatchLogicalHistory(message, {
+      controlCall: async (...args) => {
+        await logicalTurnEvents.beforeHistory()
+        return await controlCall(...args)
+      },
+      writeNative: value => write(nativeTransport.stdin, value),
+      stop,
+    })
+  ) return
   if (settle(privateCalls, message, false)) return
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return
@@ -879,6 +905,9 @@ readLines(nativeTransport.stdout, line => {
     requestId: message.id,
     succeeded: message.error === undefined,
     ...(typeof message.result?.thread?.id === 'string' ? { threadId: message.result.thread.id } : {}),
+    ...(operation.logicalTurn || operation.logicalAttached
+      ? { threadId: operation.threadId, turnId: message.result?.turn?.id }
+      : {}),
     ...(operation.agentTask && operation.method === 'thread/start'
       ? {
         providerId: message.result?.modelProvider ?? message.result?.thread?.modelProvider,
@@ -895,22 +924,6 @@ const continuation = createNativeProviderContinuation({
   lifecyclePending,
   current: threadId => !closed && !cancelledRecovery.has(threadId) && !lifecyclePending(threadId),
 })
-const BRIDGE_NATIVE_METHODS = new Set([
-  'model/list',
-  'thread/settings/update',
-  'thread/list',
-  'thread/read',
-  'thread/turns/list',
-  'thread/items/list',
-  'thread/start',
-  'thread/resume',
-  'thread/name/set',
-  'turn/start',
-  'turn/interrupt',
-  'threadSection/list',
-  'threadSection/create',
-  'thread/section/move',
-])
 readLines(control, line => {
   let message
   try {
@@ -937,41 +950,21 @@ readLines(control, line => {
     dispatchNativeTaskTool({ message, nativeCall, write, control, stop, emitDiagnostic })
     return
   }
-  // The CordisX agent bridge reads and starts threads in this same app-server, so
-  // the desktop sees them. Only these methods cross; the Host validates params.
-  if (message.type === 'native-request' && typeof message.id === 'string') {
-    const params = object(message.params)
-    if (!BRIDGE_NATIVE_METHODS.has(message.method) || params === undefined) {
-      void write(control, { id: message.id, ok: false }).catch(stop)
-      return
-    }
-    if (uncertainSwitches.has(params.threadId) && message.method === 'turn/start') {
-      void write(control, { id: message.id, ok: false, reason: 'provider-switch-reconciliation-required' }).catch(stop)
-      return
-    }
-    if (
-      uncertainSwitches.has(params.threadId) && ['thread/resume', 'turn/interrupt'].includes(message.method)
-    ) uncertainSwitches.set(params.threadId, undefined)
-    const overrides = object(message.configuredProviderOverrides)
-    const request = overrides
-      ? { ...params, config: configuredOverrides(object(params.config), overrides) }
-      : params
-    void nativeCall(message.method, request)
-      .then(value => write(control, { id: message.id, ok: true, value }))
-      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
-    return
-  }
-  if (message.type === 'idle' && typeof message.id === 'string' && typeof message.threadId === 'string') {
-    void nativeCall('thread/read', { threadId: message.threadId, includeTurns: false }).then(result => {
-      const status = result?.thread?.status?.type
-      return write(control, {
-        id: message.id,
-        ok: true,
-        value: status === 'idle' || status === 'notLoaded' || status === 'systemError',
-      })
-    }).catch(() => write(control, { id: message.id, ok: false }).catch(stop))
-    return
-  }
+  if (dispatchLogicalFence(message, logicalWriteFence, value => write(control, value), stop)) return
+  if (dispatchNativeOwnerIdentity(message, { nativeCall, write, control, stop })) return
+  if (
+    dispatchNativeBridgeRequest(message, {
+      object,
+      logicalWriteFence,
+      uncertainSwitches,
+      configuredOverrides,
+      nativeCall,
+      write,
+      control,
+      stop,
+    })
+  ) return
+  if (dispatchNativeIdle(message, { nativeCall, write, control, stop })) return
   dispatchNativeSelectionMutation(message, {
     switching,
     switchRequests,

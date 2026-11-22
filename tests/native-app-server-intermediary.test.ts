@@ -122,7 +122,7 @@ describe('native app-server intermediary', () => {
     try {
       h.send({ id: 'ready-task', method: 'echo/bytes', params: {} })
       await h.read()
-      const args = { prompt: 'Original first message', target: { type: 'projectless' } }
+      const args = { prompt: 'Original first message', target: { type: 'projectless' }, thinking: 'high' }
       const receipt: any = await h.server.invokeTask({
         callId: 'cordisx-task-exact-call',
         sourceThreadId: 'source',
@@ -145,6 +145,8 @@ describe('native app-server intermediary', () => {
         sourceThreadId: 'source',
         providerId: 'provider-b',
         model: 'model-b',
+        reasoningEffort: 'high',
+        serviceTier: 'priority',
       })
       h.send({
         id: 'agent-create',
@@ -160,6 +162,8 @@ describe('native app-server intermediary', () => {
         projectId: 'native-project',
         modelProvider: 'provider-b',
         model: 'model-b',
+        serviceTier: 'priority',
+        config: expect.objectContaining({ model_reasoning_effort: 'high' }),
       })
       expect(h.completeThreadResume).toHaveBeenCalledWith({
         threadId: 'source',
@@ -176,12 +180,16 @@ describe('native app-server intermediary', () => {
           toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Original first message' },
           approvalPolicy: 'on-request',
           model: 'old',
+          collaborationMode: { mode: 'default', settings: { model: 'old', reasoning_effort: 'low' } },
           config: { 'cordisx.operation_token': route.token },
         },
       })
       const firstTurn = JSON.parse(await h.read()).result.received
       expect(firstTurn).toMatchObject({
         model: 'model-b',
+        effort: 'high',
+        serviceTier: 'priority',
+        collaborationMode: { mode: 'default', settings: { model: 'model-b', reasoning_effort: 'high' } },
         approvalPolicy: 'on-request',
         input: [{ type: 'text', text: 'Original first message', text_elements: [] }],
       })

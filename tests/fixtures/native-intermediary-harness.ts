@@ -12,6 +12,7 @@ export async function harness(
   nativeFixture = 'native-intermediary-app-server.mjs',
   serverOptions?: Parameters<typeof startNativeSubmissionControlServer>[0],
   environment?: Readonly<Record<string, string | undefined>>,
+  actual?: Readonly<{ executable: string; args: readonly string[] }>,
 ) {
   const server = await startNativeSubmissionControlServer(serverOptions)
   const providerProcess = ['native-provider-process.mjs', 'native-provider-switch-process.mjs'].includes(nativeFixture)
@@ -67,18 +68,18 @@ export async function harness(
     } as unknown as NativeSubmissionController,
   )
   const intermediary = path.resolve('packages/cli/assets/launcher/native-app-server-protocol.mjs')
-  const nativeArguments = [path.resolve('tests/fixtures', nativeFixture), 'app-server']
+  const nativeArguments = actual ? [...actual.args] : [path.resolve('tests/fixtures', nativeFixture), 'app-server']
   const child = spawn(process.execPath, [
     intermediary,
     ...nativeArguments,
   ], {
     env: {
-      ...process.env,
+      ...(actual ? { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR } : process.env),
       ...environment,
       CODEX_CLI_PATH: 'must-not-leak',
       CORDISX_NATIVE_CONTROL_SOCKET: server.socketPath,
       CORDISX_NATIVE_CONTROL_NONCE: server.nonce,
-      CORDISX_NATIVE_REAL_CODEX_PATH: process.execPath,
+      CORDISX_NATIVE_REAL_CODEX_PATH: actual?.executable ?? process.execPath,
       CORDISX_NATIVE_NODE_PATH: process.execPath,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -100,8 +101,8 @@ export async function harness(
       buffer = buffer.slice(index + 1)
     }
   })
-  const read = async () => {
-    await vi.waitFor(() => expect(output.length, stderr).toBeGreaterThan(0), { timeout: 3000 })
+  const read = async (timeout = 3000) => {
+    await vi.waitFor(() => expect(output.length, stderr).toBeGreaterThan(0), { timeout })
     return output.shift()!
   }
   return {
@@ -151,7 +152,9 @@ export async function harness(
       }
       await closed
       await server.close()
-      expect(stderr.trim().split('\n').filter(Boolean).every(line => line.startsWith('[cordisx-native] '))).toBe(true)
+      if (!actual) {
+        expect(stderr.trim().split('\n').filter(Boolean).every(line => line.startsWith('[cordisx-native] '))).toBe(true)
+      }
     },
   }
 }

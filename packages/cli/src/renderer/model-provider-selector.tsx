@@ -26,6 +26,7 @@ import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-labe
 import { ModelStartupIcon } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
 import { managerCopy } from './ui-copy.js'
+import { NativeLogicalContinuationDialog } from './native-logical-continuation-dialog.js'
 
 export interface NativeProviderModelOption {
   readonly id: string
@@ -87,6 +88,14 @@ export interface ProviderSelectionTransport {
   selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'>
   cancelProviderIntent?(): Promise<'accepted' | 'busy' | 'unavailable'>
   confirmSubmission?(confirmed: boolean): void
+  confirmLogicalSubmission?(
+    mode: 'linked' | 'fork' | undefined,
+    remember?: 'conversation' | 'profile' | 'inherit',
+    channelCode?: string,
+  ): void
+  openLogicalSource?(sessionId: string): Promise<'accepted' | 'unavailable'>
+  logicalPrevious?(threadId: string): Promise<string | undefined>
+  logicalNext?(threadId: string): Promise<string | undefined>
 }
 
 export { selectionModelForProvider } from './model-provider-selection.js'
@@ -125,6 +134,26 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const catalog = useSyncExternalStore(registry.subscribe, registry.snapshot)
   const native = useSyncExternalStore(listener => transport.subscribe(listener), () => transport.getSnapshot())
   const [open, setOpen] = useState<'provider' | 'model'>()
+  const [previous, setPrevious] = useState<string | undefined>()
+  const [next, setNext] = useState<string | undefined>()
+  useEffect(() => {
+    let live = true
+    setPrevious(undefined)
+    setNext(undefined)
+    if (native.threadId && transport.logicalPrevious) {
+      void transport.logicalPrevious(native.threadId).then(source => {
+        if (live) setPrevious(source)
+      }).catch(() => {})
+    }
+    if (native.threadId && transport.logicalNext) {
+      void transport.logicalNext(native.threadId).then(destination => {
+        if (live) setNext(destination)
+      }).catch(() => {})
+    }
+    return () => {
+      live = false
+    }
+  }, [native.threadId, native.busy, native.submissionError, native.confirmation?.confirmationId, transport])
   const [providerQuery, setProviderQuery] = useState('')
   const [modelQuery, setModelQuery] = useState('')
   const [modelExpanded, setModelExpanded] = useState(false)
@@ -148,6 +177,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     || native.creationDisplay !== undefined && !boundCreation
   const canInteract = () => !suspended && !creationReadOnly && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
+    // Portal events still traverse this React ancestor. The confirmation must
+    // remain interactive while its modal correctly blocks the Composer seat.
+    const confirmation = event.target instanceof Element ? event.target.closest<HTMLElement>('.cxmp-confirm') : null
+    if (native.confirmation?.logical && nativeModelProviderInteractionAllowed(confirmation)) return
     if (canInteract()) return
     event.preventDefault()
     event.stopPropagation()
@@ -500,6 +533,38 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
+      {previous && transport.openLogicalSource
+        ? (
+          <button
+            type="button"
+            className="cxmp-trigger cxmp-previous-trigger"
+            disabled={suspended || native.busy}
+            onClick={() => {
+              void transport.openLogicalSource!(previous).then(result => {
+                if (result !== 'accepted') feedback.show('source.failed')
+              }).catch(() => feedback.show('source.failed'))
+            }}
+          >
+            {locale.toLowerCase().startsWith('zh') ? '此前对话' : 'Earlier conversation'}
+          </button>
+        )
+        : null}
+      {next && transport.openLogicalSource
+        ? (
+          <button
+            type="button"
+            className="cxmp-trigger cxmp-previous-trigger"
+            disabled={suspended || native.busy}
+            onClick={() => {
+              void transport.openLogicalSource!(next).then(result => {
+                if (result !== 'accepted') feedback.show('source.failed')
+              }).catch(() => feedback.show('source.failed'))
+            }}
+          >
+            {locale.toLowerCase().startsWith('zh') ? '后续对话' : 'Later conversation'}
+          </button>
+        )
+        : null}
       <button
         ref={providerTrigger}
         type="button"
@@ -897,6 +962,28 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           )
           : null}
       </HostMenuSurface>
+      {native.confirmation?.logical && transport.confirmLogicalSubmission
+        ? (
+          <NativeLogicalContinuationDialog
+            key={native.confirmation.confirmationId}
+            confirmation={native.confirmation as NativeProviderSubmitConfirmation & {
+              logical: NonNullable<NativeProviderSubmitConfirmation['logical']>
+            }}
+            locale={locale}
+            finish={(mode, remember, channelCode) => transport.confirmLogicalSubmission?.(mode, remember, channelCode)}
+            {...(transport.openLogicalSource
+              ? {
+                openSource: async (sessionId: string) => {
+                  const generation = operation.current
+                  const result = await transport.openLogicalSource!(sessionId).catch(() => 'unavailable' as const)
+                  if (result !== 'accepted' && generation === operation.current) feedback.show('source.failed')
+                  return result
+                },
+              }
+              : {})}
+          />
+        )
+        : null}
     </div>
   )
 }

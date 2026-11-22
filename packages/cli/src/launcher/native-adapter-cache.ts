@@ -9,7 +9,7 @@ import { TransformMaterializationSession } from './codex-adapter/materialization
 import { checkPreparationSignal } from './codex-adapter/preparation-error.js'
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 2
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 13
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 14
 const SHA256 = /^[a-f0-9]{64}$/u
 
 export interface CachedNativeTransform {
@@ -89,6 +89,12 @@ function validAccountCapability(
     && typeof capability.exportName === 'string' && capability.exportName.length > 0
     && (capability.readerProperty === undefined || capability.readerProperty === 'accessInputs'
       || capability.readerProperty === 'accountInfo')
+    && (capability.rspack === undefined || (
+      capability.rspack !== null && capability.exportName === '__webpack_require__'
+      && capability.readerProperty === 'accountInfo' && typeof capability.rspack.moduleId === 'string'
+      && /^[A-Za-z0-9_$-]{1,64}$/u.test(capability.rspack.moduleId)
+      && resources.some(resource => resource.url === capability.rspack!.definitionModule)
+    ))
 }
 
 export function materializeCachedTransforms(

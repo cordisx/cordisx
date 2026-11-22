@@ -1,0 +1,43 @@
+.cxmp-confirm-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.cxmp-confirm-choice input[type="radio"],
+.cxmp-confirm-choice input[type="checkbox"] {
+  appearance: auto;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--cx-primary);
+}
+
+.cxmp-confirm-choice input:disabled {
+  cursor: not-allowed;
+  opacity: var(--cx-disabled, 0.5);
+}
+
+.cxmp-confirm-choice input:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cxmp-confirm-preference {
+  display: block;
+  margin: 12px 0;
+}
+
+.cxmp-confirm-preference select {
+  appearance: auto;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--cx-border);
+  border-radius: 6px;
+  background: var(--cx-surface);
+  color: var(--cx-text);
+  font: inherit;
+}

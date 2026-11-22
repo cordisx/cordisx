@@ -1,4 +1,6 @@
 import { nativeThreadSwitchReason } from './native-thread-switch-error.js'
+import { NativeThreadSwitchError } from './native-thread-switch-error.js'
+import type { DesktopLogicalMode } from './desktop-logical-migration.js'
 import { type PreparedBase, type PreparedOperation, validText } from './native-submission-records.js'
 import type {
   NativeSubmissionControllerOptions,
@@ -9,6 +11,9 @@ interface ContinuationAdmission {
   readonly options: NativeSubmissionControllerOptions
   readonly operations: Map<string, PreparedOperation>
   readonly operationTtlMs: number
+  readonly logicalMode?: DesktopLogicalMode
+  readonly remember?: 'conversation' | 'profile' | 'inherit'
+  readonly channelCode?: string
   now(): number
   disposed(): boolean
   prepare(prepared: PreparedBase): Promise<PreparedOperation | undefined>
@@ -24,7 +29,8 @@ export async function prepareNativeContinuation(
 ): Promise<NativeSubmissionPreparation> {
   const { options, operations } = authority
   if (
-    !options.existingThread.continue || !options.selection.commitContinuation
+    (!authority.logicalMode && !options.existingThread.continue)
+    || (authority.logicalMode && !options.logicalMigration) || !options.selection.commitContinuation
     || prepared.action.continuationAvailable !== true
   ) {
     return { kind: 'reject', reason: 'provider-switch-unsupported' }
@@ -39,19 +45,42 @@ export async function prepareNativeContinuation(
     return { kind: 'reject', reason: 'stale-operation' }
   }
   operations.set(operation.token, operation)
+  let logicalCommitted = false
   try {
     if (
       authority.disposed() || !authority.revalidate(operation)
       || !await options.runtime.revalidate(operation.scope, true)
     ) throw new Error('Native continuation source changed')
-    const fork = await options.existingThread.continue({
-      scope: prepared.scope,
-      threadId: prepared.scope.threadId!,
-      providerId: prepared.pending.providerId,
-      model: prepared.pending.model,
-      configOverrides: operation.configOverrides,
-      operationToken: operation.token,
-    })
+    let fork: { threadId: string }
+    if (authority.logicalMode) {
+      operation.logicalContinuation = true
+      const result = await options.logicalMigration!.continue({
+        scope: prepared.scope,
+        operationId: prepared.action.operationId,
+        target: { providerId: prepared.pending.providerId, model: prepared.pending.model },
+        mode: authority.logicalMode,
+        ...(prepared.action.reasoningEffort ? { targetReasoningEffort: prepared.action.reasoningEffort } : {}),
+        ...(authority.remember ? { remember: authority.remember } : {}),
+        ...(authority.channelCode ? { channelCode: authority.channelCode } : {}),
+        current: () => !authority.disposed() && authority.revalidate(operation),
+        configOverrides: operation.configOverrides,
+      })
+      if (!result || result.state === 'unknown' || result.state === 'applied' && !result.navigationReady) {
+        throw new NativeThreadSwitchError('provider-switch-reconciliation-required')
+      }
+      if (result.state !== 'applied') throw new Error('Logical continuation rejected')
+      logicalCommitted = true
+      fork = { threadId: result.destination.sessionId }
+    } else {
+      fork = await options.existingThread.continue!({
+        scope: prepared.scope,
+        threadId: prepared.scope.threadId!,
+        providerId: prepared.pending.providerId,
+        model: prepared.pending.model,
+        configOverrides: operation.configOverrides,
+        operationToken: operation.token,
+      })
+    }
     if (!validText(fork.threadId, 512) || fork.threadId === prepared.scope.threadId) {
       throw new Error('Native continuation identity differed')
     }
@@ -60,10 +89,16 @@ export async function prepareNativeContinuation(
       authority.disposed() || operations.get(operation.token) !== operation || !authority.revalidate(operation)
       || !await options.runtime.revalidate(operation.scope, true) || !await authority.validateLease(operation)
     ) {
-      if (operations.get(operation.token) !== operation) {
+      if (operations.get(operation.token) !== operation && !operation.logicalContinuation) {
         await options.existingThread.discardContinuation?.({ threadId: fork.threadId, operationToken: operation.token })
       }
       throw new Error('Native continuation admission changed')
+    }
+    if (
+      authority.logicalMode === 'linked'
+      && !await options.logicalTurns?.attach(prepared.scope, fork.threadId, operation.token)
+    ) {
+      throw new NativeThreadSwitchError('provider-switch-reconciliation-required')
     }
     operation.expiresAt = authority.now() + authority.operationTtlMs
     return {
@@ -73,6 +108,11 @@ export async function prepareNativeContinuation(
     }
   } catch (error) {
     await authority.release(operation)
-    return { kind: 'reject', reason: nativeThreadSwitchReason(error) ?? 'provider-preparation-failed' }
+    return {
+      kind: 'reject',
+      reason: logicalCommitted
+        ? 'provider-switch-reconciliation-required'
+        : nativeThreadSwitchReason(error) ?? 'provider-preparation-failed',
+    }
   }
 }

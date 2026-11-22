@@ -18,6 +18,20 @@ const HELP: Readonly<Record<string, string>> = {
     'Local user only: configure best-effort idle-boundary continuation. Input: {sessionId,policy:{enabled:boolean,threshold:number,reserveTokens:integer,maxAgeMs:integer}}. Disabled by default; no guarantee against compaction.',
   'continuation-start':
     'Local user only: start a fresh Channel task using its explicit checkpoint. Input: {sessionId}. An uncertain result must be inspected, never blindly repeated.',
+  'logical-mode-default':
+    'Local user only: read the profile continuation mode preference. Input: {}. A preference does not grant history access.',
+  'logical-mode-default-set':
+    'Local user only: set or clear the profile continuation mode preference. Input: {mode:"linked"|"fork"|null,expectedRevision:integer}. History still requires explicit consent.',
+  'logical-mode-conversation':
+    'Local user only: read the effective continuation preference and conversation revision. Input: {sessionId}.',
+  'logical-mode-conversation-set':
+    'Local user only: set or clear one conversation override. Input: {sessionId,mode:"linked"|"fork"|null,expectedRevision:integer,expectedConversationId:string}; read both expected values first. History still requires explicit consent.',
+  'logical-status':
+    'Local user only: inspect up to 64 continuation operations for a source session. Input: {sessionId,operationId?}. Unknown results must be checked before any retry.',
+  'logical-chain':
+    'Local user only: inspect confirmed session boundaries ending at a destination. Input: {sessionId}. This does not disclose history or grant access.',
+  'logical-abandon':
+    'Local user only: after inspecting an unknown Desktop operation, accept a possible orphan and release its fence when the owner confirms no outstanding native writes. Input: {sessionId,operationId,confirmOrphanPossible:true}. No destination is deleted or retried.',
   'continuation-checkpoint': 'Active Channel turn with --context only: read this task checkpoint. Input: {}.',
   'continuation-checkpoint-set':
     'Active Channel turn with --context only: save an explicit handoff. Input: {expectedRevision,checkpoint:{goal,constraints,completed,remaining,history,continueAtIdle:boolean}}. Use the revision returned by continuation-checkpoint; it is 0 when no checkpoint exists. Text is bounded; source session is assigned by the Host.',

@@ -1,5 +1,8 @@
+import { logicalSubmissionConfirmation, prepareLogicalConfirmation } from './native-logical-submission-confirmation.js'
+import { desktopLogicalNavigation, desktopLogicalNeighbors } from './desktop-logical-navigation.js'
+import { nativeSubmissionConfirmation } from './native-submission-confirmation.js'
 import type { RemotePreparedProvider } from './remote-terminal-provider-client.js'
-import { nativeProviderConfig } from './native-provider-config.js'
+import { nativeProviderConfig, nativeProviderRequestConfig } from './native-provider-config.js'
 export { nativeProviderConfig } from './native-provider-config.js'
 import { randomUUID } from 'node:crypto'
 import { nativeThreadSwitchReason } from './native-thread-switch-error.js'
@@ -9,7 +12,6 @@ import {
   decideNativeProviderSubmission,
   type NativeProviderSelection,
   type NormalizedNativeSubmissionAction,
-  type PendingNativeProviderChange,
   revalidatePreparedNativeProviderChange,
 } from '../renderer/native-provider-submission-policy.js'
 
@@ -32,7 +34,6 @@ export type {
 } from './native-submission-controller-contracts.js'
 import type {
   NativeMarkedRequest,
-  NativeProviderCredentialLease,
   NativeSubmissionConfirmation,
   NativeSubmissionController,
   NativeSubmissionControllerOptions,
@@ -48,6 +49,7 @@ import {
   type PreparedBase,
   type PreparedOperation,
   type PreparedThreadResume,
+  remoteConfig,
   requestKey,
   sameScope,
   scopeKey,
@@ -57,21 +59,6 @@ import {
 
 const DEFAULT_OPERATION_TTL_MS = 120_000
 const DEFAULT_CONFIRMATION_TTL_MS = 300_000
-
-function requestConfig(
-  pending: PendingNativeProviderChange,
-  lease: NativeProviderCredentialLease,
-): Readonly<Record<string, unknown>> {
-  if (
-    !validText(pending.providerId, 128) || !validText(pending.model, 512)
-    || !validText(lease.serviceGeneration, 256)
-  ) throw new Error('native provider selection or service generation is invalid')
-  return Object.freeze({
-    model_provider: pending.providerId,
-    model: pending.model,
-    [`model_providers.${pending.providerId}`]: nativeProviderConfig(lease),
-  })
-}
 
 /** Host-only, target-scoped, non-persistent native submission authority. */
 export function createNativeSubmissionController(
@@ -121,18 +108,14 @@ export function createNativeSubmissionController(
       preparations.delete(abort)
     }
   }
-  const remoteConfig = (selection: NativeProviderSelection, lease: SubmissionLease) =>
-    Object.freeze({
-      model_provider: selection.providerId,
-      model: selection.model,
-      [`model_providers.${selection.providerId}`]: lease.provider,
-    })
-
   const releaseOperation = async (operation: PreparedOperation): Promise<void> => {
     if (operations.get(operation.token) !== operation) return
     operations.delete(operation.token)
+    options.logicalTurns?.cancelAttached(operation.token)
     try {
-      if (operation.continuationThreadId !== undefined && operation.state !== 'consumed') {
+      if (
+        operation.continuationThreadId !== undefined && operation.state !== 'consumed' && !operation.logicalContinuation
+      ) {
         await options.existingThread.discardContinuation?.({
           threadId: operation.continuationThreadId,
           operationToken: operation.token,
@@ -229,7 +212,7 @@ export function createNativeSubmissionController(
         const managed = await options.credentials.prepare(prepared.pending.providerId)
         credential = managed
         configOverrides = Object.freeze({
-          ...requestConfig(prepared.pending, managed),
+          ...nativeProviderRequestConfig(prepared.pending, managed),
           ...(prepared.action.reasoningEffort === undefined
             ? {}
             : { model_reasoning_effort: prepared.action.reasoningEffort }),
@@ -284,11 +267,19 @@ export function createNativeSubmissionController(
     })
   }
 
-  const prepareContinuation = (prepared: PreparedBase): Promise<NativeSubmissionPreparation> =>
+  const prepareContinuation = (
+    prepared: PreparedBase,
+    logicalMode?: import('./desktop-logical-migration.js').DesktopLogicalMode,
+    remember?: 'conversation' | 'profile' | 'inherit',
+    channelCode?: string,
+  ): Promise<NativeSubmissionPreparation> =>
     prepareNativeContinuation(prepared, {
       options,
       operations,
       operationTtlMs,
+      ...(logicalMode ? { logicalMode } : {}),
+      ...(remember ? { remember } : {}),
+      ...(channelCode ? { channelCode } : {}),
       now,
       disposed: () => disposed,
       prepare: prepareOperation,
@@ -481,6 +472,25 @@ export function createNativeSubmissionController(
       if (snapshot.pending?.blockedReason) return { kind: 'reject', reason: snapshot.pending.blockedReason }
       const decision = decideNativeProviderSubmission(snapshot.pending, action)
       if (decision.kind === 'pass-through') {
+        if (scope.threadId && action.intent === 'ordinary-send' && options.logicalTurns) {
+          const logical = await options.logicalTurns.prepare(scope)
+          if (logical.state === 'unavailable') return { kind: 'reject', reason: 'provider-preparation-failed' }
+          if (logical.state === 'issued') {
+            try {
+              const valid = options.providerSource?.(snapshot.effective.providerId) !== 'remote'
+                && await validSelection(snapshot.effective) && await options.runtime.revalidate(scope, true)
+              const current = options.selection.snapshot(scope)
+              if (
+                !disposed && valid && current.revision === snapshot.revision && current.pending === undefined
+                && current.pendingProviderIntent === undefined
+              ) {
+                return { kind: 'allow-logical-turn', operationToken: logical.token }
+              }
+            } catch { /* Fail closed if the owning scope disappears. */ }
+            options.logicalTurns.cancel(scope, logical.token)
+            return { kind: 'reject', reason: 'provider-preparation-failed' }
+          }
+        }
         if (options.providerSource?.(snapshot.effective.providerId) === 'remote') {
           if (!await validSelection(snapshot.effective) || !await options.runtime.revalidate(scope, true)) {
             return { kind: 'reject', reason: 'provider-preparation-failed' }
@@ -578,6 +588,16 @@ export function createNativeSubmissionController(
         operations.set(operation.token, operation)
         return { kind: 'allow-original', operationToken: operation.token }
       }
+      if (options.logicalMigration && options.logicalTurns) {
+        return await prepareLogicalConfirmation(prepared, {
+          migration: options.logicalMigration,
+          canCommit: Boolean(options.selection.commitContinuation),
+          disposed: () => disposed,
+          revalidateSelection,
+          createId,
+          confirmations,
+        })
+      }
       if (options.existingThread.continue && options.selection.commitContinuation) {
         return await prepareContinuation(prepared)
       }
@@ -585,8 +605,8 @@ export function createNativeSubmissionController(
         const result = await applyPreparedThreadSelection(prepared)
         return result.kind === 'allow-original' ? result : {
           kind: 'reject',
-          reason: result.reason === 'provider-switch-unsupported'
-              || result.reason === 'provider-switch-reconciliation-required'
+          reason: result.kind === 'reject' && (result.reason === 'provider-switch-unsupported'
+              || result.reason === 'provider-switch-reconciliation-required')
             ? result.reason
             : 'provider-preparation-failed',
         }
@@ -598,21 +618,34 @@ export function createNativeSubmissionController(
       confirmations.set(confirmationId, { ...prepared, id: confirmationId })
       return { kind: 'confirm', confirmationId, selectionRevision: snapshot.revision }
     },
-    async confirmSubmission(input) {
-      if (disposed) return { kind: 'reject', reason: 'unknown-confirmation' }
-      await expire()
-      const confirmation = confirmations.get(input.confirmationId)
-      if (confirmation === undefined) return { kind: 'reject', reason: 'unknown-confirmation' }
-      confirmations.delete(confirmation.id)
-      if (!sameScope(confirmation.scope, input.scope)) return { kind: 'reject', reason: 'stale-operation' }
-      if (confirmation.expiresAt <= now()) return { kind: 'reject', reason: 'expired-confirmation' }
-      if (
-        input.expectedSelectionRevision !== confirmation.selectionRevision
-        || !revalidateSelection(confirmation)
-        || !await options.runtime.revalidate(confirmation.scope, true)
-      ) return { kind: 'reject', reason: 'stale-operation' }
-      return applyPreparedThreadSelection(confirmation)
-    },
+    confirmSubmission: nativeSubmissionConfirmation({
+      disposed: () => disposed,
+      expire,
+      confirmations,
+      now,
+      revalidateSelection,
+      runtime: options.runtime,
+      apply: applyPreparedThreadSelection,
+    }),
+    confirmLogicalSubmission: logicalSubmissionConfirmation({
+      disposed: () => disposed,
+      expire,
+      confirmations,
+      now,
+      revalidateSelection,
+      runtime: options.runtime,
+      prepareContinuation,
+    }),
+    logicalSourceNavigation: desktopLogicalNavigation({
+      runtime: options.runtime,
+      migration: options.logicalMigration,
+      disposed: () => disposed,
+    }),
+    ...desktopLogicalNeighbors({
+      runtime: options.runtime,
+      migration: options.logicalMigration,
+      disposed: () => disposed,
+    }),
     async consumeMarkedRequest(request) {
       if (disposed) return { kind: 'reject', reason: 'unknown-token' }
       const operation = operations.get(request.operationToken)
@@ -901,6 +934,7 @@ export function createNativeSubmissionController(
       return true
     },
     async cancel(input) {
+      if (options.logicalTurns?.cancel(input.scope, input.id)) return true
       const confirmation = confirmations.get(input.id)
       if (confirmation !== undefined && sameScope(confirmation.scope, input.scope)) {
         confirmations.delete(input.id)
@@ -914,6 +948,7 @@ export function createNativeSubmissionController(
       return true
     },
     async releaseScope(scope) {
+      options.logicalTurns?.releaseScope(scope)
       for (const [abort, owner] of preparations) if (sameScope(owner, scope)) abort.abort()
       const key = scopeKey(scope)
       for (const [id, confirmation] of confirmations) {
@@ -949,6 +984,7 @@ export function createNativeSubmissionController(
     async dispose() {
       if (disposed) return
       disposed = true
+      options.logicalTurns?.dispose()
       for (const abort of preparations.keys()) abort.abort()
       confirmations.clear()
       await Promise.allSettled([

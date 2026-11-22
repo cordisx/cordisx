@@ -84,11 +84,16 @@ export class ChannelConversationTools {
     private readonly documents?: (input: unknown) => Promise<unknown>,
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
     private readonly pairing?: ChannelAdminPairing,
+    private readonly logicalPreference?: (operation: string, value: unknown) => Promise<unknown>,
   ) {}
 
   /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
   async executionGuard(operation: string, args: Record<string, unknown>, metadata?: unknown) {
     const caller = callerThreadId(metadata)
+    const target = typeof args.sessionId === 'string' ? args.sessionId : caller
+    if (operation.endsWith('-set') && target && this.consumer?.isNativeSourceMigrating(target)) {
+      return { status: 'rejected', code: 'CONTINUATION_PENDING' }
+    }
     const meta = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
     if (
       meta['cordisx/channelContext'] !== undefined
@@ -197,6 +202,35 @@ export class ChannelConversationTools {
       && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
     ) {
       return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+    }
+    if (
+      [
+        'logical-status',
+        'logical-chain',
+        'logical-abandon',
+        'logical-mode-default',
+        'logical-mode-default-set',
+        'logical-mode-conversation',
+        'logical-mode-conversation-set',
+      ]
+        .includes(operation)
+    ) {
+      if (metadata !== undefined) return { status: 'rejected', code: 'LOCAL_USER_REQUIRED' }
+      if (!this.consumer && !this.logicalPreference) {
+        return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+      }
+      try {
+        return this.consumer
+          ? await this.consumer.logicalProfilePreference(operation, value)
+          : await this.logicalPreference!(operation, value)
+      } catch (error) {
+        return {
+          status: 'rejected',
+          code: error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
+            ? error.message
+            : 'CHANNEL_OPERATION_FAILED',
+        }
+      }
     }
     if (['admin-pair-begin', 'admin-pair-status', 'admin-pair-confirm', 'admin-pair-cancel'].includes(operation)) {
       return channelAdminPairingOperation({

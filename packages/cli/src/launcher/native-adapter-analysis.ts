@@ -1,5 +1,8 @@
 import type { NativeScriptResource } from './native-submission-structure.js'
+import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import type { AdapterRuntime } from './codex-adapter/runtime.js'
+import { bundle as builtinAdapter } from '@cordisx/codex-adapter'
+import { selectAdapterModules } from './codex-adapter/selection.js'
 import {
   discoverNativeAdapterAnalysis,
   materializeCachedTransforms,
@@ -9,6 +12,19 @@ import { startNativeAdapterPreparation } from './native-adapter-preparation.js'
 export { defaultNativeSubmissionCacheDirectory } from './native-adapter-cache.js'
 export { NativeAdapterPreparationError, startNativeAdapterPreparation } from './native-adapter-preparation.js'
 export type { NativeAdapterAnalysis, NativeAdapterPreparation } from './native-adapter-preparation.js'
+
+/** Select the built-in adapter transforms without starting the submission lifecycle. */
+export function nativeSubmissionTransformsForApp(
+  appVersion: string,
+  buildNumber: string,
+  resources: readonly NativeScriptResource[],
+): readonly NativeResourceTransform[] {
+  return selectAdapterModules([{ identity: `builtin:${builtinAdapter.version}`, bundle: builtinAdapter }], {
+    appVersion,
+    buildNumber,
+    resources,
+  }).transforms
+}
 
 /** Compatibility wrapper. New callers can start early and cancel via a preparation session. */
 export async function nativeSubmissionTransforms(contents: string, cacheDirectory: string, adapterRoot: string) {

@@ -15,7 +15,7 @@ const MAX_WORKERS = 128
  */
 export function createNativeProviderTransport(
   primary,
-  { executable, args, env, initialize, diagnostic, reviewRouting } = {},
+  { executable, args, env, initialize, diagnostic, uncertain, reviewRouting } = {},
 ) {
   const stdout = new PassThrough()
   const workers = new Map()
@@ -173,6 +173,7 @@ export function createNativeProviderTransport(
         if (workers.get(id) === worker) workers.delete(id)
         worker.rejectReady(new Error('Native provider connection closed'))
         for (const pending of worker.pending.values()) {
+          uncertain?.(pending.id)
           emit({
             id: pending.id,
             error: {
@@ -296,6 +297,7 @@ export function createNativeProviderTransport(
             await route(frame, original)
           } catch (error) {
             if (frame.id !== undefined) {
+              uncertain?.(frame.id)
               emit({
                 id: frame.id,
                 error: {

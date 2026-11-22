@@ -30,8 +30,31 @@ changing the operation id is not recovery.
 After a successful native receipt is durably saved, completed routing/intent
 records retire while the real thread's credential binding remains. Pending or
 uncertain operations retain their live correlation, bounded to 128 per launch.
-The tool rejects `thinking`; reasoning selection is not part of this initial
-creation input and is never silently ignored.
+An optional `thinking` chooses a reasoning effort for the first turn. The Host
+requires that the selected model advertise the exact value and checks again
+when the native creation is claimed. Unknown, missing or malformed capability
+metadata cannot authorize an explicit effort. Omitting `thinking` retains the
+existing native/source inheritance behavior. The operation fingerprint includes
+the choice, so replay cannot change it after an uncertain result.
+
+## Creation inputs and inherited settings
+
+| Input                               | Provider-aware behavior                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider and model                  | Exact catalog pair, or the profile creation defaults when omitted; changing provider without a model uses that provider's default.                                                                                        |
+| Fast                                | Optional boolean; `true` requires advertised model support and selects native priority service tier. Omission uses the creation default or existing source behavior. Other tier values are not exposed by this operation. |
+| Reasoning effort                    | Optional `thinking` / CLI `--effort`; the exact selected model must advertise the value. Omission retains existing native/source behavior.                                                                                |
+| Title and prompt                    | Forwarded to native creation. The prompt is the actual first message; `title` is optional.                                                                                                                                |
+| Project and directory               | A registered local project, including native worktree resolution, or a projectless output directory name. This operation does not accept arbitrary cwd.                                                                   |
+| Worktree starting state             | Native default, current working tree, or a named branch; creating a missing branch requires an explicit `create-branch` choice.                                                                                           |
+| Permissions, approval and work mode | The existing native creation path owns source permissions and delegation behavior. This tool does not accept arbitrary permission, approval, work-mode or private configuration overrides.                                |
+| Remote and cloud targets            | Not supported by the current provider-aware adapter; ordinary native creation remains separate.                                                                                                                           |
+
+The projectless directory name is one name, not an absolute path, a path with
+separators, or `.` or `..`. The CLI exposes the supported local and worktree target choices. It validates
+their combinations before requesting native creation. Project registration and
+worktree provisioning remain native operations, not a promise of a particular
+filesystem layout or permission expansion.
 
 The supplementary tool calls native `mcpServer/tool/call` for `create_thread`
 on the existing app-server. It forwards an operation call id derived from the

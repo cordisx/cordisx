@@ -36,6 +36,7 @@ export const bundle: AdapterBundle = {
     ['onSelectModel', 'onSelectModelOption', 'reasoningEffort'],
     ['accessInputs', 'readAccountInfo'],
     ['accountInfo', 'readAccountInfo'],
+    ['appServices', 'setAppServices'],
     ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
     ['startWithoutFirstTurn', 'onBeforeWorktreeCreate'],
     ['browser-use-session-route-capture', 'addStreamRoleStateCallback'],

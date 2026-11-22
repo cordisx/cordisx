@@ -9,34 +9,18 @@ import type { NativeExistingThreadSwitch, NativeSubmissionController } from './n
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeThreadSwitchError } from './native-thread-switch-error.js'
+import { bindProfileLogicalFences } from './profile-logical-fence-projection.js'
+import type { ProfileLogicalConversationOwner } from './profile-logical-conversation-owner.js'
+import type { DesktopLogicalTurnAuthority } from './desktop-logical-turn-authority.js'
+import { callLogicalHistory, unavailableLogicalHistory } from './desktop-logical-turn-rpc.js'
+import { nativeMarkedRequestRpc } from './native-marked-request-rpc.js'
 import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import type { NativeManagedModelListRequest } from './native-managed-model-list.js'
+import { createDesktopLogicalHandoffControl } from './desktop-logical-handoff-control.js'
+import type { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
+import { MAX_LINE, processId, record, rejectionReason, requestId, TIMEOUT, valid } from './native-control-validation.js'
 
 // Requests stay small; authenticated native responses may contain history.
-const MAX_LINE = 256 * 1024
-const TIMEOUT = 30_000
-const valid = (value: unknown, max = 512): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-const requestId = (value: unknown): value is string | number =>
-  (typeof value === 'string' && valid(value)) || (typeof value === 'number' && Number.isSafeInteger(value))
-const processId = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
-function rejectionReason(error: unknown): string {
-  const reasons: Readonly<Record<string, string>> = {
-    'Invalid control id': 'invalid-id',
-    'Unauthenticated response': 'unauthenticated-response',
-    'Unknown control response': 'unknown-response',
-    'Unauthenticated diagnostic': 'unauthenticated-diagnostic',
-    'Invalid control authentication': 'invalid-authentication',
-    'Control unavailable': 'control-unavailable',
-    'Invalid native thread': 'invalid-thread',
-    'Invalid native request id': 'invalid-request-id',
-  }
-  return error instanceof Error ? reasons[error.message] ?? 'protocol-validation' : 'protocol-validation'
-}
-
 export type NativeBridgeMethod =
   | 'model/list'
   | 'thread/list'
@@ -45,8 +29,10 @@ export type NativeBridgeMethod =
   | 'thread/settings/update'
   | 'thread/items/list'
   | 'thread/start'
+  | 'thread/fork'
   | 'thread/resume'
   | 'thread/name/set'
+  | 'thread/metadata/update'
   | 'turn/start'
   | 'turn/interrupt'
   | 'threadSection/list'
@@ -66,12 +52,28 @@ export interface NativeSubmissionControlServer {
     }>,
   ): Promise<void>
   isThreadIdle(threadId: string): Promise<boolean>
+  acquireLogicalFence(threadId: string): Promise<string | undefined>
+  releaseLogicalFence(threadId: string, lease: string): Promise<boolean>
+  restoreLogicalFences(revision: number, sources: readonly string[]): Promise<boolean>
+  bindLogicalFenceOwner(owner: ProfileLogicalConversationOwner): void
+  bindLogicalHandoffPermits(permits: ChannelLogicalHandoffPermits): void
+  logicalHandoffReady(): boolean
+  createFencedLogicalDestination(
+    method: 'thread/start' | 'thread/fork',
+    params: Readonly<Record<string, unknown>>,
+    sourceThreadId: string,
+    logicalFenceLease: string,
+    configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<{ result: unknown; destinationLease: string }>>
   /** One allowlisted method on the desktop's own app-server; see `native-app-server-protocol.mjs`. */
   nativeRequest(
     method: NativeBridgeMethod,
     params: Readonly<Record<string, unknown>>,
     configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+    logicalFenceLease?: string,
   ): Promise<unknown>
+  /** An opaque digest only; native account records do not cross this bridge. */
+  nativeOwnerIdentity(): Promise<string | undefined>
   bindSourceConfigurationReader(
     read: (
       threadId: string,
@@ -83,6 +85,8 @@ export interface NativeSubmissionControlServer {
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
   bindChatExecution(preferences: ChatExecutionPreferences): void
+  bindLogicalHistory(handler: (params: unknown) => Promise<unknown>): void
+  bindLogicalTurns(authority: DesktopLogicalTurnAuthority): void
   subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void): () => void
   subscribeContinuationEvents(listener: (method: string, params: unknown) => void): () => void
   respondNativeApproval(input: Record<string, unknown>): Promise<unknown>
@@ -102,7 +106,7 @@ export interface NativeSubmissionControlServer {
 
 /** Private launch-scoped transport. No renderer-supplied scope crosses this boundary. */
 export async function startNativeSubmissionControlServer(
-  options: { readonly requestTimeoutMs?: number } = {},
+  options: { readonly requestTimeoutMs?: number; readonly requireLogicalFences?: boolean } = {},
 ): Promise<NativeSubmissionControlServer> {
   const diagnostic = bindDiagnostic()
   const directory = await mkdtemp(path.join(await realpath(tmpdir()), 'cx-native-'))
@@ -110,6 +114,18 @@ export async function startNativeSubmissionControlServer(
   const nonce = randomBytes(32).toString('hex')
   let peer: Socket | undefined
   let authenticated = false
+  let peerReady = false
+  let logicalFenceOwner: ProfileLogicalConversationOwner | undefined
+  let handoffPermits: ChannelLogicalHandoffPermits | undefined
+  const handoff = createDesktopLogicalHandoffControl({
+    owner: () => logicalFenceOwner,
+    permits: () => handoffPermits,
+  })
+  let fenceBarrierInstalled = false
+  let supplyLogicalOwner: ((owner: ProfileLogicalConversationOwner) => void) | undefined
+  const logicalOwnerReady = new Promise<ProfileLogicalConversationOwner>(resolve => {
+    supplyLogicalOwner = resolve
+  })
   let sourceConfiguration:
     | ((threadId: string) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>)
     | undefined
@@ -119,6 +135,8 @@ export async function startNativeSubmissionControlServer(
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
   let chatExecution: ChatExecutionPreferences | undefined
+  let logicalHistory: ((params: unknown) => Promise<unknown>) | undefined
+  let logicalTurns: DesktopLogicalTurnAuthority | undefined
   const approvalListeners = new Set<(event: Record<string, unknown>) => void>()
   const continuationListeners = new Set<(method: string, params: unknown) => void>()
   let closed = false
@@ -176,7 +194,10 @@ export async function startNativeSubmissionControlServer(
     restoration?: Readonly<{ threadId: string; revalidate?: () => Promise<boolean> }>,
   ): Promise<unknown> => {
     const socket = peer
-    if (closed || !authenticated || socket === undefined || pending.size >= 32) {
+    if (
+      closed || !authenticated || !peerReady && request.type !== 'logical-fence-restore'
+      || socket === undefined || pending.size >= 32
+    ) {
       throw new Error('Native intermediary unavailable')
     }
     const id = randomUUID()
@@ -275,7 +296,10 @@ export async function startNativeSubmissionControlServer(
       }
       forkLeases.clear()
       if (peer === socket) {
+        handoff.releaseAll()
+        if (options.requireLogicalFences && fenceBarrierInstalled) logicalFenceOwner?.store.pauseCommitBarrier()
         if (authenticated) {
+          logicalTurns?.clear()
           for (const listener of continuationListeners) {
             try {
               listener('cordisx/connection/closed', {})
@@ -284,12 +308,14 @@ export async function startNativeSubmissionControlServer(
         }
         peer = undefined
         authenticated = false
+        peerReady = false
         failPending()
       }
     })
     const handle = async (value: Record<string, unknown>): Promise<void> => {
       if (value.type === 'continuation-event') {
         if (!authenticated || !valid(value.method)) throw new Error('Control unavailable')
+        logicalTurns?.observe(value.method, value.params)
         for (const listener of continuationListeners) {
           try {
             listener(value.method, value.params)
@@ -346,6 +372,43 @@ export async function startNativeSubmissionControlServer(
               })
               : new Error('Native switch rejected'),
           )
+        return
+      }
+      if (value.type === 'logical-history') {
+        if (!authenticated) throw new Error('Control unavailable')
+        if (active >= 32) {
+          await write(socket, { id: value.id, ok: true, value: unavailableLogicalHistory() })
+          return
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          const result = await callLogicalHistory(logicalHistory, value.params)
+          await write(socket, { id: value.id, ok: true, value: result })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
+        return
+      }
+      if (
+        ['logical-handoff-status', 'logical-handoff-authorize', 'logical-handoff-release'].includes(String(value.type))
+      ) {
+        if (!authenticated || !peerReady || !options.requireLogicalFences || active >= 32) {
+          throw new Error('Control unavailable')
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          const result = await handoff.handle(
+            value,
+            () => peer === socket && authenticated && peerReady && !socket.destroyed,
+          )
+          await write(socket, { id: value.id, ok: true, value: result })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
         return
       }
       if (value.type === 'switch-resume' || value.type === 'switch-resume-complete') {
@@ -606,8 +669,28 @@ export async function startNativeSubmissionControlServer(
           parentPid: processId(value.parentPid),
           method: value.method === 'app-server-stdio' ? value.method : 'unknown',
         })
+        if (options.requireLogicalFences) {
+          const owner = logicalFenceOwner ?? await logicalOwnerReady
+          const restore = async (revision: number, sources: readonly string[]) =>
+            await callPeer({ type: 'logical-fence-restore', revision, sources }) === true
+          const readyPeer = () => {
+            if (peer !== socket || !authenticated || socket.destroyed) throw new Error('Native peer unavailable')
+            peerReady = true
+          }
+          if (!fenceBarrierInstalled) {
+            await bindProfileLogicalFences(owner, { restoreLogicalFences: restore }, readyPeer)
+            fenceBarrierInstalled = true
+          } else {
+            await owner.store.resumeCommitBarrier(readyPeer)
+          }
+        }
+        peerReady = true
         clearTimeout(authTimer)
-        await write(socket, { id: value.id, ok: true, value: { version: 1 } })
+        await write(socket, {
+          id: value.id,
+          ok: true,
+          value: { version: 1, logicalHandoffGuard: !!options.requireLogicalFences },
+        })
         return
       }
       if (value.type === 'resume' || value.type === 'managed-resume' || value.type === 'resume-complete') {
@@ -655,35 +738,13 @@ export async function startNativeSubmissionControlServer(
       active++
       activeIds.add(value.id)
       try {
-        if (value.type === 'consume') {
-          if (value.method !== 'thread/start' && value.method !== 'turn/start') throw new Error('Invalid native method')
-          const request = {
-            operationToken: value.token,
-            method: value.method as 'thread/start' | 'turn/start',
-            requestId: value.requestId,
-            ...(typeof value.threadId === 'string' ? { threadId: value.threadId } : {}),
-          }
-          const result = await taskRouting?.consume(request) ?? await controller.consumeMarkedRequest(request)
-          await write(socket, { id: value.id, ok: true, value: result })
-        } else if (value.type === 'authorize') {
-          const result = await taskRouting?.authorize(value.token, value.requestId)
-            ?? await controller.authorizeMarkedRequest({
-              operationToken: value.token,
-              requestId: value.requestId,
-            })
-          await write(socket, { id: value.id, ok: true, value: result })
-        } else if (value.type === 'complete' && typeof value.succeeded === 'boolean') {
-          const completion = {
-            operationToken: value.token,
-            requestId: value.requestId,
-            succeeded: value.succeeded,
-            ...(typeof value.threadId === 'string' ? { boundThreadId: value.threadId } : {}),
-            ...(typeof value.providerId === 'string' ? { providerId: value.providerId } : {}),
-            ...(typeof value.model === 'string' ? { model: value.model } : {}),
-          }
-          if (!await taskRouting?.complete(completion)) await controller.completeMarkedRequest(completion)
-          await write(socket, { id: value.id, ok: true })
-        } else throw new Error('Unknown control command')
+        const result = await nativeMarkedRequestRpc(
+          { ...value, token: value.token, requestId: value.requestId },
+          controller,
+          taskRouting,
+          logicalTurns,
+        )
+        await write(socket, { id: value.id, ok: true, ...(result === undefined ? {} : { value: result }) })
       } catch {
         await write(socket, { id: value.id, ok: false })
       } finally {
@@ -767,6 +828,29 @@ export async function startNativeSubmissionControlServer(
     socketPath,
     nonce,
     existingThread,
+    bindLogicalFenceOwner(owner: ProfileLogicalConversationOwner) {
+      if (!options.requireLogicalFences || logicalFenceOwner) throw new Error('Logical fence owner unavailable')
+      logicalFenceOwner = owner
+      owner.bindRecoveryProbe(async sources => await callPeer({ type: 'logical-fence-can-abandon', sources }) === true)
+      supplyLogicalOwner?.(owner)
+      supplyLogicalOwner = undefined
+    },
+    bindLogicalHandoffPermits(permits: ChannelLogicalHandoffPermits) {
+      if (!options.requireLogicalFences || handoffPermits) throw new Error('Logical handoff guard unavailable')
+      handoffPermits = permits
+    },
+    logicalHandoffReady() {
+      return !!options.requireLogicalFences && !!handoffPermits && peerReady
+        && logicalFenceOwner?.store.hasCommitBarrier() === true
+    },
+    bindLogicalHistory(handler: (params: unknown) => Promise<unknown>) {
+      if (logicalHistory) throw new Error('Logical history already bound')
+      logicalHistory = handler
+    },
+    bindLogicalTurns(authority: DesktopLogicalTurnAuthority) {
+      if (logicalTurns) throw new Error('Logical turn authority already bound')
+      logicalTurns = authority
+    },
     bindTaskRouting(value: NativeAgentTaskRouting) {
       if (taskRouting) throw new Error('Native task routing already bound')
       taskRouting = value
@@ -809,12 +893,58 @@ export async function startNativeSubmissionControlServer(
     async isThreadIdle(threadId: string) {
       return await callPeer({ type: 'idle', threadId }) === true
     },
+    async acquireLogicalFence(threadId: string) {
+      if (!valid(threadId)) throw new Error('Invalid native thread')
+      const lease = await callPeer({ type: 'logical-fence-begin', threadId })
+      return valid(lease, 256) ? lease : undefined
+    },
+    async releaseLogicalFence(threadId: string, lease: string) {
+      if (!valid(threadId) || !valid(lease, 256)) throw new Error('Invalid native thread')
+      return await callPeer({ type: 'logical-fence-release', threadId, lease }) === true
+    },
+    async restoreLogicalFences(revision: number, sources: readonly string[]) {
+      if (
+        !Number.isSafeInteger(revision) || revision < 0 || !Array.isArray(sources) || sources.length > 4096
+        || sources.some(source => !valid(source)) || new Set(sources).size !== sources.length
+      ) throw new Error('Invalid logical fence state')
+      return await callPeer({ type: 'logical-fence-restore', revision, sources }) === true
+    },
+    async createFencedLogicalDestination(
+      method: 'thread/start' | 'thread/fork',
+      params: Readonly<Record<string, unknown>>,
+      sourceThreadId: string,
+      logicalFenceLease: string,
+      configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+    ) {
+      if (
+        !['thread/start', 'thread/fork'].includes(method) || !valid(sourceThreadId)
+        || !valid(logicalFenceLease, 256) || method === 'thread/fork' && params.threadId !== sourceThreadId
+      ) throw new Error('Invalid native request')
+      const value = record(
+        await callPeer({
+          type: 'native-create-fenced',
+          method,
+          params,
+          configuredProviderOverrides,
+          logicalFenceLease,
+          logicalSourceThreadId: sourceThreadId,
+        }),
+      )
+      if (!value || !valid(value.destinationLease, 256)) throw new Error('Native destination unavailable')
+      return { result: value.result, destinationLease: value.destinationLease as string }
+    },
     async nativeRequest(
       method: NativeBridgeMethod,
       params: Readonly<Record<string, unknown>>,
       configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+      logicalFenceLease?: string,
     ) {
-      return await callPeer({ type: 'native-request', method, params, configuredProviderOverrides })
+      if (logicalFenceLease !== undefined && !valid(logicalFenceLease, 256)) throw new Error('Invalid native lease')
+      return await callPeer({ type: 'native-request', method, params, configuredProviderOverrides, logicalFenceLease })
+    },
+    async nativeOwnerIdentity() {
+      const value = await callPeer({ type: 'native-owner-identity' })
+      return typeof value === 'string' && /^desktop:[a-f0-9]{64}$/u.test(value) ? value : undefined
     },
     bindChatExecution(value: ChatExecutionPreferences) {
       chatExecution = value
@@ -852,6 +982,7 @@ export async function startNativeSubmissionControlServer(
     async close() {
       closePromise ??= (async () => {
         closed = true
+        handoff.releaseAll()
         approvalListeners.clear()
         failPending()
         expiredIds.clear()

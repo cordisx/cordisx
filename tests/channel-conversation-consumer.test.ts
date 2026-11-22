@@ -9,6 +9,8 @@ import {
   ChannelConversationTools,
 } from '../packages/cli/src/launcher/channel-conversation-tools.js'
 import { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
+import { channelLogicalTransactionStore } from '../packages/cli/src/launcher/channel-logical-continuation-store.js'
+import { parseChannelTaskConfig } from '../packages/cli/src/launcher/channel-task-config.js'
 
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test' }
 const commandGrant = { id: 'commands', action: 'command' as const, effect: 'allow' as const }
@@ -33,7 +35,7 @@ afterEach(async () => {
   for (const consumer of consumers.splice(0)) await consumer.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
-async function fixture(existingFile?: string) {
+async function fixture(existingFile?: string, logicalRuntime = true, logicalRecoveryRequired = false) {
   const root = existingFile ? path.dirname(existingFile) : await mkdtemp(path.join(os.tmpdir(), 'channel-consumer-'))
   if (!existingFile) roots.push(root)
   const file = existingFile ?? path.join(root, 'consumer.json')
@@ -76,6 +78,9 @@ async function fixture(existingFile?: string) {
   } as unknown as ChannelConversationAccess
   const report = vi.fn()
   const consumer = await ChannelConversationConsumer.open({
+    appId: 'codex',
+    logicalRuntime,
+    logicalRecoveryRequired,
     profileId: 'fixture',
     file,
     access: () => access,
@@ -91,6 +96,220 @@ async function settle(consumer: ChannelConversationConsumer) {
 }
 
 describe('persistent Channel chat consumer', () => {
+  it('does not dispatch queued work until Desktop fence recovery is ready', async () => {
+    const f = await fixture(undefined, false, true)
+    await f.consumer.policySet({
+      enabled: true,
+      rules: [{ id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['alice'] }],
+    }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)
+    f.consumer.setNativeExtras(() => f.native as never)
+    await f.consumer.receive('inbox:recovery', message('recovery'), false, true)
+    await settle(f.consumer)
+    expect(f.native.start).not.toHaveBeenCalled()
+    await f.consumer.profileLogicalOwner().store.bindCommitBarrier(async () => {})
+    await settle(f.consumer)
+    expect(f.native.start).toHaveBeenCalledOnce()
+  })
+  it('does not activate logical migration in an owner without its native guards', async () => {
+    const f = await fixture(undefined, false)
+    await f.consumer.policySet({
+      enabled: true,
+      rules: [
+        { id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['alice'] },
+        { id: 'command', action: 'command', effect: 'allow', userIds: ['alice'] },
+      ],
+    }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)
+    f.consumer.setNativeExtras(() => f.native as never)
+    await f.consumer.receive(
+      'inbox:unsupported',
+      message('om_unsupported', '/continue-provider linked new model --history=user,assistant --no-checkpoint'),
+    )
+    await settle(f.consumer)
+    expect(f.consumer.bindings()[0]?.sessionId).toBe(a)
+    expect(f.native.start).not.toHaveBeenCalled()
+    expect((f.consumer as unknown as { store: ChannelConversationStore }).store.snapshot().logicalContinuations)
+      .toBeUndefined()
+  })
+  it('routes explicit linked consent through the migration transaction', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({
+      enabled: true,
+      rules: [
+        { id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['alice'] },
+        { id: 'command', action: 'command', effect: 'allow', userIds: ['alice'] },
+      ],
+    }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
+    await f.consumer.continuation.setCheckpoint(a, {
+      goal: 'handoff-marker',
+      constraints: 'constraints',
+      completed: 'done',
+      remaining: 'next',
+      history: 'background',
+      continueAtIdle: false,
+    }, 0)
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await f.consumer.personas.profile('atlas', 'Atlas', 'Original persona', 0)
+    await f.consumer.personas.profile('nova', 'Nova', 'New persona', 0)
+    await f.consumer.personas.bind(account, 'atlas', 0)
+    await f.consumer.personas.resolveTask(a, account)
+    await f.consumer.personas.bind(account, 'nova', 1)
+    const tools = new ChannelConversationTools(() => f.access, f.consumer)
+    expect(await tools.callLocal('logical-mode-default-set', { mode: 'linked', expectedRevision: 0 }))
+      .toMatchObject({ status: 'ok', revision: 1 })
+    expect(await tools.callLocal('logical-mode-default-set', { mode: 'linked', expectedRevision: 1 }, {}))
+      .toMatchObject({ status: 'rejected', code: 'LOCAL_USER_REQUIRED' })
+    await store.mutate(state => {
+      state.taskConfig = parseChannelTaskConfig({
+        permissions: [
+          { id: 'grant', effect: 'allow', userIds: ['alice'], fields: ['providerId', 'model'] },
+        ],
+      })
+    })
+    const native = {
+      ...f.native,
+      modelOperation: async () => ({ providers: [{ providerId: 'new', models: [{ id: 'model' }] }] }),
+      taskSelection: async () => ({ providerId: 'old', model: 'old', effort: 'low' }),
+      continuationConfiguration: async () => ({
+        providerId: 'old',
+        model: 'old',
+        cwd: '/workspace',
+        serviceTier: null,
+        approvalsReviewer: 'user',
+        execution: { workMode: 'default', execution: 'read-only', approval: 'on-request', effort: 'low' },
+        sandbox: { type: 'readOnly' },
+        permissionProfile: null,
+      }),
+      logicalSourceVersion: async () => 'sha256:fixture',
+      supportsLogicalHandoff: () => true,
+      createLogicalDestination: vi.fn(async () => ({
+        state: 'created',
+        confirmed: true,
+        destination: {
+          hostId: 'local',
+          appId: 'codex',
+          profileId: 'fixture',
+          sessionId: b,
+        },
+      })),
+    }
+    f.consumer.setNativeExtras(() => native as never)
+    await f.consumer.receive('inbox:pref', message('om_pref', '/continue-provider preference linked'))
+    await settle(f.consumer)
+    await f.consumer.receive(
+      'inbox:logical',
+      message('om_logical', '/continue-provider preferred new model --history=user,assistant --checkpoint'),
+    )
+    await settle(f.consumer)
+    expect(native.createLogicalDestination).toHaveBeenCalledOnce()
+    expect(f.consumer.bindings()[0]?.sessionId).toBe(b)
+    expect(Object.values(store.snapshot().logicalContinuations?.relations ?? {})).toHaveLength(1)
+    const pin = vi.spyOn(f.consumer.personas, 'pinAlias').mockRejectedValueOnce(new Error('PERSONA_UNAVAILABLE'))
+    await f.consumer.receive('inbox:persona-failure', message('om_persona_failure'))
+    await settle(f.consumer)
+    expect(f.native.start).not.toHaveBeenCalled()
+    expect(f.consumer.status().jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: 'failed', code: 'CONTINUATION_PERSONA_UNAVAILABLE' }),
+    ]))
+    const intent = Object.values(store.snapshot().logicalContinuations!.intents)[0]!
+    expect(intent.handoffJobId).toBeUndefined()
+    pin.mockRestore()
+    await f.consumer.receive('inbox:after-logical', message('om_after_logical'))
+    await settle(f.consumer)
+    expect((await f.consumer.personas.bootstrap(b, account)).personaId).toBe('atlas')
+    expect(f.native.start).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      b,
+      expect.any(AbortSignal),
+      expect.any(Object),
+      expect.any(Object),
+      undefined,
+      undefined,
+      undefined,
+      true,
+      expect.stringContaining('handoff-marker'),
+    )
+  })
+  it('does not dispatch when a logical migration is reserved during asynchronous preparation', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
+    let release!: () => void
+    let started!: () => void
+    const entered = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    vi.spyOn(f.consumer.continuation, 'reserve').mockImplementationOnce(async () => {
+      started()
+      await gate
+      return undefined
+    })
+    await f.consumer.receive('inbox:race', message('om_race'))
+    await entered
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await store.mutate(state => {
+      state.logicalContinuations = {
+        revision: 0,
+        relations: {},
+        intents: { op: { request: { source: { sessionId: a } }, state: 'creating' } as never },
+      }
+    })
+    const binding = f.consumer.bindings()[0]!
+    await expect(f.consumer.bindingAction('unbind', binding.id)).rejects.toThrow('CONTINUATION_PENDING')
+    await expect(f.consumer.bind({ channel: channel(), mode: 'deliver' }, a)).rejects.toThrow('CONTINUATION_PENDING')
+    release()
+    await settle(f.consumer)
+    expect(f.native.start).not.toHaveBeenCalled()
+    expect(f.consumer.status().jobs).toEqual([expect.objectContaining({ state: 'queued', sessionId: a })])
+  })
+  it('does not dispatch a queued message for an unresolved logical migration after restart', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
+    await f.consumer.dispose()
+    const store = await ChannelConversationStore.open(f.file)
+    await channelLogicalTransactionStore(store).mutate(state => {
+      state.logicalContinuations!.intents.op = {
+        request: {
+          contract: 'cordisx.conversation-continuation-request/v1',
+          operationId: 'op',
+          logicalConversationId: 'logical',
+          source: { hostId: 'local', appId: 'codex', profileId: 'fixture', sessionId: a },
+          expectedRevision: 0,
+          target: { providerId: 'target', model: 'model' },
+          mode: 'fresh',
+          historyConsent: 'none',
+        },
+        actor: { principal: 'alice', scope: 'scope' },
+        evidence: {
+          sourceHistoryVersion: 'v1',
+          handoff: 'none',
+          sourceConfiguration: {
+            providerId: 'old',
+            model: 'old',
+            cwd: '/tmp',
+            serviceTier: null,
+            approvalsReviewer: 'user',
+            sandbox: { type: 'readOnly' },
+            permissionProfile: null,
+            execution: { approval: 'on-request', workMode: 'default', effort: 'medium', execution: 'read-only' },
+          },
+        },
+        state: 'creating',
+      }
+    })
+    await store.close()
+    const reopened = await fixture(f.file)
+    await reopened.consumer.receive('inbox:fenced', message('om_fenced'))
+    await settle(reopened.consumer)
+    expect(reopened.native.start).not.toHaveBeenCalled()
+  })
   it.each(['progress-final', 'manual-terminal', 'failed', 'unknown'])(
     'keeps progress independent from completion using existing receipts and per-turn routing: %s',
     async scenario => {
@@ -525,6 +744,9 @@ describe('persistent Channel chat consumer', () => {
       expect.objectContaining({ sender: { userId: 'alice' }, platform: '飞书' }),
       {},
       {},
+      undefined,
+      undefined,
+      undefined,
     )
     await f.consumer.policySet({ enabled: true, autoReply: true }, f.consumer.policy().revision)
     f.native.completion.mockResolvedValue({ state: 'completed', text: 'local answer' })

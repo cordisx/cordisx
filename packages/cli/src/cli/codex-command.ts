@@ -21,12 +21,14 @@ cordisx codex chats settings set [--session <id>] --revision <n> [--effort <valu
 cordisx codex chats settings reset [--session <id>] --revision <n>
 cordisx codex defaults get
 cordisx codex defaults set --revision <n> [settings flags or --input-file <JSON-file|->]
-cordisx codex chats create [--provider <id>] [--model <id>] [--fast <true|false>] --message <text> --operation <id> [--project <project-id>] [--title <text>]
+cordisx codex chats create [--provider <id>] [--model <id>] [--fast <true|false>] [--effort <value>] --message <text> --operation <id> [--project <project-id>] [--title <text>]
+  [--environment <local|worktree>] [--starting-state <working-tree|branch>] [--branch <ref>] [--on-missing <error|create-branch>] [--directory-name <name>]
 cordisx models services list
 cordisx models services save --input-file <JSON-file|->
 All commands accept --profile <id>. Chat targets use --session or CODEX_THREAD_ID; no target never changes global defaults.
 Settings set replaces the saved override; read its revision first. Defaults affect future chats, settings affect the next turn.
 Provider-aware create uses the existing native create_thread path and requires an actual source session/turn (--source-session, --source-turn or CODEX_THREAD_ID, CODEX_TURN_ID). No fabricated source or fallback creation.
+Creation effort must be supported by the selected model. Worktree options require an explicit project; --branch requires --starting-state branch. Directory name applies to projectless tasks only.
 Channel tasks pass their --context token and retain Channel permissions. Only --host local is supported.
 Model-service save replaces the declared services using the revision from list. Keep unrelated services. Keys/header values are write-only; use a private file or stdin. Saved services apply after restart.
 cordisx codex defaults model get
