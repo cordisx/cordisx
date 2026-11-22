@@ -423,8 +423,9 @@ renderer-only next-Send draft. The current native selection and response remain
 unchanged, and completion or cancellation of the response does not apply the draft.
 The selector labels the next-Send choice separately from the current selection.
 Only a subsequent ordinary Send consumes the draft after scope, catalog, effort,
-and authoritative idle checks. Explicit selector choice followed by ordinary idle Send directly applies a
-cross-provider draft without an additional model confirmation. Native permissions
+and authoritative idle checks. Without experimental logical continuation, an explicit selector choice followed by
+ordinary idle Send directly applies a cross-provider draft without an additional model confirmation. The experimental
+logical continuation path asks for its mode and history authorization first. Native permissions
 and approvals remain unchanged. Busy Send uses the native default queue/steer
 action without consuming the draft. Same-provider model/effort Send uses the existing
 marked-request authorization without resuming the thread. Edit/retry, steer, queue,
@@ -541,6 +542,12 @@ native OpenAI remains a UI operation.
 ## Desktop Compatibility
 
 ### Bidirectional provider continuation
+
+This section describes the predecessor behavior when
+`CORDISX_EXPERIMENTAL_LOGICAL_CONTINUATION` is not enabled. The experimental path
+uses the [logical continuation modes and authorization](channel-cli.md#model-service-continuation-experimental);
+its currently verified fork scope is narrower than the predecessor's native
+cross-provider fork and it does not silently fall back after an uncertain effect.
 
 On native builds whose complete local Composer submission and navigation paths
 are supported, selecting another provider stages a choice without changing the

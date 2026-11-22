@@ -14,6 +14,8 @@ import { claimChannelDispatch } from '../packages/cli/src/launcher/channel-conve
 import { abandonChannelLogicalContinuation } from '../packages/cli/src/launcher/channel-logical-abandon.js'
 import { desktopLogicalMigration } from '../packages/cli/src/launcher/desktop-logical-migration.js'
 import { profileLogicalConversationOwner } from '../packages/cli/src/launcher/profile-logical-conversation-owner.js'
+import { ChannelLogicalHandoffPermits } from '../packages/cli/src/launcher/channel-logical-handoff-permits.js'
+import { createDesktopLogicalHandoffControl } from '../packages/cli/src/launcher/desktop-logical-handoff-control.js'
 import {
   assertChannelLogicalHandoff,
   channelLogicalHandoffForJob,
@@ -306,6 +308,35 @@ describe('Channel logical continuation composition', () => {
           permissions: [{ id: 'grant', effect: 'allow', userIds: ['user'], fields: ['providerId', 'model'] }],
         })
       })
+      const busyFence = new ChannelNativeSourceFence(() => false)
+      const leaseInput = {
+        store,
+        fence: busyFence,
+        claims: new Set<string>(),
+        appId: 'codex',
+        profileId: 'profile',
+        event,
+        request: checkpointRequest,
+      }
+      expect(
+        await startChannelLogicalContinuation({
+          ...leaseInput,
+          native: { ...native, logicalMigrationLease: async () => ({ state: 'busy' }) } as never,
+        }),
+      ).toMatchObject({ state: 'rejected', code: 'SOURCE_BUSY' })
+      const releaseBusy = busyFence.beginMigration('source')
+      expect(releaseBusy).toBeDefined()
+      releaseBusy?.()
+      const uncertainFence = new ChannelNativeSourceFence(() => false)
+      expect(
+        await startChannelLogicalContinuation({
+          ...leaseInput,
+          fence: uncertainFence,
+          native: { ...native, logicalMigrationLease: async () => ({ state: 'unknown' }) } as never,
+        }),
+      ).toMatchObject({ state: 'rejected', code: 'SOURCE_FENCE_UNAVAILABLE' })
+      expect(uncertainFence.beginMigration('source')).toBeUndefined()
+      expect(native.createLogicalDestination).not.toHaveBeenCalled()
       native.createLogicalDestination.mockResolvedValueOnce(
         { state: 'created', confirmed: false, destination: { ...request.source, sessionId: 'orphan' } } as never,
       )
@@ -321,6 +352,18 @@ describe('Channel logical continuation composition', () => {
       })
       expect(uncertain).toMatchObject({ state: 'unknown', destination: { sessionId: 'orphan' } })
       expect(ChannelConversationStore.logicalSourceFenced(store.snapshot(), 'source')).toBe(true)
+      expect(
+        await startChannelLogicalContinuation({
+          store,
+          native: { ...native, logicalMigrationLease: async () => ({ state: 'busy' }) } as never,
+          claims: new Set(),
+          fence,
+          appId: 'codex',
+          profileId: 'profile',
+          event,
+          request: checkpointRequest,
+        }),
+      ).toMatchObject({ state: 'unknown', destination: { sessionId: 'orphan' } })
       const recovery = {
         store,
         fence,
@@ -378,8 +421,66 @@ describe('Channel logical continuation composition', () => {
       })
       expect(channelLogicalHandoffForJob(store.snapshot(), 'j', event)).toContain('checkpoint-marker')
       const handoff = channelLogicalHandoffForJob(store.snapshot(), 'j', event) as string
-      const dispatch = { threadId: 'destination', input: [{ type: 'text', text: handoff }] }
-      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', dispatch)).not.toThrow()
+      const permits = new ChannelLogicalHandoffPermits()
+      const marker = permits.issue('j', 'destination')!
+      const dispatch = { threadId: 'destination', input: [{ type: 'text', text: `${marker}\n${handoff}` }] }
+      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', dispatch)).toThrow('HANDOFF_UNAVAILABLE')
+      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/steer', dispatch, permits))
+        .toThrow('HANDOFF_UNAVAILABLE')
+      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', dispatch, permits)).not.toThrow()
+      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', dispatch, permits))
+        .toThrow('HANDOFF_UNAVAILABLE')
+      await store.bindCommitBarrier(async () => {})
+      permits.release('j')
+      const nextMarker = permits.issue('j', 'destination')!
+      const owner = profileLogicalConversationOwner(store)
+      const guard = createDesktopLogicalHandoffControl({ owner: () => owner, permits: () => permits })
+      try {
+        const query = { type: 'logical-handoff-status', threadId: 'destination', method: 'turn/start' }
+        const offer = await guard.handle(query, () => true) as { state: string; marker: string; digest: string }
+        expect(offer).toMatchObject({ state: 'pending', marker: nextMarker })
+        await store.mutate(current => {
+          current.policy = { ...current.policy, enabled: false }
+        })
+        const authorize = {
+          ...query,
+          type: 'logical-handoff-authorize',
+          marker: offer.marker,
+          digest: offer.digest,
+          guardId: 'b'.repeat(48),
+        }
+        expect(await guard.handle(authorize, () => true)).toMatchObject({ state: 'blocked' })
+        await store.mutate(current => {
+          current.policy = { ...current.policy, enabled: true }
+        })
+        const allowed = await guard.handle(authorize, () => true) as { state: string; lease: string }
+        expect(allowed.state).toBe('authorized')
+        let revoked = false
+        const revoke = store.mutate(current => {
+          current.policy = { ...current.policy, enabled: false }
+        }).then(() => {
+          revoked = true
+        })
+        await new Promise<void>(resolve => setImmediate(resolve))
+        expect(revoked).toBe(false)
+        expect(await guard.handle({ type: 'logical-handoff-release', lease: allowed.lease }, () => true)).toBe(true)
+        await revoke
+        expect(revoked).toBe(true)
+        await store.mutate(current => {
+          current.policy = { ...current.policy, enabled: true }
+        })
+        permits.release('j')
+        const delayedMarker = permits.issue('j', 'destination')!
+        const held = await store.holdCommittedSnapshot(() => true)
+        const delayedId = 'c'.repeat(48)
+        const delayed = guard.handle({ ...authorize, marker: delayedMarker, guardId: delayedId }, () => true)
+        expect(await guard.handle({ type: 'logical-handoff-release', lease: delayedId }, () => true)).toBe(true)
+        held.release()
+        expect(await delayed).toMatchObject({ state: 'blocked' })
+        expect(permits.peek('j', 'destination')).toBe(delayedMarker)
+      } finally {
+        guard.releaseAll()
+      }
       expect(store.snapshot().logicalContinuations?.intents.op2?.handoffJobId).toBe('j')
       const pending = store.snapshot()
       pending.jobs.next = { ...pending.jobs.j!, id: 'next', state: 'queued' }
@@ -410,7 +511,11 @@ describe('Channel logical continuation composition', () => {
         current.continuations.source!.checkpoint = { ...current.continuations.source!.checkpoint!, goal: 'changed' }
       })
       expect(channelLogicalHandoffForJob(store.snapshot(), 'j', event)).toBe(false)
-      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', dispatch)).toThrow('HANDOFF_UNAVAILABLE')
+      permits.release('j')
+      const renewed = permits.issue('j', 'destination')!
+      const stale = { threadId: 'destination', input: [{ type: 'text', text: `${renewed}\n${handoff}` }] }
+      expect(() => assertChannelLogicalHandoff(store.snapshot(), 'turn/start', stale, permits))
+        .toThrow('HANDOFF_UNAVAILABLE')
       const statusArgs = {
         store,
         native: native as never,
@@ -423,6 +528,9 @@ describe('Channel logical continuation composition', () => {
         argument: 'status op2',
       }
       expect(await channelLogicalCommand(statusArgs)).toContain('切换已完成')
+      const heldSource = fence.beginMigration('source')!
+      expect(await channelLogicalCommand(statusArgs)).toContain('原生保护尚未解除')
+      heldSource()
       expect(
         await channelLogicalCommand({ ...statusArgs, event: { ...event, actor: { ...event.actor, userId: 'other' } } }),
       )

@@ -24,6 +24,7 @@ import { dispatchNativeOwnerIdentity } from './native-owner-account.mjs'
 import { NativeLogicalDestinationReservations } from './native-logical-destination-reservations.mjs'
 import { createLogicalTurnEvents } from './native-logical-turn-events.mjs'
 import { prepareManagedNativeDispatch } from './native-managed-dispatch.mjs'
+import { createNativeIntermediaryWriter } from './native-intermediary-writer.mjs'
 import {
   dispatchLogicalFence,
   forwardWithLogicalFence,
@@ -174,27 +175,18 @@ const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.
 const lifecyclePending = threadId =>
   lifecycleUncertain || uncertainSwitches.has(threadId)
   || [...lifecycleCalls.values()].includes(threadId)
-const write = (stream, value, logicalLease, logicalSourceThreadId) =>
-  new Promise((resolve, reject) => {
-    if (stream.destroyed) {
-      reject(new Error('Native transport is closed'))
-      return
-    }
-    if (stream === nativeTransport.stdin) {
-      let message
-      try {
-        message = typeof value === 'string' ? JSON.parse(value) : value
-        if (message?.method === 'initialize') {
-          initializeRequestId = message.id
-          nativeLifecycle('initialize-issued')
-        }
-      } catch {}
-      if (message) logicalWriteFence.enter(message, logicalLease, logicalSourceThreadId)
-      if (message) turnDiagnostics.issued(message)
-    }
-    stream.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`, error =>
-      error ? reject(error) : resolve())
-  })
+let logicalHandoffGuard = false
+const write = createNativeIntermediaryWriter({
+  nativeStream: () => nativeTransport.stdin,
+  fence: logicalWriteFence,
+  initializing: message => {
+    initializeRequestId = message.id
+    nativeLifecycle('initialize-issued')
+  },
+  issued: message => turnDiagnostics.issued(message),
+  handoffEnabled: () => logicalHandoffGuard,
+  controlCall,
+})
 
 function rejectAll(calls) {
   for (const call of calls.values()) {
@@ -323,6 +315,7 @@ control.once('connect', () => {
   nativeLifecycle('control-connected')
   void controlCall('hello', { nonce, sourcePid: process.pid, parentPid: process.ppid, method: 'app-server-stdio' })
     .then(value => {
+      logicalHandoffGuard = value?.logicalHandoffGuard === true
       nativeLifecycle('control-authenticated')
       authenticate.resolve(value)
     }, error => {

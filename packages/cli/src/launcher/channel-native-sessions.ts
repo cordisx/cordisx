@@ -3,8 +3,9 @@ import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime
 import { randomBytes } from 'node:crypto'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
-import { codexThreadMetadata, codexTranscriptPage, codexTurn } from './agent-bridge-codex-history.js'
-import { continuationTurnHistoryPage, isTurnHistoryCursor } from './channel-continuation-turn-history.js'
+import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
+import { channelContinuationHistory } from './channel-continuation-history.js'
+import { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { ChannelReplyDefaults } from './channel-reply-routing.js'
 import {
@@ -33,13 +34,13 @@ import {
   continuationStartMatches,
 } from './channel-continuation-config.js'
 import { ChannelLiveTurnControl } from './channel-live-turn-control.js'
-import { logicalHistoryContentVersion, logicalSourceSnapshotVersion } from './logical-continuation-snapshot.js'
+import { logicalHistoryContentVersion } from './logical-continuation-snapshot.js'
 import { logicalNativeHistoryPage } from './logical-continuation-native-page.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { createLogicalNativeDestination } from './logical-continuation-native-create.js'
 import type { LogicalContinuationEvidence, LogicalContinuationRequest } from './logical-continuation-control.js'
 import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
-import { channelHistoryContextTokens } from './channel-logical-history-projection.js'
+import { channelLogicalSourceSnapshot } from './channel-logical-source-snapshot.js'
 import { logicalPresentation, placeLogicalDestination } from './logical-continuation-presentation.js'
 
 const object = (value: unknown): Record<string, unknown> =>
@@ -56,6 +57,7 @@ export type ChannelNativeReconciliationResult = Omit<ChannelNativeTurnResult, 's
 
 /** Uses the launch's authenticated native backend and existing provider/credential preparation. */
 export class ChannelNativeSessions {
+  readonly logicalHandoffPermits = new ChannelLogicalHandoffPermits()
   private readonly organization: ChannelChatOrganization
   private readonly continuationUsage = new ContinuationUsage()
   private readonly contextRedactions = new Map<string, Set<string>>()
@@ -86,6 +88,9 @@ export class ChannelNativeSessions {
       readonly cwd: string
       readonly nativeVersion?: string
       readonly logicalHandoffWriteGuardReady?: () => boolean
+      readonly logicalMigrationLease?: (
+        source: string,
+      ) => ReturnType<typeof import('./channel-logical-native-lease.js').acquireChannelLogicalNativeLease>
       readonly logicalOwnerIdentity?: () => Promise<string | undefined>
       readonly providerId?: string
       readonly model?: string
@@ -163,6 +168,9 @@ export class ChannelNativeSessions {
   supportsLogicalHandoff() {
     return this.input.logicalHandoffWriteGuardReady?.() === true
   }
+  get logicalMigrationLease() {
+    return this.input.logicalMigrationLease
+  }
   async logicalOwnerIdentity() {
     return await this.input.logicalOwnerIdentity?.()
   }
@@ -211,19 +219,13 @@ export class ChannelNativeSessions {
   }
   /** Caller must also hold the owner-side source fence while this runs and until commit. */
   async logicalSourceVersion(source: LogicalSessionRef): Promise<string | undefined> {
-    if (!await this.idle(source.sessionId)) return undefined
-    const tokens = new Set<string>()
-    const version = await logicalSourceSnapshotVersion(
-      this.input,
-      source,
-      items => channelHistoryContextTokens(items, tokens),
-    )
-    if (!await this.idle(source.sessionId)) return undefined
-    this.logicalContextRedactions.set(source.sessionId, [...tokens])
+    const snapshot = await channelLogicalSourceSnapshot(this.input, source, threadId => this.idle(threadId))
+    if (!snapshot) return undefined
+    this.logicalContextRedactions.set(source.sessionId, snapshot.tokens)
     if (this.logicalContextRedactions.size > 128) {
       this.logicalContextRedactions.delete(this.logicalContextRedactions.keys().next().value!)
     }
-    return version
+    return snapshot.version
   }
   logicalContextTokens(sessionId: string) {
     return this.logicalContextRedactions.get(sessionId)
@@ -306,25 +308,12 @@ export class ChannelNativeSessions {
     return logicalNativeHistoryPage(this.input, source, cursor)
   }
   async continuationHistory(threadId: string, options: { readonly limit?: number; readonly cursor?: unknown }) {
-    let page: Awaited<ReturnType<typeof continuationTurnHistoryPage>> | Awaited<ReturnType<typeof codexTranscriptPage>>
-    if (isTurnHistoryCursor(options.cursor)) page = await continuationTurnHistoryPage(this.input, threadId, options)
-    else {
-      try {
-        page = await codexTranscriptPage(this.input, threadId, options)
-      } catch (error) {
-        const code = object(error).rpcCode
-        if (options.cursor !== undefined || code !== -32601) throw error
-        page = await continuationTurnHistoryPage(this.input, threadId, options)
-      }
-    }
-    const tokens = this.contextRedactions.get(threadId) ?? new Set<string>()
-    return {
-      ...page,
-      entries: page.entries.map(entry => ({
-        ...entry,
-        text: [...tokens].reduce((value, token) => value.replaceAll(token, '[context redacted]'), entry.text),
-      })),
-    }
+    return await channelContinuationHistory(
+      this.input,
+      threadId,
+      options,
+      this.contextRedactions.get(threadId) ?? new Set(),
+    )
   }
   async startContinuation(
     operationId: string,
@@ -803,9 +792,17 @@ export class ChannelNativeSessions {
       ...(continuation ? { nativeOperationId: continuation.operationId } : {}),
     })
     const contextToken = this.sources.get(operationId)!.token
+    const handoffMarker = logicalHandoff && sessionId
+      ? this.logicalHandoffPermits.issue(operationId, sessionId)
+      : undefined
+    if (logicalHandoff && !handoffMarker) {
+      this.sources.delete(operationId)
+      return { state: 'reconciliation-required', code: 'HANDOFF_ASSOCIATION_UNAVAILABLE' }
+    }
     const title = channelChatTitle(event)
     const prompt = [
       ...(continuation ? [continuation.brief, ''] : []),
+      ...(handoffMarker ? [handoffMarker, ''] : []),
       ...(logicalHandoff ? [logicalHandoff, ''] : []),
       ...(logicalHistory
         ? [
@@ -959,6 +956,8 @@ export class ChannelNativeSessions {
         ...(sessionId === undefined ? {} : { sessionId }),
         code: 'NATIVE_EFFECT_UNCERTAIN',
       }
+    } finally {
+      this.logicalHandoffPermits.release(operationId)
     }
   }
   async reconcile(operationId: string): Promise<ChannelNativeReconciliationResult> {

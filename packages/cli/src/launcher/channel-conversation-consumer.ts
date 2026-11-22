@@ -156,7 +156,7 @@ export class ChannelConversationConsumer {
       || ChannelConversationStore.logicalSessionFenced(this.store.snapshot(), threadId)
   }
   assertNativeHandoff(method: string, params: Readonly<Record<string, unknown>>) {
-    assertChannelLogicalHandoff(this.store.snapshot(), method, params)
+    assertChannelLogicalHandoff(this.store.snapshot(), method, params, this.extraNative?.()?.logicalHandoffPermits)
   }
   bindings(): readonly ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)

@@ -14,13 +14,23 @@ import { parseChannelTaskConfig } from '../packages/cli/src/launcher/channel-tas
 import { channelLogicalCommand } from '../packages/cli/src/launcher/channel-logical-command.js'
 import { createChannelLogicalHistory } from '../packages/cli/src/launcher/channel-logical-history.js'
 import { startHeadlessCodexBackend } from '../packages/cli/src/launcher/headless-codex-backend.js'
+import { startChannelLogicalContinuation } from '../packages/cli/src/launcher/channel-logical-continuation.js'
+import { acquireChannelLogicalNativeLease } from '../packages/cli/src/launcher/channel-logical-native-lease.js'
+import { ChatExecutionPreferences } from '../packages/cli/src/launcher/chat-execution-preferences.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { claimChannelDispatch } from '../packages/cli/src/launcher/channel-conversation-dispatch.js'
+import {
+  channelLogicalHandoffForJob,
+  confirmChannelLogicalHandoff,
+} from '../packages/cli/src/launcher/channel-logical-handoff.js'
 
 const executable = process.env.CORDISX_LOGICAL_NATIVE_TEST_EXECUTABLE
 const realTarget = process.env.CORDISX_LOGICAL_NATIVE_DESKTOP_REAL_TARGET === '1'
 const placementMode = process.env.CORDISX_LOGICAL_NATIVE_DESKTOP_PLACEMENT === '1'
+const explicitEffort = process.env.CORDISX_LOGICAL_NATIVE_DESKTOP_EFFORT === '1'
 describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', () => {
   it.each(
-    realTarget ? ['linked', 'bound-linked'] : ['linked', 'bound-linked', 'fork'],
+    realTarget ? ['linked', 'bound-linked'] : ['linked', 'bound-linked', 'fork', 'channel-checkpoint', 'channel-fork'],
   )(
     'creates and dispatches a %s destination through the real native intermediary',
     async mode => {
@@ -31,14 +41,20 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
         historySeen = false,
         historyCalls = 0,
         historySuccess = false,
+        handoffSeen = false,
         projectedContextLeak = false,
         historyArguments: unknown
       const historySources: string[] = []
+      const modelEfforts: unknown[] = []
       const model = createServer(async (request, response) => {
         let body = ''
         for await (const chunk of request) body += chunk
+        modelEfforts.push(JSON.parse(body).reasoning?.effort)
         calls++
-        if ((calls > 2 || mode === 'fork' && calls > 1) && body.includes('PAPERKITE')) historySeen = true
+        if (body.includes('SYNTHETIC_CHECKPOINT')) handoffSeen = true
+        if ((calls > 2 || ['fork', 'channel-fork'].includes(mode) && calls > 1) && body.includes('PAPERKITE')) {
+          historySeen = true
+        }
         let nextCursor: string | undefined
         const findCursor = (value: unknown): void => {
           if (typeof value === 'string') {
@@ -55,7 +71,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           }
         }
         findCursor(JSON.parse(body))
-        const item = (mode !== 'fork' && calls === 2
+        const item = (!['fork', 'channel-fork'].includes(mode) && calls === 2
             || mode === 'bound-linked' && [4, 6, 7, 9].includes(calls))
           ? {
             type: 'function_call',
@@ -136,7 +152,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           method: 'initialize',
           params: { clientInfo: { name: 'fixture', version: '1' }, capabilities: { experimentalApi: true } },
         })
-        expect(JSON.parse(await h.read()).id).toBe('initialize')
+        expect(JSON.parse(await h.read(15000)).id).toBe('initialize')
         if (realTarget) {
           expect(await h.server.nativeOwnerIdentity()).toMatch(/^desktop:[a-f0-9]{64}$/u)
         }
@@ -149,7 +165,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
         }) as any
         const source = started.thread.id as string
         const recorded = new Map<string, unknown>()
-        const execution = {
+        const fixtureExecution = {
           settled: async () => {},
           creationDefaults: async () => ({ settings: {} }),
           read: (_host: string, threadId: string) =>
@@ -158,10 +174,65 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           set: async (_host: string, threadId: string, settings: unknown) => {
             recorded.set(threadId, {
               application: 'applied',
-              effective: { ...started, modelProvider: mode === 'fork' ? 'source' : 'target', model: 'fixture-model' },
+              override: settings,
+              effective: {
+                ...started,
+                reasoningEffort: (settings as { effort?: string }).effort ?? started.reasoningEffort,
+                modelProvider: ['fork', 'channel-fork'].includes(mode) ? 'source' : 'target',
+                model: 'fixture-model',
+              },
             })
             return { override: settings }
           },
+        }
+        let persistedExecution: ChatExecutionPreferences | undefined
+        if (explicitEffort && mode === 'linked') {
+          const configPath = path.join(root, 'cordisx.json')
+          await writeFile(
+            configPath,
+            JSON.stringify({
+              ...createDefaultHomeConfig(),
+              apps: {
+                codex: {
+                  defaultProfile: 'fixture',
+                  profiles: { fixture: { displayName: 'Fixture', dataMode: 'shared' } },
+                },
+              },
+            }),
+          )
+          persistedExecution = await ChatExecutionPreferences.open({
+            file: path.join(root, 'execution.json'),
+            configPath,
+            appId: 'codex',
+            profileId: 'fixture',
+          })
+          const capture = await persistedExecution.prepare('thread/start', {
+            modelProvider: 'source',
+            model: 'fixture-model',
+            cwd: root,
+            approvalPolicy: 'on-request',
+            sandbox: 'read-only',
+            config: { model_reasoning_effort: 'low' },
+          })
+          if (!capture.captureId) throw new Error('SOURCE_CAPTURE_UNAVAILABLE')
+          await persistedExecution.complete(capture.captureId, true, started)
+          expect(persistedExecution.read('local', source)?.application).toBe('applied')
+        }
+        const execution = persistedExecution ?? fixtureExecution
+        const expectWriteBlocked = async (id: string, threadId: string) => {
+          h.send({
+            id,
+            method: 'turn/start',
+            params: { threadId, input: [{ type: 'text', text: 'blocked', text_elements: [] }] },
+          })
+          for (let count = 0; count < 100; count++) {
+            const message = JSON.parse(await h.read(15000))
+            if (message.id === id) {
+              expect(message).toMatchObject({ error: { code: -32000 } })
+              return
+            }
+          }
+          throw new Error('FENCE_RESPONSE_UNAVAILABLE')
         }
         const native = new ChannelNativeSessions({
           bridge: () =>
@@ -178,10 +249,33 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           cwd: root,
           nativeVersion: 'codex-cli 0.171.0-alpha.13',
           logicalOwnerIdentity: async () => 'desktop:fixture',
+          logicalHandoffWriteGuardReady: () => h.server.logicalHandoffReady(),
+          logicalMigrationLease: async sourceId => {
+            const lease = await acquireChannelLogicalNativeLease(h.server, sourceId)
+            if (lease.state !== 'acquired' || !['channel-checkpoint', 'channel-fork'].includes(mode)) return lease
+            await expectWriteBlocked('blocked-source', sourceId)
+            return {
+              ...lease,
+              nativeRequest: async (method, params) => {
+                const result = await lease.nativeRequest(method, params)
+                if (method === 'thread/start' || method === 'thread/fork') {
+                  await expectWriteBlocked('blocked-destination', (result as any).thread.id)
+                }
+                return result
+              },
+            }
+          },
+          models: async () => ({
+            providers: ['source', 'target'].map(providerId => ({
+              providerId,
+              models: [{ id: 'fixture-model' }],
+            })),
+          }),
           execution: execution as never,
           confirmedWorkMode: () => 'default',
           subscribeContinuationEvents: listener => h.server.subscribeContinuationEvents(listener),
         })
+        h.server.bindLogicalHandoffPermits(native.logicalHandoffPermits)
         const control = {
           ...h.server,
           bindLogicalHistory(handler: (params: unknown) => Promise<unknown>) {
@@ -283,11 +377,140 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           composerId: 'composer',
           threadId: source,
         }
-        const target = mode === 'fork'
+        const target = ['fork', 'channel-fork'].includes(mode)
           ? { providerId: 'source', model: 'fixture-model' }
           : realTarget
           ? { providerId: 'openai', model: 'gpt-6.1-terra' }
           : { providerId: 'target', model: 'fixture-model' }
+        if (mode === 'channel-checkpoint' || mode === 'channel-fork') {
+          const channel = {
+            adapterId: 'test',
+            accountId: 'account',
+            tenantId: 'tenant',
+            conversationId: 'chat',
+            threadId: 'chat',
+            kind: 'direct' as const,
+            semantics: 'conversation' as const,
+          }
+          const event = {
+            ...channel,
+            eventId: 'event',
+            actor: { adapterId: 'test', accountId: 'account', tenantId: 'tenant', userId: 'user' },
+          }
+          const message = {
+            contract: 'cordisx.channel-user-input/v1',
+            schemaVersion: 1,
+            role: 'user',
+            content: [{ type: 'text', text: 'What was the codeword?' }],
+            source: { kind: 'channel', event },
+            receivedAt: new Date().toISOString(),
+          } as const
+          await store.mutate(state => {
+            state.policy = parseChannelConversationPolicy({
+              enabled: true,
+              rules: [
+                { id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['user'] },
+                { id: 'command', action: 'command', effect: 'allow', userIds: ['user'] },
+              ],
+            })
+            state.taskConfig = parseChannelTaskConfig({
+              permissions: [
+                { id: 'target', effect: 'allow', userIds: ['user'], fields: ['providerId', 'model'] },
+              ],
+            })
+            state.bindings.b = {
+              id: 'b',
+              channel,
+              sessionId: source,
+              hostId: 'local',
+              profileId: 'fixture',
+              createdAt: '',
+              fromSequence: 0,
+              mode: 'deliver',
+              autoReply: false,
+              state: 'active',
+            }
+            state.inputs.r = { recordId: 'r', input: message, accepted: true } as never
+            state.jobs.j = {
+              id: 'j',
+              recordId: 'r',
+              bindingId: 'b',
+              autoCreate: false,
+              state: 'queued',
+              sessionId: source,
+            }
+            state.continuations[source] = {
+              checkpoint: {
+                threadId: source,
+                revision: 1,
+                goal: 'SYNTHETIC_CHECKPOINT',
+                constraints: 'fixture constraints',
+                completed: 'fixture done',
+                remaining: 'fixture remaining',
+                history: 'fixture history',
+                continueAtIdle: false,
+              },
+            }
+          })
+          const result = await startChannelLogicalContinuation({
+            store,
+            native,
+            fence: owner.fence,
+            claims: new Set(),
+            appId: 'codex',
+            profileId: 'fixture',
+            event,
+            request: {
+              contract: 'cordisx.conversation-continuation-request/v1',
+              operationId: 'channel-operation',
+              logicalConversationId: 'conversation',
+              source: { hostId: 'local', appId: 'codex', profileId: 'fixture', sessionId: source },
+              expectedRevision: 0,
+              target,
+              ...(mode === 'channel-fork'
+                ? { mode: 'fork' as const, historyConsent: 'inherit' as const }
+                : {
+                  mode: 'linked' as const,
+                  historyConsent: 'on-demand' as const,
+                  handoffConsent: 'checkpoint' as const,
+                  historyCategories: ['user-text', 'assistant-text'] as const,
+                }),
+            },
+          })
+          expect(result).toMatchObject({ state: 'applied' })
+          if (result.state !== 'applied') throw new Error('CHANNEL_MIGRATION_UNAVAILABLE')
+          await store.mutate(state => expect(claimChannelDispatch(state, state.jobs.j!, event, undefined)).toBe(true))
+          const handoff = channelLogicalHandoffForJob(store.snapshot(), 'j', event)
+          if (mode === 'channel-checkpoint') expect(typeof handoff).toBe('string')
+          const turn = await native.start(
+            'j',
+            message as never,
+            result.destination.sessionId,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            mode === 'channel-checkpoint',
+            typeof handoff === 'string' ? handoff : undefined,
+          )
+          expect(turn.state).toBe('running')
+          expect(turn.turnId).toBeTruthy()
+          await store.mutate(state => {
+            if (mode === 'channel-checkpoint') {
+              confirmChannelLogicalHandoff(state, 'j', result.destination.sessionId, turn.turnId!)
+            }
+            state.jobs.j!.turnId = turn.turnId
+          })
+          await waitTurn(result.destination.sessionId, 'channel checkpoint')
+          if (mode === 'channel-checkpoint') {
+            expect(handoffSeen).toBe(true)
+            expect(historySuccess).toBe(true)
+            expect(store.snapshot().logicalContinuations?.intents['channel-operation']?.handoffTurnId).toBe(turn.turnId)
+          } else expect(historySeen).toBe(true)
+          return
+        }
         let channelCode: string | undefined
         if (mode === 'bound-linked') {
           const channel = {
@@ -365,11 +588,28 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           mode: mode === 'fork' ? 'fork' : 'linked',
           ...(channelCode ? { channelCode } : {}),
           current: () => true,
-          configOverrides: {},
+          ...(explicitEffort && mode === 'linked' ? { targetReasoningEffort: 'high' as const } : {}),
+          configOverrides: explicitEffort && mode === 'linked' ? { model_reasoning_effort: 'high' } : {},
         })
         expect(result, JSON.stringify(result)).toMatchObject({ state: 'applied', navigationReady: true })
         if (result?.state !== 'applied') throw new Error('MIGRATION_UNAVAILABLE')
         const destination = result.destination.sessionId
+        if (explicitEffort && mode === 'linked') {
+          expect(sourceConfig?.execution.effort).toBe('low')
+          expect(store.snapshot().logicalContinuations?.intents.operation?.evidence).toMatchObject({
+            sourceConfiguration: { execution: { effort: 'low' } },
+            targetReasoningEffort: 'high',
+          })
+          expect(persistedExecution?.read('local', destination)).toMatchObject({ override: { effort: 'high' } })
+          const reopened = await ChatExecutionPreferences.open({
+            file: path.join(root, 'execution.json'),
+            configPath: path.join(root, 'cordisx.json'),
+            appId: 'codex',
+            profileId: 'fixture',
+          })
+          expect(reopened.read('local', destination)).toMatchObject({ override: { effort: 'high' } })
+          h.server.bindChatExecution(persistedExecution!)
+        }
         if (placementMode) {
           const targetRead = await h.server.nativeRequest('thread/read', {
             threadId: destination,
@@ -406,7 +646,8 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           providerId: target.providerId,
           model: target.model,
           serviceGeneration: 'fixture',
-          configOverrides: {},
+          ...(explicitEffort && mode === 'linked' ? { reasoningEffort: 'high' } : {}),
+          configOverrides: explicitEffort && mode === 'linked' ? { model_reasoning_effort: 'high' } : {},
         })
         h.send({
           id: 'target-turn',
@@ -418,6 +659,7 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
           },
         })
         await waitTurn(destination, 'desktop')
+        if (explicitEffort && mode === 'linked') expect(modelEfforts[1]).toBe('high')
         expect(historySeen, JSON.stringify({ calls, historyCalls, historySuccess, historyArguments })).toBe(true)
         if (realTarget) expect(calls).toBe(1)
         const read = await h.server.nativeRequest('thread/read', { threadId: destination, includeTurns: true }) as any
@@ -426,6 +668,28 @@ describe.skipIf(!executable)('isolated Desktop intermediary with native Codex', 
             item.type === 'agentMessage' && item.text.includes('PAPERKITE')
           ),
         ).toBe(true)
+        if (explicitEffort && mode === 'linked') {
+          const next = await composition.preparation!.prepare({ ...scope, threadId: destination })
+          if (next.state !== 'issued') throw new Error('NEXT_TURN_AUTHORITY_UNAVAILABLE')
+          h.consume.mockResolvedValueOnce({
+            kind: 'dispatch',
+            providerId: target.providerId,
+            model: target.model,
+            serviceGeneration: 'fixture',
+            configOverrides: {},
+          })
+          h.send({
+            id: 'target-next-turn',
+            method: 'turn/start',
+            params: {
+              threadId: destination,
+              input: [{ type: 'text', text: 'Continue', text_elements: [] }],
+              config: { 'cordisx.operation_token': next.token },
+            },
+          })
+          await waitTurn(destination, 'later desktop turn')
+          expect(modelEfforts[3]).toBe('high')
+        }
         if (mode === 'bound-linked') {
           if (realTarget) return
           const event = store.snapshot().inputs.r!.input.source.event

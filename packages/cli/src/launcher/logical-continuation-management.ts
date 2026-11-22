@@ -27,7 +27,13 @@ export function logicalContinuationManagement(
   if (operation === 'logical-status') {
     if (!appId) throw new Error('LOGICAL_RUNTIME_UNAVAILABLE')
     return {
-      ...logicalContinuationStatus(owner.store, appId, profileId, value),
+      ...logicalContinuationStatus(
+        owner.store,
+        appId,
+        profileId,
+        value,
+        sessionId => owner.fence.isMigrating(sessionId),
+      ),
       ...(input.recoveryRequired ? { recoveryReady: owner.store.hasCommitBarrier() } : {}),
     }
   }

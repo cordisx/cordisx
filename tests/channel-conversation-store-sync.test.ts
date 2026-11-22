@@ -31,6 +31,39 @@ vi.mock('node:fs/promises', async importOriginal => {
 import { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
 
 describe('Channel store uncertain durability', () => {
+  it('holds policy changes until an authorized native write releases its committed snapshot', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-store-write-lease-'))
+    const store = await ChannelConversationStore.open(path.join(dir, 'state.json'))
+    try {
+      await expect(store.holdCommittedSnapshot(state => state.nextSequence)).rejects.toThrow(
+        'CONVERSATION_STORE_UNAVAILABLE',
+      )
+      await store.bindCommitBarrier(async () => {})
+      const held = await store.holdCommittedSnapshot(state => state.nextSequence)
+      expect(held.value).toBe(1)
+      let changed = false
+      const mutation = store.mutate(state => {
+        state.nextSequence = 2
+      }).then(() => {
+        changed = true
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(changed).toBe(false)
+      held.release()
+      held.release()
+      await mutation
+      expect(store.snapshot().nextSequence).toBe(2)
+      await expect(store.holdCommittedSnapshot(() => {
+        throw new Error('rejected')
+      })).rejects.toThrow('rejected')
+      await store.mutate(state => {
+        state.nextSequence = 3
+      })
+    } finally {
+      await store.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
   it('serializes committed state with its native fence projection', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-store-barrier-'))
     try {

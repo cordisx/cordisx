@@ -6,6 +6,7 @@ import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { eventThread } from './channel-conversation-refs.js'
+import type { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
 
 /** The saved checkpoint is explicitly consented background, never an authority grant. */
 export function channelLogicalHandoff(state: ChannelConversationState, request: LogicalContinuationRequest) {
@@ -81,28 +82,46 @@ export function channelLogicalHandoffForJob(state: ChannelConversationState, job
   ) return false
   return handoff.text
 }
+/** Recheck the reserved job, actor, current binding, policy and checkpoint. */
+export function inspectChannelLogicalHandoff(
+  state: ChannelConversationState,
+  method: string,
+  threadId: string,
+) {
+  if (!['turn/start', 'turn/steer', 'turn/addUserMessage'].includes(method)) return { state: 'clear' as const }
+  const intents = Object.values(state.logicalContinuations?.intents ?? {}).filter(intent =>
+    intent.state === 'applied' && intent.evidence.handoff === 'checkpoint'
+    && intent.destination?.sessionId === threadId
+  )
+  if (!intents.length) return { state: 'clear' as const }
+  if (intents.length !== 1) return { state: 'blocked' as const }
+  const intent = intents[0]!, job = intent.handoffJobId ? state.jobs[intent.handoffJobId] : undefined
+  if (intent.handoffTurnId && job?.turnId === intent.handoffTurnId) return { state: 'clear' as const }
+  if (method !== 'turn/start' || !job || job.state !== 'dispatching') return { state: 'blocked' as const }
+  const event = state.inputs[job.recordId]?.input.source.event
+  const handoff = event && channelLogicalHandoffForJob(state, job.id, event)
+  return handoff
+    ? { state: 'pending' as const, jobId: job.id, handoff, digest: intent.evidence.handoffDigest! }
+    : { state: 'blocked' as const }
+}
+
 /** Called immediately before the owning app-server writes a target turn. */
 export function assertChannelLogicalHandoff(
   state: ChannelConversationState,
   method: string,
   params: Readonly<Record<string, unknown>>,
+  permits?: ChannelLogicalHandoffPermits,
 ) {
-  if (method !== 'turn/start' || typeof params.threadId !== 'string') return
-  const intents = Object.values(state.logicalContinuations?.intents ?? {}).filter(intent =>
-    intent.state === 'applied' && intent.evidence.handoff === 'checkpoint'
-    && intent.destination?.sessionId === params.threadId
-  )
-  if (!intents.length) return
-  if (intents.length !== 1) throw new Error('HANDOFF_UNAVAILABLE')
-  const intent = intents[0]!, job = intent.handoffJobId ? state.jobs[intent.handoffJobId] : undefined
-  if (intent.handoffTurnId && job?.turnId === intent.handoffTurnId) return
-  if (!job || job.state !== 'dispatching') throw new Error('HANDOFF_UNAVAILABLE')
-  const event = state.inputs[job.recordId]?.input.source.event
-  const handoff = event && channelLogicalHandoffForJob(state, job.id, event)
+  if (typeof params.threadId !== 'string') return
+  const pending = inspectChannelLogicalHandoff(state, method, params.threadId)
+  if (pending.state === 'clear') return
+  if (pending.state !== 'pending') throw new Error('HANDOFF_UNAVAILABLE')
+  const marker = permits?.peek(pending.jobId, params.threadId)
   if (
-    !handoff || !Array.isArray(params.input)
+    !marker || !Array.isArray(params.input)
     || !params.input.some(item =>
-      item && typeof item === 'object' && typeof item.text === 'string' && item.text.includes(handoff)
-    )
+      item && typeof item === 'object' && typeof item.text === 'string'
+      && item.text.includes(pending.handoff) && item.text.includes(marker)
+    ) || !permits?.consume(pending.jobId, params.threadId, marker)
   ) throw new Error('HANDOFF_UNAVAILABLE')
 }

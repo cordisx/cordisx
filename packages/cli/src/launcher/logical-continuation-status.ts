@@ -6,6 +6,7 @@ export function logicalContinuationStatus(
   appId: string,
   profileId: string,
   value: unknown,
+  isProtected?: (sessionId: string) => boolean,
 ) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_REQUEST')
   const args = value as Record<string, unknown>
@@ -33,6 +34,10 @@ export function logicalContinuationStatus(
       state: intent.state,
       ...(intent.destination ? { destination: intent.destination.sessionId } : {}),
       ...(intent.orphanDestination ? { orphanDestination: intent.orphanDestination.sessionId } : {}),
+      ...(isProtected?.(intent.request.source.sessionId)
+          || intent.destination && isProtected?.(intent.destination.sessionId)
+        ? { protectionPending: true as const }
+        : {}),
       ...(intent.code ? { code: intent.code } : {}),
     }))
   return { status: 'ok', operations: intents.slice(0, 64), ...(intents.length > 64 ? { truncated: true } : {}) }

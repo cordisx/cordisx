@@ -971,6 +971,9 @@ export async function prepareNativeSubmissionBootstrap(
           configuration: chatConfiguration,
           models: modelHandler,
         })
+        if (completeOptions.logicalOwner && options.requireLogicalFences) {
+          control.bindLogicalHandoffPermits(channelSession.logicalHandoffPermits)
+        }
         logicalComposition.bindNative(channelSession)
         return {
           codex: (operation, input, metadata) => agentModels.call(operation, input, metadata),

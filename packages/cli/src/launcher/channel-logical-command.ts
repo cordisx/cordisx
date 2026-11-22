@@ -79,7 +79,15 @@ export async function channelLogicalCommand(input: {
   if (parts.length === 2 && parts[0] === 'status') {
     const intent = input.store.snapshot().logicalContinuations?.intents[parts[1]!]
     if (!intent || !isDeepStrictEqual(intent.actor, channelLogicalActor(input.event))) return '未找到此操作。'
-    if (intent.state === 'applied') return '切换已完成，绑定已迁移。'
+    if (intent.state === 'applied') {
+      if (
+        input.fence.isMigrating(intent.request.source.sessionId)
+        || intent.destination && input.fence.isMigrating(intent.destination.sessionId)
+      ) {
+        return '切换已记录，绑定已迁移，但原生保护尚未解除；请先核对运行状态，不要重复提交。'
+      }
+      return '切换已完成，绑定已迁移。'
+    }
     if (intent.state === 'rejected' && intent.code === 'USER_ABANDONED_UNKNOWN') {
       return '已解除原对话屏障；未确认的目标可能仍存在，未自动删除或重试。'
     }
@@ -271,6 +279,9 @@ export async function channelLogicalCommand(input: {
     ...(chosenPreference === undefined ? {} : { preference: chosenPreference }),
   })
   if (result.state === 'applied') {
+    if ('navigationReady' in result && result.navigationReady === false) {
+      return `切换已记录，但原生保护尚未解除（${operationId}）；请先核对状态，不要重复提交。`
+    }
     return request.mode === 'linked'
       ? `已切换到新对话；原对话已保留，后续消息可按需读取获准的历史文本。${
         request.handoffConsent === 'checkpoint' ? '已授权的检查点将在后续派发时交接。' : ''
@@ -280,6 +291,9 @@ export async function channelLogicalCommand(input: {
   if (result.state === 'unknown') return `切换结果尚未确认（${operationId}）；已暂停原对话派发，请勿重复提交。`
   if (result.code === 'HANDOFF_GUARD_UNAVAILABLE') {
     return '当前运行方式无法安全交接检查点，未切换。可选择 --no-checkpoint，或使用具备写入保护的运行方式。'
+  }
+  if (result.code === 'SOURCE_FENCE_UNAVAILABLE') {
+    return '无法确认原生对话保护是否已解除；请先核对状态，不要重复提交。'
   }
   if (result.code === 'PREFLIGHT_UNAVAILABLE') {
     return '无法确认目标授权或原对话的状态、工作模式、权限设置和历史。请检查目标及授权并确认原对话空闲；如同意使用默认工作模式，可先执行 /work-mode default，待下一回合完成后重试。'

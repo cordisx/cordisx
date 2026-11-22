@@ -363,6 +363,40 @@ export class ChannelConversationStore {
     this.tail = task.catch(() => undefined)
     await task
   }
+  /** Hold the owner queue from authorization until a native write is handed off. */
+  async holdCommittedSnapshot<T>(read: (state: ChannelConversationState) => T): Promise<{
+    value: T
+    release(): void
+  }> {
+    if (!this.hasCommitBarrier()) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
+    let grant!: (value: { value: T; release(): void }) => void
+    let deny!: (error: unknown) => void
+    let unlock!: () => void
+    const ready = new Promise<{ value: T; release(): void }>((resolve, reject) => {
+      grant = resolve
+      deny = reject
+    })
+    const held = new Promise<void>(resolve => {
+      unlock = resolve
+    })
+    const task = this.tail.then(async () => {
+      if (!this.hasCommitBarrier()) throw new Error('CONVERSATION_STORE_UNAVAILABLE')
+      const value = read(structuredClone(this.value))
+      let released = false
+      grant({
+        value,
+        release: () => {
+          if (!released) {
+            released = true
+            unlock()
+          }
+        },
+      })
+      await held
+    }).catch(deny)
+    this.tail = task
+    return await ready
+  }
   async mutate<T>(update: (draft: ChannelConversationState) => T): Promise<T> {
     if (this.closed) throw new Error('CONVERSATION_STORE_CLOSED')
     if (this.commitBarrier && !this.barrierReady) throw new Error('CONVERSATION_STORE_UNAVAILABLE')

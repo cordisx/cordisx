@@ -516,6 +516,12 @@ owner coordinates its own native operations and compares bounded source
 snapshots; another independent native process modifying the source is outside
 that coordination.
 
+When Desktop explicitly selects a target reasoning effort, the target model
+must advertise that effort. The Host preserves the original source setting,
+uses the selected target effort for creation and first dispatch, and saves it
+for later target turns. Missing or unsupported capability metadata rejects the
+selection before native creation.
+
 The Host copies an explicit source name and the native project assignment to the new
 session. For an explicitly ordered native section, it places the destination
 immediately before the source and checks the order using both model providers.
@@ -528,6 +534,11 @@ For an unconfirmed Desktop result, first inspect the source and any target:
 ```sh
 cordisx channel logical-status --input '{"sessionId":"<source-thread-id>"}'
 ```
+
+An applied operation can report `protectionPending` when this owner still holds
+a source or destination migration fence. Inspect the owner before retrying; an
+applied relationship does not itself mean that every native protection has been
+released.
 
 To inspect confirmed session boundaries ending at a destination, use
 `cordisx channel logical-chain --input '{"sessionId":"<destination-thread-id>"}'`.

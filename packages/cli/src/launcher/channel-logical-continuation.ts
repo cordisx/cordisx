@@ -16,6 +16,7 @@ import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import type { ConversationContinuationPreferenceV1 } from '@cordisx/protocol/conversation-continuation/v1'
 import { resolveLogicalContinuationPreference } from './logical-continuation-preferences.js'
 import { channelLogicalHandoff } from './channel-logical-handoff.js'
+import type { acquireChannelLogicalNativeLease } from './channel-logical-native-lease.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -35,6 +36,17 @@ export async function startChannelLogicalContinuation(input: {
   const { store, native, claims, fence, appId, profileId, event, request } = input
   const source = request.source.sessionId
   const actor = channelLogicalActor(event)
+  const previous = store.snapshot().logicalContinuations?.intents[request.operationId]
+  if (previous && ['creating', 'unknown'].includes(previous.state)) {
+    if (!isDeepStrictEqual(previous.actor, actor) || !isDeepStrictEqual(previous.request, request)) {
+      return { state: 'rejected' as const, operationId: request.operationId, code: 'OPERATION_ID_CONFLICT' }
+    }
+    return {
+      state: 'unknown' as const,
+      operationId: request.operationId,
+      ...(previous.destination ? { destination: previous.destination } : {}),
+    }
+  }
   if (request.mode === 'linked' && request.handoffConsent === 'checkpoint' && !native.supportsLogicalHandoff()) {
     return { state: 'rejected' as const, operationId: request.operationId, code: 'HANDOFF_GUARD_UNAVAILABLE' }
   }
@@ -44,6 +56,10 @@ export async function startChannelLogicalContinuation(input: {
   claims.add(source)
   let confirmed: string | undefined
   let releaseTarget: (() => void) | undefined
+  let nativeLease:
+    | Extract<Awaited<ReturnType<typeof acquireChannelLogicalNativeLease>>, { state: 'acquired' }>
+    | undefined
+  let retainFence = false
   let handoffDigest: string | undefined
   let observedSelection: ChannelTaskPatch | undefined
   const target = { providerId: request.target.providerId, model: request.target.model }
@@ -124,6 +140,7 @@ export async function startChannelLogicalContinuation(input: {
         evidence,
         fence,
         destination => channelLogicalDestinationAvailable(store.snapshot(), source, destination),
+        nativeLease?.nativeRequest,
       )
       if (result.state === 'rejected') return result
       if ('releaseTarget' in result) releaseTarget = result.releaseTarget
@@ -133,10 +150,43 @@ export async function startChannelLogicalContinuation(input: {
     confirm: async (_request, _evidence, destination) => confirmed === destination.sessionId,
   })
   try {
-    return await control.start(actor, request)
+    if (native.logicalMigrationLease) {
+      let acquired: Awaited<ReturnType<typeof acquireChannelLogicalNativeLease>>
+      try {
+        acquired = await native.logicalMigrationLease(source)
+      } catch {
+        acquired = { state: 'unknown' }
+      }
+      if (acquired.state !== 'acquired') {
+        retainFence = acquired.state === 'unknown'
+        return {
+          state: 'rejected' as const,
+          operationId: request.operationId,
+          code: acquired.state === 'busy' ? 'SOURCE_BUSY' : 'SOURCE_FENCE_UNAVAILABLE',
+        }
+      }
+      nativeLease = acquired
+    }
+    const result = await control.start(actor, request)
+    if (!nativeLease) return result
+    if (result.state === 'unknown') {
+      retainFence = true
+      return result
+    }
+    const targetReleased = !nativeLease.destination() || await nativeLease.releaseDestination().catch(() => false)
+    const sourceReleased = targetReleased && await nativeLease.releaseSource().catch(() => false)
+    if (!sourceReleased) {
+      retainFence = true
+      return result.state === 'applied'
+        ? { ...result, navigationReady: false as const }
+        : { state: 'rejected' as const, operationId: request.operationId, code: 'SOURCE_FENCE_UNAVAILABLE' }
+    }
+    return result.state === 'applied' ? { ...result, navigationReady: true as const } : result
   } finally {
-    releaseTarget?.()
     claims.delete(source)
-    release()
+    if (!retainFence) {
+      releaseTarget?.()
+      release()
+    }
   }
 }

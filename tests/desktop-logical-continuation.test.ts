@@ -115,6 +115,17 @@ it('commits an authorized Desktop continuation through the shared Host transacti
     expect(f.control.createFencedLogicalDestination).toHaveBeenCalledOnce()
     expect(f.owner.fence.isMigrating('source')).toBe(false)
     expect(f.owner.fence.isMigrating('destination')).toBe(false)
+    const heldSource = f.owner.fence.beginMigration('source')!
+    expect(
+      logicalContinuationStatus(
+        f.store,
+        'codex',
+        'fixture',
+        { sessionId: 'source' },
+        sessionId => f.owner.fence.isMigrating(sessionId),
+      ),
+    ).toMatchObject({ operations: [{ state: 'applied', protectionPending: true }] })
+    heldSource()
   } finally {
     await f.close()
   }

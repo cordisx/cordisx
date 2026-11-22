@@ -16,32 +16,11 @@ import { callLogicalHistory, unavailableLogicalHistory } from './desktop-logical
 import { nativeMarkedRequestRpc } from './native-marked-request-rpc.js'
 import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import type { NativeManagedModelListRequest } from './native-managed-model-list.js'
+import { createDesktopLogicalHandoffControl } from './desktop-logical-handoff-control.js'
+import type { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
+import { MAX_LINE, processId, record, rejectionReason, requestId, TIMEOUT, valid } from './native-control-validation.js'
 
 // Requests stay small; authenticated native responses may contain history.
-const MAX_LINE = 256 * 1024
-const TIMEOUT = 30_000
-const valid = (value: unknown, max = 512): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-const requestId = (value: unknown): value is string | number =>
-  (typeof value === 'string' && valid(value)) || (typeof value === 'number' && Number.isSafeInteger(value))
-const processId = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
-function rejectionReason(error: unknown): string {
-  const reasons: Readonly<Record<string, string>> = {
-    'Invalid control id': 'invalid-id',
-    'Unauthenticated response': 'unauthenticated-response',
-    'Unknown control response': 'unknown-response',
-    'Unauthenticated diagnostic': 'unauthenticated-diagnostic',
-    'Invalid control authentication': 'invalid-authentication',
-    'Control unavailable': 'control-unavailable',
-    'Invalid native thread': 'invalid-thread',
-    'Invalid native request id': 'invalid-request-id',
-  }
-  return error instanceof Error ? reasons[error.message] ?? 'protocol-validation' : 'protocol-validation'
-}
-
 export type NativeBridgeMethod =
   | 'model/list'
   | 'thread/list'
@@ -77,6 +56,8 @@ export interface NativeSubmissionControlServer {
   releaseLogicalFence(threadId: string, lease: string): Promise<boolean>
   restoreLogicalFences(revision: number, sources: readonly string[]): Promise<boolean>
   bindLogicalFenceOwner(owner: ProfileLogicalConversationOwner): void
+  bindLogicalHandoffPermits(permits: ChannelLogicalHandoffPermits): void
+  logicalHandoffReady(): boolean
   createFencedLogicalDestination(
     method: 'thread/start' | 'thread/fork',
     params: Readonly<Record<string, unknown>>,
@@ -135,6 +116,11 @@ export async function startNativeSubmissionControlServer(
   let authenticated = false
   let peerReady = false
   let logicalFenceOwner: ProfileLogicalConversationOwner | undefined
+  let handoffPermits: ChannelLogicalHandoffPermits | undefined
+  const handoff = createDesktopLogicalHandoffControl({
+    owner: () => logicalFenceOwner,
+    permits: () => handoffPermits,
+  })
   let fenceBarrierInstalled = false
   let supplyLogicalOwner: ((owner: ProfileLogicalConversationOwner) => void) | undefined
   const logicalOwnerReady = new Promise<ProfileLogicalConversationOwner>(resolve => {
@@ -310,6 +296,7 @@ export async function startNativeSubmissionControlServer(
       }
       forkLeases.clear()
       if (peer === socket) {
+        handoff.releaseAll()
         if (options.requireLogicalFences && fenceBarrierInstalled) logicalFenceOwner?.store.pauseCommitBarrier()
         if (authenticated) {
           logicalTurns?.clear()
@@ -397,6 +384,26 @@ export async function startNativeSubmissionControlServer(
         activeIds.add(value.id)
         try {
           const result = await callLogicalHistory(logicalHistory, value.params)
+          await write(socket, { id: value.id, ok: true, value: result })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
+        return
+      }
+      if (
+        ['logical-handoff-status', 'logical-handoff-authorize', 'logical-handoff-release'].includes(String(value.type))
+      ) {
+        if (!authenticated || !peerReady || !options.requireLogicalFences || active >= 32) {
+          throw new Error('Control unavailable')
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          const result = await handoff.handle(
+            value,
+            () => peer === socket && authenticated && peerReady && !socket.destroyed,
+          )
           await write(socket, { id: value.id, ok: true, value: result })
         } finally {
           active--
@@ -679,7 +686,11 @@ export async function startNativeSubmissionControlServer(
         }
         peerReady = true
         clearTimeout(authTimer)
-        await write(socket, { id: value.id, ok: true, value: { version: 1 } })
+        await write(socket, {
+          id: value.id,
+          ok: true,
+          value: { version: 1, logicalHandoffGuard: !!options.requireLogicalFences },
+        })
         return
       }
       if (value.type === 'resume' || value.type === 'managed-resume' || value.type === 'resume-complete') {
@@ -824,6 +835,14 @@ export async function startNativeSubmissionControlServer(
       supplyLogicalOwner?.(owner)
       supplyLogicalOwner = undefined
     },
+    bindLogicalHandoffPermits(permits: ChannelLogicalHandoffPermits) {
+      if (!options.requireLogicalFences || handoffPermits) throw new Error('Logical handoff guard unavailable')
+      handoffPermits = permits
+    },
+    logicalHandoffReady() {
+      return !!options.requireLogicalFences && !!handoffPermits && peerReady
+        && logicalFenceOwner?.store.hasCommitBarrier() === true
+    },
     bindLogicalHistory(handler: (params: unknown) => Promise<unknown>) {
       if (logicalHistory) throw new Error('Logical history already bound')
       logicalHistory = handler
@@ -963,6 +982,7 @@ export async function startNativeSubmissionControlServer(
     async close() {
       closePromise ??= (async () => {
         closed = true
+        handoff.releaseAll()
         approvalListeners.clear()
         failPending()
         expiredIds.clear()
