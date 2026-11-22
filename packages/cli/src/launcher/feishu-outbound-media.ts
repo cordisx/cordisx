@@ -7,10 +7,12 @@ export interface FeishuMediaAuthority {
 }
 
 export interface FeishuMediaUploader {
-  image(data: { image_type: 'message'; image: Buffer }): Promise<{ code?: number; data?: { image_key?: string } }>
+  image(
+    data: { image_type: 'message'; image: Buffer },
+  ): Promise<{ code?: number; data?: { image_key?: string | undefined } }>
   file(data: { file_type: 'opus'; file_name: string; file: Buffer; duration?: number }): Promise<{
     code?: number
-    data?: { file_key?: string }
+    data?: { file_key?: string | undefined }
   }>
 }
 
