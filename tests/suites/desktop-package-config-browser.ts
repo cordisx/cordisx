@@ -100,20 +100,22 @@ export async function expectDesktopConfigApplied(
   store: PackagePluginConfigStore,
   revision: number,
   label: string,
+  labels?: readonly string[],
 ): Promise<void> {
   const deadline = Date.now() + 30_000
+  const expected = labels === undefined ? { label } : { label, labels }
   let last: unknown
   while (Date.now() < deadline) {
     const alive = await page.evaluate(`Boolean(globalThis.__cordisxRuntime)
       || document.querySelector('p[role=status]')?.hidden === true`)
     if (!alive) throw new Error('Manager session retired during configuration')
     try {
-      expect(await store.loadStable(pluginId)).toEqual({ revision, config: { label } })
+      expect(await store.loadStable(pluginId)).toEqual({ revision, config: expected })
       expect(
         await page.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins.find(p => p.id === '${pluginId}')
         ?.configuration.value`),
-      ).toEqual({ label })
-      expect(await desktop.evaluate('globalThis.__desktopConfigValue')).toEqual({ label })
+      ).toEqual(expected)
+      expect(await desktop.evaluate('globalThis.__desktopConfigValue')).toEqual(expected)
       expect(await page.evaluate('globalThis.__desktopConfigDocumentMarker')).toBe('same-document')
       expect(['saved', 'pristine']).toContain(await page.evaluate(`document.querySelector('${form}')?.dataset.state`))
       return
@@ -123,6 +125,37 @@ export async function expectDesktopConfigApplied(
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   throw last
+}
+
+/** Exercise the existing tag control and confirm the array on both Manager pages. */
+export async function verifyDesktopArrayUpdate(
+  page: CdpClient,
+  other: CdpClient,
+  desktop: CdpClient,
+  store: PackagePluginConfigStore,
+): Promise<void> {
+  await vi.waitFor(async () => {
+    expect(await page.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
+    expect(await page.evaluate('globalThis.__desktopConfigDocumentMarker')).toBe('same-document')
+    expect(await page.evaluate(`Boolean(document.querySelector('${form} [data-config-path=labels] input'))`)).toBe(true)
+  }, { timeout: 10_000 })
+  await page.send('Page.bringToFront')
+  await page.evaluate(`document.querySelector('${form} [data-config-path=labels] input').focus()`)
+  await page.send('Input.insertText', { text: 'one' })
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await vi.waitFor(async () => {
+    expect(await page.evaluate(`!document.querySelector('${form} button[type=submit]').disabled`)).toBe(true)
+  }, { timeout: 10_000 })
+  await submitDesktopConfig(page)
+  await expectDesktopConfigApplied(page, desktop, store, 5, 'retained draft', ['one'])
+  await vi.waitFor(async () => {
+    expect(await other.evaluate('globalThis.__desktopConfigValue')).toEqual({
+      label: 'retained draft',
+      labels: ['one'],
+    })
+    expect(await other.evaluate('globalThis.__desktopConfigDocumentMarker')).toBe('same-document')
+  }, { timeout: 15_000 })
 }
 
 export async function expectDesktopConfigConflict(page: CdpClient, label: string, saved: string): Promise<void> {

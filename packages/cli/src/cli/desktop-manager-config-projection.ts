@@ -22,12 +22,35 @@ function normalized(value: unknown): unknown {
   return JSON.parse(json) as unknown
 }
 
+type DesktopConfigField = ManagerPluginConfigSnapshot['fields'][number]
+
+function supportedDesktopConfigField(field: DesktopConfigField): boolean {
+  return ['string', 'number', 'natural', 'boolean', 'const', 'union'].includes(field.type)
+    || field.type === 'array' && ['string', 'number', 'natural', 'boolean'].includes(field.arrayItemType ?? '')
+}
+
+/** Values must be fully representable by the declared non-sensitive field. */
+export function isDesktopConfigFieldValue(field: DesktopConfigField, value: unknown): boolean {
+  if (!supportedDesktopConfigField(field)) return false
+  if (value === null) return true
+  if (field.type !== 'array') {
+    return ['string', 'number', 'boolean'].includes(typeof value)
+      && (typeof value !== 'number' || Number.isFinite(value))
+  }
+  return Array.isArray(value) && value.length <= 256 && value.every(item => {
+    if (field.arrayItemType === 'string') return typeof item === 'string'
+    if (field.arrayItemType === 'boolean') return typeof item === 'boolean'
+    if (field.arrayItemType === 'number') return typeof item === 'number' && Number.isFinite(item)
+    return field.arrayItemType === 'natural' && typeof item === 'number' && Number.isSafeInteger(item) && item >= 0
+  })
+}
+
 /** Only fields that can also be verified in the redacted readback are writable. */
 export function isWritableDesktopConfigField(
-  field: ManagerPluginConfigSnapshot['fields'][number],
+  field: DesktopConfigField,
   secrets: ManagerPluginConfigSnapshot['secrets'],
 ): boolean {
-  return !field.disabled && ['string', 'number', 'natural', 'boolean', 'const', 'union'].includes(field.type)
+  return !field.disabled && supportedDesktopConfigField(field)
     && (field.role === undefined || !isReservedConfigRole(field.role))
     && !secrets.some(secret => pathStartsWith(field.path, secret.path) || pathStartsWith(secret.path, field.path))
 }
@@ -59,7 +82,7 @@ function projectedConfig(
   }
 }
 
-/** Keep only declared, non-sensitive scalar fields from a verified native configuration. */
+/** Keep only declared, non-sensitive primitive fields from a verified native configuration. */
 export function projectDesktopManagerConfig(
   snapshot: ServiceRendererSnapshot,
   plugin: CordisXConfigPlugin,
@@ -99,11 +122,7 @@ export function projectDesktopManagerConfig(
       || secretPaths.some(path => pathStartsWith(field.path, path) || pathStartsWith(path, field.path))
     if (sensitive || !hasOwnPath(redacted, field.path)) continue
     const value = ownValue(redacted, field.path)
-    if (
-      !['string', 'number', 'natural', 'boolean', 'const', 'union'].includes(field.type)
-      || value !== null && !['string', 'number', 'boolean'].includes(typeof value)
-      || typeof value === 'number' && !Number.isFinite(value)
-    ) throw new Error('desktop-manager-config-unavailable')
+    if (!isDesktopConfigFieldValue(field, value)) throw new Error('desktop-manager-config-unavailable')
     result = setAtPath(result, field.path, value, false)
   }
   if (!isDeepStrictEqual(normalized(result), redacted)) throw new Error('desktop-manager-config-unavailable')

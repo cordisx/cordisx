@@ -61,6 +61,7 @@ import {
   openDesktopConfig,
   releaseHeldConfigReplyAfterAdoption,
   submitDesktopConfig,
+  verifyDesktopArrayUpdate,
   waitForHeldConfigReply,
 } from './suites/desktop-package-config-browser.js'
 
@@ -161,6 +162,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       id: 'desktop-config-fixture',
       code: [
         "const descriptor = { type: 'object', dict: { label: { type: 'string' },",
+        "  labels: { type: 'array', inner: { type: 'string' } },",
         "  token: { type: 'string', meta: { role: 'secret' } } } }",
         "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
         '  validate: value => ({ value }) }, toJSON: () => descriptor }',
@@ -545,10 +547,7 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       }, { timeout: 10_000 })
       await submitDesktopConfig(second)
       await expectDesktopConfigApplied(second, desktop, configStore, 4, 'retained draft')
-      await vi.waitFor(async () => {
-        expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
-        expect(await first.evaluate('globalThis.__desktopConfigDocumentMarker')).toBe('same-document')
-      }, { timeout: 15_000 })
+      await verifyDesktopArrayUpdate(first, second, desktop, configStore)
       await desktop.send('Target.closeTarget', { targetId: secondTarget.targetId })
       await second.close().catch(() => {})
       second = undefined
@@ -556,7 +555,10 @@ async function exerciseDesktopOwner(archive?: string, review = false, configFixt
       second = await connect(reopened.targetId)
       await second.send('Page.navigate', { url: url(web.issueUrl()) })
       await ready(second)
-      expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'retained draft' })
+      expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({
+        label: 'retained draft',
+        labels: ['one'],
+      })
       if (archive !== undefined) await openConfiguredChannel(first)
       return
     }

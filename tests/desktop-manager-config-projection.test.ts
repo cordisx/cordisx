@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import {
   DesktopManagerConfigProjection,
+  isDesktopConfigFieldValue,
   projectDesktopManagerConfig,
 } from '../packages/cli/src/cli/desktop-manager-config-projection.js'
 
@@ -147,4 +148,53 @@ it('offers writes only for a live, non-secret proof and remembers confirmed read
   expect(read).toHaveBeenCalledTimes(2)
   seat = undefined
   expect(projection.remember(snapshot, next, updated)).toBe(false)
+})
+
+it('projects a declared primitive array while rejecting unclassified or sensitive array contents', async () => {
+  const arrayPlugin = { ...plugin, config: { labels: ['one', 'two'] } }
+  const native = structuredClone(proof)
+  native.plugin.configuration.value = { labels: ['one', 'two'] }
+  native.plugin.configuration.fields = [{ path: ['labels'], type: 'array', arrayItemType: 'string' }]
+  native.plugin.configuration.secrets = []
+  native.plugin.configuration.writable = true
+  native.plugin.configuration.applies = 'live'
+  expect(projectDesktopManagerConfig(snapshot, arrayPlugin, native)).toEqual({ labels: ['one', 'two'] })
+  const projector = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => Symbol.for('array-seat'),
+    read: async () => native,
+  })
+  expect(await projector.canWrite(snapshot, arrayPlugin)).toBe(true)
+  const objectPlugin = { ...arrayPlugin, config: { labels: [{ secret: 'synthetic' }] } }
+  const objectProof = structuredClone(native)
+  objectProof.plugin.configuration.value = objectPlugin.config
+  objectProof.plugin.configuration.fields[0].arrayItemType = undefined
+  expect(() => projectDesktopManagerConfig(snapshot, objectPlugin, objectProof)).toThrow(
+    'desktop-manager-config-unavailable',
+  )
+  const mixed = { ...arrayPlugin, config: { labels: ['one', 2] } }
+  const mixedProof = structuredClone(native)
+  mixedProof.plugin.configuration.value = mixed.config
+  expect(() => projectDesktopManagerConfig(snapshot, mixed, mixedProof)).toThrow('desktop-manager-config-unavailable')
+  const oversized = { ...arrayPlugin, config: { labels: Array.from({ length: 257 }, () => 'value') } }
+  const oversizedProof = structuredClone(native)
+  oversizedProof.plugin.configuration.value = oversized.config
+  expect(() => projectDesktopManagerConfig(snapshot, oversized, oversizedProof)).toThrow(
+    'desktop-manager-config-unavailable',
+  )
+  const sensitive = structuredClone(native)
+  sensitive.plugin.configuration.fields[0].role = 'secret'
+  expect(() => projectDesktopManagerConfig(snapshot, arrayPlugin, sensitive)).toThrow(
+    'desktop-manager-config-unavailable',
+  )
+})
+
+it('enforces primitive array element types and bounded natural numbers', () => {
+  const field = (arrayItemType: string) => ({ type: 'array', arrayItemType }) as never
+  expect(isDesktopConfigFieldValue(field('boolean'), [true, false])).toBe(true)
+  expect(isDesktopConfigFieldValue(field('boolean'), ['true'])).toBe(false)
+  expect(isDesktopConfigFieldValue(field('number'), [1, 2.5])).toBe(true)
+  expect(isDesktopConfigFieldValue(field('number'), [Number.NaN])).toBe(false)
+  expect(isDesktopConfigFieldValue(field('natural'), [0, 2])).toBe(true)
+  expect(isDesktopConfigFieldValue(field('natural'), [-1, 2.5])).toBe(false)
 })

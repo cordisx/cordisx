@@ -151,6 +151,63 @@ it('refuses stale, sensitive, undeclared, disabled and non-live configuration in
   expect(() => new DesktopPackageConfigWrite({ ...base, proof: restart })).toThrow('desktop-package-config-unavailable')
 })
 
+it.skipIf(unsupported)(
+  'stages and commits a bounded non-sensitive primitive array through the Desktop write gate',
+  async () => {
+    const root = await mkdtemp('/tmp/cx-desktop-config-array-')
+    const fence = new SharedProfilePluginConfigFence(path.join(root, 'config.json'), 'work')
+    const store = new PackagePluginConfigStore(root, 'work', 'owner-1')
+    const seat = {}
+    const arrayPlugin = { ...plugin, config: { labels: ['old'] } }
+    const arrayProof = structuredClone(proof)
+    arrayProof.plugin.configuration.value = { labels: ['old'] }
+    arrayProof.plugin.configuration.fields = [{ path: ['labels'], type: 'array', arrayItemType: 'string' }]
+    const arrayOperation = { ...operation, operations: [{ op: 'set', path: ['labels'], value: ['one', 'two'] }] }
+    try {
+      const seed = await store.stage('demo', 0, { labels: ['old'] }, token)
+      await store.commit('demo', seed.candidateRevision, token)
+      const release = await fence.acquire()
+      const write = new DesktopPackageConfigWrite({
+        snapshot,
+        plugin: arrayPlugin,
+        proof: arrayProof,
+        operation: arrayOperation,
+        profileId: 'work',
+        rendererGeneration: 'renderer-1',
+        seat,
+        current: () => true,
+        run: async action => await fence.runPackageMutation({ pluginId: 'demo', isCurrent: () => true }, action),
+      })
+      expect(write.expectedValue()).toEqual({ labels: ['one', 'two'] })
+      expect(() =>
+        new DesktopPackageConfigWrite({
+          snapshot,
+          plugin: arrayPlugin,
+          proof: arrayProof,
+          operation: { ...arrayOperation, operations: [{ op: 'set', path: ['labels'], value: ['one', 2] }] },
+          profileId: 'work',
+          rendererGeneration: 'renderer-1',
+          seat,
+          current: () => true,
+          run: async action => await action(),
+        })
+      ).toThrow('desktop-package-config-unavailable')
+      const stage = request({ config: { labels: ['one', 'two'] } })
+      await write.handle(seat, stage, async value => await store.stage('demo', 1, value.config!, token))
+      await write.handle(
+        seat,
+        request({ operation: 'commit', candidateRevision: 2 }),
+        async () => await store.commit('demo', 2, token),
+      )
+      expect(await store.loadStable('demo')).toEqual({ revision: 2, config: { labels: ['one', 'two'] } })
+      await release()
+    } finally {
+      await fence.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+)
+
 it('does not accept a late stage receipt after the write authority closes', async () => {
   const seat = {}
   let finish!: (value: unknown) => void

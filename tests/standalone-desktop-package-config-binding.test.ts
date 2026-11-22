@@ -127,3 +127,34 @@ it('waits for an in-transit rejection before adopting another page’s write', a
     bridge.dispose()
   }
 })
+
+it('accepts a confirmed primitive-array update without accepting object-array operations', async () => {
+  let request: any
+  globalThis.__cordisxDesktopPackageConfigRequestV1 = payload => request = JSON.parse(payload)
+  const bridge = new BrowserStandaloneDesktopPackageConfigBridge('renderer-binding-placeholder')
+  try {
+    const operations = [{ op: 'set' as const, path: ['labels'], value: ['one', 'two'] }]
+    const pending = bridge.request('demo', 2, operations, { raw: { labels: ['one', 'two'] }, value: {} }, () => {})
+    expect(bridge.adopt({
+      requestId: request.requestId,
+      pluginId: 'demo',
+      expectedRevision: 2,
+      revision: 3,
+      origin: true,
+      operations,
+      value: { labels: ['one', 'two'] },
+    })).toBe(true)
+    globalThis.__cordisxDesktopPackageConfigReceiveV1!(JSON.stringify({
+      requestId: request.requestId,
+      ok: true,
+      value: { status: 'applied', revision: 3 },
+    }))
+    await expect(pending).resolves.toBeUndefined()
+    await expect(bridge.request('demo', 3, [{ op: 'set', path: ['labels'], value: [{ key: 'value' }] }], {
+      raw: { labels: [{ key: 'value' }] },
+      value: {},
+    }, () => {})).rejects.toThrow('configuration is unavailable')
+  } finally {
+    bridge.dispose()
+  }
+})

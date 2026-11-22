@@ -34,7 +34,16 @@ export function equalStandaloneConfigJson(left: unknown, right: unknown, depth =
     && keys.every((key, index) => key === other[index] && equalStandaloneConfigJson(a[key], b[key], depth + 1))
 }
 
-/** Only the scalar operations admitted by the Desktop owner can cross this bridge. */
+function isStandaloneConfigValue(value: unknown): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  return Array.isArray(value) && value.length <= 256
+    && value.every(item =>
+      typeof item === 'string' || typeof item === 'boolean' || typeof item === 'number' && Number.isFinite(item)
+    )
+}
+
+/** Only bounded primitive operations admitted by the Desktop owner can cross this bridge. */
 export function isStandaloneConfigOperations(value: unknown): value is readonly ConfigMutationOperation[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 100 && value.every(item => {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) return false
@@ -50,9 +59,7 @@ export function isStandaloneConfigOperations(value: unknown): value is readonly 
         || ['__proto__', 'prototype', 'constructor'].includes(part)
       )
     ) return false
-    return operation.op === 'unset' || Object.hasOwn(operation, 'value')
-        && (operation.value === null || ['string', 'boolean'].includes(typeof operation.value)
-          || typeof operation.value === 'number' && Number.isFinite(operation.value))
+    return operation.op === 'unset' || Object.hasOwn(operation, 'value') && isStandaloneConfigValue(operation.value)
   })
 }
 

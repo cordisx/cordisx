@@ -3,7 +3,11 @@ import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { ConfigBindingRequest } from '../launcher/config-rpc.js'
 import type { DesktopManagerConfigProof, RendererConfigOperation } from '../launcher/renderer-config-management.js'
 import { assertPath, removePaths, setAtPath } from '../renderer/configuration/values.js'
-import { isWritableDesktopConfigField, projectDesktopManagerConfig } from './desktop-manager-config-projection.js'
+import {
+  isDesktopConfigFieldValue,
+  isWritableDesktopConfigField,
+  projectDesktopManagerConfig,
+} from './desktop-manager-config-projection.js'
 import type { ServiceRendererSnapshot } from './service-renderer-bootstrap-state.js'
 
 type Mutation = Extract<RendererConfigOperation, { readonly action: 'update' }>
@@ -67,9 +71,7 @@ export class DesktopPackageConfigWrite {
       const field = descriptor.fields.find(value => isDeepStrictEqual(value.path, operation.path))
       if (
         !field || !isWritableDesktopConfigField(field, descriptor.secrets)
-        || operation.op === 'set' && operation.value !== null
-          && (!['string', 'number', 'boolean'].includes(typeof operation.value)
-            || typeof operation.value === 'number' && !Number.isFinite(operation.value))
+        || operation.op === 'set' && !isDesktopConfigFieldValue(field, operation.value)
       ) throw new Error('desktop-package-config-unavailable')
       candidate = setAtPath(candidate, operation.path, operation.value, operation.op === 'unset')
     }
