@@ -2,6 +2,8 @@ import { readChannelCompletion } from './channel-legacy-completion.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash, randomBytes } from 'node:crypto'
 import { channelAttachmentTicket } from './channel-inbound-resources.js'
+import { channelPrincipalSource, signalChannelSource, waitForChannelSource } from './channel-source-principal.js'
+import { type ChannelNativeSteer, channelNativeSteer, channelSteerObserved } from './channel-native-steer.js'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
@@ -129,7 +131,7 @@ export class ChannelNativeSessions {
         this.completedLogicalTurns.clear()
         this.sources.clear()
         this.logicalContextRedactions.clear()
-        for (const threadId of this.logicalTurnWaiters.keys()) this.signalLogicalTurn(threadId)
+        for (const threadId of this.logicalTurnWaiters.keys()) signalChannelSource(this.logicalTurnWaiters, threadId)
         return
       }
       const notification = object(params), notificationTurn = object(notification.turn).id
@@ -158,7 +160,7 @@ export class ChannelNativeSessions {
           if (this.completedLogicalTurns.size > 512) {
             this.completedLogicalTurns.delete(this.completedLogicalTurns.keys().next().value!)
           }
-          this.signalLogicalTurn(value.threadId)
+          signalChannelSource(this.logicalTurnWaiters, value.threadId)
         }
         for (const [id, source] of this.sources) {
           if (
@@ -617,7 +619,7 @@ export class ChannelNativeSessions {
       if (this.completedLogicalTurns.get(threadId) === turnId) {
         for (const [id, candidate] of this.sources) if (candidate === entry) this.sources.delete(id)
       }
-      this.signalLogicalTurn(threadId)
+      signalChannelSource(this.logicalTurnWaiters, threadId)
     }
   }
   isPreparing(threadId: string): boolean {
@@ -714,7 +716,7 @@ export class ChannelNativeSessions {
     const entries = [...this.sources.values()].filter(entry =>
       entry.threadId === threadId && (!turnId || !entry.turnId || entry.turnId === turnId)
     )
-    return entries.length === 1 ? entries[0]!.source : undefined
+    return channelPrincipalSource(entries)
   }
   /** History access requires the turn id acknowledged for this exact Channel operation. */
   async sourceForLogicalTurn(threadId: string, turnId: string): Promise<ChannelEventRef | undefined> {
@@ -725,26 +727,10 @@ export class ChannelNativeSessions {
       !entries.length && this.activeLogicalTurns.get(threadId) === turnId
       && [...this.sources.values()].some(entry => entry.threadId === threadId && !entry.confirmedTurn)
     ) {
-      await new Promise<void>(resolve => {
-        const waiters = this.logicalTurnWaiters.get(threadId) ?? new Set<() => void>()
-        const finish = () => {
-          clearTimeout(timer)
-          waiters.delete(finish)
-          if (!waiters.size) this.logicalTurnWaiters.delete(threadId)
-          resolve()
-        }
-        const timer = setTimeout(finish, 2_000)
-        waiters.add(finish)
-        this.logicalTurnWaiters.set(threadId, waiters)
-      })
+      await waitForChannelSource(this.logicalTurnWaiters, threadId)
       entries = matching()
     }
-    return entries.length === 1 ? entries[0]!.source : undefined
-  }
-  private signalLogicalTurn(threadId: string) {
-    const waiters = this.logicalTurnWaiters.get(threadId)
-    this.logicalTurnWaiters.delete(threadId)
-    waiters?.forEach(resolve => resolve())
+    return channelPrincipalSource(entries)
   }
   contextFor(token: string) {
     return [...this.sources.values()].find(entry => entry.token === token)
@@ -760,6 +746,26 @@ export class ChannelNativeSessions {
       return false
     }
   }
+  steer: ChannelNativeSteer = (...args) =>
+    channelNativeSteer({
+      cli: this.input.cli,
+      request: this.input.nativeRequest,
+      sourceFor: (session, turn) => this.sourceFor(session, turn),
+      reserve: (id, source, threadId, turnId) => {
+        if (this.sources.has(id) || this.sources.size >= 128) return undefined
+        const token = randomBytes(24).toString('hex')
+        this.sources.set(id, { source, token, threadId, turnId })
+        return token
+      },
+      release: id => {
+        this.sources.delete(id)
+      },
+      observe: (id, session, turn) => this.observedDispatch(id, session, turn),
+    }, ...args)
+  steerObserved(operationId: string, sessionId: string, turnId: string) {
+    return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
+  }
+
   async start(
     operationId: string,
     message: ChannelUserInput,
