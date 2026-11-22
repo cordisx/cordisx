@@ -84,6 +84,11 @@ a fallback or claim formal readiness to bypass it.
 
 ## Keep preview launches honest
 
+Follow [local runtime resources](local-runtime-resources.md) for installation
+layout, configured preview reuse, login readback, cache retention, and owned
+cleanup. A synthetic empty profile and a configured user preview prove
+different things; record which one supplied the evidence.
+
 ### Intermediate preview
 
 A feature-branch or dirty worktree may provide a useful intermediate preview.
