@@ -6,6 +6,7 @@ import { DesktopLogicalTurnAuthority } from './desktop-logical-turn-authority.js
 import { desktopLogicalTurnPreparation } from './desktop-logical-turn-preparation.js'
 import { createDesktopLogicalHistory } from './desktop-logical-history.js'
 import { desktopLogicalMigration } from './desktop-logical-migration.js'
+import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 /** One Desktop owner coordinates account tickets and the shared history callback. */
 export function createDesktopLogicalComposition(input: {
@@ -59,7 +60,7 @@ export function createDesktopLogicalComposition(input: {
 export function createDesktopLogicalServices(
   input: Parameters<typeof createDesktopLogicalComposition>[0] & {
     native(): ChannelNativeSessions | undefined
-    targetAllowed(providerId: string, model: string): Promise<boolean>
+    targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
   },
 ) {
   const composition = createDesktopLogicalComposition(input)

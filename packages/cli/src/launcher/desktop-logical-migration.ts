@@ -9,6 +9,7 @@ import { startDesktopLogicalContinuation } from './desktop-logical-continuation.
 import { logicalPreferenceRevision, resolveLogicalContinuationPreference } from './logical-continuation-preferences.js'
 import { desktopLogicalChain } from './desktop-logical-chain.js'
 import { jointHistoryPotential } from './channel-joint-history.js'
+import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 export type DesktopLogicalMode = 'linked' | 'fork'
 
@@ -19,7 +20,7 @@ export function desktopLogicalMigration(input: {
   native(): ChannelNativeSessions | undefined
   profileId: string
   identity(scope: NativeSubmissionScope): Promise<string | undefined>
-  targetAllowed(providerId: string, model: string): Promise<boolean>
+  targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
   historyReady(): boolean
 }) {
   return {
@@ -49,11 +50,16 @@ export function desktopLogicalMigration(input: {
         && await input.identity(scope) === identity
         && isDeepStrictEqual(input.owner.store.snapshot().logicalContinuations, logical)
     },
-    async suggest(scope: NativeSubmissionScope, target: { providerId: string; model: string }) {
+    async suggest(
+      scope: NativeSubmissionScope,
+      target: { providerId: string; model: string },
+      effort?: ModelReasoningEffort,
+    ) {
       const native = input.native()
       if (
         !scope.threadId || !native || !input.owner.store.hasCommitBarrier()
-        || !await input.targetAllowed(target.providerId, target.model)
+        || effort !== undefined && !isModelReasoningEffort(effort)
+        || !await input.targetAllowed(target.providerId, target.model, effort)
       ) return undefined
       const identity = await input.identity(scope)
       if (!identity) return undefined
@@ -84,7 +90,7 @@ export function desktopLogicalMigration(input: {
           ?? (forkAvailable ? 'fork' : 'linked')
       const chain = desktopLogicalChain(logical, source, identity)
       if (
-        !await input.targetAllowed(target.providerId, target.model) || input.native() !== native
+        !await input.targetAllowed(target.providerId, target.model, effort) || input.native() !== native
         || !input.owner.store.hasCommitBarrier() || await input.identity(scope) !== identity
         || !isDeepStrictEqual(input.owner.store.snapshot().logicalContinuations, logical)
       ) return undefined
@@ -104,6 +110,7 @@ export function desktopLogicalMigration(input: {
       operationId: string
       target: { providerId: string; model: string }
       mode: DesktopLogicalMode
+      targetReasoningEffort?: ModelReasoningEffort
       remember?: 'conversation' | 'profile' | 'inherit'
       channelCode?: string
       current(): boolean
@@ -111,6 +118,12 @@ export function desktopLogicalMigration(input: {
     }) {
       const { scope, target, mode } = inputAction, native = input.native()
       if (!scope.threadId || !native || !inputAction.current()) return undefined
+      if (
+        inputAction.targetReasoningEffort !== undefined && !isModelReasoningEffort(inputAction.targetReasoningEffort)
+        || inputAction.configOverrides.model_reasoning_effort !== inputAction.targetReasoningEffort
+      ) {
+        return { state: 'rejected' as const, operationId: inputAction.operationId, code: 'TARGET_EFFORT_UNAVAILABLE' }
+      }
       if (!['linked', 'fork'].includes(mode)) {
         return { state: 'rejected' as const, operationId: inputAction.operationId, code: 'FRESH_CONTINUATION_REMOVED' }
       }
@@ -182,6 +195,7 @@ export function desktopLogicalMigration(input: {
             && logicalConversationIdentity(input.owner.store.snapshot().logicalContinuations, source)
               === logicalConversationId,
           targetAllowed: input.targetAllowed,
+          ...(inputAction.targetReasoningEffort ? { targetReasoningEffort: inputAction.targetReasoningEffort } : {}),
           linkedHistoryReady: input.historyReady(),
           configuredProviderOverrides: inputAction.configOverrides,
         },

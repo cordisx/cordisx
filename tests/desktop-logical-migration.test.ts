@@ -9,6 +9,27 @@ import { profileLogicalConversationOwner } from '../packages/cli/src/launcher/pr
 import { desktopLogicalMigration } from '../packages/cli/src/launcher/desktop-logical-migration.js'
 import { setLogicalContinuationPreference } from '../packages/cli/src/launcher/logical-continuation-preferences.js'
 import { channelLogicalConversationPreference } from '../packages/cli/src/launcher/channel-logical-preferences.js'
+import { desktopLogicalTargetAdmission } from '../packages/cli/src/launcher/desktop-logical-target.js'
+import type { NativeModelProviderCatalogEntry } from '../packages/cli/src/launcher/native-model-provider-catalog.js'
+
+it('admits an explicit target effort only when the selected model advertises it', async () => {
+  const catalog: NativeModelProviderCatalogEntry[] = [{
+    providerId: 'provider',
+    pluginId: 'fixture',
+    models: [
+      { id: 'supported', label: 'supported', aliases: [], reasoningCapabilities: { efforts: ['low', 'high'] } },
+      { id: 'unknown', label: 'unknown', aliases: [] },
+    ],
+  }]
+  const sources = { source: vi.fn(() => 'config'), validate: vi.fn(async () => true) }
+  const allowed = desktopLogicalTargetAdmission(sources, async () => catalog)
+  expect(await allowed('provider', 'supported', 'high')).toBe(true)
+  expect(await allowed('provider', 'supported', 'xhigh')).toBe(false)
+  expect(await allowed('provider', 'unknown', 'high')).toBe(false)
+  expect(await allowed('provider', 'unknown')).toBe(true)
+  sources.source.mockReturnValue('remote')
+  expect(await allowed('provider', 'supported', 'high')).toBe(false)
+})
 
 it('recommends fork only when compatible and applies the saved profile mode without granting history', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'desktop-logical-preference-'))

@@ -59,6 +59,7 @@ export async function prepareNativeContinuation(
         operationId: prepared.action.operationId,
         target: { providerId: prepared.pending.providerId, model: prepared.pending.model },
         mode: authority.logicalMode,
+        ...(prepared.action.reasoningEffort ? { targetReasoningEffort: prepared.action.reasoningEffort } : {}),
         ...(authority.remember ? { remember: authority.remember } : {}),
         ...(authority.channelCode ? { channelCode: authority.channelCode } : {}),
         current: () => !authority.disposed() && authority.revalidate(operation),

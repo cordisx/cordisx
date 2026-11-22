@@ -8,6 +8,7 @@ import type {
 import type { ContinuationConfiguration } from './channel-continuation-config.js'
 import type { LogicalHistoryCategory } from './logical-continuation-history.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
+import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 export type LogicalContinuationRequest = ConversationContinuationRequestV1
 /** The owning Host constructs this from a verified user action or authenticated Channel dispatch. */
@@ -21,6 +22,8 @@ export interface LogicalContinuationEvidence {
   readonly handoff: 'checkpoint' | 'unavailable' | 'none'
   /** Digest of the exact approved checkpoint; no checkpoint text is stored here. */
   readonly handoffDigest?: string
+  /** Explicit target effort; the separately recorded source configuration is unchanged. */
+  readonly targetReasoningEffort?: ModelReasoningEffort
 }
 export interface LogicalContinuationIntent {
   readonly request: LogicalContinuationRequest
@@ -145,7 +148,9 @@ function validEvidence(request: LogicalContinuationRequest, evidence: LogicalCon
       'sourceHistoryVersion',
       'handoff',
       'handoffDigest',
+      'targetReasoningEffort',
     ]) || !text(evidence.sourceHistoryVersion) || !evidence.sourceConfiguration
+    || evidence.targetReasoningEffort !== undefined && !isModelReasoningEffort(evidence.targetReasoningEffort)
     || !record(config) || !exact(config, [
       'providerId',
       'model',

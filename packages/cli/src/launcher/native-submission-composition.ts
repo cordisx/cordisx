@@ -1,6 +1,7 @@
 import { approvalReviewCatalogEnvironment } from './approval-review-catalog.js'
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
 import { createDesktopLogicalServices } from './desktop-logical-composition.js'
+import { desktopLogicalTargetAdmission } from './desktop-logical-target.js'
 import {
   bundledCodexVersion,
   resolveBundledCodexCliPath,
@@ -730,10 +731,10 @@ export async function prepareNativeSubmissionBootstrap(
           ownerIdentity: scope => cdp.desktopOwnerIdentity(scope),
           channelHistory: completeOptions.logicalHistory,
           native: () => channelSession,
-          targetAllowed: (providerId, model) =>
-            providerSources.source(providerId) === 'remote'
-              ? Promise.resolve(false)
-              : providerSources.validate({ providerId, model }),
+          targetAllowed: desktopLogicalTargetAdmission(
+            providerSources,
+            () => chatConfiguration?.catalog() ?? catalog(),
+          ),
         })
         encryptedReplay = await startResponsesEncryptedReplay()
         const prepareConfiguredProvider = configuredEncryptedReplay(

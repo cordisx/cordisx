@@ -120,6 +120,69 @@ it('commits an authorized Desktop continuation through the shared Host transacti
   }
 })
 
+it('preserves source settings while recording and applying the selected target effort', async () => {
+  const f = await fixture()
+  try {
+    const authority = {
+      ...f.authority,
+      targetReasoningEffort: 'high' as const,
+      configuredProviderOverrides: { model_reasoning_effort: 'high' },
+    }
+    const input = { ...f.input, authority }
+    expect(await startDesktopLogicalContinuation(input)).toMatchObject({ state: 'applied' })
+    expect(f.store.snapshot().logicalContinuations?.intents.operation?.evidence).toMatchObject({
+      sourceConfiguration: { execution: { effort: 'low' } },
+      targetReasoningEffort: 'high',
+    })
+    expect(f.native.createLogicalDestination.mock.calls[0]?.[1]).toMatchObject({
+      sourceConfiguration: { execution: { effort: 'high' } },
+      targetReasoningEffort: 'high',
+    })
+    expect(f.authority.targetAllowed).toHaveBeenCalledWith('new', 'model', 'high')
+    expect(await startDesktopLogicalContinuation(input)).toMatchObject({ state: 'applied', navigationReady: false })
+    expect(
+      await startDesktopLogicalContinuation({
+        ...input,
+        authority: {
+          ...authority,
+          targetReasoningEffort: 'medium',
+          configuredProviderOverrides: { model_reasoning_effort: 'medium' },
+        },
+      }),
+    ).toMatchObject({ state: 'rejected', code: 'OPERATION_ID_CONFLICT' })
+    expect(f.control.createFencedLogicalDestination).toHaveBeenCalledOnce()
+    await f.store.close()
+    const reopened = await ChannelConversationStore.open(path.join(f.dir, 'state.json'))
+    try {
+      expect(reopened.snapshot().logicalContinuations?.intents.operation?.evidence).toMatchObject({
+        sourceConfiguration: { execution: { effort: 'low' } },
+        targetReasoningEffort: 'high',
+      })
+    } finally {
+      await reopened.close()
+    }
+  } finally {
+    await f.close()
+  }
+})
+
+it('does not create a target when its selected effort becomes unavailable during preflight', async () => {
+  const f = await fixture()
+  try {
+    f.authority.targetAllowed.mockResolvedValueOnce(true).mockResolvedValue(false)
+    expect(
+      await startDesktopLogicalContinuation({
+        ...f.input,
+        authority: { ...f.authority, targetReasoningEffort: 'high' },
+      }),
+    ).toMatchObject({ state: 'rejected', code: 'PREFLIGHT_UNAVAILABLE' })
+    expect(f.control.createFencedLogicalDestination).not.toHaveBeenCalled()
+    expect(f.store.snapshot().logicalContinuations?.intents.operation).toBeUndefined()
+  } finally {
+    await f.close()
+  }
+})
+
 it.each(['profile', 'conversation'] as const)(
   'commits the %s mode with the destination, without saving consent',
   async scope => {

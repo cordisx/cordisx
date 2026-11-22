@@ -23,7 +23,7 @@ export async function prepareLogicalConfirmation(prepared: PreparedBase, authori
   const suggestion = await authority.migration.suggest(prepared.scope, {
     providerId: prepared.pending.providerId,
     model: prepared.pending.model,
-  })
+  }, prepared.action.reasoningEffort)
   if (!suggestion || authority.disposed() || !authority.revalidateSelection(prepared)) {
     return { kind: 'reject', reason: 'provider-preparation-failed' }
   }

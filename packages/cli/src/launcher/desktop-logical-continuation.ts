@@ -16,6 +16,7 @@ import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelTaskPatch } from './channel-task-config.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import { jointHistorySourceAllowed } from './channel-joint-history.js'
+import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 /** A Host-owned verified action, never a model-supplied account or consent. */
 export async function startDesktopLogicalContinuation(input: {
@@ -30,7 +31,8 @@ export async function startDesktopLogicalContinuation(input: {
   authority: {
     identity(): Promise<string | undefined>
     current(): boolean
-    targetAllowed(providerId: string, model: string): Promise<boolean>
+    targetAllowed(providerId: string, model: string, effort?: ModelReasoningEffort): Promise<boolean>
+    targetReasoningEffort?: ModelReasoningEffort
     linkedHistoryReady: boolean
     configuredProviderOverrides?: Readonly<Record<string, unknown>>
   }
@@ -47,6 +49,9 @@ export async function startDesktopLogicalContinuation(input: {
     || input.preference?.clear !== undefined
       && (input.preference.clear !== true || input.preference.scope !== 'conversation')
     || input.channelGrant !== undefined && request.mode === 'fork'
+    || authority.targetReasoningEffort !== undefined && !isModelReasoningEffort(authority.targetReasoningEffort)
+    || authority.configuredProviderOverrides !== undefined
+      && authority.configuredProviderOverrides.model_reasoning_effort !== authority.targetReasoningEffort
     || request.source.profileId !== input.profileId || request.mode === 'linked' && (!authority.linkedHistoryReady
         || request.handoffConsent !== 'none')
   ) {
@@ -59,7 +64,10 @@ export async function startDesktopLogicalContinuation(input: {
   const transaction = channelLogicalTransactionStore(owner.store)
   const prior = transaction.snapshot().logicalContinuations!.intents[request.operationId]
   if (prior) {
-    if (!isDeepStrictEqual(prior.actor, actor) || !isDeepStrictEqual(prior.request, request)) {
+    if (
+      !isDeepStrictEqual(prior.actor, actor) || !isDeepStrictEqual(prior.request, request)
+      || prior.evidence.targetReasoningEffort !== authority.targetReasoningEffort
+    ) {
       return { state: 'rejected' as const, operationId: request.operationId, code: 'OPERATION_ID_CONFLICT' }
     }
     if (prior.state === 'applied' && prior.destination) {
@@ -156,7 +164,11 @@ export async function startDesktopLogicalContinuation(input: {
     preflight: async current => {
       if (
         !isDeepStrictEqual(current, actor) || !authority.current() || await authority.identity() !== identity
-        || !await authority.targetAllowed(request.target.providerId, request.target.model)
+        || !await authority.targetAllowed(
+          request.target.providerId,
+          request.target.model,
+          authority.targetReasoningEffort,
+        )
       ) return undefined
       if (input.channelGrant) {
         if (
@@ -181,15 +193,35 @@ export async function startDesktopLogicalContinuation(input: {
       const version = await native.logicalSourceVersion(request.source)
       if (
         !version || !authority.current() || await authority.identity() !== identity
+        || !await authority.targetAllowed(
+          request.target.providerId,
+          request.target.model,
+          authority.targetReasoningEffort,
+        )
         || input.channelGrant && request.mode === 'linked' && await native.logicalOwnerIdentity() !== identity
         || input.channelGrant && request.mode === 'linked' && !await native.logicalJointSourceRoot(request.source)
       ) return undefined
-      return { sourceConfiguration: config, sourceHistoryVersion: version, handoff: 'none' as const }
+      return {
+        sourceConfiguration: config,
+        sourceHistoryVersion: version,
+        handoff: 'none' as const,
+        ...(authority.targetReasoningEffort === undefined
+          ? {}
+          : { targetReasoningEffort: authority.targetReasoningEffort }),
+      }
     },
     create: async (current, evidence) => {
       const created = await native.createLogicalDestination(
         current,
-        evidence,
+        evidence.targetReasoningEffort === undefined
+          ? evidence
+          : {
+            ...evidence,
+            sourceConfiguration: {
+              ...evidence.sourceConfiguration,
+              execution: { ...evidence.sourceConfiguration.execution, effort: evidence.targetReasoningEffort },
+            },
+          },
         owner.fence,
         destination => channelLogicalDestinationAvailable(owner.store.snapshot(), source, destination),
         nativeRequests.nativeRequest,
