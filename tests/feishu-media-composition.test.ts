@@ -33,8 +33,8 @@ describe('scoped media production adapter composition', () => {
       'SOURCE_DENIED',
     )
     const reply = vi.fn(async () => ({ code: 0, data: { message_id: 'synthetic-receipt' } }))
-    const image = vi.fn(async () => ({ code: 0, data: { image_key: 'synthetic-image' } }))
-    const file = vi.fn(async () => ({ code: 0, data: { file_key: 'synthetic-audio' } }))
+    const image = vi.fn(async () => ({ image_key: 'synthetic-image' }))
+    const file = vi.fn(async () => ({ file_key: 'synthetic-audio' }))
     const definition = createFeishuAdapterDefinition({
       connection: { ref: target, adapterKind: 'lark', enabled: true, transport: { mode: 'websocket' } },
       configurationRevision: 1,
