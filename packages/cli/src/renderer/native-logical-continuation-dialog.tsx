@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { HostDialog, HostDialogAction } from './host-ui/HostDialog.js'
 import type { NativeProviderSubmitConfirmation } from './native-provider-selection-client.js'
+import css from './native-logical-continuation-dialog.css?inline'
 
 type Mode = 'linked' | 'fork'
 
@@ -55,6 +56,7 @@ export function NativeLogicalContinuationDialog(input: {
         </>
       }
     >
+      <style>{css}</style>
       <p>
         {zh ? '目标服务：' : 'Target service: '}
         {input.confirmation.target.providerId}
@@ -110,7 +112,7 @@ export function NativeLogicalContinuationDialog(input: {
         : null}
       <fieldset>
         <legend>{zh ? '接续方式' : 'Continuation mode'}</legend>
-        <label>
+        <label className="cxmp-confirm-choice">
           <input
             type="radio"
             name={group}
@@ -120,8 +122,7 @@ export function NativeLogicalContinuationDialog(input: {
           />
           {zh ? '完整 fork：继承原生完整历史，包括工具内容' : 'Full fork: inherit all native history, including tools'}
         </label>
-        <br />
-        <label>
+        <label className="cxmp-confirm-choice">
           <input
             type="radio"
             name={group}
@@ -153,7 +154,7 @@ export function NativeLogicalContinuationDialog(input: {
           </div>
         )
         : null}
-      <label>
+      <label className="cxmp-confirm-preference">
         {zh ? '切换后的偏好' : 'Preference after this switch'}{' '}
         <select value={remember} onChange={event => setRemember(event.currentTarget.value as typeof remember)}>
           <option value="once">{zh ? '仅本次' : 'This switch only'}</option>
@@ -171,7 +172,7 @@ export function NativeLogicalContinuationDialog(input: {
           ? '保存方式不会保存历史授权，每次切换仍需确认。'
           : 'Saving a mode does not save history authorization; each switch still requires confirmation.'}
       </p>
-      <label>
+      <label className="cxmp-confirm-choice">
         <input
           type="checkbox"
           checked={consent}

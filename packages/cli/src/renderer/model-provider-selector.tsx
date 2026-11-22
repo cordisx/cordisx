@@ -169,6 +169,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     || native.creationDisplay !== undefined && !boundCreation
   const canInteract = () => !suspended && !creationReadOnly && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
+    // Portal events still traverse this React ancestor. The confirmation must
+    // remain interactive while its modal correctly blocks the Composer seat.
+    const confirmation = event.target instanceof Element ? event.target.closest<HTMLElement>('.cxmp-confirm') : null
+    if (native.confirmation?.logical && nativeModelProviderInteractionAllowed(confirmation)) return
     if (canInteract()) return
     event.preventDefault()
     event.stopPropagation()

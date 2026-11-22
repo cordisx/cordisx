@@ -57,6 +57,7 @@ try {
     'renderer/host-ui/empty-state.css',
     'renderer/host-ui/empty-state-illustration-theme.css',
     'renderer/model-providers.css',
+    'renderer/native-logical-continuation-dialog.css',
     'renderer/manager/manager-browse.css',
     'renderer/manager/manager-navigation.css',
     'renderer/manager/manager-content.css',
