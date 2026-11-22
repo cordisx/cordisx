@@ -11,6 +11,7 @@ import { startSupervisorControlServer } from '../packages/cli/src/cli/supervisor
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
 import { createConfiguredChannelOwner } from '../packages/cli/src/cli/configured-channel-owner.js'
 import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
+import type { ServiceRendererPermissionConsumerFence } from '../packages/cli/src/cli/service-renderer-permission-handoff.js'
 import { loadHomeConfig } from '../packages/cli/src/config/home-config.js'
 import {
   effectiveConfigFingerprint,
@@ -188,6 +189,13 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
               let current = true
               return {
                 isCurrent: () => current && live,
+                adopt: async (input: Parameters<ServiceRendererPermissionConsumerFence['adopt']>[0]) => ({
+                  profileId: input.profileId,
+                  ownerGeneration: input.ownerGeneration,
+                  requestId: input.requestId,
+                  adopted: current && live,
+                  candidate: input.candidate,
+                }),
                 release: () => {
                   if (!current || !live) return false
                   current = false

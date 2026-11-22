@@ -101,6 +101,18 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       let otherConsumersCurrent = true
       const consumers = {
         isCurrent: () => otherConsumersCurrent,
+        adopt: async (input: {
+          profileId: string
+          ownerGeneration: string
+          requestId: string
+          candidate: readonly unknown[]
+        }) => ({
+          profileId: input.profileId,
+          ownerGeneration: input.ownerGeneration,
+          requestId: input.requestId,
+          adopted: otherConsumersCurrent,
+          candidate: input.candidate,
+        }),
         release: () => {
           if (!otherConsumersCurrent) return false
           otherConsumersCurrent = false

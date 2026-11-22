@@ -21,8 +21,57 @@ import type { ServiceRendererParticipants } from './service-renderer-participant
 /** A separate owner must cover every policy consumer outside the Manager cohort. */
 export interface ServiceRendererPermissionConsumerFence {
   isCurrent(): boolean
+  /**
+   * Adopt or fence every covered consumer before returning an exact readback.
+   * Abort or fence must prevent any late adoption from reopening stale consumers.
+   * This is owner-private: policy identities here have not been renderer-projected.
+   */
+  adopt(input: {
+    readonly profileId: string
+    readonly ownerGeneration: string
+    readonly requestId: string
+    readonly expected: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly updates: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly candidate: readonly CordisXPersistedPermissionPolicyRecord[]
+  }, signal: AbortSignal): unknown | Promise<unknown>
   release(): boolean
   fence(): void
+}
+
+/** Bound the wait and cancel the consumer if the writer disconnects. */
+async function adoptOtherConsumers(
+  consumers: ServiceRendererPermissionConsumerFence,
+  input: Parameters<ServiceRendererPermissionConsumerFence['adopt']>[0],
+  writerSignal: AbortSignal,
+): Promise<unknown> {
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  writerSignal.addEventListener('abort', cancel, { once: true })
+  const timer = setTimeout(cancel, 15_000)
+  timer.unref()
+  let onAbort = () => {}
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new Error('renderer-permission-consumers-unavailable'))
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+  })
+  if (writerSignal.aborted) cancel()
+  let completed = false
+  try {
+    const result = await Promise.race([
+      Promise.resolve().then(() => {
+        controller.signal.throwIfAborted()
+        return consumers.adopt(structuredClone(input), controller.signal)
+      }),
+      aborted,
+    ])
+    completed = true
+    return result
+  } finally {
+    clearTimeout(timer)
+    writerSignal.removeEventListener('abort', cancel)
+    controller.signal.removeEventListener('abort', onAbort)
+    if (!completed) controller.abort()
+  }
 }
 
 type HandoffInput = {
@@ -188,6 +237,25 @@ async function reserve(
           if (
             !attachmentEqual(candidate, mergePersistedPermissionPolicies(previous, changes))
             || !attachmentEqual(await input.policies(), candidate) || !current()
+          ) throw new Error('renderer-permission-handoff-unavailable')
+          // A paused consumer may still hold the old policy. Require an exact
+          // owner-scoped readback before either fleet is allowed to resume.
+          const receipt = await adoptOtherConsumers(consumers, {
+            profileId: input.profileId,
+            ownerGeneration: input.generation,
+            requestId,
+            expected: previous,
+            updates: changes,
+            candidate,
+          }, context.signal)
+          if (
+            !current() || !attachmentEqual(receipt, {
+              profileId: input.profileId,
+              ownerGeneration: input.generation,
+              requestId,
+              adopted: true,
+              candidate,
+            })
           ) throw new Error('renderer-permission-handoff-unavailable')
           const confirm = async (items: typeof cohort) =>
             await synchronizeServiceRendererPolicies({

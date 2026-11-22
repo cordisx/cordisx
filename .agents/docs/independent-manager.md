@@ -242,12 +242,13 @@ by a profile-wide barrier.
 
 The owner can borrow its held permission fence for one exact policy batch while
 keeping other profile and Home changes excluded. This internal primitive does
-not provide user-action proof or synchronize renderer policy caches, so it does
 not by itself enable persistent permission changes from the Host page. The
-experimental permission channel can resolve a renderer-scoped Manager UI
-identity to the verified owner source and project its receipt back without
-exposing that source. The channel remains disabled until an owner-held user
-decision and all affected consumers can be coordinated.
+experimental permission channel verifies a signed user decision, resolves a
+renderer-scoped Manager UI identity to the owner source, and requires each
+Manager and every other covered consumer to adopt the exact owner readback.
+A missing or stale consumer receipt fences the handoff. The service owner does
+not yet supply the other-consumer reservation, so persistent changes remain
+unavailable in the production path.
 
 On macOS and Linux, an experimental service-mode renderer or an eligible
 Desktop renderer holds profile-scoped fences while its
