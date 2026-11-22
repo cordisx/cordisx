@@ -54,9 +54,11 @@ Manager's adoption. Secrets and other field types remain unavailable. A Desktop
 seat change retires pages using this projection, and a new page requires a fresh
 proof. Each Manager receives only matching existing Manager UI permissions.
 Managed-service reads and subscriptions are available; the service owner can
-coordinate an explicit login across admitted Managers. When initial service
-sources are still being adopted, the owner waits before taking the Manager's
-profile fences; admission remains bounded and stops when the page disconnects.
+coordinate an explicit login or logout across admitted Managers. Logout is
+unavailable while affected terminal or managed-service clients hold leases.
+When initial service sources are still being adopted, the owner waits before
+taking the Manager's profile fences; admission remains bounded and stops when
+the page disconnects.
 Desktop login and dynamic changes to those managed packages remain unavailable.
 The service owner and an eligible Desktop owner can change an unrelated
 capability-free v1 package while admitted Manager pages retain their projected
@@ -76,7 +78,11 @@ A Desktop owner must own the profile exclusively, have a ready Desktop renderer
 and not be in attach mode. On macOS or Linux, either owner can project one
 configured Channel archive when its staged browser graph has an initial
 stylesheet and its live service owner matches. An existing source-specific
-Manager UI permission or a separate one-tab review is required. The exact
+Manager UI permission or a separate one-tab review is required. In service mode,
+an explicit user decision can persist, deny or reset the selected Channel's two
+Manager UI permissions. The owner verifies the decision and waits for admitted
+Manager pages to adopt it; unaccounted renderers prevent the change. Desktop
+and external adapter consumers are not yet included. The exact
 published Channel 0.1.7 archive is supported as a read-only legacy view: its
 static stylesheet is recovered into the verified same-origin graph, but that
 version cannot negotiate the configuration facade. Other legacy graphs without
@@ -85,10 +91,9 @@ version can also expose the existing connection form for a resolved account's di
 name and reception selectors, and can rotate a Feishu/Lark credential within
 that Host-owned form. The eligible Desktop owner remains read-only. Connection
 creation, connection controls, Channel policies, logs and sessions are not available
-through this restricted page. Other configured plugins,
-adapters, concurrent permission changes and recovery after an uncertain result
-are not yet supported. The isolated browser tests do not constitute real Codex
-App validation.
+through this restricted page. Other configured plugins, adapters and recovery
+after an uncertain result are not yet supported. The isolated browser tests do
+not constitute real Codex App validation.
 
 The experimental Host page in service mode and the eligible Desktop mode can
 read and save shared model-service declarations through the
@@ -96,7 +101,8 @@ existing Manager form when the owner advertises the safe-write contract. The
 Desktop path depends on its native settings authority being ready. Edits use the
 owner's revision and credential protection; they retain the app-restart apply
 semantics described below. An edit started against an older revision is rejected
-if another client changes the declarations first.
+if another client changes the declarations first. Other independent Manager
+pages refresh these declarations while idle; an open edit retains its draft.
 
 While an experimental Host page is attached, installed-package plugin and
 service configuration writers use the same profile fence as Manager admission.

@@ -89,7 +89,9 @@ the live Host's existing gateway and credentials. The CLI does not export plugin
 login or copy credentials into Codex configuration. It holds a launch-scoped
 command-backed credential lease and releases it when the child exits or startup
 fails. Owner/service replacement invalidates the lease; start a new CLI session.
-An orphaned launch expires. The existing App and unrelated services are retained.
+The wrapper asks its terminal child to exit and, if it does not respond, ends it
+after a short grace period. It does not replay the interrupted request. An
+orphaned launch expires. The existing App and unrelated services are retained.
 
 The CLI discovers the single live owner among configured App namespaces that
 contain the selected profile; `--owner-app ID` requires that exact namespace.
