@@ -31,6 +31,7 @@ import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 import { bindDiagnosticContext } from '../diagnostics/context.js'
 import { updateFeishuCard } from './feishu-card-update.js'
+import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -537,6 +538,7 @@ export function createLocalChannelService(input: {
       return {
         generation: current.generation,
         runtime: current.runtime,
+        ...channelFeedbackSdk(event => current.directory.channel(event), () => !disposed && active === current),
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
             ref: connection.ref,
