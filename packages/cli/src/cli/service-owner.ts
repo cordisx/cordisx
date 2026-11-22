@@ -115,6 +115,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ownerGeneration: generation,
           ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
           readLifecycleFence: () => services!.readManagedServiceUIFence(),
+          allowAuthentication: true,
           runtime: services,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })

@@ -97,7 +97,7 @@ describe('plugin management RPC', () => {
     }
   })
 
-  it('keeps an authenticated observation open beyond 60 seconds without extending mutation deadlines', async () => {
+  it('allows observation and interactive login to outlive ordinary mutation deadlines', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-observation-rpc-'))
     let started!: () => void
     const bothStarted = new Promise<void>(resolve => {
@@ -114,7 +114,7 @@ describe('plugin management RPC', () => {
       processStartedAt,
       service: {} as PluginManagementService,
       managerRenderer: async () => {
-        if (++count === 2) started()
+        if (++count === 3) started()
         await new Promise(resolve => setTimeout(resolve, 61_000))
         return { status: 'ok' }
       },
@@ -137,6 +137,10 @@ describe('plugin management RPC', () => {
       })
       const mutation = requestPluginManagementRpc(paths, endpoint, {
         ...common,
+        payload: JSON.stringify({ operation: 'logout' }),
+      })
+      const authentication = requestPluginManagementRpc(paths, endpoint, {
+        ...common,
         payload: JSON.stringify({ operation: 'authenticate' }),
       })
       const rejected = expect(mutation).rejects.toThrow('plugin management request timed out')
@@ -145,6 +149,7 @@ describe('plugin management RPC', () => {
       await rejected
       await vi.advanceTimersByTimeAsync(1_000)
       await expect(observation).resolves.toEqual({ status: 'ok' })
+      await expect(authentication).resolves.toEqual({ status: 'ok' })
     } finally {
       vi.useRealTimers()
       await server.close()

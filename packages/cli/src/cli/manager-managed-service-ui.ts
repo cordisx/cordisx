@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
+  type ManagedServiceUIBindingRequest,
   type ManagedServiceUIBridgeHandler,
   MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
   parseManagedServiceUIBindingRequest,
@@ -49,6 +51,7 @@ interface Session {
   readonly capabilities: readonly OwnerCapability[]
   readonly startup: ManagerStartupObservation
   readonly observation: ManagerManagedServiceObservation
+  readonly authenticationRequests: Set<string>
   readonly onAbort: () => void
 }
 
@@ -63,6 +66,52 @@ function object(value: unknown): Record<string, unknown> {
 
 function sameKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key))
+}
+
+type LoginRequest = Extract<ManagedServiceUIBindingRequest, { readonly operation: 'authenticate' }>
+const loginResultSchema =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json'
+const loginErrorCodes = new Set([
+  'stale-generation',
+  'binding-replaced',
+  'service-unavailable',
+  'permission-denied',
+  'not-authenticated',
+  'already-authenticated',
+  'authenticating',
+  'authentication-failed',
+  'user-cancelled',
+  'timeout',
+  'stale-revision',
+  'cancelled',
+  'unavailable',
+  'unsupported',
+  'not-ready',
+])
+
+/** Keep the receipt bound to the requested service and redact backend error text. */
+function projectLoginResult(value: unknown, request: LoginRequest): Record<string, unknown> {
+  const result = object(value)
+  const base = ['$schema', 'contract', 'schemaVersion', 'requestId', 'binding', 'status']
+  if (
+    result.$schema !== loginResultSchema || result.contract !== 'cordisx.managed-service-login-result/v1'
+    || result.schemaVersion !== 1 || result.requestId !== request.request.requestId
+    || !isDeepStrictEqual(result.binding, request.binding)
+  ) throw unavailable()
+  if (result.status === 'accepted') {
+    if (
+      !sameKeys(result, [...base, 'stateAt', 'sequence']) || result.stateAt !== 'authenticated'
+      || !Number.isSafeInteger(result.sequence) || (result.sequence as number) <= request.request.expectedSequence
+    ) throw unavailable()
+    return result
+  }
+  const error = object(result.error)
+  if (
+    !['denied', 'failed', 'unavailable'].includes(String(result.status))
+    || !sameKeys(result, [...base, 'error']) || !sameKeys(error, ['code', 'message'])
+    || typeof error.code !== 'string' || !loginErrorCodes.has(error.code) || typeof error.message !== 'string'
+  ) throw unavailable()
+  return { ...result, error: { code: error.code, message: 'Managed service login could not be completed.' } }
 }
 
 function copyCapabilities(value: readonly ManagedServiceUICapabilityMutation[]): readonly OwnerCapability[] {
@@ -168,6 +217,8 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly ownerGeneration: string
   readonly ownerCurrent: () => boolean
   readonly readLifecycleFence: () => number | undefined
+  /** Enabled only when the production owner wraps writes in its Manager/lifecycle reservation. */
+  readonly allowAuthentication?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
     readonly managedServiceUI: {
@@ -297,6 +348,7 @@ export function createManagerManagedServiceUIBridge(input: {
       capabilities,
       startup,
       observation,
+      authenticationRequests: new Set(),
       onAbort: () => retire(context.rendererId),
     }
     usedRenderers.add(context.rendererId)
@@ -341,6 +393,64 @@ export function createManagerManagedServiceUIBridge(input: {
           const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
           if (!observationOperations.has(parsed.operation)) throw unavailable()
           return session.observation.prepare(parsed as ManagerManagedServiceObservationRequest, alias)
+        }
+        if (request.operation === 'authenticate' && input.allowAuthentication) {
+          if (context.admitted !== true) throw unavailable()
+          const forwarded = { ...request, token: alias.ownerToken }
+          const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
+          const validation = validator(alias.ownerToken, input.profileId, input.runtimeGeneration)
+          const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
+          if (parsed.operation !== 'authenticate') throw unavailable()
+          return {
+            mode: 'write',
+            async dispatch() {
+              assertCurrent(session, context)
+              if (session.authenticationRequests.has(requestId) || session.authenticationRequests.size >= 4_096) {
+                throw unavailable()
+              }
+              session.authenticationRequests.add(requestId)
+              const response = sanitize(
+                session,
+                await input.runtime.managedServiceUI.handleBindingValue(JSON.stringify(forwarded), context.signal),
+                requestId,
+              )
+              assertCurrent(session, context)
+              if (response.ok !== true) throw unavailable()
+              const result = projectLoginResult(response.value, parsed)
+              // A failed action can have changed the external service before
+              // the backend reported an error; do not present it as retryable.
+              if (result.status === 'failed' || result.status === 'unavailable') throw unavailable()
+              const confirmationId = 'confirm-' + randomBytes(16).toString('hex')
+              const confirmation = sanitize(
+                session,
+                await input.runtime.managedServiceUI.handleBindingValue(
+                  JSON.stringify({
+                    version: 1,
+                    token: alias.ownerToken,
+                    requestId: confirmationId,
+                    operation: 'snapshot',
+                    scope,
+                    serviceId: parsed.serviceId,
+                    binding: parsed.binding,
+                  }),
+                  context.signal,
+                ),
+                confirmationId,
+              )
+              assertCurrent(session, context)
+              const snapshot = object(confirmation.value)
+              const projection = object(snapshot.projection)
+              const auth = object(projection.auth)
+              if (
+                confirmation.ok !== true || snapshot.status !== 'available'
+                || !isDeepStrictEqual(projection.binding, parsed.binding)
+                || !Number.isSafeInteger(projection.sequence) || (projection.sequence as number) < 0
+                || result.status === 'accepted'
+                  && ((projection.sequence as number) < (result.sequence as number) || auth.state !== 'authenticated')
+              ) throw unavailable()
+              return { requestId, ok: true, value: result }
+            },
+          }
         }
         if (!readOperations.has(request.operation)) {
           return {
@@ -404,6 +514,12 @@ export function createManagerManagedServiceUIBridge(input: {
                   contract: service.contract,
                   schemaVersion: 1,
                   binding: service.binding,
+                  ...(input.allowAuthentication && service.authenticationTimeoutMs !== undefined
+                      && Number.isSafeInteger(service.authenticationTimeoutMs)
+                      && (service.authenticationTimeoutMs as number) >= 100
+                      && (service.authenticationTimeoutMs as number) <= 300_000
+                    ? { authenticationTimeoutMs: service.authenticationTimeoutMs }
+                    : {}),
                   capabilities: { logout: false, readCatalog: capabilities.readCatalog, accountControl: false },
                 },
               },

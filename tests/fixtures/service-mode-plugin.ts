@@ -30,6 +30,15 @@ const server = createServer(async (request, response) => {
 server.listen(Number(process.argv[2]), '127.0.0.1')
 process.on('SIGTERM', () => server.close(() => process.exit(0)))
 `
+const authHelper = String.raw`#!/usr/bin/env node
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+const marker = path.join(process.env.HOME, 'fixture-authenticated')
+const action = process.argv[2]
+appendFileSync(path.join(process.env.HOME, 'fixture-auth-actions'), action + '\n')
+if (action === 'login') writeFileSync(marker, 'ready')
+process.exit(existsSync(marker) ? 0 : 1)
+`
 
 export async function stageServiceModePlugin(
   root: string,
@@ -38,7 +47,8 @@ export async function stageServiceModePlugin(
   withService: boolean,
   canonicalSource: string | null = 'https://example.test/fixtures',
   browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
-  options: { readonly version?: 14 | 15; readonly uiPoints?: readonly string[] } = {},
+  options: { readonly version?: 14 | 15; readonly uiPoints?: readonly string[]; readonly authentication?: boolean } =
+    {},
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
   const dir = path.join(root, id)
@@ -50,7 +60,23 @@ export async function stageServiceModePlugin(
     defaultAlias: 'fixture',
     routes,
   }
-  const value = definition('gateway')
+  const authAction = (action: string) => ({
+    executable: { kind: 'package-relative' as const, path: './auth.mjs' as const },
+    arguments: [action],
+    timeoutMs: 5_000,
+    outcomes: [
+      { exitCode: 0, state: 'authenticated' as const },
+      { exitCode: 1, state: 'authentication-required' as const },
+    ],
+  })
+  const value = {
+    ...definition('gateway'),
+    ...(options.authentication
+      ? {
+        authentication: { mode: 'cli' as const, status: authAction('status'), login: authAction('login') },
+      }
+      : {}),
+  }
   const version = options.version ?? 14
   const registration = `
 export async function apply(ctx, input) {
@@ -59,7 +85,7 @@ export async function apply(ctx, input) {
   }' })
   ctx.effect(() => () => handle.dispose())
   ${
-    version === 15 ? '' : `
+    version === 15 || options.authentication ? '' : `
   const ready = await handle.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')
   const result = await handle.publishNativeProvider({
@@ -102,12 +128,22 @@ export async function prepare(ctx, input) {
     services: withService
       ? [{
         ...declaration('gateway', id, []),
-        runtimeResources: [{
-          path: './server.mjs',
-          mode: 'executable',
-          byteLength: Buffer.byteLength(backend),
-          digest: digest(backend),
-        }],
+        runtimeResources: [
+          {
+            path: './server.mjs',
+            mode: 'executable',
+            byteLength: Buffer.byteLength(backend),
+            digest: digest(backend),
+          },
+          ...(options.authentication
+            ? [{
+              path: './auth.mjs',
+              mode: 'executable',
+              byteLength: Buffer.byteLength(authHelper),
+              digest: digest(authHelper),
+            }]
+            : []),
+        ],
       }]
       : [],
     ...(version === 15
@@ -141,6 +177,7 @@ export async function prepare(ctx, input) {
     ),
     writeFile(path.join(dir, 'gateway.mjs'), service),
     writeFile(path.join(dir, 'server.mjs'), backend, { mode: 0o755 }),
+    ...(options.authentication ? [writeFile(path.join(dir, 'auth.mjs'), authHelper, { mode: 0o755 })] : []),
     writeFile(path.join(dir, 'runtime.json'), runtime),
     writeFile(
       path.join(dir, 'cordisx-package.json'),

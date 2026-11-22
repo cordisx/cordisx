@@ -589,6 +589,80 @@ it('extensionFactory without accounts methods does not expose them', async () =>
   expect(src.cancelOAuth).toBeUndefined()
 })
 
+it('prevents concurrent login and logout on the same managed service', async () => {
+  const projection = runtimeProjection()
+  let finish!: (result: ManagedServiceControlResultV1) => void
+  const pending = new Promise<ManagedServiceControlResultV1>(resolve => {
+    finish = resolve
+  })
+  const handle = { ...fakeRegistrationHandle(projection), authenticate: vi.fn(async () => await pending) }
+  const source = createManagedServiceSource({
+    ...baseOptions({ authenticationMode: 'cli', logoutAvailable: true }),
+    registrationHandle: handle,
+  })
+  const gesture = { kind: 'explicit-click' as const, at: new Date().toISOString() }
+  const login = source.authenticate({
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
+    contract: 'cordisx.managed-service-login-request/v1',
+    schemaVersion: 1,
+    requestId: 'login-in-flight',
+    binding: source.binding,
+    action: 'login',
+    expectedSequence: 0,
+    userGesture: gesture,
+  })
+  try {
+    const concurrent = await source.logout({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-request.v1.schema.json',
+      contract: 'cordisx.managed-service-logout-request/v1',
+      schemaVersion: 1,
+      requestId: 'concurrent-logout',
+      binding: source.binding,
+      action: 'logout',
+      expectedSequence: 0,
+      userGesture: gesture,
+    })
+    expect(concurrent).toMatchObject({ status: 'denied', error: { code: 'authenticating' } })
+    expect(handle.authenticate).toHaveBeenCalledTimes(1)
+    expect(handle.authenticate).toHaveBeenCalledWith('login')
+    finish({ status: 'accepted', projection })
+    expect(await login).toMatchObject({ status: 'accepted' })
+  } finally {
+    finish({ status: 'accepted', projection })
+    await login
+  }
+})
+
+it('releases the authentication guard after the runtime rejects an attempt', async () => {
+  const projection = runtimeProjection()
+  const handle = {
+    ...fakeRegistrationHandle(projection),
+    authenticate: vi.fn()
+      .mockRejectedValueOnce(new Error('fixture failure'))
+      .mockResolvedValueOnce({ status: 'accepted', projection }),
+  }
+  const source = createManagedServiceSource({
+    ...baseOptions({ authenticationMode: 'cli' }),
+    registrationHandle: handle,
+  })
+  const request: ManagedServiceLoginRequestV1 = {
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
+    contract: 'cordisx.managed-service-login-request/v1',
+    schemaVersion: 1,
+    requestId: 'login-retry',
+    binding: source.binding,
+    action: 'login',
+    expectedSequence: 0,
+    userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+  }
+  expect(await source.authenticate(request)).toMatchObject({ status: 'failed' })
+  expect(await source.authenticate(request)).toMatchObject({ status: 'accepted' })
+  expect(handle.authenticate).toHaveBeenCalledTimes(2)
+})
+
 it('broadcasts an authenticated delta to every live subscription after login succeeds', async () => {
   const missing = runtimeProjection({
     state: 'authentication-required' as const,
@@ -666,4 +740,68 @@ it('broadcasts an authenticated delta to every live subscription after login suc
 
   await sub1.subscription.unsubscribe()
   await sub2.subscription.unsubscribe()
+})
+
+it('broadcasts logout to every live subscription without waiting for the next health poll', async () => {
+  vi.useFakeTimers()
+  const authenticated = runtimeProjection({
+    authentication: Object.freeze({ state: 'configured' as const, sessionHandle: 'msa_test' }),
+  })
+  const loggedOut = runtimeProjection({
+    state: 'authentication-required' as const,
+    authentication: Object.freeze({ state: 'missing' as const }),
+  })
+  let didLogout = false
+  const handle: ManagedServiceRegistrationHandleV1 = {
+    ...fakeRegistrationHandle(authenticated),
+    inspect: vi.fn(async () => didLogout ? loggedOut : authenticated),
+    authenticate: vi.fn(async () => {
+      didLogout = true
+      return { status: 'accepted' as const, projection: loggedOut }
+    }),
+  }
+  const source = createManagedServiceSource({
+    ...baseOptions({ healthIntervalMs: 10_000, authenticationMode: 'cli', logoutAvailable: true }),
+    registrationHandle: handle,
+  })
+  const first = await source.subscribe(0) as Extract<ManagedServiceSubscribeResultV1, { status: 'subscribed' }>
+  const second = await source.subscribe(0) as Extract<ManagedServiceSubscribeResultV1, { status: 'subscribed' }>
+  try {
+    const pages1 = first.subscription.pages[Symbol.asyncIterator]()
+    const pages2 = second.subscription.pages[Symbol.asyncIterator]()
+    const initial1 = pages1.next()
+    const initial2 = pages2.next()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect((await initial1).done).toBe(false)
+    expect((await initial2).done).toBe(false)
+    const current = await source.snapshot() as Extract<ManagedServiceSnapshotResultV1, { status: 'available' }>
+    const delivered1 = vi.fn()
+    const delivered2 = vi.fn()
+    void pages1.next().then(delivered1)
+    void pages2.next().then(delivered2)
+    const result = await source.logout({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-request.v1.schema.json',
+      contract: 'cordisx.managed-service-logout-request/v1',
+      schemaVersion: 1,
+      requestId: 'logout-broadcast',
+      binding: source.binding,
+      action: 'logout',
+      expectedSequence: current.projection.sequence,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    })
+    expect(result.status).toBe('accepted')
+    await vi.advanceTimersByTimeAsync(0)
+    for (const delivered of [delivered1, delivered2]) {
+      expect(delivered).toHaveBeenCalledOnce()
+      expect(delivered.mock.calls[0]?.[0]).toMatchObject({
+        done: false,
+        value: { updates: [{ kind: 'state-changed', delta: { auth: { state: 'logged-out' } } }] },
+      })
+    }
+  } finally {
+    await first.subscription.unsubscribe()
+    await second.subscription.unsubscribe()
+    vi.useRealTimers()
+  }
 })

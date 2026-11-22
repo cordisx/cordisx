@@ -643,6 +643,14 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
           }
         }
+        if (input.channel === 'managed-service-ui') {
+          try {
+            const envelope = object(JSON.parse(input.payload))
+            rendererWrite = envelope?.operation === 'authenticate'
+          } catch {
+            return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+          }
+        }
         if (rendererWrite) {
           rendererWriteDispatched = true
           response.once('close', () => {

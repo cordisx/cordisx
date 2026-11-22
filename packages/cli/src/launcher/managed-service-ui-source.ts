@@ -263,6 +263,7 @@ export function createManagedServiceSource(
   let sequence = 0
   let lastProjection: ManagedServiceProjectionV1 | undefined
   let loggedOut = false
+  let authenticationInFlight = false
   interface SubscriptionHandle {
     readonly deliverPage: (phase: 'replay' | 'live', updates: ManagedServiceProjectionUpdateV1[]) => void
     readonly closed: () => boolean
@@ -533,6 +534,18 @@ export function createManagedServiceSource(
 
     authenticate(request: ManagedServiceLoginRequestV1): Promise<ManagedServiceLoginResultV1> {
       ensureNotDisposed()
+      if (authenticationInFlight) {
+        return Promise.resolve(Object.freeze({
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+          contract: 'cordisx.managed-service-login-result/v1',
+          schemaVersion: 1,
+          requestId: request.requestId,
+          binding,
+          status: 'denied' as const,
+          error: Object.freeze({ code: 'authenticating' as const, message: 'authentication is already in progress' }),
+        }))
+      }
       if (request.binding.bindingId !== binding.bindingId) {
         return Promise.resolve(Object.freeze({
           $schema:
@@ -557,7 +570,8 @@ export function createManagedServiceSource(
           error: Object.freeze({ code: 'stale-revision' as const, message: 'projection sequence is stale' }),
         }))
       }
-      return options.registrationHandle.authenticate('login').then(result => {
+      authenticationInFlight = true
+      return Promise.resolve().then(async () => await options.registrationHandle.authenticate('login')).then(result => {
         ensureNotDisposed()
         sequence += 1
         if (result.status === 'accepted' || result.status === 'ready') {
@@ -602,13 +616,20 @@ export function createManagedServiceSource(
             message: error instanceof Error ? error.message : 'authentication failed',
           }),
         })
+      }).finally(() => {
+        authenticationInFlight = false
       })
     },
     logout(request: ManagedServiceLogoutRequestV1): Promise<ManagedServiceLogoutResultV1> {
       ensureNotDisposed()
       const unavailable = (
         status: 'denied' | 'failed' | 'unavailable',
-        code: 'binding-replaced' | 'stale-revision' | 'service-unavailable' | 'authentication-failed',
+        code:
+          | 'binding-replaced'
+          | 'stale-revision'
+          | 'service-unavailable'
+          | 'authentication-failed'
+          | 'authenticating',
         message: string,
       ): ManagedServiceLogoutResultV1 =>
         Object.freeze({
@@ -621,6 +642,9 @@ export function createManagedServiceSource(
           status,
           error: Object.freeze({ code, message }),
         })
+      if (authenticationInFlight) {
+        return Promise.resolve(unavailable('denied', 'authenticating', 'authentication is already in progress'))
+      }
       if (request.binding.bindingId !== binding.bindingId) {
         return Promise.resolve(unavailable('failed', 'binding-replaced', 'binding was replaced'))
       }
@@ -630,31 +654,37 @@ export function createManagedServiceSource(
       if (!options.logoutAvailable) {
         return Promise.resolve(unavailable('unavailable', 'service-unavailable', 'logout is unavailable'))
       }
-      return options.registrationHandle.authenticate('logout').then(result => {
-        ensureNotDisposed()
-        sequence += 1
-        if (result.status === 'accepted' || result.status === 'ready') {
-          loggedOut = true
-          return Object.freeze({
-            $schema:
-              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
-            contract: 'cordisx.managed-service-logout-result/v1',
-            schemaVersion: 1,
-            requestId: request.requestId,
-            binding,
-            status: 'accepted' as const,
-            stateAt: 'logged-out' as const,
-            sequence,
-          })
-        }
-        return unavailable(
-          'failed',
-          'authentication-failed',
-          'diagnostic' in result ? result.diagnostic.code : result.status,
-        )
-      }).catch((error: unknown) =>
+      authenticationInFlight = true
+      return Promise.resolve().then(async () => await options.registrationHandle.authenticate('logout')).then(
+        result => {
+          ensureNotDisposed()
+          sequence += 1
+          if (result.status === 'accepted' || result.status === 'ready') {
+            loggedOut = true
+            refreshAndBroadcast()
+            return Object.freeze({
+              $schema:
+                'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
+              contract: 'cordisx.managed-service-logout-result/v1',
+              schemaVersion: 1,
+              requestId: request.requestId,
+              binding,
+              status: 'accepted' as const,
+              stateAt: 'logged-out' as const,
+              sequence,
+            })
+          }
+          return unavailable(
+            'failed',
+            'authentication-failed',
+            'diagnostic' in result ? result.diagnostic.code : result.status,
+          )
+        },
+      ).catch((error: unknown) =>
         unavailable('failed', 'authentication-failed', error instanceof Error ? error.message : 'logout failed')
-      )
+      ).finally(() => {
+        authenticationInFlight = false
+      })
     },
     ...(extension?.readCatalog === undefined
       ? {}

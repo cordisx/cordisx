@@ -51,7 +51,7 @@ async function yieldObservation(signal: AbortSignal): Promise<void> {
   })
 }
 
-function requestId(payload: string): string {
+function requestId(payload: string, channel: IndependentHostChannel): string {
   if (payload.length > MAX_PAYLOAD_CHARS) throw new Error('independent-host-request-too-large')
   let value: unknown
   try {
@@ -67,7 +67,12 @@ function requestId(payload: string): string {
   const nestedId = nested !== null && typeof nested === 'object' && !Array.isArray(nested)
     ? (nested as Record<string, unknown>).requestId
     : undefined
-  if (envelope.requestId !== undefined && nestedId !== undefined && envelope.requestId !== nestedId) {
+  // Managed-service actions contain a separate domain request id inside the
+  // transport envelope. Other channels require their two ids to agree.
+  if (
+    channel !== 'managed-service-ui' && envelope.requestId !== undefined && nestedId !== undefined
+    && envelope.requestId !== nestedId
+  ) {
     throw new Error('independent-host-request-invalid')
   }
   const id = envelope.requestId ?? nestedId
@@ -140,7 +145,7 @@ export function installIndependentHostBindings(input: {
     const [name, receiverName] = INDEPENDENT_HOST_CHANNELS[channel]
     const binding: Binding = payload => {
       if (closed) throw new Error('independent-host-session-revoked')
-      const id = requestId(payload)
+      const id = requestId(payload, channel)
       const body = JSON.stringify({ channel, payload })
       if (new TextEncoder().encode(body).byteLength > MAX_WIRE_BYTES) {
         throw new Error('independent-host-request-too-large')
@@ -193,7 +198,8 @@ export function installIndependentHostBindings(input: {
       void Promise.resolve().then(async () => {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
           || channel === 'channel-credentials'
-          || (channel === 'model-services' || channel === 'plugin-management') && !request.readOnly
+          || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')
+            && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {
           if (!await input.rendererAdmission) throw new Error('independent-host-session-revoked')
         }

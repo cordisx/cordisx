@@ -28,6 +28,7 @@ import { coordinateManagerPermissionReview } from './manager-permission-review-f
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
 import { createManagerRendererChannelCredentials } from './manager-renderer-channel-credentials.js'
 import { createManagerRendererMarketplaceChannel } from './manager-renderer-marketplace.js'
+import { coordinateManagerManagedServiceMutations } from './manager-managed-service-mutation.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
@@ -67,7 +68,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
   readonly rendererWriteLifetimes?: ManagerRendererWriteLifetimes
   readonly rendererReadLifetimes?: ManagerRendererReadLifetimes
-  /** Owner-issued, per-renderer read-only managed-service UI bridge. */
+  /** Owner-issued, per-renderer managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
   readonly rendererModelServices?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
@@ -113,6 +114,15 @@ export async function openProductionPluginManagementComposition(input: {
       isCurrent: context => !closed && input.rendererParticipants!.peer(context.rendererId) !== undefined,
     })
   let rendererSessions!: ManagerRendererSessions
+  const rendererManagedServiceUI = input.rendererManagedServiceUI === undefined
+    ? undefined
+    : coordinateManagerManagedServiceMutations({
+      channel: input.rendererManagedServiceUI,
+      sessions: () => rendererSessions,
+      ...(input.mode === 'service' && input.rendererParticipants && input.rendererLifecycle
+        ? { participants: input.rendererParticipants, lifecycle: input.rendererLifecycle }
+        : {}),
+    })
   const rendererServiceConfig = input.rendererConfiguredChannelService
     ? createManagerRendererServiceConfigChannel({
       profileId: input.profileId,
@@ -163,9 +173,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererBootstrap === undefined
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),
-      ...(input.rendererManagedServiceUI === undefined
+      ...(rendererManagedServiceUI === undefined
         ? []
-        : [['managed-service-ui', input.rendererManagedServiceUI] as const]),
+        : [['managed-service-ui', rendererManagedServiceUI] as const]),
       ...(input.rendererModelServices === undefined
         ? []
         : [['model-services', input.rendererModelServices] as const]),

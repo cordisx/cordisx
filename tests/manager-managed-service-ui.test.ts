@@ -43,7 +43,7 @@ function descriptor() {
   }
 }
 
-function fixture() {
+function fixture(options: { allowAuthentication?: boolean } = {}) {
   let epoch = 1
   let live = true
   let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
@@ -61,6 +61,7 @@ function fixture() {
     ownerGeneration: 'owner-1',
     ownerCurrent: () => live,
     readLifecycleFence: () => epoch,
+    allowAuthentication: options.allowAuthentication,
     runtime: { capabilities: () => capabilities, managedServiceUI: { handleBindingValue: handle } },
   })
   return {
@@ -164,6 +165,114 @@ describe('manager managed-service UI bridge', () => {
     }
     expect(handle).not.toHaveBeenCalled()
     bridge.dispose()
+  })
+
+  it('admits one scoped login only after confirming the resulting service snapshot', async () => {
+    const { bridge, handle } = fixture({ allowAuthentication: true })
+    const a = { ...context('1', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(a)[0]!.token
+    const login = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
+      contract: 'cordisx.managed-service-login-request/v1',
+      schemaVersion: 1,
+      requestId: 'login-1',
+      binding,
+      action: 'login',
+      expectedSequence: 2,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    handle.mockImplementation(async value => {
+      const input = JSON.parse(value) as { requestId: string; operation: string }
+      return {
+        requestId: input.requestId,
+        ok: true,
+        value: input.operation === 'get' ? descriptor() : input.operation === 'authenticate'
+          ? {
+            $schema:
+              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+            contract: 'cordisx.managed-service-login-result/v1',
+            schemaVersion: 1,
+            requestId: login.requestId,
+            binding,
+            status: 'accepted',
+            stateAt: 'authenticated',
+            sequence: 3,
+          }
+          : { status: 'available', projection: { binding, sequence: 4, auth: { state: 'authenticated' } } },
+      }
+    })
+    try {
+      const available = await bridge.channel.prepare(request(token), a).dispatch()
+      expect(available).toMatchObject({ value: { service: { authenticationTimeoutMs: 300_000 } } })
+      const action = bridge.channel.prepare(request(token, 'authenticate', { binding, request: login }), a)
+      expect(action.mode).toBe('write')
+      expect(await action.dispatch()).toMatchObject({ ok: true, value: { status: 'accepted', sequence: 3 } })
+      expect(handle.mock.calls.map(([value]) => JSON.parse(value).operation)).toEqual([
+        'get',
+        'authenticate',
+        'snapshot',
+      ])
+      await expect(action.dispatch()).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(() =>
+        bridge.channel.prepare(request(token, 'authenticate', { binding, request: login }), {
+          ...a,
+          admitted: false,
+        })
+      ).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    } finally {
+      bridge.dispose()
+    }
+  })
+
+  it('does not return a successful login when its owner snapshot cannot confirm it', async () => {
+    const { bridge, handle } = fixture({ allowAuthentication: true })
+    const a = { ...context('1', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(a)[0]!.token
+    const login = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-request.v1.schema.json',
+      contract: 'cordisx.managed-service-login-request/v1',
+      schemaVersion: 1,
+      requestId: 'login-2',
+      binding,
+      action: 'login',
+      expectedSequence: 0,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    let failed = false
+    handle.mockImplementation(async value => {
+      const input = JSON.parse(value) as { requestId: string; operation: string }
+      return {
+        requestId: input.requestId,
+        ok: true,
+        value: input.operation === 'authenticate'
+          ? {
+            $schema:
+              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+            contract: 'cordisx.managed-service-login-result/v1',
+            schemaVersion: 1,
+            requestId: login.requestId,
+            binding,
+            ...(failed
+              ? { status: 'failed', error: { code: 'authentication-failed', message: 'private diagnostic' } }
+              : { status: 'accepted', stateAt: 'authenticated', sequence: 1 }),
+          }
+          : { status: 'available', projection: { binding, sequence: 2, auth: { state: 'missing' } } },
+      }
+    })
+    try {
+      await expect(
+        bridge.channel.prepare(request(token, 'authenticate', { binding, request: login }), a).dispatch(),
+      ).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      failed = true
+      await expect(
+        bridge.channel.prepare(request(token, 'authenticate', { requestId: 'next', binding, request: login }), a)
+          .dispatch(),
+      ).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    } finally {
+      bridge.dispose()
+    }
   })
 
   it('retires on abort, token replacement, owner loss or a lifecycle fence change', () => {

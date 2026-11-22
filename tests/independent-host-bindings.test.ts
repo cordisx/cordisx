@@ -4,6 +4,32 @@ import { installIndependentHostBindings } from '../packages/cli/src/independent-
 type TestWindow = Window & Record<string, any>
 const token = 'a'.repeat(64)
 
+it('uses the transport id for a managed-service action with a separate domain id', async () => {
+  const receive = vi.fn()
+  const fetch = vi.fn(async () =>
+    new Response(JSON.stringify({ requestId: 'transport-id', ok: true, value: { status: 'accepted' } }))
+  )
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+    rendererAdmission: Promise.resolve(true),
+  })
+  try {
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({
+      requestId: 'transport-id',
+      operation: 'authenticate',
+      request: { requestId: 'action-id' },
+    }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(JSON.parse(receive.mock.calls[0]![0])).toMatchObject({ requestId: 'transport-id', ok: true })
+    expect(fetch).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
+  }
+})
+
 it('reuses one observation request while the sidecar yields browser connections', async () => {
   const receive = vi.fn()
   const fetch = vi.fn()
