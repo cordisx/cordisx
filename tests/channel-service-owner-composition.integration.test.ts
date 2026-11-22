@@ -27,6 +27,17 @@ import {
   CORDISX_PLUGIN_SOURCE,
 } from '../packages/cli/src/renderer/ownership.js'
 
+async function removeFixtureRoot(root: string): Promise<void> {
+  const writable = async (directory: string): Promise<void> => {
+    await chmod(directory, 0o700)
+    for (const file of await readdir(directory, { withFileTypes: true })) {
+      if (file.isDirectory()) await writable(path.join(directory, file.name))
+    }
+  }
+  await writable(root)
+  await rm(root, { recursive: true, force: true })
+}
+
 describe('actual direct Channel service ownership assembly', () => {
   it('persists lifecycle-installed Channel configuration without a legacy configured plugin', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-package-service-config-'))
@@ -242,7 +253,7 @@ describe('actual direct Channel service ownership assembly', () => {
       bridges?.configApi?.dispose()
       await channel?.service?.dispose()
       createSdk.mockRestore()
-      await rm(root, { recursive: true, force: true })
+      await removeFixtureRoot(root)
     }
   })
   it(
@@ -490,14 +501,7 @@ describe('actual direct Channel service ownership assembly', () => {
         configApi?.dispose()
         await channel?.service?.dispose()
         expect(channel?.service?.managementOwner()).toBeUndefined()
-        async function writable(directory: string): Promise<void> {
-          await chmod(directory, 0o700)
-          for (const file of await readdir(directory, { withFileTypes: true })) {
-            if (file.isDirectory()) await writable(path.join(directory, file.name))
-          }
-        }
-        await writable(root)
-        await rm(root, { recursive: true, force: true })
+        await removeFixtureRoot(root)
       }
     },
     60_000,
