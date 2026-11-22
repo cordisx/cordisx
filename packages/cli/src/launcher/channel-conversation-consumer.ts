@@ -40,12 +40,12 @@ import {
   channelWakePrefix,
   parseChannelConversationPolicy,
 } from './channel-conversation-policy.js'
-import {
-  type ChannelChatBinding,
-  type ChannelConversationInput,
-  type ChannelConversationJob,
-  ChannelConversationStore,
+import type {
+  ChannelChatBinding,
+  ChannelConversationInput,
+  ChannelConversationJob,
 } from './channel-conversation-store.js'
+import { ChannelConversationStore } from './channel-conversation-store.js'
 
 /** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {

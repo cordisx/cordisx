@@ -7,6 +7,16 @@ production launch, Protocol publication, or a complete-memory-system claim.
 
 ### Current fix-loop evidence
 
+Mainline integration repeat on November 22, 2026: 62 focused deterministic
+tests passed across eight files after preserving mainline feedback composition.
+Real-model `persona-blank-bootstrap` and `persona-account-continuity-control`
+both passed in `/tmp/channel-memory-model-071lO4`, using the existing authorized
+model configuration and mock platform boundary. An earlier invocation could not
+initialize the native client on a read-only filesystem; it is not a behavior pass.
+The corrected run used approved native-client state access. CI subsequently
+identified source-kind/message-ID typing and consumer file-size issues; fixes
+are committed separately and require the new CI result before merge.
+
 Production-backed Host seams now include own-topic accepted-text resolution,
 local configured administrator authority, two-account challenge confirmation,
 persona native startup injection and task memory routing. Model runs below are
