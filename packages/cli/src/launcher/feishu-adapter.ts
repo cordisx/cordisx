@@ -335,8 +335,8 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
             const media = delivery.media
               ? await prepareFeishuOutboundMedia(delivery.media, delivery.target, resources, {
-                image: data => channel.rawClient!.im.v1.image.create({ data }),
-                file: data => channel.rawClient!.im.v1.file.create({ data }),
+                image: async data => ({ code: 0, data: await channel.rawClient!.im.v1.image.create({ data }) ?? {} }),
+                file: async data => ({ code: 0, data: await channel.rawClient!.im.v1.file.create({ data }) ?? {} }),
               })
               : undefined
             const rendered = delivery.questionCard

@@ -3,13 +3,8 @@ import { mkdir, mkdtemp, open, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
-import type {
-  ChannelContentBlock,
-  ChannelEventRef,
-  ChannelThreadRef,
-  ChannelUserInput,
-} from '../../../channel-runtime/src/types.js'
-import type { ChannelOutboundMedia } from '../../../channel-runtime/src/outbound-media.js'
+import type { ChannelContentBlock, ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
+import type { ChannelOutboundMedia } from '@cordisx/channel-runtime'
 
 const scope = (event: ChannelEventRef) =>
   JSON.stringify([

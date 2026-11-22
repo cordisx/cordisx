@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
-import { validateOutboundMedia } from '../../../channel-runtime/src/outbound-media.js'
-import type { ChannelOutboundMedia } from '../../../channel-runtime/src/outbound-media.js'
-import type { ChannelThreadRef } from '../../../channel-runtime/src/types.js'
+import { validateOutboundMedia } from '@cordisx/channel-runtime'
+import type { ChannelOutboundMedia, ChannelThreadRef } from '@cordisx/channel-runtime'
 
 export interface FeishuMediaAuthority {
   resolve(handle: string, target: ChannelThreadRef, maximumBytes: number): Promise<Uint8Array>

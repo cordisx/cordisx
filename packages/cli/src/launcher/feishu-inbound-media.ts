@@ -1,6 +1,6 @@
 import type { NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import type { Readable } from 'node:stream'
-import type { ChannelContentBlock, ChannelEventRef } from '../../../channel-runtime/src/types.js'
+import type { ChannelContentBlock, ChannelEventRef } from '@cordisx/channel-runtime'
 import { ChannelInboundResources } from './channel-inbound-resources.js'
 
 export interface FeishuMessageResourceClient {
