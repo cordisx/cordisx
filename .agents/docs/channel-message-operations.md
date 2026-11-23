@@ -1,6 +1,12 @@
 # Scoped Channel message operations
 
 Candidate source capability, not a claim of installed or live-platform support.
+Protocol owns portable request/result types and normative semantics. This Host
+implements the configured CLI-to-launcher entry; it does not expose an instance
+of `ChannelMessageOperationsV1` on `ctx.channel`. Importable types and consumer
+compile checks do not establish a callable plugin runtime acquisition path.
+Host authorization, platform adapters, durable operation storage and CLI wiring
+remain Host implementation responsibilities.
 Use the exact configured Host CLI/profile and incoming context. No SDK sending
 or new dispatch path is introduced. Discover `help message-capabilities` first.
 
