@@ -9,6 +9,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'service-config': ['__cordisxServiceConfigRequestV1', '__cordisxServiceConfigReceiveV1'],
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
   'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
+  'native-catalog': ['__cordisxNativeCatalogRequestV1', '__cordisxNativeCatalogReceiveV1'],
   'channel-actions': ['__cordisxChannelActionsRequestV1', '__cordisxChannelActionsReceiveV1'],
   'channel-credentials': ['__cordisxChannelCredentialRequestV1', '__cordisxChannelCredentialReceiveV1'],
   'desktop-package-config': ['__cordisxDesktopPackageConfigRequestV1', '__cordisxDesktopPackageConfigReceiveV1'],
@@ -181,6 +182,7 @@ export function installIndependentHostBindings(input: {
         readOnly: (() => {
           const envelope = JSON.parse(payload) as { operation?: unknown }
           if (channel === 'model-services') return envelope.operation === 'read'
+          if (channel === 'native-catalog') return envelope.operation === 'read'
           if (channel === 'service-config') return envelope.operation === 'list'
           if (channel === 'marketplace') return true
           if (channel === 'channel-actions') return (envelope as { action?: unknown }).action === 'snapshot'
@@ -214,6 +216,7 @@ export function installIndependentHostBindings(input: {
       void Promise.resolve().then(async () => {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
+          || channel === 'native-catalog'
           || channel === 'permission-policy'
           || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')

@@ -334,7 +334,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
               key={provider.providerId}
               provider={provider}
               modelsLabel={copy.models}
-              {...(catalog.connected ? { readOnly: t('catalog.readOnly') } : {})}
+              {...(catalog.connected || provider.readOnly ? { readOnly: t('catalog.readOnly') } : {})}
               bindingState={catalog.connected ? 'unbound' : managementState}
               startupState={state.startup}
               locale={locale}

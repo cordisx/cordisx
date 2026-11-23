@@ -84,6 +84,30 @@ it('waits for renderer admission before reading managed accounts', async () => {
   }
 })
 
+it('waits for admission before a catalog read and keeps navigation recoverable', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const fetch = vi.fn(() => new Promise(() => {}))
+  const target = { fetch, __cordisxNativeCatalogReceiveV1: vi.fn() } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['native-catalog'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxNativeCatalogRequestV1(JSON.stringify({ version: 1, requestId: 'catalog', operation: 'read' }))
+    await Promise.resolve()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(dispose.canResume()).toBe(true)
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(true)
+  } finally {
+    dispose()
+  }
+})
+
 it('does not dispatch a queued account read after admission is denied', async () => {
   let admit!: (value: boolean) => void
   const admission = new Promise<boolean>(resolve => admit = resolve)

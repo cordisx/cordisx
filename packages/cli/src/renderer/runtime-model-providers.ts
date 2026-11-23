@@ -2,6 +2,7 @@ import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { nativeModelProviderRegistry } from './model-providers.js'
 import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 import { StandaloneModelServices } from './standalone-model-services.js'
+import { StandaloneNativeCatalog } from './standalone-native-catalog.js'
 
 /** Compose the runtime-owned model bridge and its startup observation once. */
 export function createRuntimeModelProviders(metadata: CordisXRuntimeMetadata, generation: string) {
@@ -14,7 +15,8 @@ export function createRuntimeModelProviders(metadata: CordisXRuntimeMetadata, ge
         generation,
         metadata.startupHostCapability,
       )
-  const modelProviders = nativeModelProviderRegistry(managedServiceBridge)
+  const nativeCatalog = metadata.hostKind === 'standalone' ? StandaloneNativeCatalog.connect() : undefined
+  const modelProviders = nativeModelProviderRegistry(managedServiceBridge, nativeCatalog)
   if (metadata.hostKind === 'standalone') {
     const services = StandaloneModelServices.connect()
     if (services) modelProviders.attachStandaloneModelServices(services)

@@ -122,6 +122,12 @@ semantics described below. An edit started against an older revision is rejected
 if another client changes the declarations first. Other independent Manager
 pages refresh these declarations while idle; an open edit retains its draft.
 
+A Codex service owner also reads the selected profile's configured local model
+catalogs for the existing Model services page. These provider and model names
+are read-only and refreshed from the owner; connection details, credentials,
+and catalog paths remain private. Listing a model does not establish a live
+provider connection or enable selection through a native adapter.
+
 While a standalone Manager page is attached, installed-package plugin and
 service configuration writers use the same profile fence as Manager admission.
 Pending configuration candidates prevent admission; a confirmed change outside

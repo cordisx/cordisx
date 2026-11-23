@@ -98,6 +98,7 @@ export async function openProductionPluginManagementComposition(input: {
   /** Owner-issued, per-renderer managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
   readonly rendererModelServices?: ManagerRendererChannel
+  readonly rendererNativeCatalog?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
   readonly rendererReadonlyChannel?: ManagerRendererChannel
   /** The Desktop owner supplies the same private participant and lifecycle registry. */
@@ -293,6 +294,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererModelServices === undefined
         ? []
         : [['model-services', input.rendererModelServices] as const]),
+      ...(input.rendererNativeCatalog === undefined
+        ? []
+        : [['native-catalog', input.rendererNativeCatalog] as const]),
       ...(rendererDesktopPackageConfig === undefined
         ? []
         : [['desktop-package-config', rendererDesktopPackageConfig] as const]),

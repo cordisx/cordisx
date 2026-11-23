@@ -19,6 +19,7 @@ import { createServiceRendererProjector } from './service-renderer-projection.js
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
+import { createManagerRendererNativeCatalogChannel } from './manager-renderer-native-catalog.js'
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
@@ -318,6 +319,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             && rendererParticipants?.peer(context.rendererId) !== undefined,
           call: codex,
         })
+        const rendererNativeCatalog = appId === 'codex'
+          ? createManagerRendererNativeCatalogChannel({
+            configPath,
+            codexHome: environment.CODEX_HOME || path.join(environment.HOME || os.homedir(), '.codex'),
+            profileId,
+            generation,
+            isCurrent: context =>
+              ownerOpen && !lifetime.signal.aborted
+              && rendererParticipants?.peer(context.rendererId)?.closed === false,
+          })
+          : undefined
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -336,6 +348,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererReadLifetimes: rendererBootstrap.readLifetimes,
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
           rendererModelServices,
+          ...(rendererNativeCatalog === undefined ? {} : { rendererNativeCatalog }),
           ...(rendererReadonlyChannel === undefined
             ? {}
             : { rendererReadonlyChannel: rendererReadonlyChannel.channel }),

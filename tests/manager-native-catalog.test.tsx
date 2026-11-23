@@ -42,12 +42,13 @@ describe('Manager native catalog coverage', () => {
       expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No models available')
 
       await act(async () => {
-        snapshot = { ...snapshot, providers }
+        snapshot = { ...snapshot, providers: providers.map(provider => ({ ...provider, readOnly: true })) }
         listeners.forEach(listener => listener())
       })
       expect(toggle.disabled).toBe(false)
       await fixture.click('.cxms-provider-toggle')
       expect(fixture.document.querySelector('[aria-label="DeepSeek · Models"]')).not.toBeNull()
+      expect(fixture.element('.cxmc-muted').textContent).toBe('Read only')
     } finally {
       await fixture.dispose()
     }

@@ -60,6 +60,7 @@ const rendererChannelAllowlist = new Set([
   'channel-credentials',
   'desktop-package-config',
   'model-services',
+  'native-catalog',
   'service-config',
   'marketplace',
   'permission-policy',

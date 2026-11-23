@@ -39,17 +39,38 @@ it.skipIf(chrome === undefined)(
   async () => {
     const root = await mkdtemp('/tmp/cx-manager-real-browser-')
     const homeDir = path.join(root, 'home')
+    const codexHome = path.join(root, 'codex')
     const profile = path.join(root, 'chrome-profile')
     const env = managerChildEnvironment(process.env, 'unused')
     delete env.CORDISX_MANAGER_CHILD_KEY
     Object.assign(env, {
       HOME: root,
-      CODEX_HOME: path.join(root, 'codex'),
+      CODEX_HOME: codexHome,
       CORDISX_HOME: homeDir,
       CORDISX_MODEL_API_PORT: '0',
     })
     await mkdir(homeDir, { mode: 0o700 })
-    await writeFile(path.join(homeDir, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    await mkdir(codexHome, { mode: 0o700 })
+    const homeConfig = JSON.parse(JSON.stringify(createDefaultHomeConfig()))
+    homeConfig.apps.codex.profiles.default.configModelCatalogs = { fixture: 'fixture-models.json' }
+    await writeFile(path.join(homeDir, 'config.json'), JSON.stringify(homeConfig), { mode: 0o600 })
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '[model_providers.fixture]',
+        'name = "Fixture provider"',
+        'base_url = "https://fixture-private.example.test/v1"',
+        'env_key = "FIXTURE_PRIVATE_ENV"',
+        'experimental_bearer_token = "fixture-private-token"',
+      ].join('\n'),
+    )
+    const modelCatalog = path.join(codexHome, 'fixture-models.json')
+    await writeFile(
+      modelCatalog,
+      JSON.stringify({
+        models: [{ slug: 'fixture-model', base_instructions: 'fixture-private-instructions' }],
+      }),
+    )
     let cli: string | undefined
     let browser: ChildProcess | undefined
     let first: CdpClient | undefined
@@ -292,6 +313,57 @@ it.skipIf(chrome === undefined)(
       second = await CdpClient.connect(await socketFor(created.targetId))
       await second.send('Runtime.enable')
       await ready(second)
+      // Inspect only the privacy result, never the response or its private inputs.
+      await first.evaluate(`(() => {
+        const send = window.fetch.bind(window)
+        window.fetch = (resource, options) => {
+          const result = send(resource, options)
+          if (resource !== '/api/renderer/binding') return result
+          try {
+            if (JSON.parse(options.body).channel !== 'native-catalog') return result
+            return result.then(async response => {
+              const text = await response.clone().text()
+              globalThis.__fixtureNativeCatalog = {
+                ok: response.ok,
+                leaked: ['fixture-private-token', 'FIXTURE_PRIVATE_ENV', 'fixture-private.example.test',
+                  'fixture-private-instructions', ${JSON.stringify(root)}].some(value => text.includes(value)),
+              }
+              return response
+            })
+          } catch { return result }
+        }
+      })()`)
+      for (const page of [first, second]) {
+        await page.evaluate('document.querySelector("[data-tab=model-services]").click()')
+        await vi.waitFor(async () => {
+          expect(await page.evaluate("document.querySelector('.cxms-provider-identity')?.textContent"))
+            .toContain('Fixture provider')
+        }, { timeout: 20_000 })
+        await page.evaluate("document.querySelector('.cxms-provider-toggle').click()")
+        expect(await page.evaluate("document.querySelector('.cxms-model-identity')?.textContent"))
+          .toContain('fixture-model')
+        expect(await page.evaluate("document.querySelector('.cxmc-muted')?.textContent"))
+          .toMatch(/Read only|只读/u)
+      }
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('globalThis.__fixtureNativeCatalog')).toEqual({ ok: true, leaked: false })
+      }, { timeout: 20_000 })
+      await writeFile(modelCatalog, JSON.stringify({ models: [{ slug: 'updated-model' }] }))
+      await first.send('Page.reload')
+      await ready(first)
+      await first.evaluate('document.querySelector("[data-tab=model-services]").click()')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate("document.querySelector('.cxms-provider-identity')?.textContent"))
+          .toContain('Fixture provider')
+      }, { timeout: 20_000 })
+      await first.evaluate("document.querySelector('.cxms-provider-toggle').click()")
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate("document.querySelector('.cxms-model-identity')?.textContent"))
+          .toContain('updated-model')
+      }, { timeout: 20_000 })
+      for (const page of [first, second]) {
+        await page.evaluate('document.querySelector("[data-tab=plugins]").click()')
+      }
       const snapshot = async (page: CdpClient) =>
         await page.evaluate<{ active: any; epoch: number }>(`({
       active: globalThis.__cordisxRuntime.activePluginGeneration(),
