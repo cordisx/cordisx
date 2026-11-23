@@ -1,4 +1,4 @@
-import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
 import { sameChannelPrincipal } from './channel-source-principal.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { channelReplyDefaults } from './channel-reply-routing.js'
@@ -21,7 +21,7 @@ export function channelSteerParent(state: ChannelConversationState, jobId: strin
   const event = record?.input.source.event
   if (
     !job || job.state !== 'queued' || !sessionId || !record?.accepted || !record.routed || !event?.actor?.userId
-    || !state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)
+    || !state.policy.enabled || !channelDispatchAllowed(state, event)
     || !binding || binding.state !== 'active' || binding.mode !== 'deliver' || binding.sessionId !== sessionId
     || ChannelConversationStore.logicalSourceFenced(state, sessionId)
     || ['dispatching', 'unknown'].includes(state.continuations[sessionId]?.intent?.state ?? '')

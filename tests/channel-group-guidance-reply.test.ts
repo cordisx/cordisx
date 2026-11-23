@@ -40,7 +40,10 @@ describe('denied group request guidance', () => {
       message: message as never,
       recordId: 'inbox:1',
       mentionedBot: true,
-      consumer: { policy: () => ({ revision: 1, policy: currentPolicy }) } as never,
+      consumer: {
+        policy: () => ({ revision: 1, policy: currentPolicy }),
+        profileLogicalOwner: () => ({ store: { snapshot: () => ({ policy: currentPolicy, inputs: {} }) } }),
+      } as never,
       access: () => ({ generation: 'g', runtime: { notifyOnce }, drain }) as never,
       guidance: { reserve } as never,
     }
@@ -69,13 +72,41 @@ describe('denied group request guidance', () => {
       message: message as never,
       recordId: 'inbox:1',
       mentionedBot: true,
-      consumer: { policy: () => ({ revision, policy: currentPolicy }) } as never,
+      consumer: {
+        policy: () => ({ revision, policy: currentPolicy }),
+        profileLogicalOwner: () => ({ store: { snapshot: () => ({ policy: currentPolicy, inputs: {} }) } }),
+      } as never,
       access: () => ({ generation: 'g', runtime: { notifyOnce }, drain: async () => {} }) as never,
       guidance: { reserve } as never,
     })
     revision++
     release()
     await work
+    expect(notifyOnce).not.toHaveBeenCalled()
+  })
+  it('does not tell a whitelisted member that their new mentioned task is denied', async () => {
+    const currentPolicy = policy([{ id: 'account', action: 'dispatch', effect: 'allow', userIds: ['ou_admin'] }])
+    const notifyOnce = vi.fn(), reserve = vi.fn()
+    await channelGroupGuidanceReply({
+      message: message as never,
+      recordId: 'inbox:1',
+      mentionedBot: true,
+      consumer: {
+        policy: () => ({ revision: 1, policy: currentPolicy }),
+        profileLogicalOwner: () => ({
+          store: {
+            snapshot: () => ({
+              policy: currentPolicy,
+              groupTaskAccess: [{ ...ref, conversationId: 'oc_group', fromSequence: 2 }],
+              inputs: { input: { input: message, mentionedBot: true, sequence: 2 } },
+            }),
+          },
+        }),
+      } as never,
+      access: () => ({ generation: 'g', runtime: { notifyOnce }, drain: async () => {} }) as never,
+      guidance: { reserve } as never,
+    })
+    expect(reserve).not.toHaveBeenCalled()
     expect(notifyOnce).not.toHaveBeenCalled()
   })
 })

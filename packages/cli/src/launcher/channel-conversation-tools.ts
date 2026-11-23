@@ -5,6 +5,7 @@ import type {
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
+import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
 import type { ChannelMessageReadResult } from './channel-message-read.js'
@@ -383,6 +384,18 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (operation === 'group-access' || operation === 'group-access-set') {
+        if (!this.consumer) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
+        return await channelGroupAccessOperation({
+          operation,
+          value: input,
+          metadata,
+          store: this.consumer.profileLogicalOwner().store,
+          agent: this.consumer.agentAccess,
+          access: this.access,
+          signal: this.lifetime.signal,
+        })
+      }
       if (operation === 'reaction') {
         if (!source || !this.consumer || !this.consumer.commandAllowed(source, 'send')) {
           throw new Error('CHANNEL_PERMISSION_DENIED')

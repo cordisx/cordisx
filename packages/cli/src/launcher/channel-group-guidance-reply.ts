@@ -1,6 +1,7 @@
 import type { ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
 import { CALLER } from './channel-conversation-consumer-contract.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
@@ -24,14 +25,15 @@ export async function channelGroupGuidanceReply(input: {
   ) return
   const access = input.access(), snapshot = input.consumer.policy(), policy = snapshot.policy
   if (
-    !access || !policy.enabled || channelPolicyAllows(policy, 'dispatch', event)
+    !access || !policy.enabled || channelDispatchAllowed(input.consumer.profileLogicalOwner().store.snapshot(), event)
     || !channelPolicyAllows(policy, 'send', event) || !channelPolicyAllows(policy, 'command', event, 'help')
   ) return
   if (!await input.guidance.reserve(event, event.conversationId)) return
   const updated = input.consumer.policy(), latest = updated.policy, current = input.access()
   if (
     !current || current.generation !== access.generation || snapshot.revision !== updated.revision || !latest.enabled
-    || channelPolicyAllows(latest, 'dispatch', event) || !channelPolicyAllows(latest, 'send', event)
+    || channelDispatchAllowed(input.consumer.profileLogicalOwner().store.snapshot(), event)
+    || !channelPolicyAllows(latest, 'send', event)
     || !channelPolicyAllows(latest, 'command', event, 'help')
   ) return
   const target = channelCommandReplyTarget(event, current.replyCapabilities?.(event))

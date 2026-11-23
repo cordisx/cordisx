@@ -319,6 +319,14 @@ export function channelCommandDenied(
   )
 }
 
+export function channelPolicyDenied(
+  policy: ChannelConversationPolicy,
+  action: ChannelPolicyAction,
+  event: ChannelEventRef,
+): boolean {
+  return policy.rules.some(rule => rule.action === action && rule.effect === 'deny' && matches(rule, policy, event))
+}
+
 /** Denials win. Allowlists at global and narrower scopes each apply, so their intersection is enforced. */
 export function channelPolicyAllows(
   policy: ChannelConversationPolicy,
