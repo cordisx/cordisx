@@ -65,6 +65,8 @@ it.skipIf(!executable)(
         })}
     })
     let backend: Awaited<ReturnType<typeof startHeadlessCodexBackend>> | undefined
+    const nativeReads: { method: string; params: Readonly<Record<string, unknown>> }[] = []
+    let unsupportedItems = false
     let consumer: ChannelConversationConsumer | undefined
     const resources = new ChannelInboundResources()
     try {
@@ -101,7 +103,17 @@ it.skipIf(!executable)(
         providerId: 'fixture',
         model: 'fixture-model',
         bridge: () => backend as never,
-        nativeRequest: backend.nativeRequest,
+        nativeRequest: async (method, params) => {
+          nativeReads.push({ method, params })
+          try {
+            return await backend!.nativeRequest(method, params)
+          } catch (error) {
+            if (method === 'thread/items/list' && (error as { rpcCode?: number }).rpcCode === -32601) {
+              unsupportedItems = true
+            }
+            throw error
+          }
+        },
         models: backend.models,
       })
       const account = { adapterId: 'feishu', accountId: 'fixture', tenantId: 'synthetic' }
@@ -197,6 +209,19 @@ it.skipIf(!executable)(
       expect(bodies.at(-1)?.split('SYNTHETIC_ADJUSTMENT').length! - 1).toBe(1)
       expect(bodies.at(-1)).toContain('input_image')
       expect(reactions.filter(emoji => emoji === 'OnIt')).toHaveLength(2)
+      expect(nativeReads.some(row => row.method === 'thread/read' && row.params.includeTurns === true)).toBe(false)
+      if (process.env.CORDISX_EXPECT_UNSUPPORTED_ITEMS === '1') expect(unsupportedItems).toBe(true)
+      if (unsupportedItems) {
+        expect(nativeReads).toContainEqual({
+          method: 'thread/turns/list',
+          params: {
+            threadId: jobs[0]!.sessionId,
+            limit: 1,
+            sortDirection: 'desc',
+            itemsView: 'full',
+          },
+        })
+      }
     } finally {
       held?.destroy()
       await consumer?.dispose()

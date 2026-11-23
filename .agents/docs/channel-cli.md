@@ -1003,10 +1003,22 @@ confirms that change; an unsupported switch is rejected. Catalog availability
 permits new conversations with the requested provider, not cross-provider replay
 of an existing conversation.
 
-Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
-response, final-message delivery reads the exact completed turn with
-`thread/read`. This compatibility path loads the complete thread and can hit
-transport limits for very long histories; other read errors do not trigger it.
+Some Codex 0.149.1 app-servers advertise `thread/items/list` but return method-not-found
+or “not supported yet”. On a first-page `-32601` only, final-message delivery uses
+`thread/turns/list` metadata pages (`itemsView:"notLoaded"`, descending, one turn
+per page) to locate the exact original turn, then requests that same page with
+`itemsView:"full"`. The returned ID and completed status must still match. It does
+not load the whole thread or forward another turn's answer. Scanning is limited
+to 64 metadata pages, with no further page scheduled after a 45-second scan budget
+(an in-flight RPC retains its transport timeout); repeated/invalid cursors and malformed responses fail
+closed. Other errors and a later-page `-32601` do not trigger this fallback.
+
+One native turn can still exceed the transport's 2 MiB line limit. A recognized
+oversize error reports `NATIVE_COMPLETION_PAGE_TOO_LARGE`; page/deadline exhaustion
+reports `NATIVE_COMPLETION_PAGE_LIMIT`. These are failures, not completion or
+delivery evidence. The fallback bounds loaded turn count, not native single-turn
+bytes, and does not change the transport cap. Final delivery retains its original
+stable outbox ID; unknown send receipts are not automatically replayed.
 
 ## Model-service continuation (experimental)
 
