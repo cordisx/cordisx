@@ -911,7 +911,9 @@ export class ChannelConversationConsumer {
         return undefined
       }
       try {
-        current.replyTarget ??= existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
+        const replyTarget = existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
+        if (!replyTarget) throw new Error('INVALID_REPLY_MODE')
+        current.replyTarget ??= replyTarget
       } catch (error) {
         current.state = 'failed'
         current.code = error instanceof Error && error.message === 'REPLY_MESSAGE_REQUIRED'

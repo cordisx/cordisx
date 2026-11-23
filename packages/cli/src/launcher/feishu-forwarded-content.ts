@@ -1,4 +1,4 @@
-import { type ApiMessageItem, normalize, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
+import { type Client, normalize, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import type { ChannelContentBlock, ChannelEventRef } from '@cordisx/channel-runtime'
 import { ChannelInboundResources } from './channel-inbound-resources.js'
 import {
@@ -8,10 +8,7 @@ import {
 } from './feishu-inbound-media.js'
 
 export interface FeishuForwardClient {
-  get(input: { path: { message_id: string } }): Promise<{
-    code?: number
-    data?: { items?: (ApiMessageItem & { chat_id?: string; deleted?: boolean })[] }
-  }>
+  get(input: { path: { message_id: string } }): ReturnType<Client['im']['v1']['message']['get']>
 }
 
 export async function feishuForwardedContent(
@@ -102,7 +99,19 @@ export async function feishuForwardedContent(
                 message_type: item.msg_type ?? 'text',
                 content: text,
                 create_time: String(item.create_time ?? ''),
-                ...(item.mentions ? { mentions: item.mentions } : {}),
+                ...(item.mentions
+                  ? {
+                    mentions: item.mentions.map(mention => ({
+                      key: mention.key,
+                      name: mention.name,
+                      id: {
+                        ...(mention.id_type === 'open_id' ? { open_id: mention.id } : {}),
+                        ...(mention.id_type === 'user_id' ? { user_id: mention.id } : {}),
+                        ...(mention.id_type === 'union_id' ? { union_id: mention.id } : {}),
+                      },
+                    })),
+                  }
+                  : {}),
               },
             }, { botIdentity: { openId: '', name: '' }, stripBotMentions: false }),
             text,
