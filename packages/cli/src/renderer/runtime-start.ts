@@ -187,7 +187,7 @@ export async function start(
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)
   const channelActionsBridge = metadata.channelActionsBridgeToken === undefined
     ? undefined
-    : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken)
+    : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken, metadata.hostKind === 'standalone')
   const { lifecycleBridge, pluginManagementBinding } = createRuntimeManagementBindings(metadata, generation)
   const localDevelopment = new Map(plugins.flatMap(plugin =>
     plugin.development === undefined

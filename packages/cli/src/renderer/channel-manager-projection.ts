@@ -75,6 +75,8 @@ export interface ChannelManagerProjectionV1 {
     readonly revision: number
     readonly lastGoodRevision: number
     readonly writable: boolean
+    /** Present only when the service owner supplies coordinated connection control. */
+    readonly connectionControl?: 'enable-disable'
   }
   readonly connections: readonly ChannelManagerConnectionProjection[]
   readonly routes: readonly ChannelManagerRouteProjection[]
@@ -233,12 +235,14 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   const service = object(projection.service, 'Channel Manager projection.service')
   exactKeys(
     service,
-    ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable'],
+    ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable', 'connectionControl'],
     'Channel Manager projection.service',
   )
   if (
     service.configurationKind !== 'host' || service.configApplies !== 'service-restart'
     || typeof service.writable !== 'boolean'
+    || service.connectionControl !== undefined
+      && (service.connectionControl !== 'enable-disable' || service.writable !== true)
   ) {
     throw new TypeError('Channel Manager service projection is invalid')
   }
@@ -413,6 +417,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       revision: boundedInteger(service.revision, 'Channel Manager projection.service.revision'),
       lastGoodRevision: boundedInteger(service.lastGoodRevision, 'Channel Manager projection.service.lastGoodRevision'),
       writable: service.writable,
+      ...(service.connectionControl === 'enable-disable' ? { connectionControl: 'enable-disable' as const } : {}),
     },
     connections,
     routes,

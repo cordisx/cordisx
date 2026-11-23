@@ -553,7 +553,14 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
               }),
             ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
               actions: {
-                ...(runtimeScope.metadata()!.hostKind === 'standalone' ? { snapshotOnly: true as const } : {}),
+                ...(runtimeScope.metadata()!.hostKind === 'standalone'
+                  ? {
+                    snapshotOnly: true as const,
+                    ...(runtimeScope.metadata()!.channelManager?.service.connectionControl === 'enable-disable'
+                      ? { connectionControl: 'enable-disable' as const }
+                      : {}),
+                  }
+                  : {}),
                 run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input),
               },
             }),

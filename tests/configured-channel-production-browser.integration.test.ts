@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -15,7 +15,7 @@ import {
   requestPluginManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
-import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
+import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
@@ -59,7 +59,7 @@ it.skipIf(
     const configPath = path.join(homeDir, 'config.json')
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
-      HOME: userHome,
+      HOME: process.env.CORDISX_TEST_INHERIT_HOME === '1' ? process.env.HOME : userHome,
       CODEX_HOME: codexHome,
       CORDISX_HOME: homeDir,
       CORDISX_MODEL_API_PORT: '0',
@@ -158,6 +158,11 @@ it.skipIf(
         throw new Error('fixture paths must be absolute')
       }
       await Promise.all([homeDir, userHome, codexHome].map(directory => mkdir(directory, { mode: 0o700 })))
+      if (process.env.CORDISX_TEST_CODEX_AUTH_FILE) {
+        const auth = path.join(codexHome, 'auth.json')
+        await copyFile(process.env.CORDISX_TEST_CODEX_AUTH_FILE, auth, constants.COPYFILE_EXCL)
+        await chmod(auth, 0o600)
+      }
       await writeFile(
         configPath,
         JSON.stringify({
@@ -329,6 +334,62 @@ it.skipIf(
         return event.defaultPrevented
       })()`)
       ).toBe(true)
+      if (process.env.CORDISX_CHANNEL_CONTROL_FIXTURE === '1') {
+        const selector = '[data-cordisx-page-header-action="connection-toggle"]'
+        const readyFor = (page: CdpClient, labels: readonly string[]) =>
+          page.evaluate<boolean>(
+            '(() => { const button = document.querySelector(' + JSON.stringify(selector) + ');'
+              + ' return Boolean(button && !button.disabled && '
+              + JSON.stringify(labels) + '.includes(button.getAttribute("aria-label"))); })()',
+          )
+        const channelState = async () => {
+          const value = JSON.parse(await readFile(configPath, 'utf8'))
+          const service = value.plugins[0].services.runtime.profiles.default
+          return { revision: service.revision, enabled: service.config.connections[0].enabled }
+        }
+        await expect.poll(() => first.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
+        for (const page of [first, second]) {
+          await expect.poll(() => readyFor(page, ['Disable', '停用']), { timeout: 20_000 }).toBe(true)
+        }
+        await trustedClick(first, selector)
+        await expect.poll(channelState, { timeout: 45_000 }).toEqual({ revision: 2, enabled: false })
+        for (const page of [first, second]) {
+          await expect.poll(() => readyFor(page, ['Enable', '启用']), { timeout: 30_000 }).toBe(true)
+        }
+        expect(await second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'))
+          .toBe('Second page draft')
+        await trustedClick(second, selector)
+        await expect.poll(channelState, { timeout: 45_000 }).toEqual({ revision: 3, enabled: true })
+        for (const page of [first, second]) {
+          await expect.poll(() => readyFor(page, ['Disable', '停用']), { timeout: 30_000 }).toBe(true)
+        }
+        expect(await second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'))
+          .toBe('Second page draft')
+        await first.send('Page.reload', { ignoreCache: true })
+        await showChannel(first)
+        await expect.poll(() => first.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
+        await expect.poll(() => readyFor(first, ['Disable', '停用']), { timeout: 20_000 }).toBe(true)
+
+        await run('stop', '--mode', 'service', 'codex', 'default', '--json')
+        for (const page of [first, second]) {
+          await expect.poll(() => page.evaluate('document.body.textContent.includes("CordisX 连接不可用")'), {
+            timeout: 30_000,
+          }).toBe(true)
+        }
+        expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
+          .toMatchObject({ status: 'ready', mode: 'service' })
+        const recoveredUrl = await open()
+        const recoveredResponse = await fetch(debugOrigin + '/json/new?' + encodeURIComponent(recoveredUrl), {
+          method: 'PUT',
+        })
+        const recoveredTarget = await recoveredResponse.json() as { webSocketDebuggerUrl: string }
+        const recovered = await CdpClient.connect(recoveredTarget.webSocketDebuggerUrl)
+        pages.push(recovered)
+        await showChannel(recovered)
+        await expect.poll(() => recovered.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
+        await expect.poll(() => readyFor(recovered, ['Disable', '停用']), { timeout: 20_000 }).toBe(true)
+        return
+      }
       for (const page of [first, second]) {
         expect(
           await page.evaluate(

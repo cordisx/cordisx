@@ -100,6 +100,8 @@ export class ServiceRendererBootstrap {
       readonly experimentalConfiguredChannel?: ConfiguredChannel
       /** The production owner also supplied the coordinated Channel configuration bridge. */
       readonly experimentalChannelServiceConfig?: boolean
+      /** The owner also supplied the coordinated connection-control bridge. */
+      readonly experimentalChannelControl?: boolean
       /** The owner also supplied the private, coordinated credential bridge. */
       readonly experimentalChannelCredentials?: boolean
       /** Owner-created verifier, enabled only with an independently coordinated policy channel. */
@@ -579,6 +581,7 @@ export class ServiceRendererBootstrap {
             service: channel.service,
             bridge: channel.bridge,
             allowConfiguration: this.input.experimentalChannelServiceConfig === true,
+            allowConnectionControl: this.input.experimentalChannelControl === true,
             server: await this.input.lifecycle.artifactServer(),
             current: () => this.current(rendererId, entry),
             unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),

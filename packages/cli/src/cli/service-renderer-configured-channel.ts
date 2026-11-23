@@ -49,6 +49,7 @@ export class ServiceRendererConfiguredChannel {
       readonly service: LocalChannelService
       readonly bridge: ReadonlyChannelRendererBridge
       readonly allowConfiguration: boolean
+      readonly allowConnectionControl: boolean
       readonly current: () => boolean
       readonly unchanged: () => Promise<boolean>
       readonly retire: () => void
@@ -67,6 +68,7 @@ export class ServiceRendererConfiguredChannel {
     readonly service: LocalChannelService
     readonly bridge: ReadonlyChannelRendererBridge
     readonly allowConfiguration: boolean
+    readonly allowConnectionControl: boolean
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
     readonly unchanged: () => Promise<boolean>
@@ -194,7 +196,14 @@ export class ServiceRendererConfiguredChannel {
         } satisfies CordisXConfigPlugin,
         policies: identity.projectManagerPolicies(context, source, this.input.plugin.id, policies),
         projection: configurationAvailable
-          ? { ...view.initial.projection, service: { ...view.initial.projection.service, writable: true } }
+          ? {
+            ...view.initial.projection,
+            service: {
+              ...view.initial.projection.service,
+              writable: true,
+              ...(this.input.allowConnectionControl ? { connectionControl: 'enable-disable' as const } : {}),
+            },
+          }
           : view.initial.projection,
         serviceOwner: {
           ...view.initial.owner,
@@ -300,7 +309,16 @@ export class ServiceRendererConfiguredChannel {
     if (!this.view) throw new Error('renderer-configured-channel-unavailable')
     const projection = this.view.initial.projection
     const writable = this.configurationCapability() !== undefined
-    return writable ? { ...projection, service: { ...projection.service, writable: true } } : projection
+    return writable
+      ? {
+        ...projection,
+        service: {
+          ...projection.service,
+          writable: true,
+          ...(this.input.allowConnectionControl ? { connectionControl: 'enable-disable' as const } : {}),
+        },
+      }
+      : projection
   }
 
   /** Obtain a view after the owner has independently verified this session's admission. */

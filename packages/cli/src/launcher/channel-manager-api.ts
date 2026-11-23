@@ -65,6 +65,8 @@ export interface ChannelManagerLogsExport {
 }
 
 export interface ChannelManagerActionResult {
+  /** Private coordinated owner readback; never exposed by the public Channel facade. */
+  readonly channelProjection?: unknown
   readonly continuationDefaults?: import('./channel-continuation-defaults.js').ChannelContinuationDefaults
   readonly continuationLivePolicy?: {
     readonly policy: { readonly enabled: boolean; readonly thresholdRatio: number }

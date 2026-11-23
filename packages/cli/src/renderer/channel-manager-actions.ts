@@ -4,6 +4,8 @@ import type { ChannelManagerActionResult } from '../launcher/channel-manager-api
 export interface ChannelManagerActionsApi {
   /** Only a current redacted snapshot can be requested through this bridge. */
   readonly snapshotOnly?: true
+  /** A coordinated configuration facade may additionally toggle an existing connection. */
+  readonly connectionControl?: 'enable-disable'
   run(
     action:
       | 'enable'
@@ -39,12 +41,19 @@ export interface ChannelManagerActionsApi {
 }
 
 /** A read-only transport cannot be used for any action other than snapshot. */
-export function restrictChannelManagerActions(actions: ChannelManagerActionsApi | undefined, snapshotOnly = false) {
+export function restrictChannelManagerActions(
+  actions: ChannelManagerActionsApi | undefined,
+  snapshotOnly = false,
+  allowConnectionControl = false,
+) {
   if (!actions || !snapshotOnly && actions.snapshotOnly !== true) return actions
+  const control = allowConnectionControl && actions.connectionControl === 'enable-disable'
   return {
     snapshotOnly: true as const,
+    ...(control ? { connectionControl: 'enable-disable' as const } : {}),
     run: async (action, request) =>
       action === 'snapshot' && Object.keys(request).length === 0
+        || control && (action === 'enable' || action === 'disable')
         ? await actions.run(action, request)
         : { status: 'unavailable' as const, code: 'CHANNEL_READ_ONLY' },
   } satisfies ChannelManagerActionsApi

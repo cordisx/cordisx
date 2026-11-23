@@ -28,6 +28,7 @@ import type { ManagerOriginFence } from './manager-origin-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
+import { createManagerRendererChannelControl } from './manager-renderer-channel-control.js'
 import { createManagerRendererChannelCredentials } from './manager-renderer-channel-credentials.js'
 import { createManagerRendererMarketplaceChannel } from './manager-renderer-marketplace.js'
 import { createManagerRendererDesktopPackageConfig } from './manager-renderer-desktop-package-config.js'
@@ -224,6 +225,18 @@ export async function openProductionPluginManagementComposition(input: {
       sessions: () => rendererSessions,
     })
     : undefined
+  const rendererChannelActions = input.rendererConfiguredChannelService && input.rendererReadonlyChannel
+    ? createManagerRendererChannelControl({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      configPath: input.configPath,
+      readOnly: input.rendererReadonlyChannel,
+      ...input.rendererConfiguredChannelService,
+      participants: input.rendererParticipants!,
+      lifecycle: input.rendererLifecycle!,
+      sessions: () => rendererSessions,
+    })
+    : input.rendererReadonlyChannel
   const credentialHandler = input.managerChannelCredentials
   const rendererCredentials = input.rendererConfiguredChannelService && credentialHandler
     ? createManagerRendererChannelCredentials({
@@ -282,9 +295,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(rendererDesktopPackageConfig === undefined
         ? []
         : [['desktop-package-config', rendererDesktopPackageConfig] as const]),
-      ...(input.rendererReadonlyChannel === undefined
+      ...(rendererChannelActions === undefined
         ? []
-        : [['channel-actions', input.rendererReadonlyChannel] as const]),
+        : [['channel-actions', rendererChannelActions] as const]),
       ...(rendererServiceConfig === undefined ? [] : [['service-config', rendererServiceConfig] as const]),
       ...(rendererCredentials === undefined ? [] : [['channel-credentials', rendererCredentials.channel] as const]),
       ...(rendererPermission === undefined ? [] : [['permission-policy', rendererPermission] as const]),

@@ -7,6 +7,7 @@ import { ServiceRendererBootstrap } from '../../packages/cli/src/cli/service-ren
 import type { DesktopManagerConfigProjection } from '../../packages/cli/src/cli/desktop-manager-config-projection.js'
 import { createConfiguredChannelOwner } from '../../packages/cli/src/cli/configured-channel-owner.js'
 import { createManagerRendererServiceConfigChannel } from '../../packages/cli/src/cli/manager-renderer-service-config.js'
+import { createManagerRendererChannelControl } from '../../packages/cli/src/cli/manager-renderer-channel-control.js'
 import { createManagerRendererChannelCredentials } from '../../packages/cli/src/cli/manager-renderer-channel-credentials.js'
 import { createManagerRendererManagementChannel } from '../../packages/cli/src/cli/manager-renderer-management.js'
 import { openPluginManagementService } from '../../packages/cli/src/management/service.js'
@@ -68,6 +69,7 @@ export async function fixture(
     channelGrantOtherSource?: boolean
     channelOwnerMismatch?: boolean
     channelServiceConfig?: boolean
+    channelControls?: boolean
     channelCredentials?: boolean
     channelCredentialValidate?: () => Promise<void>
     channelCredentialCleanupFails?: boolean
@@ -332,6 +334,7 @@ export async function fixture(
       }
       : {}),
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
+    experimentalChannelControl: options.channelServiceConfig === true && options.channelControls === true,
     experimentalChannelCredentials: options.channelCredentials === true,
     experimentalConfiguredPermissionPolicy: options.channelPermissionPolicy === true,
     ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
@@ -368,6 +371,21 @@ export async function fixture(
       sessions: () => sessions,
     })
     : undefined
+  const channelActions = options.channelControls && channelBridge && configuredChannel && configuredOwner
+    ? createManagerRendererChannelControl({
+      readOnly: channelBridge.channel,
+      profileId,
+      generation,
+      configPath,
+      plugin: configuredChannel.plugin,
+      service: configuredChannel.service,
+      authority: configuredOwner,
+      bootstrap,
+      participants,
+      lifecycle,
+      sessions: () => sessions,
+    })
+    : channelBridge?.channel
   const credentialValues = new Map<string, string>()
   let credentialCleanupFails = options.channelCredentialCleanupFails === true
   let credentialCommitUnknown = options.channelCredentialCommitUnknown === true
@@ -463,7 +481,7 @@ export async function fixture(
         : [['plugin-management', createManagerRendererManagementChannel(management, bootstrap)] as const]),
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
-      ...(channelBridge === undefined ? [] : [['channel-actions', channelBridge.channel] as const]),
+      ...(channelActions === undefined ? [] : [['channel-actions', channelActions] as const]),
       ...(serviceConfigChannel === undefined ? [] : [['service-config', serviceConfigChannel] as const]),
       ...(credentialsChannel === undefined ? [] : [['channel-credentials', credentialsChannel.channel] as const]),
       ...(options.writeDispatch === undefined ? [] : [

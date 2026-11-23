@@ -14,12 +14,21 @@ export function channelConfigurationAllowed(service: object): boolean {
   return !state.snapshotOnly || state.configurationOnly && serviceOwnerFor(service)?.scope === 'configuration'
 }
 
+export function channelConnectionControlAllowed(service: object): boolean {
+  const state = stateFor(service)
+  return state.configurationOnly && !state.connectionControlUncertain
+    && serviceOwnerFor(service)?.scope === 'configuration'
+    && state.projection.service.writable && state.projection.service.connectionControl === 'enable-disable'
+    && state.actions?.connectionControl === 'enable-disable'
+}
+
 export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 | ChannelManagerSnapshotV4>(
   service: object,
   snapshot: T,
 ): T {
   if (!stateFor(service).configurationOnly) return snapshot
   const configurationAllowed = channelConfigurationAllowed(service)
+  const connectionControlAllowed = channelConnectionControlAllowed(service)
   return Object.freeze({
     ...snapshot,
     accounts: Object.freeze(snapshot.accounts.map(account =>
@@ -29,6 +38,7 @@ export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 |
           account.availableOperations.filter(operation =>
             operation !== 'target.credential.capture.rotate' && operation !== 'connection.rotate-credential'
             && (configurationAllowed || operation !== 'connection.update')
+            && (connectionControlAllowed || operation !== 'connection.enable' && operation !== 'connection.disable')
           ),
         ),
       })

@@ -21,6 +21,8 @@ export interface ChannelManagerState {
   projection: ChannelManagerProjectionV1
   readonly snapshotOnly: boolean
   readonly configurationOnly: boolean
+  /** An unconfirmed control result must not be retried by this renderer. */
+  connectionControlUncertain: boolean
   readonly credentialRequest?: ChannelManagerServiceInput['credentialRequest']
   readonly broker?: PermissionBroker
   credentials?: ChannelCredentialWorkflow
