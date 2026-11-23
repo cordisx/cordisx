@@ -445,7 +445,40 @@ Use `--page-token` with returned pagination. `--page-all` is bounded by
 history was retrieved. Check pagination completion and thread coverage. A
 permission failure in the selected app cannot be bypassed by switching tools.
 
-Send requests use `{account, target, text, operationId}`, with
+For explicit CLI `send` / `send-many`, prefer `richtext` for ordinary prose,
+progress updates and results, even when only one plain block is needed:
+
+```json
+{
+  "account": {
+    "adapterId": "feishu",
+    "accountId": "bot",
+    "tenantId": "tenant"
+  },
+  "target": { "id": "oc_chat", "kind": "group", "replyMode": "conversation" },
+  "content": {
+    "type": "richtext",
+    "blocks": [{ "text": "Message", "style": "plain" }]
+  },
+  "operationId": "distinct-stable-message-id"
+}
+```
+
+Choose `strong`, `emphasis` or `code` blocks when useful; richtext has 1..128
+blocks, each with 1..4096 characters. Blocks carry literal text and explicit
+styles, not Markdown parsing. For `send-many`, replace `target` with `targets`.
+Use `text` only when preserving verbatim original text, when the user explicitly
+requests plain text, or for compatibility when the running Host/platform lacks
+richtext support. Legacy `{account,target,text,operationId}` and typed
+`content:{type:"text",text}` retain plain-text wire semantics: this preference
+does not convert text inputs. `payload` is a `content` alias; never combine
+content fields. Images, audio, files, video and cards remain distinct types,
+not richtext substitutes. Discover installed arguments with `help send` and
+`help send-many`; CLI guidance does not establish platform capability or grant
+permissions. This preference does not change automatic final-response runtime
+defaults.
+
+Send requests use `{account, target, content, operationId}`, with
 `target: {id, kind, replyTo?, replyMode?}`. `conversation` posts to the main stream;
 `reply` quotes `replyTo` there; `thread` replies in a topic. Reply/thread require
 an `om_*` message ID and an `oc_*` chat ID; a conversation send must omit

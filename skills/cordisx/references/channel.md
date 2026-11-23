@@ -85,6 +85,19 @@ Explicit sends select `target.replyMode` per destination; reply/thread
 require `replyTo`, while a main-stream send omits it.
 `channel_listen` waits briefly; it is not a persistent binding.
 
+For explicit CLI `send` / `send-many`, prefer richtext for ordinary prose,
+progress and results, even one plain block:
+`content:{type:"richtext",blocks:[{text:"Message",style:"plain"}]}`.
+Use strong/emphasis/code styles when useful; blocks are literal text, not
+Markdown parsing. Use text only for verbatim original text, an explicit
+plain-text request, or compatibility when the running Host/platform lacks
+richtext support. Top-level text and typed text retain plain-text wire
+semantics; never combine content fields. Keep image/audio/file/video/card as
+distinct types. Read `help send` / `help send-many` on the exact Host for limits
+and capabilities. Explicit text fallback applies only to unsupported types,
+never permission or send failures. This is CLI guidance only; it does not
+change automatic final-response runtime defaults or the text-only MCP schema.
+
 Send only the messages and destinations the user requested. Use `channel_send`
 or `channel_send_many` as the selected account. Preserve operationId and target
 order, and inspect `channel_receipt` after uncertainty; include targetCount for
