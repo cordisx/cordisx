@@ -755,6 +755,20 @@ export class ChannelConversationTools {
             if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
             const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
             const requested = contents[index]!
+            if (
+              Buffer.byteLength(
+                JSON.stringify({
+                  contract: 'cordisx.channel-message-send/v2',
+                  schemaVersion: 2,
+                  target: parsed[index],
+                  kind: 'reply',
+                  idempotencyKey: deliveryIdFor(index),
+                  content: requested.content,
+                  fallback: requested.fallback,
+                }),
+                'utf8',
+              ) > 196_608
+            ) throw new Error('INVALID_CHANNEL_PAYLOAD')
             const requirements = richtextRequirements(requested.content)
             if (requirements.userIds.length) {
               await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)

@@ -312,6 +312,25 @@ it('rechecks ready account on chunks and commits and rejects unavailable service
   expect(await f.call(begin)).toMatchObject({ status: 'unavailable' })
 })
 
+it('rejects aggregate inline content size before any batch effect', async () => {
+  const f = fixture()
+  const content = {
+    type: 'richtext',
+    blocks: [{
+      type: 'paragraph',
+      nodes: Array.from({ length: 128 }, () => ({ type: 'text', text: 'x'.repeat(4096), style: 'plain' })),
+    }],
+  }
+  expect(
+    await f.tools.call(
+      'send-many',
+      { account, targets: [begin.target], operationId: 'oversized', content },
+      f.metadata,
+    ),
+  ).toMatchObject({ status: 'rejected', code: 'INVALID_CHANNEL_PAYLOAD' })
+  expect(f.notifyOnce).not.toHaveBeenCalled()
+})
+
 it('preflights every mention identity before any batch effect and never falls back on identity denial', async () => {
   const f = fixture()
   const verify = vi.spyOn(f.access.runtime, 'validateMentionContent')

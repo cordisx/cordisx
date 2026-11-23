@@ -45,6 +45,20 @@ export async function enqueueOutbound(
   }
   const content = notification.content === undefined ? undefined : validateOutboundContent(notification.content)
   const fallback = content ? validateOutboundFallback(notification.fallback ?? { mode: 'reject' }) : undefined
+  if (
+    content && Buffer.byteLength(
+        JSON.stringify({
+          contract: 'cordisx.channel-message-send/v2',
+          schemaVersion: 2,
+          target,
+          kind: notification.kind,
+          idempotencyKey: notification.idempotencyKey ?? deliveryId,
+          content,
+          fallback,
+        }),
+        'utf8',
+      ) > 196_608
+  ) throw new ChannelIntegrityError('Typed send request exceeds transport bound')
   if (content && (notification.text !== '' || notification.media !== undefined || questionCard !== undefined)) {
     throw new ChannelIntegrityError('Typed content cannot be combined with legacy content')
   }
