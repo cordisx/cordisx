@@ -167,6 +167,44 @@ actor/admin claims are rejected. See the
 [memory design and delivery ledger](channel-memory-design.md) for tested
 boundaries, identity confirmation gaps and production gates.
 
+### Automatic request-local recall for an administrator
+
+For a direct project-status request such as “青杉项目现在进度是什么？” or a
+recent-work question such as “你记得自己最近都做了什么吗？”, the Host can admit
+the requesting administrator's own relevant task records automatically. The Agent
+should first read `memory guide --context <incoming-context> --input '{"topic":"recall"}'`.
+Its `recallAccess` reports the verified administrator, recognized request scope and
+current audience. Then use `search-page` with the supplied project name, or
+`navigate {}` for a recent-work overview, and `get`/`batch` for selected cards.
+No sharing phrase or repeated grant request is needed for records already admitted.
+
+The Host derives this role from effective `allow-user`, `deny-user` and `reset-user`
+management grants at the actual source, or configured memory-source administrator
+authority. It verifies adapter, account, tenant and user identity; a claimed role
+or platform group-admin title is insufficient. Disabled policy and explicit
+dispatch/send/management denials block this additional path. Memory-source
+administration does not confer authority to read another person's private data.
+
+This access is recomputed for each authenticated incoming request, creates no
+persistent grant and does not open the records to other group members. It covers
+exact-owner `fact`, `conversation` and `collaboration` records relevant to the
+supplied topic. Recent-work overview additionally requires a task/work keyword and
+an update within the last 30 days. Preferences, profiles, impressions, unrelated
+personal facts, expired records, other accounts and unconfirmed linked identities
+are excluded from this new path. Existing explicit own-topic and grant rules
+retain their separate behavior. A following unrelated request receives only its
+ordinary authorized scope.
+
+The request made in a group authorizes an answer about these selected task facts
+to that current audience, not disclosure of the private archive. Candidate matching
+and permission checks happen inside the Host before cards/content reach the model;
+no hidden record count, denied source title or other-person existence is returned.
+The model must answer only the requested task facts and preserve their dates and
+uncertainty. Quoted, negated, ambiguous or unsupported wording does not activate
+this path; the normal authorized scope still applies. A broad assistant work
+overview across all users/personas is not implemented. This does not merge persona
+spaces, create global knowledge or change group task admission.
+
 Local operator-only operations, rejected with Agent/Channel metadata:
 `memory-authority-set` (account user tuple,scopes,expectedRevision),
 `memory-persona-profile` (personaId,name,identity,style?,expectedRevision),

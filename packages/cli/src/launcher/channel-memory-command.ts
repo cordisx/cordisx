@@ -6,6 +6,7 @@ import { ownMemoryTopic } from './channel-memory-intent.js'
 import type { ChannelMemoryAuthority } from './channel-memory-authority.js'
 import { memoryKey } from './channel-memory-policy.js'
 import { MemoryRecordValidationError, validateMemoryRecord } from './channel-memory-record-validation.js'
+import { ownAdministratorRecall } from './channel-memory-recall.js'
 
 export async function channelMemoryCommand(
   store: ChannelMemoryStore,
@@ -58,6 +59,9 @@ export async function channelMemoryCommand(
     'identity-confirm': ['challenge'],
   }
   if (authorization) authority.administer = await authorization.scopes(authority.actor)
+  const administrator = access.memoryAdministrator(metadata, !!authority.administer?.length)
+  const recall = administrator ? ownAdministratorRecall(access.requestText(metadata)) : undefined
+  if (recall) authority.ownRecall = recall
   const action = String(value.action)
   if ((action === 'remember' || action === 'update') && value.record === undefined) {
     throw new MemoryRecordValidationError([{
@@ -71,8 +75,17 @@ export async function channelMemoryCommand(
     throw new Error('MEMORY_INVALID_REQUEST')
   }
   let result: unknown
-  if (action === 'guide') result = channelMemoryGuide(value.topic as string | undefined)
-  else if (action === 'remember') {
+  if (action === 'guide') {
+    result = {
+      ...channelMemoryGuide(value.topic as string | undefined) as Record<string, unknown>,
+      recallAccess: {
+        administrator,
+        ownRequestScope: recall?.recentWork ? 'recent-work' : recall?.topics ? 'topic' : 'none',
+        audience: source.kind === 'group' ? 'current-group' : 'requesting-user',
+        persistentGrantCreated: false,
+      },
+    }
+  } else if (action === 'remember') {
     result = await store.remember(authority, value.record as MemoryInput, source.messageId)
   } else if (action === 'get') result = await store.get(authority, String(value.id))
   else if (action === 'navigate' || action === 'search-page') {
