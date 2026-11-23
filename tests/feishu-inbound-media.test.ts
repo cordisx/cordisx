@@ -138,6 +138,26 @@ describe('SDK normalization through Channel native input', () => {
       await resources.dispose()
     }
   })
+  it('explains the platform sticker limitation without attempting an ordinary resource download', async () => {
+    const resources = new ChannelInboundResources()
+    const get = vi.fn()
+    try {
+      const content = await feishuInboundContent(
+        await fixture('sticker', { file_key: 'sticker_synthetic' }),
+        event,
+        resources,
+        { get },
+      )
+      expect(get).not.toHaveBeenCalled()
+      expect(content.every(block => block.type === 'text')).toBe(true)
+      expect(JSON.stringify(content)).toContain('does not support downloading sticker resources')
+      expect(JSON.stringify(content)).toContain('Send it as an ordinary image')
+      expect(JSON.stringify(content)).not.toContain('permission denied')
+      expect(JSON.stringify(content)).not.toContain('sticker_synthetic')
+    } finally {
+      await resources.dispose()
+    }
+  })
   it('rejects oversized streams, invalid images, and stale handles', async () => {
     const resources = new ChannelInboundResources()
     const message = await fixture('image', { image_key: 'img_v3_synthetic' })
