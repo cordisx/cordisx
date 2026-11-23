@@ -299,45 +299,55 @@ it.each(['direct', 'group grant'])('wires %s inputs through Get, OnIt, and stopp
   expect(f.calls).toEqual(['add:Get', 'add:OnIt', 'remove:Get', 'add:DONE', 'remove:OnIt'])
 })
 
-it('retires Get and OnIt if their receipts arrive after the turn has stopped', async () => {
-  const f = fixture()
-  delete f.state.inputs.record.feedback
-  f.access.runtime = { observeOutbound: () => () => {} }
-  let resolveGet!: (value: { reactionId: string; emojiType: string }) => void
-  let resolveOnIt!: (value: { reactionId: string; emojiType: string }) => void
-  const get = new Promise<{ reactionId: string; emojiType: string }>(done => {
-    resolveGet = done
-  })
-  const onIt = new Promise<{ reactionId: string; emojiType: string }>(done => {
-    resolveOnIt = done
-  })
-  f.react.mockImplementation(async (_event: any, emoji: string) => {
-    f.calls.push('add:' + emoji)
-    if (emoji === 'Get') return get
-    if (emoji === 'OnIt') return onIt
-    return { reactionId: 'done', emojiType: emoji }
-  })
-  const feedback = new ChannelFeedback({
-    store: { snapshot: () => structuredClone(f.state), mutate: async (run: any) => run(f.state) },
-    access: () => f.access,
-    turnState: async () => f.state.jobs.job.state === 'completed' ? 'completed' : 'active',
-    settings: async () =>
-      parseChannelFeedbackSettings({ reaction: { stoppedEnabled: true }, wait: { enabled: false } }),
-    signal: new AbortController().signal,
-  })
-  dispose.push(() => feedback.dispose())
-  await feedback.routed('record')
-  await feedback.started('record')
-  f.state.jobs.job.state = 'completed'
-  feedback.jobUpdated('record')
-  await vi.waitFor(() => expect(f.calls).toContain('add:DONE'))
-  resolveGet({ reactionId: 'Get', emojiType: 'Get' })
-  resolveOnIt({ reactionId: 'OnIt', emojiType: 'OnIt' })
-  await vi.waitFor(() => expect(f.calls).toContain('remove:Get'))
-  await vi.waitFor(() => expect(f.calls).toContain('remove:OnIt'))
-  expect(f.calls.filter(value => value === 'remove:Get')).toHaveLength(1)
-  expect(f.calls.filter(value => value === 'remove:OnIt')).toHaveLength(1)
-})
+it.each(['confirmed removal', 'unknown Get removal'])(
+  'retires late OnIt after DONE with %s',
+  async outcome => {
+    const f = fixture()
+    delete f.state.inputs.record.feedback
+    f.access.runtime = { observeOutbound: () => () => {} }
+    let resolveGet!: (value: { reactionId: string; emojiType: string }) => void
+    let resolveOnIt!: (value: { reactionId: string; emojiType: string }) => void
+    const get = new Promise<{ reactionId: string; emojiType: string }>(done => {
+      resolveGet = done
+    })
+    const onIt = new Promise<{ reactionId: string; emojiType: string }>(done => {
+      resolveOnIt = done
+    })
+    if (outcome === 'unknown Get removal') {
+      f.remove.mockImplementation(async (_event: any, id: string) => {
+        f.calls.push('remove:' + id)
+        if (id === 'Get') throw new Error('unknown removal')
+        return { reactionId: id, removed: true }
+      })
+    }
+    f.react.mockImplementation(async (_event: any, emoji: string) => {
+      f.calls.push('add:' + emoji)
+      if (emoji === 'Get') return get
+      if (emoji === 'OnIt') return onIt
+      return { reactionId: 'done', emojiType: emoji }
+    })
+    const feedback = new ChannelFeedback({
+      store: { snapshot: () => structuredClone(f.state), mutate: async (run: any) => run(f.state) },
+      access: () => f.access,
+      turnState: async () => f.state.jobs.job.state === 'completed' ? 'completed' : 'active',
+      settings: async () =>
+        parseChannelFeedbackSettings({ reaction: { stoppedEnabled: true }, wait: { enabled: false } }),
+      signal: new AbortController().signal,
+    })
+    dispose.push(() => feedback.dispose())
+    await feedback.routed('record')
+    await feedback.started('record')
+    f.state.jobs.job.state = 'completed'
+    feedback.jobUpdated('record')
+    await vi.waitFor(() => expect(f.calls).toContain('add:DONE'))
+    resolveGet({ reactionId: 'Get', emojiType: 'Get' })
+    resolveOnIt({ reactionId: 'OnIt', emojiType: 'OnIt' })
+    await vi.waitFor(() => expect(f.calls).toContain('remove:Get'))
+    await vi.waitFor(() => expect(f.calls).toContain('remove:OnIt'))
+    expect(f.calls.filter(value => value === 'remove:Get')).toHaveLength(1)
+    expect(f.calls.filter(value => value === 'remove:OnIt')).toHaveLength(1)
+  },
+)
 
 it('enabling stopped feedback does not sweep already stored messages or replay them after restart', async () => {
   const f = fixture()

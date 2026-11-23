@@ -154,8 +154,11 @@ export class ChannelFeedback {
         feedback.receivedReaction = receipt
         if (feedback.processingSharesReceived) feedback.reaction = receipt
       })
-      await this.retireReceived(recordId)
-      this.stopped.receiptUpdated(recordId)
+      try {
+        await this.retireReceived(recordId)
+      } finally {
+        this.stopped.receiptUpdated(recordId)
+      }
     }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED'))
   }
   async routed(recordId: string) {
@@ -240,8 +243,11 @@ export class ChannelFeedback {
         const feedback = state.inputs[recordId]?.feedback
         if (feedback) feedback.reaction = receipt
       })
-      await this.retireReceived(recordId)
-      this.stopped.receiptUpdated(recordId)
+      try {
+        await this.retireReceived(recordId)
+      } finally {
+        this.stopped.receiptUpdated(recordId)
+      }
     }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_PROCESSING_FAILED'))
   }
   private async retireReceived(recordId: string) {
