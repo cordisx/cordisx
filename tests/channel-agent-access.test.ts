@@ -65,6 +65,12 @@ describe('configured Channel CLI routine approval', () => {
       configuredChannelApprovalOperation(command.map(value => value === context.profile ? 'default' : value), context),
     ).toBeUndefined()
     expect(configuredChannelApprovalOperation(argv('task-settings-set'), context)?.kind).toBe('write')
+    for (const operation of ['user-access', 'group-block']) {
+      expect(configuredChannelApprovalOperation(argv(operation), context)?.kind).toBe('read')
+    }
+    for (const operation of ['user-access-set', 'group-block-set']) {
+      expect(configuredChannelApprovalOperation(argv(operation), context)?.kind).toBe('write')
+    }
     expect(configuredChannelApprovalOperation(argv('task-approve'), context)).toBeUndefined()
   })
 
@@ -112,6 +118,10 @@ describe('configured Channel CLI routine approval', () => {
       ),
     ).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'chat' }), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('user-access', { user: 'ou_member' }, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('user-access', { user: 'ou_member' }, 'old'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('user-access-set', {}, 'current'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('group-block-set', {}, 'current'), 'chat', 'turn')).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'other' }), 'chat', 'turn')).toBe(false)
     const memory = (action: string, token?: string) => {
       const command = argv('memory', {}, token)

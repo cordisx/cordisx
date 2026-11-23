@@ -40,6 +40,68 @@ cutoff. Revision conflicts require a fresh read. An unknown RPC outcome is not
 success and must be read back before another write. General `policy-set` remains
 local-user-only for profile changes.
 
+### Let an administrator change personal task access or block a group
+
+An authorized user can ask “给 @用户 授权”, “禁止 @用户 发起任务” or
+“恢复 @用户 权限”. The AI must copy the original target into these operations:
+
+```bash
+cordisx channel user-access --context <incoming-context> --input '{"user":"@用户"}'
+cordisx channel user-access-set --context <incoming-context> --input '{"user":"@用户","effect":"allow","expectedRevision":<revision>}'
+```
+
+`effect` is `allow`, `deny` or `reset`, requiring the sender's corresponding
+`allow-user`, `deny-user` or `reset-user` command permission. In a group, `allow`
+creates a task-only grant for this exact account, tenant, group and user. It
+bypasses positive dispatch allowlists for that user's future messages mentioning
+the bot; earlier messages are not replayed. It does not open the group to other
+members or change private chats, other groups, send or management permissions.
+Explicit denies still win. Revocation rechecks queued work but does not interrupt
+an active turn. This grant does not require global command authority.
+
+Direct-chat rules and optional `scope:"account"` use ordinary policy rules:
+positive lists at applicable scopes intersect and explicit denies win. Account
+scope requires both an explicit “在本账号给 @用户 授权” (or corresponding
+deny/reset) request and the existing global command grant. It remains limited to
+the source account and tenant. A scoped command administrator cannot silently
+widen a change to the account. Arbitrary other accounts and unrestricted remote
+`policy-set` are not accepted.
+
+The Host resolves native mentions, explicit IDs or unique full names using the
+current source's addressing and directory. An ambiguous/incomplete name returns
+`choice-required` without changing the policy. Ask the user for a new explicit
+request using a native mention or ID; the AI must not select a person itself.
+The Host validates the target, scope and affirmative intent against the original
+message, not an AI-provided actor or paraphrase. For `user-access`,
+`dispatchAllowed` describes prospective task admission; a task-only grant still
+requires a new mentioned message at or after `fromSequence`.
+
+For current-group task blocking, ask “禁止本群任务”; to restore, ask
+“恢复本群任务”. The AI reads the revision and writes:
+
+```bash
+cordisx channel group-block --context <incoming-context> --input '{}'
+cordisx channel group-block-set --context <incoming-context> --input '{"blocked":true,"expectedRevision":<revision>}'
+```
+
+Blocking requires `messages-off`; restoration requires `messages-on` and uses
+`blocked:false`. The group accepts an explicitly mentioned, authorized
+“恢复本群任务” request even while its managed block is active, provided the
+other admission rules permit that sender. Other tasks remain blocked. If another
+deny or an allowlist also blocks the administrator, `/messages-on` is the
+authenticated management fallback, independently of task dispatch; a local
+administrator can also inspect and edit policy. No arbitrary remote group target
+is accepted. Disabling the whole consumer still requires local configuration.
+
+The message commands and CLI share managed rule IDs. Personal `reset` removes
+only the matching managed rule and precise user grant; group restoration removes
+only the matching managed group block. Neither deletes unrelated denies, opens
+management commands or promises admission when another rule still forbids it.
+Live caller, connection generation, command authority and revision are checked
+again at the durable effect. Re-read conflicts and uncertain RPC outcomes before
+any further write. Running tasks are not interrupted and denied history is not
+automatically replayed.
+
 ### Scoped memory (local implementation)
 
 Use `cordisx channel memory guide --context <incoming-context> --input '{}'`
