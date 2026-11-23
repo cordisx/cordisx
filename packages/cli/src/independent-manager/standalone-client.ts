@@ -403,7 +403,9 @@ export function startStandaloneManager(input: {
         browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
         forgetEntryAttempt()
       }
-      const opened = record(await post('/api/renderer/open', {}, sessionToken), [
+      // The server retires the prior recovery cookie on the first authorized
+      // request. Accept that Set-Cookie without sending cookies to other APIs.
+      const opened = record(await post('/api/renderer/open', {}, sessionToken, recoveryAttempt !== undefined), [
         'status',
         'rendererId',
         'generation',

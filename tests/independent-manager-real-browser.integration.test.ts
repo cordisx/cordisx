@@ -240,6 +240,11 @@ it.skipIf(chrome === undefined)(
       expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')"))
         .not.toBe(beforeInterruptedResume)
       expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-attempt')")).toBeNull()
+      const cookies = await first.send('Network.getAllCookies') as { cookies: Array<{ name: string; path: string }> }
+      const resumeCookies = cookies.cookies.filter(cookie => cookie.name === 'cordisx_manager_resume')
+      const currentResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
+      expect(resumeCookies.length).toBe(1)
+      expect(resumeCookies[0]?.path === `/api/session/resume/${currentResume}`).toBe(true)
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
       const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }
       const port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])

@@ -277,6 +277,8 @@ it('recovers a refreshed tab only after the old renderer is confirmed retired', 
     expect(requests.every(([, options]) => options.credentials === 'same-origin')).toBe(true)
     expect(test.fetch.mock.calls.some(call => call[0] === '/api/session')).toBe(false)
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    const open = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/open')!
+    expect(open[1].credentials).toBe('same-origin')
   } finally {
     await test.manager.close()
     test.dom.window.close()
