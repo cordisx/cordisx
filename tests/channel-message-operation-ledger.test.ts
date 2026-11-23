@@ -111,4 +111,20 @@ describe('durable message operations', () => {
     await expect(first.execute(key, {}, 'stable', effect)).rejects.toThrow()
     expect(effect).not.toHaveBeenCalled()
   })
+  it('keeps the unknown reservation when a returned operation identity mismatches', async () => {
+    const { filename, first, key } = await fixture()
+    await expect(
+      first.execute(
+        key,
+        {},
+        'stable',
+        async () => ({ status: 'unknown', code: 'CHANNEL_UNKNOWN', operationId: 'other' }),
+      ),
+    )
+      .rejects.toThrow('CHANNEL_OPERATION_STORE_INVALID')
+    expect(await (await ChannelMessageOperationLedger.open(filename)).receipt(key)).toMatchObject({
+      status: 'unknown',
+      operationId: 'stable',
+    })
+  })
 })

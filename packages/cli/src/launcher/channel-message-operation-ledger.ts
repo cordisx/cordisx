@@ -59,6 +59,7 @@ export class ChannelMessageOperationLedger {
         result = { status: 'unknown', code: 'CHANNEL_OPERATION_UNCERTAIN', operationId }
       }
       validateStoredMessageOperation(result)
+      if (result.operationId !== operationId) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
       entries[key] = { ...entry, result }
       await this.persist(entries)
       return structuredClone(result)
@@ -72,7 +73,8 @@ export class ChannelMessageOperationLedger {
     try {
       const handle = await open(this.filename, constants.O_RDONLY | constants.O_NOFOLLOW)
       try {
-        if ((await handle.stat()).size > 16 * 1024 * 1024) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
+        const stat = await handle.stat()
+        if (!stat.isFile() || stat.size > 16 * 1024 * 1024) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
         const raw: unknown = JSON.parse(await handle.readFile('utf8'))
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
         const document = raw as { contract?: unknown; entries?: unknown }
