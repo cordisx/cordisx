@@ -169,6 +169,9 @@ If the response to the one-time Marketplace startup migration is lost while a
 tab is leaving, that tab may request recovery without replaying the migration.
 The owner must still confirm that the previous renderer and any write have
 retired; an unconfirmed write continues to block recovery.
+If a persistent permission response is lost during navigation, the same tab can
+recover only after the owner confirms retirement; the new page then reads the
+current policy without replaying the write.
 The Host page also restores supported navigation destinations within that tab.
 Route parameters and unsaved form inputs are not stored; a transient edit page
 returns to a main section after refresh. Changed shared model-service and Channel

@@ -1,8 +1,16 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { expect, it, vi } from 'vitest'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { openManagerOwner } from '../packages/cli/src/cli/manager-owner.js'
 import { ManagerRendererCommandPeer } from '../packages/cli/src/cli/manager-renderer-peer.js'
 import { dispatchManagerRendererOperation } from '../packages/cli/src/cli/manager-renderer-rpc.js'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
+import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
+import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
+import { openPluginManagementService } from '../packages/cli/src/management/service.js'
 
 const secret = (value: string) => value.repeat(64)
 const deferred = <T>() => {
@@ -147,6 +155,88 @@ it('rotates tab-scoped recovery only after the owner confirms renderer retiremen
     await web.close()
   }
 })
+
+it('waits for a slow owner retirement before resuming the tab', async () => {
+  const retirement = deferred<void>()
+  const started = deferred<void>()
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-slow-retire-'))
+  const configPath = path.join(home, 'config.json')
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret('c') }
+  let service: Awaited<ReturnType<typeof openPluginManagementService>> | undefined
+  let authority: ManagerRendererSessions | undefined
+  let rpc: Awaited<ReturnType<typeof startPluginManagementRpcServer>> | undefined
+  let web: Awaited<ReturnType<typeof startManagerWeb>> | undefined
+  try {
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    service = await openPluginManagementService({ configPath, homeDir: home, appId: 'codex', profileId: 'default' })
+    const currentAuthority = new ManagerRendererSessions({
+      profileId: 'default',
+      ownerGeneration: 'owner-1',
+      ownerCurrent: () => true,
+      authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+      channels: new Map([['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }]]),
+      waitForRetirement: async () => {
+        started.resolve()
+        await retirement.promise
+        return true
+      },
+    })
+    authority = currentAuthority
+    rpc = await startPluginManagementRpcServer({
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+      configPath,
+      generation: 'owner-1',
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      service,
+      managerRenderer: async operation => await dispatchManagerRendererOperation(currentAuthority, operation),
+    })
+    const owner = await openManagerOwner('default', { CORDISX_HOME: home })
+    const managerWeb = await startManagerWeb(owner, { rendererGateway: gateway })
+    web = managerWeb
+    const origin = new URL(managerWeb.url).origin
+    const post = async (path: string, body: unknown, token?: string, cookie?: string) =>
+      await fetch(origin + path, {
+        method: 'POST',
+        headers: {
+          origin,
+          'content-type': 'application/json',
+          ...(token ? { authorization: 'Bearer ' + token } : {}),
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify(body),
+      })
+    const opened = await post('/api/session', { token: new URL(managerWeb.url).hash.slice(1), resume: true })
+    const initial = await opened.json() as { token: string; resumeId: string }
+    const cookie = opened.headers.get('set-cookie')!.split(';')[0]!
+    expect((await post('/api/renderer/open', {}, initial.token)).status).toBe(200)
+    const closing = post('/api/renderer/close', { preserveResume: true }, initial.token)
+    await started.promise
+    let settled = false
+    const resuming = post('/api/session/resume/' + initial.resumeId, { attempt: secret('d') }, undefined, cookie)
+      .then(response => {
+        settled = true
+        return response
+      })
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    expect(settled).toBe(false)
+    retirement.resolve()
+    expect((await closing).status).toBe(200)
+    expect((await resuming).status).toBe(200)
+  } finally {
+    retirement.resolve()
+    await web?.close()
+    authority?.dispose()
+    await rpc?.close()
+    service?.close()
+    await rm(home, { recursive: true, force: true })
+  }
+}, 10_000)
 
 it('retries an interrupted recovery only for the same tab after retiring its intermediate session', async () => {
   const retired = deferred<{ status: string }>()
@@ -383,48 +473,54 @@ it('does not resume an owner session while a dispatched write has an unknown res
   }
 })
 
-it('does not issue a replacement if renderer retirement is uncertain', async () => {
-  const owner = {
-    appId: 'codex',
-    profileId: 'work',
-    generation: 'owner-1',
-    isCurrent: async () => true,
-    request: async (operation: { action?: string }) =>
-      operation.action === 'open'
-        ? {
-          status: 'ok',
-          channels: ['plugin-management'],
-          commands: true,
-          handle: { rendererId: secret('a'), grant: secret('b'), ownerGeneration: 'owner-1' },
+it.each(['unavailable', 'timeout'] as const)(
+  'does not issue a replacement if renderer retirement is %s',
+  async failure => {
+    const owner = {
+      appId: 'codex',
+      profileId: 'work',
+      generation: 'owner-1',
+      isCurrent: async () => true,
+      request: async (operation: { action?: string }) => {
+        if (operation.action === 'open') {
+          return {
+            status: 'ok',
+            channels: ['plugin-management'],
+            commands: true,
+            handle: { rendererId: secret('a'), grant: secret('b'), ownerGeneration: 'owner-1' },
+          }
         }
-        : { status: 'unavailable' },
-  }
-  const web = await startManagerWeb(owner as never, {
-    rendererGateway: { pid: 42, processStartedAt: 'fixture', instanceToken: secret('c') },
-  })
-  const origin = new URL(web.url).origin
-  const post = async (path: string, body: unknown, token?: string, cookie?: string) =>
-    await fetch(`${origin}${path}`, {
-      method: 'POST',
-      headers: {
-        origin,
-        'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        ...(cookie ? { cookie } : {}),
+        if (failure === 'timeout') throw new Error('owner request timed out')
+        return { status: 'unavailable' }
       },
-      body: JSON.stringify(body),
+    }
+    const web = await startManagerWeb(owner as never, {
+      rendererGateway: { pid: 42, processStartedAt: 'fixture', instanceToken: secret('c') },
     })
-  try {
-    const opened = await post('/api/session', { token: new URL(web.url).hash.slice(1), resume: true })
-    const initial = await opened.json() as { token: string; resumeId: string }
-    const cookie = opened.headers.get('set-cookie')!.split(';')[0]!
-    expect((await post('/api/renderer/open', {}, initial.token)).status).toBe(200)
-    expect((await post('/api/renderer/close', { preserveResume: true }, initial.token)).status).toBe(503)
-    expect((await post(`/api/session/resume/${initial.resumeId}`, {}, undefined, cookie)).status).toBe(401)
-  } finally {
-    await web.close()
-  }
-})
+    const origin = new URL(web.url).origin
+    const post = async (path: string, body: unknown, token?: string, cookie?: string) =>
+      await fetch(`${origin}${path}`, {
+        method: 'POST',
+        headers: {
+          origin,
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify(body),
+      })
+    try {
+      const opened = await post('/api/session', { token: new URL(web.url).hash.slice(1), resume: true })
+      const initial = await opened.json() as { token: string; resumeId: string }
+      const cookie = opened.headers.get('set-cookie')!.split(';')[0]!
+      expect((await post('/api/renderer/open', {}, initial.token)).status).toBe(200)
+      expect((await post('/api/renderer/close', { preserveResume: true }, initial.token)).status).toBe(503)
+      expect((await post(`/api/session/resume/${initial.resumeId}`, {}, undefined, cookie)).status).toBe(401)
+    } finally {
+      await web.close()
+    }
+  },
+)
 
 it('resumes after read-only checks find no Channel or managed-service owner', async () => {
   const request = vi.fn(async (operation: { kind?: string; action?: string }) => {

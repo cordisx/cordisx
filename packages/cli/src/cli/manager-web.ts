@@ -13,6 +13,10 @@ import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 import { ManagerObservationPolls } from './manager-observation-polls.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
+// Renderer retirement may have to drain active reads and release graph leases.
+// Keep it bounded within the browser's recovery window without treating a
+// normally slow, confirmed cleanup as an uncertain result after one second.
+const retirementTimeoutMs = 15_000
 const files: Readonly<Record<string, string>> = {
   '/': 'manager-standalone.html',
   '/manager.js': 'manager.js',
@@ -165,7 +169,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     ]
     const retireOperations = retireKinds.map(({ kind, stateful, absent }) => {
       const operation = { kind, action: 'retire', sessionId: session.id }
-      return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 })
+      return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: retirementTimeoutMs })
         .then(result => {
           const value = object(result)
           return value?.status === 'retired'
@@ -181,7 +185,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           action: 'revoke',
           gateway: options.rendererGateway,
           browserSessionId: session.id,
-        }, { timeoutMs: 1_000 }).then(result => object(result)?.status === 'ok'),
+        }, { timeoutMs: retirementTimeoutMs }).then(result => object(result)?.status === 'ok'),
       )
     }
     const retired = Promise.allSettled(retireOperations).then(results =>
