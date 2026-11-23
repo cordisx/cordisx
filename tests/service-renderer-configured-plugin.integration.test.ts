@@ -133,6 +133,44 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   45_000,
 )
 
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'keeps an installed package and a configured plugin in the same Manager session',
+  async () => {
+    const f = await fixture({ protectProfileInputs: true })
+    try {
+      expect(await f.install('installed-demo')).toMatchObject({ outcome: 'applied' })
+      const plugin = await configuredManagerPlugin(f.root)
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'configured-demo', entry: plugin.archive }],
+      }), f.configPath)
+      const prepared = await f.call({ action: 'prepare' }) as any
+      expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: expect.any(Array) } })
+      const graphs: ServiceRendererPrivateGraph[] = prepared.value.privateGraphs
+      expect(graphs.map(graph => graph.pluginId).sort()).toEqual(['configured-demo', 'installed-demo'])
+      const completed = await f.call({
+        action: 'complete',
+        managerOrigin: origin,
+        graphs: graphs.map(project),
+      }) as any
+      expect(completed).toMatchObject({ status: 'ok', value: { status: 'ok' } })
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      try {
+        const bundle = bytes.toString('utf8')
+        expect(bundle).toContain('configured-demo')
+        expect(bundle).toContain('installed-demo')
+        expect(bundle).not.toContain(plugin.archive)
+        expect(bundle).not.toContain(plugin.source)
+      } finally {
+        bytes.fill(0)
+      }
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
 const configuredChannelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 it.skipIf(
   configuredChannelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
