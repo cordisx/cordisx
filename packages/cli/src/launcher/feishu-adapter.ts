@@ -23,7 +23,7 @@ import { channelInboxRecordId } from '@cordisx/channel-runtime'
 import type { ChannelServiceConfig, ChannelServiceConnectionConfigV2 } from '@cordisx/channel-runtime'
 import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
 import { ChannelInboundResources } from './channel-inbound-resources.js'
-import { feishuInboundContent } from './feishu-inbound-media.js'
+import { feishuMessageContent } from './feishu-message-content.js'
 import { prepareFeishuOutboundMedia } from './feishu-outbound-media.js'
 import { channelReactionInput, type KnownBotMessage } from './channel-reaction-input.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
@@ -233,12 +233,10 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           return
         }
         const base = inboundEnvelope(message, input.connection)
-        const content = await feishuInboundContent(
-          message,
-          base.input.source.event,
-          resources,
-          channel.rawClient?.im.v1.messageResource,
-        )
+        const content = await feishuMessageContent(message, base.input.source.event, resources, {
+          messageClient: channel.rawClient?.im.v1.message,
+          resourceClient: channel.rawClient?.im.v1.messageResource,
+        })
         if (stopped) return
         const envelope = { input: { ...base.input, content } }
         const existingOriginal = originalInputs.get(envelope.input.source.event.threadId)
