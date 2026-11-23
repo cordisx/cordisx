@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { ManagerRendererCommandPeer } from '../packages/cli/src/cli/manager-renderer-peer.js'
@@ -8,6 +8,88 @@ import { encodeManagerRendererBundle } from '../packages/cli/src/cli/manager-ren
 import { managerRendererGraphFixture } from './fixtures/manager-renderer-graph.js'
 
 const secret = () => randomBytes(32).toString('hex')
+
+it('rejects a refresh while an owner permission write is still in flight', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  let entered!: () => void
+  let release!: () => void
+  const started = new Promise<void>(resolve => entered = resolve)
+  const pending = new Promise<void>(resolve => release = resolve)
+  let writes = 0
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['permission-policy', {
+        prepare: payload => ({
+          mode: 'write' as const,
+          dispatch: async () => {
+            writes++
+            entered()
+            await pending
+            return { requestId: JSON.parse(String(payload)).requestId, ok: true, value: 'saved' }
+          },
+        }),
+      }],
+    ]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string, cookie?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: {
+        origin,
+        'content-type': 'application/json',
+        ...(token ? { authorization: 'Bearer ' + token } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify(data),
+    })
+  try {
+    const opened = await post('/api/session', { token: new URL(web.url).hash.slice(1), resume: true })
+    const session = await opened.json() as { token: string; resumeId: string }
+    const cookie = opened.headers.get('set-cookie')!.split(';')[0]!
+    expect((await post('/api/renderer/open', {}, session.token)).status).toBe(200)
+    const write = post('/api/renderer/binding', {
+      channel: 'permission-policy',
+      payload: JSON.stringify({ requestId: 'pending-policy' }),
+    }, session.token)
+    await started
+    const closing = post('/api/renderer/close', { preserveResume: true }, session.token)
+    let resumed = false
+    const recovery = post(`/api/session/resume/${session.resumeId}`, { attempt: secret() }, undefined, cookie)
+      .then(response => {
+        resumed = true
+        return response
+      })
+    await vi.waitFor(() => expect(authority.mutationAvailability()).not.toBe('available'))
+    expect(resumed).toBe(false)
+    release()
+    expect((await closing).status).toBe(503)
+    expect((await recovery).status).toBe(401)
+    await write
+    expect(writes).toBe(1)
+    expect(await authority.open(gateway, secret())).toBeUndefined()
+  } finally {
+    release()
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)
 
 it('yields observation HTTP requests while retaining one authenticated owner call', async () => {
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }

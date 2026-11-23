@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BindingPermissionPolicyStore } from '../packages/cli/src/renderer/permission-binding.js'
+import { createRuntimePermissionStore } from '../packages/cli/src/renderer/runtime-permission-store.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
@@ -97,6 +98,38 @@ describe('renderer permission persistence binding', () => {
       expect(onUnknown).toHaveBeenCalledOnce()
     } finally {
       store.dispose()
+    }
+  })
+
+  it('identifies an uncertain standalone permission write to the owning session', async () => {
+    const [record] = exactDomPermissionPolicies('work', [{
+      id: 'channel',
+      entry: '/fixture.js',
+      pointIds: ['manager.content'],
+    }])
+    const onUnknown = vi.fn()
+    globals.__cordisxPermissionPolicyRequestV1 = text => {
+      const request = JSON.parse(text) as { requestId: string }
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: false,
+        }))
+      )
+    }
+    const store = createRuntimePermissionStore(
+      {
+        hostKind: 'standalone',
+        permissionBridgeToken: 'standalone-fixture',
+        permissionPolicies: [],
+        standaloneWriteUncertain: onUnknown,
+      } as Parameters<typeof createRuntimePermissionStore>[0],
+    )
+    try {
+      await expect(store.writeV3!([record!])).rejects.toThrow('request was rejected')
+      expect(onUnknown).toHaveBeenCalledExactlyOnceWith('permission-policy')
+    } finally {
+      store.dispose?.()
     }
   })
 })

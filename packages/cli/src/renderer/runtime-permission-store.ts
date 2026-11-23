@@ -20,7 +20,9 @@ export function createRuntimePermissionStore(
       metadata.hostKind !== 'standalone'
         ? undefined
         : {
-          ...(metadata.standaloneWriteUncertain === undefined ? {} : { onUnknown: metadata.standaloneWriteUncertain }),
+          ...(metadata.standaloneWriteUncertain === undefined
+            ? {}
+            : { onUnknown: () => metadata.standaloneWriteUncertain?.('permission-policy') }),
           ...(sign === undefined ? {} : { sign }),
         },
     )

@@ -315,7 +315,7 @@ export interface CordisXRuntimeMetadata {
   readonly standaloneConfiguredPluginPolicyReview?: readonly string[]
   /** Host-private owner and resource check supplied by the standalone session. */
   readonly standaloneReviewSession?: () => Promise<boolean>
-  readonly standaloneWriteUncertain?: () => void
+  readonly standaloneWriteUncertain?: (source?: 'permission-policy') => void
   /** One-shot Host registration; removed before metadata reaches runtime or plugins. */
   readonly standalonePolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void
   /** Session-private signer; removed before metadata reaches runtime or plugins. */

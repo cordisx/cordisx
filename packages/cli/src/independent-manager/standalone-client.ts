@@ -34,7 +34,7 @@ type Composition = {
   startStandaloneManagerComposition(
     signal: AbortSignal,
     verifySession: () => Promise<boolean>,
-    onResultUnknown: () => void,
+    onResultUnknown: (source?: 'permission-policy') => void,
     registerPolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void,
     permissionSigner?: StandalonePermissionSigner,
   ): Promise<CordisXRuntimeHandle>
@@ -335,7 +335,7 @@ export function startStandaloneManager(input: {
   }
   const fail = (reason?: 'result-unknown') => {
     if (closed) return
-    const uncertain = reason === 'result-unknown' || removeBindings?.canResume() === false
+    const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
     if (!notified) {
       notified = true
       try {
@@ -358,6 +358,7 @@ export function startStandaloneManager(input: {
     if (navigationTimer !== undefined) clearTimeout(navigationTimer)
     navigationTimer = setTimeout(() => {
       navigating = false
+      if (removeBindings?.hasUncertainWrite()) fail('result-unknown')
     }, 3_000)
   }
   const onPageHide = (event: PageTransitionEvent) => {
@@ -544,7 +545,16 @@ export function startStandaloneManager(input: {
         composition.startStandaloneManagerComposition(
           lifetime.signal,
           verifyReviewSession,
-          () => fail('result-unknown'),
+          (source?: 'permission-policy') => {
+            // Permission persistence and its adoption both report unknown
+            // results. Only an interrupted navigation may retain recovery;
+            // the owner still has to confirm retirement before a new session.
+            if (
+              source === 'permission-policy' && navigating && removeBindings?.hasUncertainWrite()
+              && canPreserveResume()
+            ) return
+            fail('result-unknown')
+          },
           (adopt: StandaloneDomPolicyAdopter) => {
             if (closed || policyAdopter !== undefined || typeof adopt !== 'function') {
               throw new Error('manager-policy-adoption-unavailable')
@@ -597,7 +607,7 @@ export function startStandaloneManager(input: {
         onQuiesce: async () => {
           // Do not acknowledge a fence while an operation may have written or
           // while resource recovery has an unresolved result.
-          if (!removeBindings?.canResume() || !resourceAuth || heartbeatRunning) return false
+          if (!removeBindings?.canQuiesce() || !resourceAuth || heartbeatRunning) return false
           removeBindings()
           if (heartbeat !== undefined) clearInterval(heartbeat)
           heartbeat = undefined

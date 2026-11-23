@@ -22,6 +22,7 @@ export type IndependentHostChannel = keyof typeof INDEPENDENT_HOST_CHANNELS
 type Binding = (payload: string) => void
 type BindingWindow = Window & Record<string, unknown>
 interface Pending {
+  readonly channel: IndependentHostChannel
   readonly requestId: string
   readonly receiverName: string
   readonly receiver: Binding
@@ -100,7 +101,11 @@ export function installIndependentHostBindings(input: {
   /** True only while a trusted navigation is leaving this document. */
   readonly isNavigating?: () => boolean
   readonly onSessionLost?: (reason?: 'result-unknown') => void
-}): (() => void) & { canResume(): boolean } {
+}): (() => void) & {
+  canResume(): boolean
+  canQuiesce(): boolean
+  hasUncertainWrite(): boolean
+} {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
   const host = input.window as BindingWindow
   const granted = new Set(input.channels)
@@ -113,6 +118,7 @@ export function installIndependentHostBindings(input: {
   const pending = new Map<string, Pending>()
   const installed = new Map<string, Binding>()
   let closed = false
+  let uncertainNavigationWrite = false
   const deliver = (key: string, payload: string) => {
     const request = pending.get(key)
     if (request === undefined) return
@@ -128,9 +134,12 @@ export function installIndependentHostBindings(input: {
   const failure = (key: string, reason: 'INDEPENDENT_HOST_RESULT_UNKNOWN' | 'INDEPENDENT_HOST_SESSION_REVOKED') => {
     const request = pending.get(key)
     if (request !== undefined) {
-      const migrationDuringNavigation = request.resumeAfterOwnerRetirement && input.isNavigating?.() === true
+      const recoveryDuringNavigation = request.resumeAfterOwnerRetirement && input.isNavigating?.() === true
+      const permissionRecovery = recoveryDuringNavigation && request.channel === 'permission-policy'
+        && reason === 'INDEPENDENT_HOST_RESULT_UNKNOWN' && request.dispatched
+      if (permissionRecovery) uncertainNavigationWrite = true
       const uncertain = reason === 'INDEPENDENT_HOST_RESULT_UNKNOWN' && request.dispatched && !request.readOnly
-        && !migrationDuringNavigation
+        && !recoveryDuringNavigation
       deliver(key, JSON.stringify({ requestId: request.requestId, ok: false, error: reason, code: reason }))
       if (uncertain && !closed) {
         dispose()
@@ -169,16 +178,17 @@ export function installIndependentHostBindings(input: {
       const retryBusyRead = channel === 'managed-service-ui'
         && ['snapshot', 'readCatalog', 'readAccounts'].includes(String(operation))
       const request: Pending = {
+        channel,
         requestId: id,
         receiverName,
         receiver: receiver as Binding,
         controller,
-        // This one-time initialization is reconciled from owner state. A
-        // replacement may only join after the owner confirms retirement; the
-        // client never replays the dispatched request.
-        resumeAfterOwnerRetirement: channel === 'plugin-management' && operation !== null
-          && typeof operation === 'object' && !Array.isArray(operation)
-          && (operation as { kind?: unknown }).kind === 'migrate-legacy-sources',
+        // These operations can be read back from owner state. A replacement
+        // may join only after the owner confirms retirement; no write is replayed.
+        resumeAfterOwnerRetirement: channel === 'permission-policy'
+          || channel === 'plugin-management' && operation !== null
+            && typeof operation === 'object' && !Array.isArray(operation)
+            && (operation as { kind?: unknown }).kind === 'migrate-legacy-sources',
         readOnly: (() => {
           const envelope = JSON.parse(payload) as { operation?: unknown }
           if (channel === 'model-services') return envelope.operation === 'read'
@@ -276,11 +286,17 @@ export function installIndependentHostBindings(input: {
     host[name] = binding
     installed.set(name, binding)
   }
-  // Queued requests are canceled locally. A dispatched startup migration may
-  // request recovery, but the owner must still confirm its retirement.
+  // A recovery attempt is not a quiescence receipt. An in-flight permission
+  // write must still block lifecycle fences until the owner retires it.
+  const safe = (forRecovery: boolean) =>
+    !closed && (forRecovery || !uncertainNavigationWrite)
+    && [...pending.values()].every(item =>
+      item.readOnly || !item.dispatched || item.resumeAfterOwnerRetirement
+        && (forRecovery || item.channel !== 'permission-policy')
+    )
   return Object.assign(dispose, {
-    canResume: () =>
-      !closed
-      && [...pending.values()].every(item => item.readOnly || !item.dispatched || item.resumeAfterOwnerRetirement),
+    canResume: () => safe(true),
+    canQuiesce: () => safe(false),
+    hasUncertainWrite: () => uncertainNavigationWrite,
   })
 }

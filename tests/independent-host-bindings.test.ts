@@ -318,8 +318,65 @@ it('allows an owner-confirmed resume attempt after a lost startup migration resp
     }))
     await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledOnce())
     expect(dispose.canResume()).toBe(true)
+    expect(dispose.canQuiesce()).toBe(true)
     target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'write', operation: { kind: 'execute' } }))
     await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledTimes(2))
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+  }
+})
+
+it('allows an owner-confirmed resume attempt after a permission response is lost during navigation', async () => {
+  let reject!: (error: Error) => void
+  const lost = vi.fn()
+  const receive = vi.fn()
+  const target = {
+    fetch: vi.fn(() => new Promise((_resolve, fail) => reject = fail)),
+    __cordisxPermissionPolicyReceiveV1: receive,
+  } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['permission-policy'],
+    rendererAdmission: Promise.resolve(true),
+    isNavigating: () => true,
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'policy' }))
+    await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(true)
+    expect(dispose.canQuiesce()).toBe(false)
+    reject(new Error('response interrupted'))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(lost).not.toHaveBeenCalled()
+    expect(dispose.hasUncertainWrite()).toBe(true)
+    expect(dispose.canResume()).toBe(true)
+    expect(dispose.canQuiesce()).toBe(false)
+    expect(target.fetch).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
+  }
+})
+
+it('still isolates an uncertain permission write outside navigation', async () => {
+  const lost = vi.fn()
+  const target = {
+    fetch: vi.fn(async () => new Response('{}', { status: 503 })),
+    __cordisxPermissionPolicyReceiveV1: vi.fn(),
+  } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['permission-policy'],
+    rendererAdmission: Promise.resolve(true),
+    isNavigating: () => false,
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'policy' }))
+    await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith('result-unknown'))
     expect(dispose.canResume()).toBe(false)
   } finally {
     dispose()
@@ -421,7 +478,8 @@ it('does not dispatch a permission write before the owner admits the renderer', 
     expect(dispose.canResume()).toBe(true)
     admit(true)
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
-    expect(dispose.canResume()).toBe(false)
+    expect(dispose.canResume()).toBe(true)
+    expect(dispose.canQuiesce()).toBe(false)
   } finally {
     dispose()
   }

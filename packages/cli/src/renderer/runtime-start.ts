@@ -496,7 +496,10 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
-    policyRuntime.register(broker, options.signal, metadata.standaloneWriteUncertain)
+    const permissionWriteUncertain = metadata.standaloneWriteUncertain === undefined
+      ? undefined
+      : () => metadata.standaloneWriteUncertain?.('permission-policy')
+    policyRuntime.register(broker, options.signal, permissionWriteUncertain)
     if (certifiedPermissionChannel !== undefined) {
       certifiedPermissionChannel.replaceSink(broker)
     } else if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {

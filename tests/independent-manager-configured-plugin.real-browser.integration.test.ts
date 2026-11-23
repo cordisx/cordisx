@@ -134,11 +134,21 @@ it.skipIf(chrome === undefined)(
           '(() => {',
           '  const send = window.fetch.bind(window)',
           '  window.fetch = (resource, options) => {',
-          '    if (resource === "/api/renderer/binding" && !sessionStorage.getItem("fixture-migration-lost")) {',
+          '    if (resource === "/api/renderer/binding") {',
           '      try {',
           '        const envelope = JSON.parse(options.body)',
           '        const operation = JSON.parse(envelope.payload).operation',
-          '        if (envelope.channel === "plugin-management" && operation.kind === "migrate-legacy-sources") {',
+          '        if (envelope.channel === "permission-policy" && sessionStorage.getItem("fixture-hold-permission") === "1" && !sessionStorage.getItem("fixture-permission-lost")) {',
+          '          const count = Number(sessionStorage.getItem("fixture-permission-count") || "0")',
+          '          sessionStorage.setItem("fixture-permission-count", String(count + 1))',
+          '          return send(resource, options).then(async response => {',
+          '            const result = await response.clone().json().catch(() => ({}))',
+          '            if (!response.ok || result.ok !== true) return response',
+          '            sessionStorage.setItem("fixture-permission-lost", "1")',
+          '            return new Promise((_, reject) => { window.__fixtureRejectPermission = reject })',
+          '          })',
+          '        }',
+          '        if (!sessionStorage.getItem("fixture-migration-lost") && envelope.channel === "plugin-management" && operation.kind === "migrate-legacy-sources") {',
           '          const count = Number(sessionStorage.getItem("fixture-migration-count") || "0")',
           '          sessionStorage.setItem("fixture-migration-count", String(count + 1))',
           '          return send(resource, options).then(response => {',
@@ -305,17 +315,12 @@ it.skipIf(chrome === undefined)(
       const resetPoint = await page.evaluate<string>(
         'document.querySelector("[data-standalone-dom-reset]").dataset.standaloneDomReset',
       )
+      await page.evaluate("sessionStorage.setItem('fixture-hold-permission', '1')")
       await trustedClick(page, '[data-standalone-dom-reset]')
       await vi.waitFor(async () => expect((await policy(resetPoint))?.policy).toBe('ask'), { timeout: 60_000 })
       await vi.waitFor(async () => expect(await peerPolicy(resetPoint)).toBe('ask'), { timeout: 60_000 })
-      // The peer can adopt the reset before the writer receives its result.
-      // A refresh during that unresolved write must remain fenced.
       await vi.waitFor(async () => {
-        expect(
-          await page!.evaluate(
-            'Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))',
-          ),
-        ).toBe(true)
+        expect(await page!.evaluate("sessionStorage.getItem('fixture-permission-lost')")).toBe('1')
       }, { timeout: 30_000 })
 
       const previousResume = await page.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
@@ -324,6 +329,7 @@ it.skipIf(chrome === undefined)(
         "window.addEventListener('beforeunload', () => {",
         "  sessionStorage.setItem('fixture-migration-aborted', '1')",
         "  window.__fixtureRejectMigration?.(new Error('simulated interrupted response'))",
+        "  window.__fixtureRejectPermission?.(new Error('simulated interrupted response'))",
         '}, { once: true })',
       ].join('\n'))
       await page.send('Page.reload')
@@ -348,6 +354,13 @@ it.skipIf(chrome === undefined)(
       await openFixturePage()
       expect(await page.evaluate("sessionStorage.getItem('fixture-migration-count')")).toBe('1')
       expect(await page.evaluate("sessionStorage.getItem('fixture-migration-aborted')")).toBe('1')
+      expect(await page.evaluate("sessionStorage.getItem('fixture-permission-count')")).toBe('1')
+      expect(
+        await page.evaluate(
+          'globalThis.__cordisxRuntime.snapshot().permissions.find(item => item.identity.id === "review-demo"'
+            + ' && item.scope.extensionPoints?.[0] === ' + JSON.stringify(resetPoint) + ')?.policy',
+        ),
+      ).toBe('ask')
     } finally {
       await peer?.close().catch(() => undefined)
       await page?.close().catch(() => undefined)

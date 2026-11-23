@@ -1,3 +1,4 @@
+import { webcrypto } from 'node:crypto'
 import { JSDOM } from 'jsdom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { startStandaloneManager } from '../packages/cli/src/independent-manager/standalone-client.js'
@@ -53,6 +54,7 @@ function fixture(input: {
   readonly controlledPoll?: boolean
   readonly holdBindings?: boolean
   readonly pluginManagement?: boolean
+  readonly permissionPolicy?: boolean
   readonly modelServices?: boolean
   readonly admissionGate?: Promise<void>
   readonly credentialFailure?: boolean
@@ -61,6 +63,7 @@ function fixture(input: {
     url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
   })
   const win = dom.window
+  if (input.permissionPolicy) Object.defineProperty(win.crypto, 'subtle', { value: webcrypto.subtle })
   let beforeUnload: ((event: BeforeUnloadEvent) => void) | undefined
   let pageHide: ((event: PageTransitionEvent) => void) | undefined
   const addListener = win.addEventListener.bind(win)
@@ -126,6 +129,7 @@ function fixture(input: {
         channels: [
           'config',
           ...(input.pluginManagement ? ['plugin-management'] : []),
+          ...(input.permissionPolicy ? ['permission-policy'] : []),
           ...(input.modelServices ? ['model-services'] : []),
           ...(input.credentialFailure ? ['channel-credentials'] : []),
         ],
@@ -208,7 +212,9 @@ function fixture(input: {
     auth.start.mockImplementation(async () => await config.isSessionCurrent())
     return auth
   })
-  const start = vi.fn(async () => {
+  let reportResultUnknown: ((source?: 'permission-policy') => void) | undefined
+  const start = vi.fn(async (...args: unknown[]) => {
+    reportResultUnknown = args[2] as (source?: 'permission-policy') => void
     await input.startGate
     Object.assign(win, { __cordisxRuntime: runtime, __cordisxPluginGenerationResourcesV1: registry })
     return runtime
@@ -239,6 +245,8 @@ function fixture(input: {
     pageHide: () => pageHide?.({ isTrusted: true } as PageTransitionEvent),
     failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
     failBinding: () => rejectBinding?.(new Error('navigation interrupted the binding')),
+    reportResultUnknown: () => reportResultUnknown?.(),
+    reportPermissionUnknown: () => reportResultUnknown?.('permission-policy'),
     deliverPoll: (value: unknown) => resolvePoll?.(response({ command: value })),
     pollStarted: () => rejectPoll !== undefined,
     revokeSession: () => {
@@ -513,6 +521,95 @@ it('does not preserve refresh authority while a possible write is in flight', as
     expect(JSON.parse(String(close[1].body))).toEqual({})
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
     expect(test.unavailable).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('fences an interrupted permission write when navigation is canceled', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, permissionPolicy: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPermissionPolicyReceiveV1 = vi.fn()
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'permission-write' }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.beforeUnload()
+    test.failBinding()
+    await vi.waitFor(() => expect(target.__cordisxPermissionPolicyReceiveV1).toHaveBeenCalledOnce())
+    expect(test.unavailable).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('result-unknown'), {
+      timeout: 5_000,
+    })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('preserves recovery when an interrupted permission response marks its result unknown during navigation', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, permissionPolicy: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPermissionPolicyReceiveV1 = vi.fn(() => {
+      test.reportPermissionUnknown()
+      queueMicrotask(() => test.reportPermissionUnknown())
+    })
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'permission-write' }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.beforeUnload()
+    test.failBinding()
+    await vi.waitFor(() => expect(target.__cordisxPermissionPolicyReceiveV1).toHaveBeenCalledOnce())
+    expect(test.unavailable).not.toHaveBeenCalled()
+    test.pageHide()
+    await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('still fences an unrelated unknown result after an interrupted permission response', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, permissionPolicy: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPermissionPolicyReceiveV1 = vi.fn(() => test.reportPermissionUnknown())
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'permission-write' }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.beforeUnload()
+    test.failBinding()
+    await vi.waitFor(() => expect(target.__cordisxPermissionPolicyReceiveV1).toHaveBeenCalledOnce())
+    expect(test.unavailable).not.toHaveBeenCalled()
+    test.reportResultUnknown()
+    expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('result-unknown')
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not acknowledge quiescence while a permission write awaits its result', async () => {
+  const test = fixture({ controlledPoll: true, holdBindings: true, permissionPolicy: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPermissionPolicyReceiveV1 = vi.fn()
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'permission-write' }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.deliverPoll({ id: 'e'.repeat(64), sequence: 2, method: 'quiesce', payload: { fenceId: 'f'.repeat(64) } })
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledOnce())
+    const acknowledgements = test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')
+    expect(acknowledgements).toHaveLength(2)
+    expect(JSON.parse(String(acknowledgements[1]![1].body))).toMatchObject({ receipt: { ok: false } })
   } finally {
     await test.manager.close()
     test.dom.window.close()
