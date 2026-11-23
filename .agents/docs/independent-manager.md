@@ -134,8 +134,11 @@ Host page keeps its session token in
 memory. On refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
 If the browser loses the unload request, the authenticated replacement requests
-that retirement itself. A duplicated tab carrying the same recovery handle
-replaces the previous session; open a new manager entry for an independent tab.
+that retirement itself. If recovery is interrupted before the replacement makes
+its first authenticated request, the same tab can retry briefly; the owner must
+also confirm retirement of any intermediate session. A duplicated tab carrying
+the same recovery handle replaces the previous session; open a new manager
+entry for an independent tab.
 This includes a hard reload, where the fixed resource worker reclaims the page
 before the new authenticated session binds. Requests still queued before owner
 admission are cancelled rather than treated as dispatched writes.

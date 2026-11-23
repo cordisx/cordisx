@@ -45,6 +45,8 @@ function fixture(input: {
   readonly startGate?: Promise<void>
   readonly loseAck?: boolean
   readonly resume?: boolean
+  readonly resumeGate?: Promise<void>
+  readonly loseResumeResponse?: boolean
   readonly issueResume?: boolean
   readonly controlledPoll?: boolean
   readonly holdBindings?: boolean
@@ -99,6 +101,13 @@ function fixture(input: {
         : Promise.resolve(result)
     }
     if (path === `/api/session/resume/${'e'.repeat(64)}`) {
+      if (input.loseResumeResponse) return Promise.reject(new Error('lost recovery response'))
+      if (input.resumeGate) {
+        return Promise.race([
+          input.resumeGate.then(() => response({ token: sessionToken, resumeId: 'f'.repeat(64) })),
+          abortResponse(options.signal!),
+        ])
+      }
       if (resumes++ === 0) {
         return Promise.resolve(new Response(JSON.stringify({ error: 'RESUME_PENDING' }), { status: 409 }))
       }
@@ -268,6 +277,43 @@ it('recovers a refreshed tab only after the old renderer is confirmed retired', 
     expect(requests.every(([, options]) => options.credentials === 'same-origin')).toBe(true)
     expect(test.fetch.mock.calls.some(call => call[0] === '/api/session')).toBe(false)
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('keeps the same tab recovery attempt when refresh interrupts its exchange', async () => {
+  const gate = deferred<void>()
+  const test = fixture({ resume: true, resumeGate: gate.promise })
+  try {
+    await vi.waitFor(() =>
+      expect(test.fetch.mock.calls.some(call => call[0].startsWith('/api/session/resume/'))).toBe(true)
+    )
+    const request = test.fetch.mock.calls.find(call => call[0].startsWith('/api/session/resume/'))!
+    const body = JSON.parse(String(request[1].body)) as { attempt: string }
+    expect(body.attempt).toMatch(/^[a-f0-9]{64}$/u)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
+    test.beforeUnload()
+    test.pageHide()
+    expect(await test.manager.ready).toBe(false)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-attempt')).toContain(body.attempt)
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    gate.resolve()
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retains recovery after a lost response so the tab can retry', async () => {
+  const test = fixture({ resume: true, loseResumeResponse: true })
+  try {
+    expect(await test.manager.ready).toBe(false)
+    expect(test.unavailable).toHaveBeenCalledOnce()
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-attempt')).toMatch(/^[a-f0-9]{64}:[a-f0-9]{64}$/u)
   } finally {
     await test.manager.close()
     test.dom.window.close()

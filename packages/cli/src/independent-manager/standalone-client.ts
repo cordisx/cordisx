@@ -23,6 +23,7 @@ const heartbeatMilliseconds = 15_000
 const requestMilliseconds = 20_000
 const bootMilliseconds = 60_000
 const resumeStorageKey = 'cordisx-manager-resume-id'
+const resumeAttemptStorageKey = 'cordisx-manager-resume-attempt'
 const entryStorageKey = 'cordisx-manager-entry-attempt'
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
@@ -211,14 +212,35 @@ export function startStandaloneManager(input: {
       browser.sessionStorage.removeItem(entryStorageKey)
     } catch { /* storage may be disabled */ }
   }
-  const takeResumeId = (): string | undefined => {
+  const readResumeId = (): string | undefined => {
     try {
       const value = browser.sessionStorage.getItem(resumeStorageKey)
-      browser.sessionStorage.removeItem(resumeStorageKey)
       return value && tokenPattern.test(value) ? value : undefined
     } catch {
       return undefined
     }
+  }
+  const resumeAttempt = (id: string): string | undefined => {
+    try {
+      const prefix = `${id}:`
+      const existing = browser.sessionStorage.getItem(resumeAttemptStorageKey)
+      const attempt = existing?.startsWith(prefix) ? existing.slice(prefix.length) : undefined
+      if (attempt && tokenPattern.test(attempt)) return attempt
+      const bytes = browser.crypto.getRandomValues(new Uint8Array(32))
+      const value = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+      browser.sessionStorage.setItem(resumeAttemptStorageKey, `${prefix}${value}`)
+      return value
+    } catch {
+      return undefined
+    }
+  }
+  const forgetResumeAttempt = (id: string | undefined) => {
+    if (!id) return
+    try {
+      if (browser.sessionStorage.getItem(resumeAttemptStorageKey)?.startsWith(`${id}:`)) {
+        browser.sessionStorage.removeItem(resumeAttemptStorageKey)
+      }
+    } catch { /* storage may be disabled */ }
   }
   const saveResumeId = (value: unknown): string | undefined => {
     if (typeof value !== 'string' || !tokenPattern.test(value)) return undefined
@@ -235,11 +257,18 @@ export function startStandaloneManager(input: {
         browser.sessionStorage.removeItem(resumeStorageKey)
       }
     } catch { /* storage may be disabled */ }
+    forgetResumeAttempt(resumeId)
     resumeId = undefined
   }
-  const resumeSession = async (id: string): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const result = await post(`/api/session/resume/${id}`, {}, undefined, true, true)
+  const resumeSession = async (id: string, attempt: string | undefined): Promise<Record<string, unknown>> => {
+    for (let retry = 0; retry < 20; retry++) {
+      const result = await post(
+        `/api/session/resume/${id}`,
+        attempt === undefined ? {} : { attempt },
+        undefined,
+        true,
+        true,
+      )
       if (result.error !== 'RESUME_PENDING' || Object.keys(result).length !== 1) return result
       await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
     }
@@ -305,7 +334,9 @@ export function startStandaloneManager(input: {
         input.onUnavailable?.(uncertain ? 'result-unknown' : undefined)
       } catch { /* presentation cannot keep an invalid session alive */ }
     }
-    void close()
+    // An interrupted exchange has not dispatched a new session operation. The
+    // same tab can retry it; the owner still has to confirm every retirement.
+    void close(sessionToken === undefined && resumeId !== undefined)
   }
   const canPreserveResume = () =>
     resumeId !== undefined
@@ -340,8 +371,11 @@ export function startStandaloneManager(input: {
       const entryToken = url.hash.slice(1)
       const isEntry = tokenPattern.test(entryToken)
       if (!isEntry) browser.history.replaceState(null, '', `${url.pathname}${url.search}`)
-      const previousResume = takeResumeId()
+      const previousResume = readResumeId()
+      resumeId = previousResume
+      if (isEntry) forgetResumeId()
       const attempt = isEntry ? entryAttempt() : undefined
+      const recoveryAttempt = !isEntry && previousResume ? resumeAttempt(previousResume) : undefined
       const exchanged = isEntry
         ? await post(
           '/api/session',
@@ -351,7 +385,7 @@ export function startStandaloneManager(input: {
         )
         : entryToken !== '' || previousResume === undefined
         ? undefined
-        : await resumeSession(previousResume)
+        : await resumeSession(previousResume, recoveryAttempt)
       if (!exchanged || typeof exchanged.token !== 'string' || !tokenPattern.test(exchanged.token)) {
         throw new Error('manager-session-invalid')
       }
@@ -359,7 +393,10 @@ export function startStandaloneManager(input: {
         throw new Error('manager-session-invalid')
       }
       sessionToken = exchanged.token
-      resumeId = saveResumeId(exchanged.resumeId)
+      const nextResume = saveResumeId(exchanged.resumeId)
+      if (!nextResume) forgetResumeId()
+      resumeId = nextResume
+      if (!isEntry) forgetResumeAttempt(previousResume)
       if (isEntry) {
         // Keep the bootstrap in the fragment until exchange succeeds, then
         // remove it before starting any owner operation.

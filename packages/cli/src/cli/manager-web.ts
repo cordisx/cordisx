@@ -8,7 +8,7 @@ import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
 import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
-import { ManagerSessionResumeGrants } from './manager-session-resume.js'
+import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 import { ManagerObservationPolls } from './manager-observation-polls.js'
 
@@ -129,7 +129,13 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
   let bootstraps!: ManagerBootstrapEntries
-  const retireSession = async (token: string, preserveResume = false, preserveBootstrap = false) => {
+  const retireSession = async (
+    token: string,
+    preserveResume = false,
+    preserveBootstrap = false,
+    preserveResumeExchange = false,
+  ) => {
+    if (!preserveResumeExchange) resumes.finalizeSession(token)
     const session = sessions.get(token)
     if (!session) return await closedSessions.get(token)?.retired ?? false
     if (!preserveBootstrap) bootstraps.finalizeSession(token)
@@ -212,6 +218,15 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     session.timer = timer
     sessions.set(token, session)
     return session
+  }
+  const issueResumedSession = async () => {
+    if (!await owner.isCurrent().catch(() => false)) return undefined
+    const token = randomBytes(32).toString('hex')
+    for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
+    while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
+    const resume = resumes.issue(token)
+    touchSession(token, randomBytes(32).toString('hex'), false)
+    return { token, resumeId: resume.id, cookie: resume.cookie }
   }
   const server = createServer(async (request, response) => {
     response.setHeader('cache-control', 'no-store')
@@ -307,23 +322,18 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       ) return json(response, 403, { error: 'INVALID_ORIGIN' })
       try {
         const input = object(await body(request))
-        if (!input || Object.keys(input).length !== 0) return json(response, 400, { error: 'INVALID_REQUEST' })
-        const claimed = await resumes.claim(
-          resumeMatch[1]!,
-          request.headers.cookie,
-          async session => await retireSession(session, true),
-        )
-        if (claimed === 'pending') return json(response, 409, { error: 'RESUME_PENDING' })
-        if (claimed !== 'accepted' || !await owner.isCurrent().catch(() => false)) {
-          return json(response, 401, { error: 'UNAUTHORIZED' })
-        }
-        const token = randomBytes(32).toString('hex')
-        for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
-        while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
-        const resume = resumes.issue(token)
-        touchSession(token, randomBytes(32).toString('hex'), false)
-        response.setHeader('set-cookie', [resumes.deleteCookie(resumeMatch[1]!), resume.cookie])
-        return json(response, 200, { token, resumeId: resume.id })
+        if (!input) return json(response, 400, { error: 'INVALID_REQUEST' })
+        const exchanged = await exchangeManagerSessionResume({
+          id: resumeMatch[1]!,
+          cookie: request.headers.cookie,
+          payload: input,
+          grants: resumes,
+          retireOriginal: async session => await retireSession(session, true),
+          retireIssued: async session => await retireSession(session, false, false, true),
+          issue: issueResumedSession,
+        })
+        if (exchanged.cookies) response.setHeader('set-cookie', exchanged.cookies)
+        return json(response, exchanged.status, exchanged.value)
       } catch {
         return json(response, 400, { error: 'INVALID_REQUEST' })
       }
@@ -356,6 +366,13 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
     bootstraps.finalizeSession(token)
+    const finalizedResumes = resumes.finalizeSession(token)
+    if (finalizedResumes.length > 0) {
+      response.setHeader(
+        'set-cookie',
+        finalizedResumes.map(id => resumes.deleteCookie(id)),
+      )
+    }
     const activeSession = () =>
       sessions.get(token) === session && session.deadline > Date.now()
       && !session.controller.signal.aborted

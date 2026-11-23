@@ -47,3 +47,22 @@ it('rejects uncertain retirement, explicit revocation, and expired resume window
   await vi.advanceTimersByTimeAsync(30_001)
   expect(await grants.claim(expired.id, cookie(expired.cookie))).toBe('denied')
 })
+
+it('retires an intermediate session if its recovery window expires while issuance waits', async () => {
+  vi.useFakeTimers()
+  const grants = new ManagerSessionResumeGrants()
+  const original = 'a'.repeat(64)
+  const grant = grants.issue(original)
+  grants.park(original, Promise.resolve(true))
+  let deliver!: (value: { token: string; resumeId: string; cookie: string }) => void
+  const waiting = new Promise<{ token: string; resumeId: string; cookie: string }>(resolve => deliver = resolve)
+  const issue = vi.fn(async () => await waiting)
+  const retire = vi.fn(async () => true)
+  const exchange = grants.exchange(grant.id, cookie(grant.cookie), 'b'.repeat(64), retire, retire, issue)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(issue).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(30_001)
+  deliver({ token: 'c'.repeat(64), resumeId: 'd'.repeat(64), cookie: 'fixture' })
+  expect(await exchange).toBe('denied')
+  expect(retire).toHaveBeenCalledExactlyOnceWith('c'.repeat(64))
+})

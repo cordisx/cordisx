@@ -139,6 +139,15 @@ it.skipIf(chrome === undefined)(
                 return new Promise(() => {})
               })
             }
+            if (typeof request === 'string' && request.startsWith('/api/session/resume/')
+              && sessionStorage.getItem('fixture-interrupt-resume') === '1') {
+              return original(request, options).then(response => {
+                if (!response.ok) return response
+                sessionStorage.removeItem('fixture-interrupt-resume')
+                sessionStorage.setItem('fixture-resume-issued', '1')
+                return new Promise(() => {})
+              })
+            }
             if (request === '/api/renderer/close' && sessionStorage.getItem('fixture-drop-close') === '1') {
               sessionStorage.removeItem('fixture-drop-close')
               sessionStorage.setItem('fixture-close-dropped', '1')
@@ -215,6 +224,22 @@ it.skipIf(chrome === undefined)(
       await ready(first)
       expect(await first.evaluate("sessionStorage.getItem('fixture-close-dropped')")).toBe('1')
       expect(await first.evaluate('location.hash')).toBe('')
+      const beforeInterruptedResume = await first.evaluate<string>(
+        "sessionStorage.getItem('cordisx-manager-resume-id')",
+      )
+      await first.evaluate("sessionStorage.setItem('fixture-interrupt-resume', '1')")
+      await first.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate("sessionStorage.getItem('fixture-resume-issued')")).toBe('1')
+      }, { timeout: 20_000 })
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).toBe(beforeInterruptedResume)
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-attempt')"))
+        .toMatch(/^[a-f0-9]{64}:[a-f0-9]{64}$/u)
+      await first.send('Page.reload')
+      await ready(first)
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')"))
+        .not.toBe(beforeInterruptedResume)
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-attempt')")).toBeNull()
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
       const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }
       const port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])

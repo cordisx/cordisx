@@ -148,6 +148,85 @@ it('rotates tab-scoped recovery only after the owner confirms renderer retiremen
   }
 })
 
+it('retries an interrupted recovery only for the same tab after retiring its intermediate session', async () => {
+  const retired = deferred<{ status: string }>()
+  const revoke = vi.fn(async () => await retired.promise)
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'work',
+    generation: 'owner-1',
+    isCurrent: async () => true,
+    request: async (operation: { action?: string }) => {
+      if (operation.action === 'open') {
+        return {
+          status: 'ok',
+          channels: ['plugin-management'],
+          commands: true,
+          handle: { rendererId: secret('a'), grant: secret('b'), ownerGeneration: 'owner-1' },
+        }
+      }
+      if (operation.action === 'revoke') return await revoke()
+      return { status: 'unavailable' }
+    },
+  } as never, { rendererGateway: { pid: 42, processStartedAt: 'fixture', instanceToken: secret('c') } })
+  const origin = new URL(web.url).origin
+  const post = async (path: string, body: unknown, token?: string, cookie?: string) =>
+    await fetch(`${origin}${path}`, {
+      method: 'POST',
+      headers: {
+        origin,
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+  try {
+    const opened = await post('/api/session', { token: new URL(web.url).hash.slice(1), resume: true })
+    const initial = await opened.json() as { token: string; resumeId: string }
+    const cookie = opened.headers.get('set-cookie')!.split(';')[0]!
+    const path = `/api/session/resume/${initial.resumeId}`
+    const attempt = secret('d')
+    expect((await post('/api/renderer/open', {}, initial.token)).status).toBe(200)
+    expect((await post(path, { attempt }, undefined, 'cordisx_manager_resume=wrong')).status).toBe(401)
+    const first = post(path, { attempt }, undefined, cookie)
+    await vi.waitFor(() => expect(revoke).toHaveBeenCalledOnce())
+    expect((await post(path, { attempt: secret('e') }, undefined, cookie)).status).toBe(401)
+    expect((await post(path, {}, undefined, cookie)).status).toBe(401)
+    expect((await post(path, { attempt }, undefined, cookie)).status).toBe(409)
+    retired.resolve({ status: 'ok' })
+    const firstResponse = await first
+    expect(firstResponse.status).toBe(200)
+    const intermediate = await firstResponse.json() as { token: string; resumeId: string }
+    expect(
+      firstResponse.headers.getSetCookie().some(value =>
+        value.includes(`Path=${path};`)
+        && !value.includes('Max-Age=0')
+      ),
+    ).toBe(true)
+
+    // The server issued a session but the tab never observed its response.
+    const retry = await post(path, { attempt }, undefined, cookie)
+    expect(retry.status).toBe(200)
+    const replacement = await retry.json() as { token: string; resumeId: string }
+    expect(replacement.token).not.toBe(intermediate.token)
+    expect(replacement.resumeId).not.toBe(intermediate.resumeId)
+    expect((await post('/api/renderer/open', {}, intermediate.token)).status).toBe(401)
+    const adopted = await post('/api/renderer/open', {}, replacement.token)
+    expect(adopted.status).toBe(200)
+    expect(
+      adopted.headers.getSetCookie().some(value =>
+        value.includes(`Path=${path};`)
+        && value.includes('Max-Age=0')
+      ),
+    ).toBe(true)
+    expect((await post(path, { attempt }, undefined, cookie)).status).toBe(401)
+  } finally {
+    retired.resolve({ status: 'ok' })
+    await web.close()
+  }
+})
+
 it('retires the previous renderer when a refresh loses its unload request', async () => {
   const retired = deferred<{ status: string }>()
   const revoke = vi.fn(async () => await retired.promise)
@@ -289,11 +368,13 @@ it('does not resume an owner session while a dispatched write has an unknown res
       payload: JSON.stringify({ operation: 'commit' }),
     }, initial.token)
     await entered.promise
-    const resuming = post(`/api/session/resume/${initial.resumeId}`, {}, undefined, cookie)
+    const resumePath = `/api/session/resume/${initial.resumeId}`
+    const resuming = post(resumePath, { attempt: secret('e') }, undefined, cookie)
     await vi.waitFor(() => expect(peer?.closed).toBe(true))
     finish.resolve()
     expect((await write).status).toBe(503)
     expect((await resuming).status).toBe(401)
+    expect((await post(resumePath, { attempt: secret('e') }, undefined, cookie)).status).toBe(401)
     expect(authority.mutationAvailability()).toBe('unavailable')
   } finally {
     finish.resolve()
