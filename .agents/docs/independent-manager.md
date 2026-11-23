@@ -122,7 +122,7 @@ semantics described below. An edit started against an older revision is rejected
 if another client changes the declarations first. Other independent Manager
 pages refresh these declarations while idle; an open edit retains its draft.
 
-While an experimental Host page is attached, installed-package plugin and
+While a standalone Manager page is attached, installed-package plugin and
 service configuration writers use the same profile fence as Manager admission.
 Pending configuration candidates prevent admission; a confirmed change outside
 that fence retires the affected page. The managed-service startup configuration
@@ -140,11 +140,10 @@ private management socket. Each browser opening obtains a 60-second bootstrap
 in the URL fragment; it is exchanged for a separate session token and removed
 from the address bar. If that exchange is interrupted, the same tab may retry
 its temporary attempt until the session first makes an authenticated request;
-the previous session must retire before a replacement is issued. The default
-page stores its session token in that tab's session storage. The experimental
-Host page keeps its session token in
-memory. On refresh, a tab-local handle and an HttpOnly cookie can
-authorize a new session after the owner confirms retirement of the old renderer.
+the previous session must retire before a replacement is issued. The Manager
+keeps its session token in memory. On refresh, a tab-local handle and an
+HttpOnly cookie can authorize a new session after the owner confirms retirement
+of the old renderer.
 If the browser loses the unload request, the authenticated replacement requests
 that retirement itself. If recovery is interrupted before the replacement makes
 its first authenticated request, the same tab can retry briefly; the owner must
@@ -181,22 +180,13 @@ terminal without a graphical launcher, an operator may run
 not be shared. Closing the tab clears its browser storage but does not itself stop
 the sidecar; use `manager stop` to stop it.
 
-The preview offers shared model-service editing, plugin/source lifecycle actions,
-and Marketplace search. Permission plans v2, v4 and v7 require the user to choose
-each required decision and explicitly confirm; v7 may defer optional decisions
-until use. The existing Host rechecks the plan and applies it. Other permission
-plan versions remain unavailable. Busy,
-stale or uncertain reviews are not automatically retried. Plugin-owned custom
-pages, specialized credential entry, and service configuration without an
-active renderer are not yet equivalent to the existing Manager; their absence is
-not reported as a successful edit. Service configuration is an advanced JSON
-editor limited to known fields in projected schemas; it does not support unknown
-fields, secret values, or array insertions/deletions. For active managed plugin
-services that expose explicit login, the user may initiate the existing Host
-background login flow. That process does not expose its standard streams, so
-login methods needing terminal input or a displayed terminal code are not
-supported here. A synthetic service verifies the bridge; a real provider login is
-not yet verified.
+The Manager reuses the existing model-service and Marketplace pages. The
+owner-advertised capabilities and eligibility limits above determine which
+plugin actions and settings are available. Busy, stale or uncertain permission
+reviews are not automatically retried. Eligible managed services can expose
+owner-coordinated login; methods requiring terminal input or a displayed code
+remain unavailable. A synthetic service verifies the bridge; a real provider
+login has not yet been verified.
 
 The independent Host renderer evaluates public Marketplace trust records only.
 Other trust authorities remain unavailable there until the owner can project
