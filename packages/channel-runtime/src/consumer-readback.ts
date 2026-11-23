@@ -91,6 +91,11 @@ export function deliverySnapshot(state: ChannelStoreState, id: string, caller: C
     state: record.status,
     attempts: record.attempts,
     target: structuredClone(record.target),
+    ...(record.content === undefined ? {} : {
+      requestedType: record.requestedType,
+      effectiveType: record.effectiveType,
+      downgraded: record.requestedType !== record.effectiveType,
+    }),
     ...(record.externalMessageId === undefined ? {} : { externalMessageId: record.externalMessageId }),
     ...(record.errorCode === undefined ? {} : { code: record.errorCode }),
   }

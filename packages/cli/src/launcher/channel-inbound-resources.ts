@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { Readable } from 'node:stream'
 import type { ChannelContentBlock, ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import type { ChannelOutboundMedia } from '@cordisx/channel-runtime'
+import { validateOutboundMedia } from '@cordisx/channel-runtime'
 
 const scope = (event: ChannelEventRef) =>
   JSON.stringify([
@@ -17,7 +18,10 @@ const scope = (event: ChannelEventRef) =>
     event.messageId,
     event.actor?.userId,
   ])
-const entries = new Map<string, { scope: string; file: string; mediaType: string; expires: number; size: number }>()
+const entries = new Map<
+  string,
+  { scope: string; file: string; mediaType: string; expires: number; size: number; name?: string }
+>()
 const tickets = new Map<string, { expires: number; images: string[]; text: string; handles: string[] }>()
 let root: Promise<string> | undefined
 const lifetime = 60 * 60 * 1000
@@ -47,34 +51,55 @@ export class ChannelInboundResources {
   ): Promise<ChannelOutboundMedia> {
     const entry = entries.get(handle)
     if (
-      !entry || !this.handles.has(handle) || entry.scope !== scope(source) || entry.expires <= Date.now()
+      this.disposed || !entry || !this.handles.has(handle) || entry.scope !== scope(source)
+      || entry.expires <= Date.now()
       || threadScope(source) !== threadScope(target)
     ) throw new Error('RESOURCE_SOURCE_DENIED')
     const format = entry.mediaType === 'image/png' ? 'png' : entry.mediaType === 'image/jpeg'
       ? 'jpeg'
       : entry.mediaType === 'audio/ogg'
       ? 'opus'
+      : entry.mediaType === 'application/pdf'
+      ? 'pdf'
+      : entry.mediaType === 'video/mp4'
+      ? 'mp4'
+      : entry.mediaType === 'application/octet-stream'
+      ? 'binary'
       : undefined
     if (!format) throw new Error('RESOURCE_OUTBOUND_FORMAT_UNSUPPORTED')
     const bytes = await boundedResourceBytes(entry.file, entry.size)
     const token = `media:${randomUUID()}`
-    this.outbound.set(token, { attachment: handle, target: threadScope(target) })
-    return {
-      type: format === 'opus' ? 'audio' : 'image',
+    const media = validateOutboundMedia({
+      type: format === 'opus'
+        ? 'audio'
+        : format === 'mp4'
+        ? 'video'
+        : format === 'pdf' || format === 'binary'
+        ? 'file'
+        : 'image',
       handle: token,
       format,
       size: entry.size,
       sha256: createHash('sha256').update(bytes).digest('hex'),
-    }
+      ...(format === 'pdf' || format === 'mp4' || format === 'binary'
+        ? { filename: entry.name ?? (format === 'binary' ? 'attachment.bin' : `attachment.${format}`) }
+        : {}),
+    })
+    this.outbound.set(token, { attachment: handle, target: threadScope(target) })
+    return media
   }
   async resolve(handle: string, target: ChannelThreadRef, maximumBytes: number): Promise<Uint8Array> {
     const grant = this.outbound.get(handle)
     const entry = grant && entries.get(grant.attachment)
     if (
       this.disposed || !grant || grant.target !== threadScope(target) || !entry
-      || entry.expires <= Date.now() || entry.size > maximumBytes
+      || entry.expires <= Date.now() || !Number.isSafeInteger(maximumBytes) || maximumBytes <= 0
+      || entry.size > maximumBytes
     ) throw new Error('RESOURCE_SOURCE_DENIED')
     return boundedResourceBytes(entry.file, maximumBytes)
+  }
+  ownsOutbound(handle: string): boolean {
+    return this.outbound.has(handle)
   }
   async ingest(
     event: ChannelEventRef,
@@ -102,7 +127,7 @@ export class ChannelInboundResources {
         handle,
         mediaType: existing.mediaType,
         size: existing.size,
-        ...(name ? { name: path.basename(name).replace(/[\x00-\x1f]/gu, '').slice(0, 255) || 'attachment' } : {}),
+        ...(existing.name ? { name: existing.name } : {}),
       }
     }
     const file = path.join(await this.directory, randomUUID())
@@ -142,14 +167,27 @@ export class ChannelInboundResources {
         ? 'application/pdf'
         : 'application/octet-stream'
       if (kind === 'image' && !mediaType.startsWith('image/')) throw new Error('RESOURCE_IMAGE_FORMAT_UNSUPPORTED')
-      entries.set(handle, { scope: scope(event), file, mediaType, expires: Date.now() + lifetime, size })
+      const filename = name
+        ? path.basename(name.replace(/\\/gu, '/')).replace(/[\x00-\x1f\x7f]/gu, '').trim().slice(0, 255)
+        : undefined
+      const safeName = filename && filename !== '.' && filename !== '..' && !filename.endsWith('.')
+        ? filename
+        : undefined
+      entries.set(handle, {
+        scope: scope(event),
+        file,
+        mediaType,
+        expires: Date.now() + lifetime,
+        size,
+        ...(safeName ? { name: safeName } : {}),
+      })
       this.handles.add(handle)
       return {
         type: 'attachment',
         handle,
         mediaType,
         size,
-        ...(name ? { name: path.basename(name).replace(/[\x00-\x1f]/gu, '').slice(0, 255) || 'attachment' } : {}),
+        ...(safeName ? { name: safeName } : {}),
       }
     } catch (error) {
       stream.destroy()

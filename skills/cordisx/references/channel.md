@@ -4,8 +4,13 @@
 
 Check the running CLI's `channel help reaction`. Images/post images use native
 local-image inputs where supported; audio/file/video are accessible attachment
-descriptions, not transcription, synthesis or video understanding. Public media
-send CLI remains unavailable: never invent path/URL arguments.
+descriptions, not transcription, synthesis or video understanding. Discover
+outgoing support through `channel help send` and `channel help media-prepare`
+on the exact running Host. Compatible candidates prepare bounded base64 chunks
+with begin, chunk and commit, then send the returned caller/target-scoped media
+handle. Never invent path/URL arguments or treat a handle as file-access authority.
+Older installed Hosts may lack these operations; source changes do not establish
+installation or live platform verification.
 
 Use the exact incoming CLI/profile/context. Candidate syntax:
 `channel reaction --profile PROFILE --context INCOMING_CONTEXT --input

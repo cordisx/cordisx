@@ -10,6 +10,10 @@ describe('Channel preparation fence', () => {
       status: 'rejected',
       code: 'PREPARATION_READ_ONLY',
     })
+    expect(await tools.call('media-prepare', {}, { 'cordisx/mcpRequestId': 'target' })).toEqual({
+      status: 'rejected',
+      code: 'PREPARATION_READ_ONLY',
+    })
     expect(await tools.callLocal('continuation-policy-set', {}, undefined)).toEqual({
       status: 'rejected',
       code: 'PREPARATION_READ_ONLY',

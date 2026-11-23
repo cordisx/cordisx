@@ -43,6 +43,55 @@ describe('launcher private secret resolution', () => {
 })
 
 describe('official Feishu direct-message adapter', () => {
+  it.each(['timeout', 'missing', 'rejected'])('distinguishes SDK %s from confirmed send', async outcome => {
+    const create = vi.fn(async () => {
+      if (outcome === 'timeout') throw new Error('ETIMEDOUT')
+      return outcome === 'rejected' ? { code: 1 } : { code: 0, data: {} }
+    })
+    const definition = createFeishuAdapterDefinition({
+      connection,
+      configurationRevision: 1,
+      source: 'test',
+      resolveSecret: async () => 'fixture',
+      createChannel: () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          on: () => () => {},
+          send: async () => ({ messageId: 'unused' }),
+          rawClient: { im: { v1: { message: { create } } } },
+        }) as never,
+    })
+    const active = await definition.start({
+      generation: 1,
+      ref: connection.ref,
+      receive: async () => ({ recordId: 'unused', duplicate: false, status: 'queued' }),
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    })
+    try {
+      await expect(
+        active.send({
+          deliveryId: 'delivery:test',
+          target: {
+            ...connection.ref,
+            conversationId: 'chat',
+            kind: 'group',
+            threadId: 'chat',
+            semantics: 'conversation',
+          },
+          kind: 'reply',
+          text: 'test',
+          createdAt: '2026-11-23T00:00:00Z',
+        }),
+      ).rejects.toMatchObject({
+        name: outcome === 'rejected' ? 'CHANNEL_FEISHU_OUTBOUND_UNAVAILABLE' : 'UncertainChannelSendError',
+      })
+      expect(create).toHaveBeenCalledTimes(1)
+    } finally {
+      await active.stop('disposed')
+    }
+  })
   it('consumes pairing control text before durable ingress while preserving ordinary messages', async () => {
     let listener: ((message: NormalizedMessage) => Promise<void>) | undefined
     const receive = vi.fn(async () => ({ recordId: 'inbound', duplicate: false, status: 'queued' as const }))

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { validateOutboundMedia } from './outbound-media.js'
+import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
 import type {
   ChannelAdapterDescriptor,
   ChannelInboundEnvelope,
@@ -138,6 +139,18 @@ export class JsonChannelStore {
       const parsed: unknown = JSON.parse(await readFile(store.#file, 'utf8'))
       if (!isState(parsed)) throw new Error('Channel store has an unsupported contract or malformed root')
       for (const record of Object.values(parsed.outbox)) {
+        if (record.content !== undefined) {
+          const content = validateOutboundContent(record.content)
+          const fallback = validateOutboundFallback(record.fallback)
+          if (
+            record.requestedType !== content.type || record.questionCard !== undefined
+            || (record.effectiveType !== content.type && !(record.effectiveType === 'text' && fallback.mode === 'text'))
+            || (record.effectiveType === 'text' && record.media !== undefined)
+            || (record.effectiveType !== 'text' && record.text !== '')
+            || ('handle' in content && record.effectiveType !== 'text'
+              && (!record.media || record.media.handle !== content.handle || record.media.type !== content.type))
+          ) throw new Error('Invalid stored typed delivery')
+        }
         if (record.media !== undefined) {
           validateOutboundMedia(record.media)
           if (record.text !== '' || record.questionCard !== undefined) throw new Error('Invalid stored media delivery')
