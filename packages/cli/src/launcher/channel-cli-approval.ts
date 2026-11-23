@@ -18,6 +18,8 @@ const READS = new Set([
   'receipt',
   'policy',
   'group-access',
+  'input-ack',
+  'input-status',
   'user-access',
   'group-block',
   'execution-defaults',

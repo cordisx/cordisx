@@ -52,6 +52,7 @@ it('the production consumer steers Host reminders into one turn, while only a co
     profile: 'default',
   }
   const requests: any[] = [], contexts: string[] = []
+  const initialAcknowledgments: unknown[] = []
   const native = new ChannelNativeSessions({
     cli,
     cwd: root,
@@ -60,6 +61,9 @@ it('the production consumer steers Host reminders into one turn, while only a co
         call: async (_app: string, _op: string, request: any) => {
           contexts.push(/--context '([a-f0-9]{48})'/u.exec(request.prompt)![1]!)
           native.observedDispatch(request.operationId, session, 'turn')
+          if (contexts.length === 1) {
+            initialAcknowledgments.push(await acknowledgment('input-ack', contexts[0]!))
+          }
           return { status: 'started', sessionId: session, turnId: 'turn' }
         },
       }) as never,
@@ -128,6 +132,18 @@ it('the production consumer steers Host reminders into one turn, while only a co
     await settle()
   }
   const notices = () => requests.filter(request => request.input[0].text.startsWith('[CordisX Host progress reminder'))
+  const acknowledgment = async (operation: string, context: string) => {
+    const result = await promisify(execFile)(cli.node, [
+      cli.entry,
+      'channel',
+      operation,
+      '--context',
+      context,
+      '--input',
+      '{}',
+    ], { env: { ...process.env, CORDISX_HOME: root, CODEX_THREAD_ID: session }, timeout: 10000 })
+    return JSON.parse(result.stdout)
+  }
   const command = async (input: unknown) => {
     const r = await promisify(execFile)(cli.node, [
       cli.entry,
@@ -149,7 +165,20 @@ it('the production consumer steers Host reminders into one turn, while only a co
   try {
     await consumer.policySet({ enabled: true, autoReply: false }, 0)
     await receive('om_first')
+    expect(initialAcknowledgments).toEqual([expect.objectContaining({ acknowledgment: 'agent-acknowledged' })])
     await receive('om_second')
+    expect(await acknowledgment('input-status', contexts.at(-1)!)).toMatchObject({
+      acknowledgment: 'awaiting-agent',
+      consumption: 'unconfirmed',
+    })
+    expect(await acknowledgment('input-ack', contexts[0]!)).toMatchObject({ acknowledgment: 'not-monitored' })
+    expect(await acknowledgment('input-ack', contexts.at(-1)!)).toMatchObject({
+      acknowledgment: 'agent-acknowledged',
+      consumption: 'acknowledged-by-caller',
+    })
+    expect(await acknowledgment('input-status', contexts.at(-1)!)).toMatchObject({
+      acknowledgment: 'agent-acknowledged',
+    })
     await vi.waitFor(() => expect(notices()).toHaveLength(1), { timeout: 3000 })
     expect(notices()[0]).toMatchObject({ threadId: session, expectedTurnId: 'turn' })
     expect(access.feedbackWait).not.toHaveBeenCalled()
@@ -176,6 +205,7 @@ it('the production consumer steers Host reminders into one turn, while only a co
     expect(result.deliveryState).toBe('sent')
     expect(send).toHaveBeenCalledOnce()
     const count = notices().length
+    expect(await acknowledgment('input-status', contexts.at(-1)!)).toMatchObject({ acknowledgment: 'not-monitored' })
     await new Promise(resolve => setTimeout(resolve, 1200))
     expect(notices()).toHaveLength(count)
     await expect(

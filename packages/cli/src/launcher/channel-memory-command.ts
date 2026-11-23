@@ -5,6 +5,7 @@ import { channelMemoryGuide } from './channel-memory-guide.js'
 import { ownMemoryTopic } from './channel-memory-intent.js'
 import type { ChannelMemoryAuthority } from './channel-memory-authority.js'
 import { memoryKey } from './channel-memory-policy.js'
+import { MemoryRecordValidationError, validateMemoryRecord } from './channel-memory-record-validation.js'
 
 export async function channelMemoryCommand(
   store: ChannelMemoryStore,
@@ -58,6 +59,12 @@ export async function channelMemoryCommand(
   }
   if (authorization) authority.administer = await authorization.scopes(authority.actor)
   const action = String(value.action)
+  if ((action === 'remember' || action === 'update') && value.record === undefined) {
+    throw new MemoryRecordValidationError([{
+      field: 'record',
+      expected: 'required object wrapper; remember {record:{...}} or update {id,revision,record:{...}}',
+    }])
+  }
   if (
     !allowed[action] || Object.keys(value).some(key => key !== 'action' && !allowed[action]!.includes(key))
   ) {
@@ -77,9 +84,7 @@ export async function channelMemoryCommand(
   } else if (action === 'search') {
     result = await store.search(authority, value.query as string, value.entity as string | undefined)
   } else if (action === 'update' || action === 'forget') {
-    if (action === 'update' && (!value.record || typeof value.record !== 'object' || Array.isArray(value.record))) {
-      throw new Error('MEMORY_INVALID_RECORD')
-    }
+    if (action === 'update') validateMemoryRecord(value.record)
     result = await store.change(
       authority,
       String(value.id),

@@ -10,6 +10,7 @@ import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations
 import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
+import { MemoryRecordValidationError } from './channel-memory-record-validation.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
 import type { ChannelMessageReadResult } from './channel-message-read.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
@@ -397,6 +398,10 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (operation === 'input-ack' || operation === 'input-status') {
+        if (!scopedCaller || !this.consumer || Object.keys(input).length) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        return this.consumer.feedback.inputStatus(scopedCaller.source, scopedCaller.threadId, operation === 'input-ack')
+      }
       if (['forward', 'merge-forward', 'forward-receipt'].includes(operation)) {
         if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
           throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
@@ -973,6 +978,7 @@ export class ChannelConversationTools {
         subscriptions.forEach(dispose => dispose())
       }
     } catch (error) {
+      if (operation === 'memory' && error instanceof MemoryRecordValidationError) return error.response()
       const code = error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
         ? error.message
         : 'CHANNEL_OPERATION_FAILED'

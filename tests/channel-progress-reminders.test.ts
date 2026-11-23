@@ -23,7 +23,7 @@ const event = (id = 'm1', conversationId = 'chat', accountId = 'fixture'): Chann
   messageId: id,
   actor: { adapterId: 'feishu', accountId, tenantId: 'fixture', userId: 'user' },
 })
-function fixture() {
+function fixture(ackTimeoutSeconds = 60) {
   vi.useFakeTimers()
   const state: any = {
     policy: { enabled: true, rules: [], wakePrefixes: [] },
@@ -44,12 +44,15 @@ function fixture() {
   }
   const access: any = { generation: 'g1', runtime }
   const remind = vi.fn(async () => 'accepted' as const), turn = vi.fn(async () => 'active')
+  const report = vi.fn()
   const reminders = new ChannelProgressReminders({
     store: { snapshot: () => structuredClone(state) },
     access: () => access,
-    settings: async () => parseChannelFeedbackSettings({ wait: { mode: 'agent', quietSeconds: 5, repeatSeconds: 10 } }),
+    settings: async () =>
+      parseChannelFeedbackSettings({ wait: { mode: 'agent', quietSeconds: 5, repeatSeconds: 10, ackTimeoutSeconds } }),
     turnState: turn,
     remind,
+    report,
     signal: new AbortController().signal,
   })
   disposals.push(() => reminders.dispose())
@@ -86,7 +89,7 @@ function fixture() {
       })
     }
   }
-  return { state, remind, turn, reminders, add, sent, listeners, access }
+  return { state, remind, turn, reminders, add, sent, listeners, access, report }
 }
 describe('active Channel progress reminders', () => {
   it('debounces six inputs to the last one, then repeats only while no confirmed message is sent', async () => {
@@ -105,6 +108,48 @@ describe('active Channel progress reminders', () => {
     f.sent(event('m6'))
     await vi.advanceTimersByTimeAsync(30000)
     expect(f.remind).toHaveBeenCalledTimes(2)
+  })
+  it('reports missing cooperative input acknowledgment without claiming consumption or interrupting work', async () => {
+    const f = fixture()
+    await f.add('m1')
+    expect(f.reminders.inputStatus(event(), 's', false)).toMatchObject({
+      acknowledgment: 'awaiting-agent',
+      consumption: 'unconfirmed',
+      overdue: false,
+    })
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(f.report).toHaveBeenCalledWith('CHANNEL_INPUT_ACK_OVERDUE')
+    expect(f.reminders.inputStatus(event(), 's', false)).toMatchObject({ overdue: true, consumption: 'unconfirmed' })
+    expect(f.reminders.inputStatus(event('old'), 's', true)).toMatchObject({ acknowledgment: 'not-monitored' })
+    expect(f.reminders.inputStatus(event(), 's', true)).toMatchObject({
+      acknowledgment: 'agent-acknowledged',
+      consumption: 'acknowledged-by-caller',
+      overdue: false,
+    })
+    await f.add('m2')
+    expect(f.reminders.inputStatus(event('m2'), 's', false)).toMatchObject({
+      acknowledgment: 'awaiting-agent',
+      consumption: 'unconfirmed',
+    })
+    f.sent(event('m2'))
+    expect(f.reminders.inputStatus(event('m2'), 's', false)).toMatchObject({ acknowledgment: 'not-monitored' })
+  })
+  it('allows disabling acknowledgment diagnostics and cancels obsolete/acknowledged timers', async () => {
+    const disabled = fixture(0)
+    await disabled.add('m1')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(disabled.report).not.toHaveBeenCalled()
+    const f = fixture(10)
+    await f.add('m1')
+    await vi.advanceTimersByTimeAsync(9000)
+    await f.add('m2')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(f.report).not.toHaveBeenCalled()
+    f.reminders.inputStatus(event('m2'), 's', true)
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(f.report).not.toHaveBeenCalled()
+    expect(() => parseChannelFeedbackSettings({ wait: { ackTimeoutSeconds: -1 } })).toThrow()
+    expect(() => parseChannelFeedbackSettings({ wait: { ackTimeoutSeconds: 1.5 } })).toThrow()
   })
   it('invalidates a pending reminder immediately on a new input, even before the new input is routed', async () => {
     const f = fixture()

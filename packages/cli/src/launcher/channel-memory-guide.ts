@@ -18,6 +18,28 @@ export function channelMemoryGuide(topic?: string): unknown {
   return {
     topic,
     guidance: topics[topic],
+    ...(topic === 'write'
+      ? {
+        recordFormat: {
+          kind: 'fact|preference|person|conversation|collaboration|impression',
+          confidence: 'JSON number 0..1',
+          required: ['kind', 'title', 'summary', 'tags', 'entityRefs', 'evidenceType', 'confidence'],
+          example: {
+            record: {
+              kind: 'fact',
+              title: 'Project progress',
+              summary: 'Verified deployment finished; validation remains.',
+              tags: ['project'],
+              entityRefs: [],
+              evidenceType: 'verified',
+              confidence: 1,
+            },
+          },
+        },
+        errorRecovery:
+          'task and decision are not kind values. Put verified tasks/decisions in fact summaries. Missing record wrapper, invalid kind or string confidence returns field issues with retrySafe:true before writing; correct and retry in the same authenticated turn. Do not invent unknown confidence/evidence. Revision conflicts require get then reconsider; unknown RPC/storage results require search/get, not blind remember retry. Retrieval success is evidence read, not proof it was used in the answer; cite relevant dated facts and explain missing information.',
+      }
+      : {}),
     outboundStyle:
       'Configured effective persona/conversation style applies to all user-visible outbound text: automatic final replies, manual Channel send/send-many, ask question/option labels and progress notifications. The native business prompt prepares the configured style capsule before drafting; do not rewrite every message with a second model. Internal technical work, tool JSON, raw memory/index and option semantic values stay unchanged. Preserve facts, uncertainty and actual delivery status; do not invent promises. No private reasoning is requested or exposed. Illustrative affectionate styles are not defaults or permission to mutate persona; ordinary good-night should stay normal, not dramatic guarding promises. Model-generated outbound text receives configured preferences; a separate style rewrite pipeline and styled Host-owned fixed progress copy are not implemented.',
     experienceOrganization:
