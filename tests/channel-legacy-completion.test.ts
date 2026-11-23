@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { JsonLineRpcError } from '../packages/cli/src/providers/json-line-rpc.js'
 import {
   legacyChannelCompletion,
   readChannelCompletion,
@@ -6,8 +7,8 @@ import {
 
 const agent = (text: string, phase: string | null = null) => ({ type: 'agentMessage', phase, text })
 const readTurn = (items: unknown[], status = 'completed') =>
-  vi.fn(async () => ({
-    thread: { id: 'chat', turns: [{ id: 'turn', status, items }] },
+  vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => ({
+    data: params.threadId === 'chat' ? [{ id: 'turn', status, ...(params.itemsView === 'full' ? { items } : {}) }] : [],
   }))
 
 describe('Channel completion for unphased native messages', () => {
@@ -17,6 +18,13 @@ describe('Channel completion for unphased native messages', () => {
       state: 'completed',
       text: 'reply',
     })
+    expect(request).toHaveBeenCalledWith('thread/turns/list', {
+      threadId: 'chat',
+      limit: 1,
+      sortDirection: 'desc',
+      itemsView: 'full',
+    })
+    expect(request.mock.calls.some(([method]) => method === 'thread/read')).toBe(false)
   })
 
   it.each([
@@ -84,5 +92,69 @@ describe('Channel completion for unphased native messages', () => {
       state: 'failed',
       code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE',
     })
+  })
+  it('locates an older target using metadata and never loads unrelated turns', async () => {
+    const request = vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => {
+      if (params.cursor === undefined) return { data: [{ id: 'newer', status: 'completed' }], nextCursor: 'older' }
+      expect(params.cursor).toBe('older')
+      return {
+        data: [{
+          id: 'turn',
+          status: 'completed',
+          ...(params.itemsView === 'full' ? { items: [agent('correct', 'final_answer')] } : {}),
+        }],
+      }
+    })
+    expect(await legacyChannelCompletion(request, 'chat', 'turn')).toEqual({ state: 'completed', text: 'correct' })
+    expect(request.mock.calls.filter(([, params]) => params.itemsView === 'full')).toHaveLength(1)
+    expect(request.mock.calls).toHaveLength(3)
+  })
+  it.each(['wrong-id', 'in-progress', 'duplicate', 'missing-items'])(
+    'rejects changed or malformed full target: %s',
+    async shape => {
+      const request = vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => {
+        if (params.itemsView === 'notLoaded') return { data: [{ id: 'turn', status: 'completed' }] }
+        const turn = {
+          id: shape === 'wrong-id' ? 'other' : 'turn',
+          status: shape === 'in-progress' ? 'inProgress' : 'completed',
+          ...(shape === 'missing-items' ? {} : { items: [agent('unsafe', 'final_answer')] }),
+        }
+        return { data: shape === 'duplicate' ? [turn, turn] : [turn] }
+      })
+      expect(await legacyChannelCompletion(request, 'chat', 'turn')).toMatchObject({
+        state: 'failed',
+        code: 'NATIVE_ITEMS_UNAVAILABLE',
+      })
+    },
+  )
+  it('bounds metadata scanning and detects cursor cycles', async () => {
+    let count = 0
+    const request = vi.fn(async () => ({ data: [{ id: 'other', status: 'completed' }], nextCursor: String(++count) }))
+    expect(await legacyChannelCompletion(request, 'chat', 'turn')).toMatchObject({
+      code: 'NATIVE_COMPLETION_PAGE_LIMIT',
+    })
+    expect(request).toHaveBeenCalledTimes(64)
+    request.mockImplementation(async () => ({ data: [{ id: 'other', status: 'completed' }], nextCursor: 'cycle' }))
+    expect(await legacyChannelCompletion(request, 'chat', 'turn')).toMatchObject({ code: 'NATIVE_ITEMS_UNAVAILABLE' })
+  })
+  it('reports an oversized single target and never falls back after a non-method error or later page', async () => {
+    const request = vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => {
+      if (params.itemsView === 'notLoaded') return { data: [{ id: 'turn', status: 'completed' }] }
+      throw new JsonLineRpcError('RPC line exceeds maximum size')
+    })
+    expect(await legacyChannelCompletion(request, 'chat', 'turn')).toMatchObject({
+      code: 'NATIVE_COMPLETION_PAGE_TOO_LARGE',
+    })
+    request.mockImplementation(async () => {
+      throw Object.assign(new Error('denied'), { rpcCode: -32000 })
+    })
+    await expect(readChannelCompletion(request, 'chat', 'turn')).rejects.toThrow('denied')
+    expect(request.mock.calls.at(-1)?.[0]).toBe('thread/items/list')
+    request.mockImplementationOnce(async () => ({ data: [], nextCursor: 'next' }))
+    request.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('unsupported later'), { rpcCode: -32601 })
+    })
+    await expect(readChannelCompletion(request, 'chat', 'turn')).rejects.toThrow('unsupported later')
+    expect(request.mock.calls.at(-1)?.[0]).toBe('thread/items/list')
   })
 })

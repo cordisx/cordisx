@@ -449,29 +449,24 @@ describe('Channel native task delivery', () => {
     )
   })
   it('falls back on old app-servers only for a missing item method and the exact completed turn', async () => {
-    const nativeRequest = vi.fn(async (method: string) => {
-      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: 'completed' }] }
-      if (method === 'thread/items/list') throw Object.assign(new Error('missing'), { rpcCode: -32601 })
-      if (method === 'thread/read') {
+    const nativeRequest = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'thread/items/list') {
+        throw Object.assign(new Error('thread/items/list is not supported yet'), { rpcCode: -32601 })
+      }
+      if (method === 'thread/turns/list') {
         return {
-          thread: {
-            id: 'chat',
-            turns: [
-              {
-                id: 'other',
-                status: 'completed',
-                items: [{ type: 'agentMessage', phase: 'final_answer', text: 'wrong' }],
-              },
-              {
-                id: 'turn',
-                status: 'completed',
+          data: [{
+            id: 'turn',
+            status: 'completed',
+            ...(params.itemsView === 'full'
+              ? {
                 items: [
                   { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
                   { type: 'agentMessage', phase: 'final_answer', text: 'correct' },
                 ],
-              },
-            ],
-          },
+              }
+              : {}),
+          }],
         }
       }
       throw new Error('unexpected')
@@ -482,7 +477,13 @@ describe('Channel native task delivery', () => {
       cwd: '/tmp',
     })
     await expect(sessions.completion('chat', 'turn', true)).resolves.toEqual({ state: 'completed', text: 'correct' })
-    expect(nativeRequest).toHaveBeenCalledWith('thread/read', { threadId: 'chat', includeTurns: true })
+    expect(nativeRequest).toHaveBeenCalledWith('thread/turns/list', {
+      threadId: 'chat',
+      limit: 1,
+      sortDirection: 'desc',
+      itemsView: 'full',
+    })
+    expect(nativeRequest.mock.calls.some(([method]) => method === 'thread/read')).toBe(false)
     nativeRequest.mockImplementationOnce(async () => ({ data: [{ id: 'turn', status: 'completed' }] }))
     nativeRequest.mockImplementationOnce(async () => {
       throw Object.assign(new Error('denied'), { rpcCode: -32000 })
