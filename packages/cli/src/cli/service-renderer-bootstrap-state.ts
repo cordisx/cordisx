@@ -8,6 +8,7 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import type { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
+import type { ServiceRendererConfiguredPlugin } from './service-renderer-configured-plugin.js'
 import type { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import type { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 
@@ -54,6 +55,7 @@ export type ServiceRendererBootstrapEntry = {
   retirement?: Promise<boolean>
   cleanupFailed?: boolean
   configuredChannel?: ServiceRendererConfiguredChannel
+  configuredPlugins?: ServiceRendererConfiguredPlugin[]
   channelTransition?: { readonly isCurrent: () => boolean }
   lifecycleTransition?: { readonly isCurrent: () => boolean }
   preparing?: Promise<unknown>

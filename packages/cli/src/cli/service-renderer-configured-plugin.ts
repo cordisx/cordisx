@@ -1,0 +1,165 @@
+import { randomBytes } from 'node:crypto'
+import path from 'node:path'
+import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import type { CordisXConfigPlugin } from '../launcher/config.js'
+import type {
+  PluginGenerationArtifactServer,
+  PluginGenerationGraphLease,
+} from '../launcher/plugin-generation-artifact-server.js'
+import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
+import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
+import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
+
+/** An owner-selected, service-free configured archive with no private configuration. */
+export class ServiceRendererConfiguredPlugin {
+  private identity?: ServiceRendererIdentityProjection
+  private closed = false
+
+  private constructor(
+    private readonly input: {
+      readonly homeDir: string
+      readonly plugin: CordisXConfigPlugin
+      readonly current: () => boolean
+    },
+    readonly lease: PluginGenerationGraphLease,
+  ) {}
+
+  static async prepare(input: {
+    readonly homeDir: string
+    readonly plugin: CordisXConfigPlugin
+    readonly server: PluginGenerationArtifactServer
+    readonly current: () => boolean
+  }): Promise<ServiceRendererConfiguredPlugin> {
+    const value = input.plugin.config
+    if (
+      !input.current() || value === null || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== 0
+    ) throw new Error('renderer-configured-plugin-unavailable')
+    const staged = await loadServiceConfiguredArchive(input.homeDir, input.plugin)
+    const manifest = staged.manifest.runtimeManifest
+    const startup = 'startup' in manifest ? manifest.startup : undefined
+    const artifact = staged.browserArtifact
+    if (
+      !input.current() || !artifact || !input.plugin.manifest || !input.plugin.distributionArtifact
+      || !('services' in manifest) || manifest.services.length !== 0 || manifest.capabilities.length !== 0
+      || staged.serviceModules.length !== 0 || staged.managedServiceResources.length !== 0
+      || staged.entityTemplates.length !== 0 || (staged.documents?.length ?? 0) !== 0
+      || startup !== undefined && (startup.pages.length !== 0 || startup.capabilities.length !== 0)
+    ) throw new Error('renderer-configured-plugin-unavailable')
+    const lease = await input.server.lease(
+      {
+        packageIdentity: { pluginId: input.plugin.id, version: staged.manifest.version, integrity: staged.digest },
+        artifactDirectory: stagedPluginBrowserArtifactDirectory(input.homeDir, staged.digest),
+        runtimeEntry: artifact.manifest.entry,
+      },
+      'configured_' + randomBytes(32).toString('hex'),
+      artifact.manifest,
+    )
+    if (!input.current()) {
+      lease.retire()
+      throw new Error('renderer-configured-plugin-unavailable')
+    }
+    return new ServiceRendererConfiguredPlugin(input, lease)
+  }
+
+  isCurrent(): boolean {
+    return !this.closed && this.input.current()
+  }
+
+  async project(
+    context: ManagerRendererChannelContext,
+    graph: ManagerRendererGraph,
+    origin: string,
+    policies: readonly CordisXPersistedPermissionPolicyRecord[],
+  ) {
+    if (
+      !this.isCurrent() || this.identity || graph.pluginId !== this.input.plugin.id
+      || graph.moduleGeneration !== this.lease.moduleGeneration
+    ) throw new Error('renderer-configured-plugin-unavailable')
+    const identity = new ServiceRendererIdentityProjection({
+      homeDir: this.input.homeDir,
+      context,
+      isCurrent: () => this.isCurrent(),
+    })
+    this.identity = identity
+    try {
+      const source = await identity.issue(context, this.input.plugin)
+      if (!this.isCurrent() || !this.input.plugin.manifest || !this.input.plugin.distributionArtifact) {
+        throw new Error('renderer-configured-plugin-unavailable')
+      }
+      return {
+        plugin: {
+          id: this.input.plugin.id,
+          entry: this.input.plugin.entry,
+          source,
+          enabled: true,
+          config: {},
+          revision: this.input.plugin.revision ?? 0,
+          manifest: this.input.plugin.manifest,
+          distributionArtifact: { ...this.input.plugin.distributionArtifact },
+          readme: '',
+          readmes: {},
+          documents: [],
+          runtimeGraph: createStandaloneRuntimeGraph(graph, origin),
+        } satisfies CordisXConfigPlugin,
+        policies: identity.projectManagerPolicies(context, source, this.input.plugin.id, policies),
+      }
+    } catch (error) {
+      this.close()
+      throw error
+    }
+  }
+
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    this.identity?.close()
+  }
+}
+
+/** Disabled configured entries expose only their ID and actual disabled state. */
+export function disabledConfiguredPlugin(plugin: CordisXConfigPlugin): CordisXConfigPlugin {
+  return {
+    id: plugin.id,
+    entry: path.join('/', '__cordisx_disabled__', plugin.id),
+    source: `https://renderer.cordisx.invalid/unavailable/${randomBytes(32).toString('hex')}`,
+    enabled: false,
+    config: {},
+    readme: '',
+    readmes: {},
+    documents: [],
+  }
+}
+
+export async function prepareConfiguredPlugins(input: {
+  readonly homeDir: string
+  readonly plugins: readonly CordisXConfigPlugin[]
+  readonly server: PluginGenerationArtifactServer
+  readonly configured: ServiceRendererConfiguredPlugin[]
+  readonly leases: PluginGenerationGraphLease[]
+  readonly current: () => boolean
+}): Promise<void> {
+  for (const plugin of input.plugins) {
+    const configured = await ServiceRendererConfiguredPlugin.prepare({ ...input, plugin })
+    input.configured.push(configured)
+    input.leases.push(configured.lease)
+    if (!input.current()) throw new Error('renderer-bootstrap-stale')
+  }
+}
+
+export async function projectConfiguredPlugins(input: {
+  readonly plugins: readonly ServiceRendererConfiguredPlugin[]
+  readonly graphs: ReadonlyMap<string, ManagerRendererGraph>
+  readonly context: ManagerRendererChannelContext
+  readonly origin: string
+  readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
+}) {
+  return await Promise.all(input.plugins.map(async plugin => {
+    const graph = input.graphs.get(plugin.lease.pluginId)
+    if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
+    return await plugin.project(input.context, graph, input.origin, input.policies)
+  }))
+}

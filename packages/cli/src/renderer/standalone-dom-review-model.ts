@@ -25,7 +25,6 @@ export function createStandaloneDomReviewModel(
     ) return undefined
     const moduleGeneration = runtime.moduleGenerationOf()!(controller)
     const configured = controller.item.standaloneConfiguredGraph === true && controller.item.package === undefined
-      && identity.id === 'channel'
     const packageItem = controller.item.package
     let artifact = configured ? controller.item.distributionArtifact : undefined
     if (!configured && controller.item.standaloneInstalledGraph === true && packageItem !== undefined) {
@@ -47,7 +46,7 @@ export function createStandaloneDomReviewModel(
       controller,
       artifact,
       moduleGeneration,
-      persistentEligible: configured && metadata.standaloneConfiguredPolicyReview === true
+      persistentEligible: configured && identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
         || controller.item.standaloneInstalledGraph === true
           && metadata.standaloneInstalledPolicyReview === true,
       packageDigest: packageItem?.digest,

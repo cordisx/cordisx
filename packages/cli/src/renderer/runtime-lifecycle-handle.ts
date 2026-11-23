@@ -1,5 +1,6 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { createStandaloneDomReviewModel } from './standalone-dom-review-model.js'
+import { configuredStartupGraphGenerations } from './runtime-startup-plugins.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -785,12 +786,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   configuredPluginGraphGenerations: () =>
     runtimeScope.metadata()!.hostKind === 'standalone'
-      ? runtimeScope.controllers()!.flatMap(controller => (
-        controller.status === 'active' && controller.item.standaloneConfiguredGraph === true
-          && controller.item.package === undefined && typeof controller.item.artifactGeneration === 'string'
-          ? [{ pluginId: controller.item.id, moduleGeneration: controller.item.artifactGeneration }]
-          : []
-      ))
+      ? configuredStartupGraphGenerations(runtimeScope.controllers()!)
       : [],
   pluginRegistryEpoch: () => runtimeScope.generationVisibility()!.registryEpoch(),
   releaseCertifiedPermissionChannel: () => {

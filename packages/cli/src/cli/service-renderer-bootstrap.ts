@@ -1,5 +1,3 @@
-import { randomBytes } from 'node:crypto'
-import path from 'node:path'
 import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js'
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
 import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
@@ -20,7 +18,6 @@ import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.j
 import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
-import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
@@ -31,11 +28,21 @@ import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
+import {
+  disabledConfiguredPlugin,
+  prepareConfiguredPlugins,
+  projectConfiguredPlugins,
+} from './service-renderer-configured-plugin.js'
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import { allowsManagementWrite, projectManagementRequest } from './service-renderer-management-projection.js'
 import { serviceRendererManagementEntry } from './service-renderer-management-entry.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
-import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
+import {
+  loadServiceRendererInitialPackage,
+  retireFinalizedServiceRendererGraphs,
+  serviceRendererPrivateGraph,
+  validateServiceRendererGraphs,
+} from './service-renderer-projection.js'
 import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
 import { ServiceRendererPermissionAccess } from './service-renderer-permission-access.js'
@@ -179,19 +186,9 @@ export class ServiceRendererBootstrap {
       profileInputs: async snapshot => await this.profileInputs(snapshot),
       current: (rendererId, entry) => this.current(rendererId, entry),
     })
-    this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active => {
-      for (const entry of this.entries.values()) {
-        for (let index = entry.leases.length - 1; index >= 0; index--) {
-          const lease = entry.leases[index]!
-          if (lease === entry.configuredChannel?.lease) continue
-          const plugin = active.plugins.find(item => item.id === lease.pluginId)
-          if (plugin?.enabled !== true || plugin.moduleGeneration !== lease.moduleGeneration) {
-            lease.retire()
-            entry.leases.splice(index, 1)
-          }
-        }
-      }
-    })
+    this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active =>
+      retireFinalizedServiceRendererGraphs(this.entries.values(), active)
+    )
   }
 
   /** Bind only before an owner publishes Manager admission; never from a browser. */
@@ -249,6 +246,7 @@ export class ServiceRendererBootstrap {
         if (
           !this.current(rendererId, entry) || !entry.config || !entry.policies || !entry.packageInputs
           || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+          || entry.configuredPlugins?.some(plugin => !plugin.isCurrent())
         ) return false
         const snapshot = this.input.lifecycle.snapshot()
         const [configRead, policiesRead, inputsRead] = await Promise.allSettled([
@@ -283,6 +281,7 @@ export class ServiceRendererBootstrap {
           !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
           || !entry.packageInputs
           || entry.configuredChannel && !entry.configuredChannel.isCurrent()
+          || entry.configuredPlugins?.some(plugin => !plugin.isCurrent())
         ) {
           return false
         }
@@ -370,6 +369,13 @@ export class ServiceRendererBootstrap {
       entry.configuredChannel?.close()
     } catch {
       entry.cleanupFailed = true
+    }
+    for (const plugin of entry.configuredPlugins ?? []) {
+      try {
+        plugin.close()
+      } catch {
+        entry.cleanupFailed = true
+      }
     }
     try {
       entry.managementPlans?.close()
@@ -508,17 +514,18 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
-        // Only the owner-selected Channel may run in this projection. Other
-        // configured plugins can be represented when they are disabled.
+        // Channel requires its live service owner. Other enabled archives are
+        // independently checked before their graph can join this projection.
         const activeConfigured = config.plugins.filter(plugin => plugin.enabled)
+        const channelPlugin = activeConfigured.find(plugin => plugin.id === 'channel')
+        const configuredPlugins = activeConfigured.filter(plugin => plugin.id !== 'channel')
         if (
           plugins.some(plugin => !emptyPluginConfig(plugin.config))
             && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
           || config.plugins.length > MAX_INITIAL_GRAPHS
           || config.plugins.length > 0 && !this.input.protectProfileInputs
           || config.plugins.some(plugin => plugins.some(installed => installed.id === plugin.id))
-          || activeConfigured.length > 1 || activeConfigured.some(plugin => plugin.id !== 'channel')
-          || (activeConfigured.length === 1) !== (this.configuredChannel !== undefined)
+          || (channelPlugin !== undefined) !== (this.configuredChannel !== undefined)
         ) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
@@ -557,7 +564,7 @@ export class ServiceRendererBootstrap {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
         const active = snapshot.active.plugins.filter(plugin => plugin.enabled)
-        if (active.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
+        if (active.length + activeConfigured.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
         if (active.length > 0) {
           const server = await this.input.lifecycle.artifactServer()
           for (const item of active) {
@@ -576,13 +583,24 @@ export class ServiceRendererBootstrap {
             if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
           }
         }
-        if (activeConfigured.length === 1) {
+        if (configuredPlugins.length > 0) {
+          entry.configuredPlugins = []
+          await prepareConfiguredPlugins({
+            homeDir: this.input.homeDir,
+            plugins: configuredPlugins,
+            server: await this.input.lifecycle.artifactServer(),
+            configured: entry.configuredPlugins,
+            leases: entry.leases,
+            current: () => this.current(rendererId, entry),
+          })
+        }
+        if (channelPlugin !== undefined) {
           const channel = this.configuredChannel!
           const configured = await ServiceRendererConfiguredChannel.prepare({
             homeDir: this.input.homeDir,
             configPath: this.input.configPath,
             profileId: this.input.profileId,
-            plugin: activeConfigured[0]!,
+            plugin: channelPlugin,
             selectedPlugin: channel.plugin,
             service: channel.service,
             bridge: channel.bridge,
@@ -668,39 +686,27 @@ export class ServiceRendererBootstrap {
         ) {
           throw new Error('renderer-bootstrap-stale')
         }
-        if (!Array.isArray(rawGraphs) || rawGraphs.length !== entry.leases.length) {
-          throw new Error('renderer-bootstrap-graphs-invalid')
-        }
-        const graphs = rawGraphs.map(value => parseManagerRendererGraph(value, managerOrigin))
-        const byLease = new Map(graphs.map(graph => [graph.leaseId, graph]))
-        const byPlugin = new Map<string, ManagerRendererGraph>(graphs.map(graph => [graph.pluginId, graph]))
-        const bases = new Set(graphs.map(graph => graph.baseUrl))
-        if (byLease.size !== graphs.length || byPlugin.size !== graphs.length || bases.size !== graphs.length) {
-          throw new Error('renderer-bootstrap-graphs-invalid')
-        }
-        for (const lease of entry.leases) {
-          // The authenticated sidecar assigns a distinct session-local alias;
-          // the private owner lease identifier must never reach the browser.
-          const graph = byPlugin.get(lease.pluginId)
-          if (
-            !graph || graph.pluginId !== lease.pluginId || graph.moduleGeneration !== lease.moduleGeneration
-            || graph.entryUrl.slice(graph.baseUrl.length) !== lease.entryUrl.slice(lease.baseUrl.length)
-            || !attachmentEqual(
-              graph.initialStyleUrls.map(url => url.slice(graph.baseUrl.length)),
-              lease.initialStyleUrls.map(url => url.slice(lease.baseUrl.length)),
-            )
-          ) throw new Error('renderer-bootstrap-graphs-invalid')
-        }
+        const { graphs, byPlugin } = validateServiceRendererGraphs(rawGraphs, managerOrigin, entry.leases)
         const configuredGraph = entry.configuredChannel && byPlugin.get('channel')
         if (entry.configuredChannel && !configuredGraph) throw new Error('renderer-bootstrap-graphs-invalid')
         const configured = entry.configuredChannel
           ? await entry.configuredChannel.project(context, configuredGraph!, managerOrigin, entry.policies)
           : undefined
+        const configuredPlugins = await projectConfiguredPlugins({
+          plugins: entry.configuredPlugins ?? [],
+          graphs: byPlugin,
+          context,
+          origin: managerOrigin,
+          policies: entry.policies,
+        })
         const snapshot = entry.snapshot
         let projectedSnapshot: Snapshot | undefined
         const disabledConfigured = entry.config.plugins.filter(plugin => !plugin.enabled)
         const disabledIds = new Set(disabledConfigured.map(plugin => plugin.id))
-        let projectedPolicies = entry.policies.filter(policy => !disabledIds.has(policy.key.identity.pluginId))
+        const configuredIds = new Set(configuredPlugins.map(item => item.plugin.id))
+        let projectedPolicies = entry.policies.filter(policy =>
+          !disabledIds.has(policy.key.identity.pluginId) && !configuredIds.has(policy.key.identity.pluginId)
+        )
         let projectedPlugins = entry.plugins.map(plugin => {
           if (emptyPluginConfig(plugin.config)) return plugin
           if (!entry.projectedConfigs?.has(plugin.id)) throw new Error('renderer-bootstrap-plugin-unsupported')
@@ -753,16 +759,8 @@ export class ServiceRendererBootstrap {
               if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
               return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }
             }),
-            ...disabledConfigured.map(plugin => ({
-              id: plugin.id,
-              entry: path.join('/', '__cordisx_disabled__', plugin.id),
-              source: `https://renderer.cordisx.invalid/unavailable/${randomBytes(32).toString('hex')}`,
-              enabled: false,
-              config: {},
-              readme: '',
-              readmes: {},
-              documents: [],
-            })),
+            ...disabledConfigured.map(disabledConfiguredPlugin),
+            ...configuredPlugins.map(item => item.plugin),
             ...(configured === undefined ? [] : [configured.plugin]),
           ],
         }
@@ -796,9 +794,12 @@ export class ServiceRendererBootstrap {
           permission: {
             profileId: this.input.profileId,
             ...(this.input.permissionProof === undefined ? {} : { bridgeToken: STANDALONE_PERMISSION_BINDING_MARKER }),
-            policies: configured === undefined ? projectedPolicies : [
-              ...projectedPolicies.filter(policy => policy.key.identity.pluginId !== 'channel'),
-              ...configured.policies,
+            policies: [
+              ...projectedPolicies.filter(policy =>
+                configured === undefined || policy.key.identity.pluginId !== 'channel'
+              ),
+              ...configuredPlugins.flatMap(item => item.policies),
+              ...(configured?.policies ?? []),
             ],
           },
           pluginActivation: projectedSnapshot?.active ?? snapshot.active,
@@ -823,6 +824,13 @@ export class ServiceRendererBootstrap {
         })
         if (entry.managedContext) this.managedServiceUI?.assertBundleSafe(context, bundle)
         if (entry.identity && entry.plugins.some(plugin => plugin.source && bundle.includes(plugin.source))) {
+          throw new Error('renderer-bootstrap-unavailable')
+        }
+        if (
+          entry.config.plugins.some(plugin =>
+            configuredIds.has(plugin.id) && plugin.source && bundle.includes(plugin.source)
+          )
+        ) {
           throw new Error('renderer-bootstrap-unavailable')
         }
         if (entry.leases.some(lease => bundle.includes(lease.baseUrl)) || !await this.unchanged(rendererId, entry)) {

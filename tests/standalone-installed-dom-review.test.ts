@@ -86,6 +86,29 @@ function fixture(persistentAvailable = false) {
   return { broker, controller, decisions, model, persistent, scope, verify }
 }
 
+function configuredFixture() {
+  const f = fixture(true)
+  const item = f.controller.item as unknown as {
+    standaloneInstalledGraph?: boolean
+    standaloneConfiguredGraph?: boolean
+    package?: typeof packageItem
+    distributionArtifact?: { version: string; integrity: string }
+  }
+  item.standaloneInstalledGraph = false
+  item.standaloneConfiguredGraph = true
+  delete item.package
+  item.distributionArtifact = { version: packageItem.version, integrity: packageItem.digest }
+  f.scope.moduleGenerationOf = () => () => packageItem.moduleGeneration
+  f.scope.metadata = () => ({
+    hostKind: 'standalone',
+    profileId: 'default',
+    standaloneReviewSession: f.verify,
+    standaloneConfiguredPolicyReview: true,
+    standaloneInstalledPolicyReview: true,
+  })
+  return { ...f, item, model: createStandaloneDomReviewModel(f.scope as never)! }
+}
+
 it('reviews an installed graph only for this tab and never offers a persistent decision', async () => {
   const first = fixture()
   const other = fixture()
@@ -115,6 +138,42 @@ it('offers persistent choices only when the service owner provides their handoff
     expect(f.model.describe(identity, point)?.persistentAvailable).toBe(true)
     expect(await f.model.request(identity, point)).toBe(true)
     expect(f.decisions[0]).toEqual(expect.arrayContaining(['allow-once', 'allow-persistent', 'deny-persistent']))
+  } finally {
+    f.broker.dispose()
+  }
+})
+
+it('reviews a configured plugin only in the current session even when persistent review is enabled elsewhere', async () => {
+  const first = configuredFixture()
+  const other = configuredFixture()
+  try {
+    expect(first.model.describe(identity, point)).toMatchObject({
+      version: packageItem.version,
+      integrity: packageItem.digest,
+      persistentAvailable: false,
+      resetAvailable: false,
+    })
+    expect(await first.model.request(identity, point)).toBe(true)
+    expect(first.decisions).toEqual([['deny-once', 'allow-once']])
+    expect(first.persistent).not.toHaveBeenCalled()
+    expect(first.broker.hasDomLease(identity, point)).toBe(true)
+    expect(other.broker.hasDomLease(identity, point)).toBe(false)
+  } finally {
+    first.broker.dispose()
+    other.broker.dispose()
+  }
+})
+
+it('rejects a configured graph that changes during the owner review', async () => {
+  const f = configuredFixture()
+  try {
+    f.verify.mockImplementationOnce(async () => {
+      f.item.distributionArtifact = { version: packageItem.version, integrity: `sha256:${'d'.repeat(64)}` }
+      return true
+    })
+    expect(await f.model.request(identity, point)).toBe(false)
+    expect(f.broker.hasDomLease(identity, point)).toBe(false)
+    expect(f.decisions).toHaveLength(0)
   } finally {
     f.broker.dispose()
   }

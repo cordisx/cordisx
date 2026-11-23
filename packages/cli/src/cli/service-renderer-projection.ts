@@ -8,7 +8,9 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
-import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap-state.js'
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 
 // The standalone Manager has no Platform provider bridge. Optional Platform
@@ -43,6 +45,58 @@ export function serviceRendererPrivateGraph(lease: PluginGenerationGraphLease): 
     baseUrl: lease.baseUrl,
     entryUrl: lease.entryUrl,
     initialStyleUrls: [...lease.initialStyleUrls],
+  }
+}
+
+/** Verify the authenticated sidecar's session-local aliases against the owner leases. */
+export function validateServiceRendererGraphs(
+  rawGraphs: unknown,
+  managerOrigin: string,
+  leases: readonly PluginGenerationGraphLease[],
+): { graphs: ManagerRendererGraph[]; byPlugin: Map<string, ManagerRendererGraph> } {
+  if (!Array.isArray(rawGraphs) || rawGraphs.length !== leases.length) {
+    throw new Error('renderer-bootstrap-graphs-invalid')
+  }
+  const graphs = rawGraphs.map(value => parseManagerRendererGraph(value, managerOrigin))
+  const byLease = new Map(graphs.map(graph => [graph.leaseId, graph]))
+  const byPlugin = new Map<string, ManagerRendererGraph>(graphs.map(graph => [graph.pluginId, graph]))
+  const bases = new Set(graphs.map(graph => graph.baseUrl))
+  if (byLease.size !== graphs.length || byPlugin.size !== graphs.length || bases.size !== graphs.length) {
+    throw new Error('renderer-bootstrap-graphs-invalid')
+  }
+  for (const lease of leases) {
+    // The authenticated sidecar assigns a distinct session-local alias;
+    // the private owner lease identifier must never reach the browser.
+    const graph = byPlugin.get(lease.pluginId)
+    if (
+      !graph || graph.pluginId !== lease.pluginId || graph.moduleGeneration !== lease.moduleGeneration
+      || graph.entryUrl.slice(graph.baseUrl.length) !== lease.entryUrl.slice(lease.baseUrl.length)
+      || !attachmentEqual(
+        graph.initialStyleUrls.map(url => url.slice(graph.baseUrl.length)),
+        lease.initialStyleUrls.map(url => url.slice(lease.baseUrl.length)),
+      )
+    ) throw new Error('renderer-bootstrap-graphs-invalid')
+  }
+  return { graphs, byPlugin }
+}
+
+/** Retire only installed-package leases affected by a finalized activation. */
+export function retireFinalizedServiceRendererGraphs(
+  entries: Iterable<ServiceRendererBootstrapEntry>,
+  active: CordisXPluginActivationRecordV1,
+): void {
+  for (const entry of entries) {
+    for (let index = entry.leases.length - 1; index >= 0; index--) {
+      const lease = entry.leases[index]!
+      if (lease === entry.configuredChannel?.lease || entry.configuredPlugins?.some(plugin => plugin.lease === lease)) {
+        continue
+      }
+      const plugin = active.plugins.find(item => item.id === lease.pluginId)
+      if (plugin?.enabled !== true || plugin.moduleGeneration !== lease.moduleGeneration) {
+        lease.retire()
+        entry.leases.splice(index, 1)
+      }
+    }
   }
 }
 
