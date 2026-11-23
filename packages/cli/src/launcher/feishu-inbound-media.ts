@@ -100,6 +100,7 @@ export async function feishuInboundContent(
   const descriptors = (message.resources ?? []).slice(0, 16)
   const seen = new Set<string>()
   for (const resource of descriptors) {
+    if (contentType === 'sticker' || resource.type === 'sticker') continue
     if (seen.has(resource.fileKey)) continue
     seen.add(resource.fileKey)
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -151,7 +152,7 @@ export async function feishuInboundContent(
     text += '\n[Shared reference only: backing document, folder, or URL content not read]'
   }
   if (contentType === 'sticker') {
-    text += '\n[Sticker metadata only: sticker bytes not read or interpreted]'
+    text += '\n[Sticker original image unavailable: the Feishu message-resource API does not support downloading sticker resources. Metadata only; sticker bytes not read or interpreted. Send it as an ordinary image to make the pixels available.]'
   }
   if (text.trim()) blocks.unshift({ type: 'text', text })
   if (!blocks.length) {

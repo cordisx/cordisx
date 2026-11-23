@@ -198,6 +198,11 @@ collecting `image_key`/`img_key`/`file_key` descriptors only through the existin
 authenticated message-resource API. Cloud-file, folder, sticker and hongbao
 tokens are not reinterpreted as downloadable ordinary files. Backing document,
 folder, link and sticker-byte limitations are explicit in the resulting text.
+The official SDK documentation for `im.v1.messageResource.get` explicitly
+excludes sticker resources. SDK sticker descriptors are therefore not attempted
+as ordinary image/file downloads. The fallback reports this platform limitation,
+not a permission or download failure, and suggests sending an ordinary image.
+It does not claim access to the original sticker pixels or a private download API.
 No URL fetch, action execution, card update, calendar lookup,
 identity lookup, extra SDK capability or new permission is enabled. Placeholder
 or template-only cards are described as received; hidden content is not claimed.
