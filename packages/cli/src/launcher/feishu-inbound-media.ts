@@ -152,7 +152,8 @@ export async function feishuInboundContent(
     text += '\n[Shared reference only: backing document, folder, or URL content not read]'
   }
   if (contentType === 'sticker') {
-    text += '\n[Sticker original image unavailable: the Feishu message-resource API does not support downloading sticker resources. Metadata only; sticker bytes not read or interpreted. Send it as an ordinary image to make the pixels available.]'
+    text +=
+      '\n[Sticker original image unavailable: the Feishu message-resource API does not support downloading sticker resources. Metadata only; sticker bytes not read or interpreted. Send it as an ordinary image to make the pixels available.]'
   }
   if (text.trim()) blocks.unshift({ type: 'text', text })
   if (!blocks.length) {
