@@ -320,3 +320,102 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
     await f.close()
   }
 }, 30_000)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'limits a configured Channel form save to one existing resolved connection',
+  async () => {
+    const f = await fixture({
+      channelArchive: archive,
+      channelUiGrant: true,
+      protectProfileInputs: true,
+      channelServiceConfig: true,
+      channelCredentials: true,
+    })
+    try {
+      await bootConfiguredChannelManager(f)
+      const request = (requestId: string, operation: Record<string, unknown>) =>
+        JSON.stringify({ version: 1, token, requestId, ...operation })
+      const listed = await f.sessions.call(
+        f.invocation,
+        'service-config',
+        request('list-scoped', {
+          operation: 'list',
+          pluginId: 'channel',
+          scope: { profileId: f.profileId, generation: f.generation },
+        }),
+      ) as any
+      const descriptor = listed.value.value[0]
+      expect(JSON.stringify(listed)).not.toContain('fixture-private-reference')
+      const mutation = (configuration: unknown) => ({
+        contract: 'cordisx.service-config-mutation/v1',
+        schemaVersion: 1,
+        identity: descriptor.identity,
+        scope: descriptor.scope,
+        expectedRevision: descriptor.revision,
+        configuration,
+      })
+      const changes: Array<(value: any) => void> = [
+        value => value.connections[0].enabled = !value.connections[0].enabled,
+        value => value.connections[0].transport = { mode: 'webhook', callbackAlias: 'changed' },
+        value => value.connections.push(structuredClone(value.connections[0])),
+        value => value.connections.splice(0, 1),
+        value => value.pendingConnections[0].displayName = 'Changed pending account',
+        value => value.connections[0].selectors = ['unexpected'],
+        value => value.connections[0].displayName = '',
+        value => {
+          value.connections[0].displayName = 'Changed first'
+          value.connections[1].displayName = 'Changed second'
+        },
+        value => value.connections[1].secretRef = 'host-secret:env/FORGED_VALUE',
+      ]
+      for (const [index, change] of changes.entries()) {
+        const candidate = structuredClone(descriptor.configuration)
+        change(candidate)
+        const result = await f.sessions.call(
+          f.invocation,
+          'service-config',
+          request(`out-of-scope-${index}`, { operation: 'mutate', mutation: mutation(candidate) }),
+        )
+        expect(result).toMatchObject({
+          status: 'ok',
+          value: { value: { status: 'rejected', error: { code: 'validation-failed' } } },
+        })
+      }
+      const candidate = structuredClone(descriptor.configuration)
+      candidate.connections[0].displayName = 'One connection updated'
+      candidate.connections[0].selectors = ['direct', 'mentions']
+      const saved = await f.sessions.call(
+        f.invocation,
+        'service-config',
+        request('single-connection', { operation: 'mutate', mutation: mutation(candidate) }),
+      )
+      expect(saved).toMatchObject({ status: 'ok', value: { value: { status: 'applied', revision: 2 } } })
+      const stale = await f.sessions.call(
+        f.invocation,
+        'service-config',
+        request('stale-connection', { operation: 'mutate', mutation: mutation(candidate) }),
+      )
+      expect(stale).toMatchObject({ status: 'ok', value: { value: { status: 'conflict', revision: 2 } } })
+      const stored = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath) as any
+      expect(stored).toMatchObject({
+        revision: 2,
+        config: {
+          connections: [
+            expect.objectContaining({ displayName: 'One connection updated', selectors: ['direct', 'mentions'] }),
+            expect.objectContaining({ enabled: false, secretRef: 'host-secret:channel/fixture-private-reference' }),
+          ],
+          pendingConnections: [expect.objectContaining({ secretRef: 'host-secret:channel/fixture-private-reference' })],
+        },
+      })
+      expect(JSON.stringify([listed, saved])).not.toContain('fixture-private-reference')
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)

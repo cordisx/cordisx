@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mutateChannelConnectionConfiguration } from '../packages/cli/src/renderer/channel-connection-configuration.js'
 import { createChannelHostServiceConfigContract } from '../packages/channel-runtime/src/config.js'
+import { isManagerChannelFormMutation } from '../packages/cli/src/cli/manager-channel-config-scope.js'
 
 describe('Host exact connection configuration writes', () => {
   it('upgrades a v1 configuration on save while preserving unrelated connections and private references', async () => {
@@ -39,6 +40,8 @@ describe('Host exact connection configuration writes', () => {
       }),
     ).toMatchObject({ status: 'applied', revision: 8 })
     const candidate = (mutate.mock.calls[0]![0] as { configuration: unknown }).configuration
+    expect(isManagerChannelFormMutation((descriptor as { readonly configuration: unknown }).configuration, candidate))
+      .toBe(true)
     expect(candidate).toMatchObject({
       contract: 'cordisx.channel-service-config/v2',
       schemaVersion: 2,

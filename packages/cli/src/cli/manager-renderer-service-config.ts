@@ -11,6 +11,7 @@ import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { createConfiguredChannelOwner } from './configured-channel-owner.js'
 import { fenceManagerOrigin } from './manager-origin-fence.js'
 import { channelConfigurationApi } from './renderer-channel-composition.js'
+import { isManagerChannelFormMutation } from './manager-channel-config-scope.js'
 
 const TOKEN = 'renderer-binding-placeholder'
 
@@ -125,7 +126,37 @@ export function createManagerRendererServiceConfigChannel(input: {
               identity: { ...request.mutation.identity, source: identity.source },
             }
             const result = await input.bootstrap.mutateConfiguredChannel(origin, async () => {
-              const value = await input.authority.withOwner(async () => await api!.mutate(mutation))
+              const value = await input.authority.withOwner(async () => {
+                const descriptor = await api!.descriptor()
+                const base = {
+                  contract: 'cordisx.service-config-result/v1' as const,
+                  schemaVersion: 1 as const,
+                  identity: mutation.identity,
+                  scope: mutation.scope,
+                  revision: descriptor.revision,
+                }
+                if (descriptor.revision !== mutation.expectedRevision) {
+                  return {
+                    ...base,
+                    status: 'conflict' as const,
+                    error: { code: 'conflict' as const, message: 'Channel configuration changed.' },
+                  }
+                }
+                if (!isManagerChannelFormMutation(descriptor.configuration, mutation.configuration)) {
+                  return {
+                    ...base,
+                    status: 'rejected' as const,
+                    error: {
+                      code: 'validation-failed' as const,
+                      message: 'Channel configuration is outside this form.',
+                    },
+                  }
+                }
+                if (!origin.isCurrent() || input.service.generation() !== serviceGeneration) {
+                  throw new Error('SERVICE_CONFIG_UNAVAILABLE')
+                }
+                return await api!.mutate(mutation)
+              })
               if (!value) throw new Error('SERVICE_CONFIG_UNAVAILABLE')
               return value
             })

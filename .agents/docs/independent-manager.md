@@ -56,9 +56,12 @@ proof. Each Manager receives only matching existing Manager UI permissions.
 Managed-service reads and subscriptions are available; the service owner can
 coordinate an explicit login or logout across admitted Managers. Logout is
 unavailable while affected terminal or managed-service clients hold leases.
-An owner-private reservation can temporarily borrow specific service operations
-while other clients stay fenced. Manager account switching and OAuth do not yet
-use this facility and remain unavailable.
+For a compatible service source, the service owner can also read and enable or
+disable an account. It reserves affected service clients, validates the exact
+operation plan and account revision, confirms the result with a fresh read, and
+waits for admitted Manager pages to adopt the account projection. An unconfirmed
+result is not replayed. This path does not yet coordinate native adapters or
+enable OAuth.
 When initial service sources are still being adopted, the owner waits before
 taking the Manager's profile fences; admission remains bounded and stops when
 the page disconnects.
@@ -224,6 +227,10 @@ revision changes. An unadmitted Manager or an unaccounted adapter still makes
 the write unavailable; a lost receipt after dispatch requires reconciliation.
 This handoff covers the restricted Channel page, not other clients or general
 permission and configuration synchronization.
+The owner compares a form save with its current redacted configuration and
+accepts changes to the display name and reception selectors of at most one
+resolved connection. Other configuration fields remain unchanged; credential
+rotation uses the separate private transaction. A stale revision is rejected.
 
 When the owner-selected Channel has no matching UI allow, its Manager entry can
 lead to a Host permission review. The user may allow the navigation entry and
