@@ -225,3 +225,116 @@ it('does not submit a write when a platform read arrives after timeout', async (
     vi.useRealTimers()
   }
 })
+
+it('pins and unpins only visible scoped messages and normalizes explicit pages', async () => {
+  const fixtureValue = fixture()
+  const pin = parseMessageOperation('pin-add', { ...base, messageId: 'om_owned', operationId: 'pin' })
+  expect(
+    await feishuMessageOperation(pin, event, fixtureValue.channel, { authorize: () => {}, ownsPlainCard: () => false }),
+  ).toMatchObject({ status: 'ok' })
+  expect(fixtureValue.update).toHaveBeenCalledWith({ data: { message_id: 'om_owned' } })
+  const unpin = parseMessageOperation('pin-remove', { ...base, messageId: 'om_owned', operationId: 'unpin' })
+  expect(
+    await feishuMessageOperation(unpin, event, fixtureValue.channel, {
+      authorize: () => {},
+      ownsPlainCard: () => false,
+    }),
+  ).toMatchObject({ status: 'ok' })
+  fixtureValue.readUsers.mockResolvedValueOnce(
+    {
+      code: 0,
+      data: {
+        items: [{ message_id: 'om_owned', chat_id: 'oc_chat', create_time: '123' }],
+        has_more: true,
+        page_token: 'next',
+      },
+    } as unknown as Awaited<ReturnType<typeof fixtureValue.readUsers>>,
+  )
+  const list = parseMessageOperation('pin-list', { ...base, pageSize: 1, startTime: '1', endTime: '1000' })
+  expect(
+    await feishuMessageOperation(list, event, fixtureValue.channel, {
+      authorize: () => {},
+      ownsPlainCard: () => false,
+    }),
+  ).toEqual({
+    status: 'ok',
+    operation: 'pin-list',
+    items: [{ type: 'pin', messageId: 'om_owned', createdAt: '123' }],
+    hasMore: true,
+    pageToken: 'next',
+  })
+  expect(fixtureValue.readUsers).toHaveBeenCalledWith({
+    params: { chat_id: 'oc_chat', page_size: 1, start_time: '1', end_time: '1000' },
+  })
+})
+
+it('rejects cross-conversation pin pages and missing continuation tokens', async () => {
+  const fixtureValue = fixture()
+  const list = parseMessageOperation('pin-list', base)
+  fixtureValue.readUsers.mockResolvedValueOnce(
+    {
+      code: 0,
+      data: { items: [{ message_id: 'om_other', chat_id: 'oc_other' }], has_more: false },
+    } as unknown as Awaited<ReturnType<typeof fixtureValue.readUsers>>,
+  )
+  expect(
+    await feishuMessageOperation(list, event, fixtureValue.channel, {
+      authorize: () => {},
+      ownsPlainCard: () => false,
+    }),
+  ).toMatchObject({ code: 'CHANNEL_OPERATION_PAGE_INVALID' })
+  fixtureValue.readUsers.mockResolvedValueOnce({ code: 0, data: { items: [], has_more: true } })
+  expect(
+    await feishuMessageOperation(list, event, fixtureValue.channel, {
+      authorize: () => {},
+      ownsPlainCard: () => false,
+    }),
+  ).toMatchObject({ code: 'CHANNEL_OPERATION_PAGE_INVALID' })
+})
+
+it('returns normalized reaction IDs and filters without forwarding arbitrary platform fields', async () => {
+  const fixtureValue = fixture()
+  fixtureValue.readUsers.mockResolvedValueOnce(
+    {
+      code: 0,
+      data: {
+        items: [{
+          reaction_id: 'reaction-id',
+          reaction_type: { emoji_type: 'OnIt' },
+          operator: { operator_id: 'ou_reader', operator_type: 'user' },
+          action_time: '123',
+          token: 'secret',
+        }],
+        has_more: false,
+      },
+    } as unknown as Awaited<ReturnType<typeof fixtureValue.readUsers>>,
+  )
+  const list = parseMessageOperation('reaction-list', {
+    ...base,
+    messageId: 'om_owned',
+    emojiType: 'OnIt',
+    pageSize: 1,
+  })
+  expect(
+    await feishuMessageOperation(list, event, fixtureValue.channel, {
+      authorize: () => {},
+      ownsPlainCard: () => false,
+    }),
+  ).toEqual({
+    status: 'ok',
+    operation: 'reaction-list',
+    items: [{
+      type: 'reaction',
+      reactionId: 'reaction-id',
+      emojiType: 'OnIt',
+      operatorId: 'ou_reader',
+      operatorType: 'user',
+      createdAt: '123',
+    }],
+    hasMore: false,
+  })
+  expect(fixtureValue.readUsers).toHaveBeenCalledWith({
+    path: { message_id: 'om_owned' },
+    params: { page_size: 1, user_id_type: 'open_id', reaction_type: 'OnIt' },
+  })
+})
