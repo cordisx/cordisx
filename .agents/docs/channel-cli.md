@@ -1,5 +1,10 @@
 # Channel CLI and chat bindings
 
+For independently authorized original-message forwarding, see [single/merge forwarding](channel-forward.md). It is not `send`, reply/thread sending, or Agent SDK fallback.
+See [scoped message operations](channel-message-operations.md) for candidate
+edit/recall, pin, read-user/reaction pagination, restricted card updates and
+operation-level capability discovery. These are not generic vendor API access.
+
 See [media and reactions](channel-media-reactions.md) for candidate reaction CLI
 arguments, completion semantics, capability boundaries and unavailable media APIs.
 

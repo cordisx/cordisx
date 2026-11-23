@@ -2,12 +2,18 @@ import type { ChannelNativeCliContext } from './channel-cli-context.js'
 
 export type ChannelCliOperationKind = 'read' | 'send' | 'write' | 'checkpoint'
 const READS = new Set([
+  'forward-receipt',
   'connections',
   'conversations',
   'bind-status',
   'history',
   'remote-history',
   'message-get',
+  'message-capabilities',
+  'message-operation-receipt',
+  'pin-list',
+  'read-users',
+  'reaction-list',
   'listen',
   'receipt',
   'policy',
@@ -26,6 +32,13 @@ const READS = new Set([
   'continuation-history',
 ])
 const WRITES = new Set([
+  'forward',
+  'merge-forward',
+  'message-edit',
+  'message-recall',
+  'pin-add',
+  'pin-remove',
+  'card-update',
   'bind',
   'unbind',
   'reply-mode',

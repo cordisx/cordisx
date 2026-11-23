@@ -1,5 +1,7 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
 import { channelMessageRead } from './channel-message-read.js'
+import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
+import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -25,6 +27,7 @@ import {
 } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { ChannelOutboundRpc } from './channel-outbound-rpc.js'
+import { createChannelForwardService } from './channel-forward-service.js'
 import { channelOutboundRuntimeOptions } from './channel-outbound-runtime-options.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
@@ -39,7 +42,9 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
+  readonly messageOperations: ChannelMessageOperationLedger
   generation: string
   readonly runtime: ChannelRuntime
   readonly host: LauncherChannelServiceHost
@@ -299,6 +304,9 @@ export function createLocalChannelService(input: {
     const generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     await mkdir(input.dataDir, { recursive: true })
     const outbound = new ChannelOutboundRpc()
+    const messageOperations = await ChannelMessageOperationLedger.open(
+      path.join(input.dataDir, 'message-operations.json'),
+    )
     try {
       const runtime: ChannelRuntime = await ChannelRuntime.open({
         ...channelOutboundRuntimeOptions(
@@ -336,7 +344,17 @@ export function createLocalChannelService(input: {
         // that account unavailable without preventing the rest of CordisX from
         // starting.
         const current: ActiveRuntime = {
+          forward: createChannelForwardService({
+            filename: path.join(input.dataDir, 'forward.json'),
+            channel: request => directory.channel(request.source),
+            active: () => !disposed && active === current,
+            supported: request =>
+              configuration.connections.some(connection =>
+                ['feishu', 'lark'].includes(connection.adapterKind) && key(connection.ref) === key(request.source)
+              ),
+          }),
           outbound,
+          messageOperations,
           generation,
           runtime,
           host,
@@ -649,6 +667,15 @@ export function createLocalChannelService(input: {
         generation: current.generation,
         runtime: current.runtime,
         outbound: current.outbound,
+        forward: current.forward,
+        messageOperations: (operation, request, context) =>
+          channelMessageOperationsRpc(operation, request, {
+            ...context,
+            ledger: current.messageOperations,
+            channel: event => current.directory.channel(event),
+            active: () => active === current && !disposed,
+            ownsPlainCard: (event, messageId) => current.runtime.ownsPlainCard(event, messageId),
+          }),
         ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({

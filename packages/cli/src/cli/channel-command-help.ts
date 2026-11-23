@@ -1,4 +1,7 @@
+import { CHANNEL_FORWARD_HELP } from './channel-forward-help.js'
+
 const HELP: Readonly<Record<string, string>> = {
+  ...CHANNEL_FORWARD_HELP,
   'media-prepare':
     'Candidate three-step Host upload; installed support is not implied. Use media-prepare begin|chunk|commit [--profile <id>] [--context <incoming-context>] --input <JSON>. begin: {account,target,operationId,type:"image"|"audio"|"file"|"video",format,filename?,mediaType?,durationMs?,size,sha256}. Formats: image png/jpeg, audio opus, file pdf/binary, video mp4. filename required for file/video; optional mediaType must match format, name is a consistent filename alias. chunk: {uploadId,offset,bytesBase64}; offset is a byte offset, each decoded chunk is 1..65536 bytes, canonical base64 only. commit: {uploadId}. Returned Host result is printed unchanged; preserve its uploadId and committed media handle. Host binds caller/context/target, verifies size/hash, and judges platform capability. No Host path reads, CLI file reads, SDK sends, caller-claimed grants or automatic retries. Each complete RPC must be under 256 KiB. Use media: handle in send payload; inspect uncertain outcomes before retrying.',
   'user-access':
@@ -59,6 +62,26 @@ const HELP: Readonly<Record<string, string>> = {
     'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
+  'message-capabilities':
+    'Discover implemented operations, restrictions and permission alternatives, not permission success. Input: {account,conversationId,kind}.',
+  'message-operation-receipt':
+    'Read a durable operation without replay. Input: {account,conversationId,kind,operationId}. null is not proof of no effect; unknown writes must not be blindly repeated with new IDs.',
+  'message-edit':
+    'Edit an owned text/post message with the same type. Input: {account,conversationId,kind,messageId,operationId,content:{type:"text",text}|{type:"richtext",blocks:[{text,style}]}}. Stable operationId; platform edit window and count apply.',
+  'message-recall':
+    'Recall only this bot’s message, not local history deletion. Input: {account,conversationId,kind,messageId,operationId}. Platform recall window applies. Unknown effects are not replayed.',
+  'pin-add':
+    'Pin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Requires platform pin permission; preserve operationId.',
+  'pin-remove':
+    'Unpin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Preserve operationId; not message deletion.',
+  'pin-list':
+    'Read one group pin page. Input: {account,conversationId,kind:"group",pageSize?:1..50,pageToken?,startTime?,endTime?}. Times are decimal milliseconds; no automatic traversal.',
+  'read-users':
+    'Read one page for this bot’s own message, at most 7 days old. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?}. Reading is not approval or completion.',
+  'reaction-list':
+    'Read one reaction page; Channel callers may only inspect their incoming source message. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?,emojiType?}. Existing reaction add/remove remains separate.',
+  'card-update':
+    'Update an owned plain notice/status card, never an approval/question control card. Input: {account,conversationId,kind,messageId,operationId,card:{template:"notice"|"status",title,body,status?:"pending"|"running"|"completed"|"failed"}}. Status template requires status; no raw vendor JSON or generic card actions.',
   listen:
     'Wait for messages in multiple conversations. Input: {account,conversationIds:[string],afterCursor?:string,timeoutSeconds?:0..60}.',
   send:

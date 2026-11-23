@@ -1,5 +1,6 @@
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import { CHANNEL_COMMAND_NAMES } from '../channel-command-registry.js'
+import { CHANNEL_FORWARD_PERMISSION_KEYS } from './channel-forward-permissions.js'
 import {
   type ChannelAutoReplyMode,
   type ChannelReplyMode,
@@ -226,7 +227,11 @@ export function parseChannelConversationPolicy(value: unknown): ChannelConversat
     const userGroupIds = rule.userGroupIds === undefined ? undefined : strings(rule.userGroupIds)
     if (userGroupIds?.some(id => !groups.some(group => group.id === id))) throw new Error('INVALID_USER_GROUP')
     const commands = rule.commands === undefined ? undefined : strings(rule.commands)
-    if (commands?.some(command => !(CHANNEL_COMMAND_NAMES as readonly string[]).includes(command))) {
+    if (
+      commands?.some(command =>
+        !([...CHANNEL_COMMAND_NAMES, ...CHANNEL_FORWARD_PERMISSION_KEYS] as readonly string[]).includes(command)
+      )
+    ) {
       throw new Error('INVALID_COMMAND')
     }
     return {

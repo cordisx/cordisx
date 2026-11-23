@@ -12,6 +12,9 @@ import { prepareChannelSendInput } from './channel-send-payload.js'
 import { parseChannelMediaPrepareArgv, validateChannelMediaPrepareRequest } from './channel-media-prepare-payload.js'
 
 const OPERATIONS = [
+  'forward',
+  'merge-forward',
+  'forward-receipt',
   'memory',
   'memory-authority-set',
   'memory-persona-profile',
@@ -45,6 +48,16 @@ const OPERATIONS = [
   'history',
   'remote-history',
   'message-get',
+  'message-capabilities',
+  'message-operation-receipt',
+  'message-edit',
+  'message-recall',
+  'pin-add',
+  'pin-remove',
+  'pin-list',
+  'read-users',
+  'reaction-list',
+  'card-update',
   'listen',
   'send',
   'send-many',

@@ -6,6 +6,8 @@ import type {
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { richtextRequirements } from '@cordisx/channel-runtime'
+import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations-rpc.js'
+import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
@@ -21,8 +23,16 @@ import { questionDeliveryId } from './channel-questions.js'
 import { channelProgressTarget } from './channel-progress-reminders.js'
 import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
+import { channelForwardRpc } from './channel-forward-rpc.js'
+import { authorizeChannelForward } from './channel-forward-permissions.js'
 
 export interface ChannelConversationAccess {
+  readonly forward?: ReturnType<typeof import('./channel-forward-service.js').createChannelForwardService>
+  messageOperations?(operation: string, input: Record<string, unknown>, context: {
+    source?: import('@cordisx/channel-runtime').ChannelEventRef | undefined
+    callerScope: string
+    authorize: (event: import('@cordisx/channel-runtime').ChannelEventRef, write: boolean) => void
+  }): Promise<unknown>
   readonly outbound?: ChannelOutboundRpc
   feedbackReact?(
     event: import('@cordisx/channel-runtime').ChannelEventRef,
@@ -387,6 +397,29 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (['forward', 'merge-forward', 'forward-receipt'].includes(operation)) {
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        const access = this.access()
+        if (!access) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        return await channelForwardRpc({
+          operation,
+          value: input,
+          access,
+          scope: outboundCallerScope({
+            session: callerSession,
+            turnId: scopedCaller?.turnId ?? callerTurnId(metadata),
+            source,
+          }),
+          ...(source ? { source } : {}),
+          authorize: (event, action) => {
+            if (source && this.consumer) {
+              authorizeChannelForward(this.consumer.profileLogicalOwner().store.snapshot().policy, event, action)
+            }
+          },
+        })
+      }
       if (['user-access', 'user-access-set', 'group-block', 'group-block-set'].includes(operation)) {
         if (!this.consumer) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
         return await this.consumer.permissionOperation(operation, input, metadata)
@@ -519,6 +552,16 @@ export class ChannelConversationTools {
       }
       const current = this.access()
       if (!current) return { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
+      if (CHANNEL_MESSAGE_OPERATION_COMMANDS.includes(operation as typeof CHANNEL_MESSAGE_OPERATION_COMMANDS[number])) {
+        return authorizedChannelMessageOperation(operation, input, {
+          current,
+          consumer: this.consumer,
+          source,
+          nativeCaller,
+          callerSession,
+          active: () => !this.lifetime.signal.aborted && this.access()?.generation === current.generation,
+        })
+      }
       if (operation === 'reply-mode') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
         const callerSession = scopedCaller?.threadId ?? callerThreadId(metadata)
