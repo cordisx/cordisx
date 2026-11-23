@@ -1,5 +1,26 @@
 import type { ChannelStoreState } from './store.js'
 import type { ChannelRuntimeSnapshot } from './types.js'
+import type { ChannelPermissionBroker, ChannelPluginIdentity } from './types.js'
+import { digest } from './runtime-validation.js'
+
+export async function visibleConnections(
+  snapshot: ChannelRuntimeSnapshot,
+  permissions: ChannelPermissionBroker,
+  caller: ChannelPluginIdentity,
+) {
+  const visible: ChannelRuntimeSnapshot['accounts'][number][] = []
+  for (const account of snapshot.accounts) {
+    const decision = await permissions.authorize({
+      caller,
+      capability: 'channel.accounts.read',
+      source: account.ref,
+      generation: account.generation,
+      operationId: `connections:${digest([caller, account.ref, account.generation])}`,
+    })
+    if (decision === 'allow') visible.push(account)
+  }
+  return visible
+}
 
 export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): ChannelRuntimeSnapshot {
   const accounts = Object.entries(state.adapters)

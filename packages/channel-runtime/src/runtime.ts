@@ -3,7 +3,7 @@ import { isEligibleOutbox } from './outbound-enqueue.js'
 import { ChannelDeliveryObservers } from './delivery-observers.js'
 export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
-import { runtimeSnapshot } from './runtime-snapshot.js'
+import { runtimeSnapshot, visibleConnections } from './runtime-snapshot.js'
 import { validateOutboundMedia } from './outbound-media.js'
 import { validateOutboundContent } from './outbound-content.js'
 import { mentionCapabilities, validateMentionAuthority, validateMentionDispatch } from './outbound-mention.js'
@@ -453,19 +453,7 @@ export class ChannelRuntime {
 
   async connections(caller: ChannelPluginIdentity): Promise<readonly ChannelRuntimeAccountSnapshot[]> {
     this.#assertRuntimeActive()
-    const snapshot = this.snapshot()
-    const visible: ChannelRuntimeAccountSnapshot[] = []
-    for (const account of snapshot.accounts) {
-      const decision = await this.#permissions.authorize({
-        caller,
-        capability: 'channel.accounts.read',
-        source: account.ref,
-        generation: account.generation,
-        operationId: `connections:${digest([caller, account.ref, account.generation])}`,
-      })
-      if (decision === 'allow') visible.push(account)
-    }
-    return visible
+    return visibleConnections(this.snapshot(), this.#permissions, caller)
   }
 
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
