@@ -91,6 +91,9 @@ Corrupt entries fail closed instead of manufacturing success.
 
 A crash can leave the lock behind. `FORWARD_LEDGER_LOCKED` must not be retried
 with another ledger, profile or tool. There is no automatic TTL lock stealing.
+Receipt queries acquire the same lock and are unavailable until an abandoned
+lock is safely recovered; this version does not implement lock-free prior
+receipt reads. A lock error does not imply that a forwarding effect failed.
 An operator must prove all owners of that profile are stopped before manually
 recovering an abandoned lock. A persisted sending operation becomes unknown,
 not replayable. The bounded ledger rejects new operations when full rather than
