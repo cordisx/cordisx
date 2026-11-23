@@ -205,6 +205,9 @@ forwards only matching existing Manager UI policies. The connection form may
 save ordinary settings and rotate a credential for a resolved Feishu/Lark
 account through owner-bound bridges. Credential values and private references
 are not returned to the plugin-facing facade or stored in browser storage.
+When the owner explicitly advertises coordinated connection control, a
+compatible Channel page also uses its existing header action to enable or
+disable a resolved connection. Reconnect remains unavailable on this path.
 The owner retires private drafts with the renderer; an unconfirmed cleanup or
 write keeps subsequent mutation coordination closed. A two-page test exercises the
 compiled service owner, actual isolated Codex app-server, authenticated sidecar,
@@ -219,12 +222,14 @@ without an initial Channel stylesheet are unavailable, and permissions from
 another source are not reused.
 
 The originating Manager reserves the owner lifecycle and all admitted Manager
-sessions before a connection settings or credential write. The owner drains
+sessions before a connection settings, enable/disable, or credential write. The owner drains
 their old reads, verifies the new service generation and sends a redacted view
 to the other Managers. It reports success only after they confirm adoption.
 Those pages retain unsaved form values and require review when their underlying
 revision changes. An unadmitted Manager or an unaccounted adapter still makes
 the write unavailable; a lost receipt after dispatch requires reconciliation.
+The originating page adopts the confirmed connection state before reporting
+success and does not automatically retry an uncertain action.
 This handoff covers the restricted Channel page, not other clients or general
 permission and configuration synchronization.
 The owner compares a form save with its current redacted configuration and
