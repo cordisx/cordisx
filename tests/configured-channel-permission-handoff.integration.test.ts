@@ -37,10 +37,11 @@ async function setup() {
   f = await fixture({
     channelArchive: archive,
     channelUiGrant: true,
+    channelPermissionPolicy: true,
     protectProfileInputs: true,
     writeDispatch: async context => {
-      const expected = f.bootstrap.permissionSnapshot(context)
-      const updates = f.bootstrap.resolvePermissionPolicies([projected], context)
+      const expected = f.bootstrap.permissionAccess.snapshot(context)
+      const updates = f.bootstrap.permissionAccess.resolve([projected], context)
       const origin = await fenceManagerOrigin({
         sessions: f.sessions,
         participants: f.participants,
@@ -48,7 +49,7 @@ async function setup() {
         allowAdditionalManagers: true,
       })
       try {
-        const barrier = await f.bootstrap.reservePermissionPolicy(
+        const barrier = await f.bootstrap.permissionAccess.reserve(
           origin,
           context,
           'request-1',

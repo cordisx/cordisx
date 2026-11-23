@@ -122,6 +122,29 @@ it('cannot adopt after the origin is fenced while the owner readback is pending'
   f.consumers.close()
 })
 
+it('accepts only the owner-selected installed identity and fences it when its graph becomes stale', async () => {
+  let persisted: any[] = []
+  const f = await fixture(async () => persisted)
+  let current = true
+  const target = {
+    identity: { id: 'fixture-service', source: 'https://example.test/fixture' },
+    isCurrent: () => current,
+  }
+  const update = {
+    ...f.request.updates[0]!,
+    key: { ...f.request.updates[0]!.key, identity: { pluginId: target.identity.id, source: target.identity.source } },
+  }
+  const request = { ...f.request, updates: [update], candidate: [update] }
+  persisted = [update]
+  const reservation = f.consumers.reserve(f.origin, target)
+  await expect(reservation.adopt(request, new AbortController().signal)).resolves.toMatchObject({ adopted: true })
+  current = false
+  expect(reservation.release()).toBe(false)
+  expect(() => f.consumers.reserve(f.origin, target)).toThrow('service-permission-consumers-unavailable')
+  f.origin.fence()
+  f.consumers.close()
+})
+
 it.each([false, true])('rejects a missing or delayed origin release proof: %s', async delayed => {
   let persisted: any[] = []
   const f = await fixture(async () => persisted)

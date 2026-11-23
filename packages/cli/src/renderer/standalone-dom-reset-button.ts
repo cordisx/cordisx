@@ -1,5 +1,5 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
-import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 
 type Registration = {
   readonly button: HTMLElement
@@ -17,7 +17,7 @@ export function registerStandaloneDomResetButton(
   pointId: string,
 ): () => void {
   const view = button.ownerDocument.defaultView
-  if (!view || !(button instanceof view.HTMLButtonElement) || !isStandaloneDomReviewTarget(identity, pointId)) {
+  if (!view || !(button instanceof view.HTMLButtonElement) || !isStandaloneManagerDomTarget(identity, pointId)) {
     return () => {}
   }
   const registration: Registration = { button, identity: { ...identity }, pointId }

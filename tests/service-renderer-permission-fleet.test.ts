@@ -6,17 +6,16 @@ import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const scope = { homeDigest: 'a'.repeat(64), ownerAppId: 'codex', profileId: 'work', generation: 'owner-1' }
 const originalSource = 'file:///fixture-private/channel'
-const [policy] = exactDomPermissionPolicies(scope.profileId, [{
-  id: 'channel',
-  entry: '/fixture.js',
-  pointIds: ['manager.content'],
-}])
-const candidate = [{
-  ...policy!,
-  key: { ...policy!.key, identity: { ...policy!.key.identity, source: originalSource } },
-}]
-
-function fixture() {
+function fixture(pluginId = 'channel') {
+  const [policy] = exactDomPermissionPolicies(scope.profileId, [{
+    id: pluginId,
+    entry: '/fixture.js',
+    pointIds: ['manager.content'],
+  }])
+  const candidate = [{
+    ...policy!,
+    key: { ...policy!.key, identity: { ...policy!.key.identity, source: originalSource } },
+  }]
   const peers = ['1', '2'].map((digit) =>
     new ManagerRendererCommandPeer({
       scope,
@@ -37,7 +36,7 @@ function fixture() {
   })
   const targets = peers.map((peer, index) => {
     const identity = {
-      id: 'channel',
+      id: pluginId,
       source: `https://renderer.cordisx.invalid/plugin/${String(index + 3).repeat(64)}`,
     }
     return {
@@ -104,6 +103,22 @@ it('waits for each scoped Manager receipt and never sends the owner source', asy
     expect(acknowledge(f.peers[1]!, commands[1]!)).toBe(true)
     expect(await pending).toBe(true)
     expect(f.fence).not.toHaveBeenCalled()
+  } finally {
+    for (const peer of f.peers) peer.close()
+  }
+})
+
+it('delivers an installed plugin decision through each renderer alias and waits for both receipts', async () => {
+  const f = fixture('fixture-service')
+  try {
+    const pending = f.run()
+    const commands = await Promise.all(f.peers.map(async peer => await peer.next()))
+    expect(commands.map(command => (command?.payload as { identity: { id: string } }).identity.id))
+      .toEqual(['fixture-service', 'fixture-service'])
+    expect(JSON.stringify(commands)).not.toContain(originalSource)
+    expect(acknowledge(f.peers[0]!, commands[0]!)).toBe(true)
+    expect(acknowledge(f.peers[1]!, commands[1]!)).toBe(true)
+    expect(await pending).toBe(true)
   } finally {
     for (const peer of f.peers) peer.close()
   }

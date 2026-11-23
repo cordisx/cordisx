@@ -67,6 +67,7 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
     f = await fixture({
       channelArchive: archive!,
       channelUiGrant: !signedReview,
+      channelPermissionPolicy: signedReview,
       protectProfileInputs: true,
       ...(proof === undefined ? {} : { permissionProof: proof }),
     })

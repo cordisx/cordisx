@@ -9,7 +9,7 @@ import {
 } from '../permission-contracts.js'
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
-import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import { standalonePermissionProofBytes } from '../standalone-permission-proof.js'
 
 type Review = {
@@ -95,7 +95,7 @@ export async function createStandalonePermissionSigner(
         const declaration = plan.declarations[0]
         const selected = decision.decisions[0]
         if (
-          closed || !isStandaloneDomReviewTarget(review.identity, review.pointId)
+          closed || !isStandaloneManagerDomTarget(review.identity, review.pointId)
           || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
           || plan.$schema !== CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3 || plan.schemaVersion !== 3
           || plan.operation !== 'runtime' || plan.profileId !== review.profileId
@@ -141,7 +141,7 @@ export async function createStandalonePermissionSigner(
     ): (() => void) | undefined {
       try {
         if (
-          closed || !isStandaloneDomReviewTarget(review.identity, review.pointId)
+          closed || !isStandaloneManagerDomTarget(review.identity, review.pointId)
           || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
           || observed !== 'allow-persistent' && observed !== 'deny-persistent'
         ) return undefined

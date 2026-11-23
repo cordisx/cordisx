@@ -64,7 +64,7 @@ const browserPlugin = [
 it.skipIf(
   !managerPackage || !chrome || !codex || process.platform !== 'darwin' && process.platform !== 'linux',
 )(
-  'reviews an installed plugin in one real Manager tab and retires its grants on refresh or owner loss',
+  'coordinates one-time and persistent installed-plugin UI decisions across real Manager pages',
   async () => {
     if (!path.isAbsolute(managerPackage!)) throw new Error('fixture path must be absolute')
     const root = await realpath(process.env.CORDISX_REVIEW_TEST_ROOT ?? await mkdtemp('/tmp/cx-installed-review-'))
@@ -121,14 +121,49 @@ it.skipIf(
       const launched = launchChrome(chrome!, browserProfile)
       browser = launched.browser
       const socket = await waitForChromeTarget(browserProfile, browser, launched.stderr)
+      const trace = [
+        '(() => {',
+        '  const events = globalThis.__reviewTrace = []',
+        '  const original = globalThis.fetch.bind(globalThis)',
+        '  globalThis.fetch = async (url, options) => {',
+        '    const path = new URL(typeof url === "string" ? url : url.url, location.href).pathname',
+        '    const tracked = path.startsWith("/api/renderer/")',
+        '    try {',
+        '      const response = await original(url, options)',
+        '      if (tracked) {',
+        '        const event = { path, status: response.status }',
+        '        if (path.endsWith("/acknowledge")) {',
+        '          const body = JSON.parse(options.body); event.receiptOk = body.receipt?.ok',
+        '        }',
+        '        if (path.endsWith("/poll")) {',
+        '          const body = await response.clone().json().catch(() => ({})); event.command = body.command?.method',
+        '        }',
+        '        events.push(event); if (events.length > 50) events.shift()',
+        '      }',
+        '      return response',
+        '    } catch (error) { if (tracked) events.push({ path, error: true }); throw error }',
+        '  }',
+        '})()',
+      ].join(String.fromCharCode(10))
       const first = await CdpClient.connect(socket)
       pages.push(first)
       await first.send('Runtime.enable')
       await first.send('Page.enable')
+      await first.send('Page.addScriptToEvaluateOnNewDocument', { source: trace })
       await first.send('Page.navigate', { url: firstUrl })
-      const ready = async (page: CdpClient) => {
-        await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 70_000 })
-          .toBe('true')
+      const ready = async (page: CdpClient, timeout = 70_000) => {
+        try {
+          await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout })
+            .toBe('true')
+        } catch (cause) {
+          const state = await page.evaluate(
+            '({ text: document.body?.innerText.slice(0, 500),'
+              + ' readyState: document.readyState, controlled: Boolean(navigator.serviceWorker?.controller),'
+              + ' resources: performance.getEntriesByType("resource").filter(item => new URL(item.name).pathname.startsWith("/api/"))'
+              + '.map(item => ({ path: new URL(item.name).pathname.replace(/[a-f0-9]{64}/g, "[id]"), status: item.responseStatus })) })',
+          )
+          throw new Error('Manager did not recover: ' + JSON.stringify(state), { cause })
+        }
         await expect.poll(
           () =>
             page.evaluate(
@@ -138,7 +173,7 @@ it.skipIf(
         ).toBe('pending')
       }
       await ready(first)
-      const response = await fetch('http://' + new URL(socket).host + '/json/new?' + encodeURIComponent(await open()), {
+      const response = await fetch('http://' + new URL(socket).host + '/json/new?about:blank', {
         method: 'PUT',
       })
       const second = await CdpClient.connect(
@@ -147,6 +182,8 @@ it.skipIf(
       pages.push(second)
       await second.send('Runtime.enable')
       await second.send('Page.enable')
+      await second.send('Page.addScriptToEvaluateOnNewDocument', { source: trace })
+      await second.send('Page.navigate', { url: await open() })
       await ready(second)
       const permissionsBefore = (JSON.parse(await readFile(configPath, 'utf8')) as { permissions: unknown }).permissions
       const aliases = await Promise.all(pages.map(page =>
@@ -180,7 +217,7 @@ it.skipIf(
           await first.evaluate<string[]>(
             '[...document.querySelectorAll("[data-permission-decision]")].map(x => x.dataset.permissionDecision)',
           ),
-        ).toEqual(['deny-once', 'allow-once'])
+        ).toEqual(expect.arrayContaining(['deny-once', 'allow-once', 'deny-persistent', 'allow-persistent']))
         await trustedClick(first, '[data-permission-decision=allow-once]')
         await trustedClick(first, '[data-permission-action=confirm]')
         await expect.poll(
@@ -207,6 +244,70 @@ it.skipIf(
       expect(await first.evaluate('Boolean(document.querySelector("[data-installed-review-fixture]"))')).toBe(false)
       await first.evaluate('document.querySelector("[data-settings-navigation-item^=fixture-service]").click()')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-standalone-dom-review] button"))'))
+        .toBe(true)
+      const persistentPoint = await first.evaluate<string>(
+        'document.querySelector("[data-standalone-dom-review]").dataset.standaloneDomReview',
+      )
+      await trustedClick(first, '[data-standalone-dom-review] button')
+      await expect.poll(() =>
+        first.evaluate('Boolean(document.querySelector("[data-permission-decision=allow-persistent]"))')
+      )
+        .toBe(true)
+      await trustedClick(first, '[data-permission-decision=allow-persistent]')
+      await trustedClick(first, '[data-permission-action=confirm]')
+      const durablePolicy = async () => {
+        const config = JSON.parse(await readFile(configPath, 'utf8')) as {
+          permissions: Array<
+            {
+              key: { identity: { pluginId: string; source: string }; scope: { extensionPoints?: string[] } }
+              policy: string
+            }
+          >
+        }
+        return config.permissions.find(record =>
+          record.key.identity.pluginId === 'fixture-service'
+          && record.key.scope.extensionPoints?.[0] === persistentPoint
+        )
+      }
+      await expect.poll(async () => (await durablePolicy())?.policy, { timeout: 60_000 }).toBe('allow-persistent')
+      expect((await durablePolicy())?.key.identity.source).toBe('https://example.test/fixtures')
+      const peerPolicy = async () =>
+        await second.evaluate<string | undefined>(
+          'globalThis.__cordisxRuntime.snapshot().permissions.find(item => item.identity.id === "fixture-service"'
+            + ' && item.scope.extensionPoints?.[0] === ' + JSON.stringify(persistentPoint) + ')?.policy',
+        )
+      await expect.poll(peerPolicy, { timeout: 60_000 }).toBe('allow')
+      // A disk write and a peer adoption happen before the writer receives the
+      // final receipt. Do not navigate until the full handoff has completed.
+      await expect.poll(() =>
+        first.evaluate('Boolean(document.querySelector("[data-standalone-dom-reset]:not(:disabled)"))')
+      )
+        .toBe(true)
+      await second.evaluate('globalThis.__beforePersistentReload = true')
+      await second.send('Page.reload')
+      await expect.poll(() => second.evaluate('globalThis.__beforePersistentReload === undefined').catch(() => false))
+        .toBe(true)
+      await ready(second, 30_000)
+      await expect.poll(peerPolicy, { timeout: 30_000 }).toBe('allow')
+      await expect.poll(() =>
+        second.evaluate(
+          'globalThis.__reviewTrace.some(item => item.path === "/api/renderer/admit" && item.status === 200)',
+        ), { timeout: 30_000 }).toBe(true)
+      await first.evaluate('document.querySelector("[data-standalone-dom-reset]").click()')
+      expect((await durablePolicy())?.policy).toBe('allow-persistent')
+      await trustedClick(first, '[data-standalone-dom-reset]')
+      await expect.poll(async () => (await durablePolicy())?.policy, { timeout: 60_000 }).toBe('ask')
+      try {
+        await expect.poll(peerPolicy, { timeout: 30_000 }).toBe('ask')
+      } catch (cause) {
+        const state = await second.evaluate(
+          '({ text: document.body?.innerText.slice(0, 300), trace: globalThis.__reviewTrace })',
+        )
+        throw new Error('Peer did not adopt reset: ' + JSON.stringify(state), { cause })
+      }
+      await expect.poll(() =>
+        first.evaluate('Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))')
+      )
         .toBe(true)
       await trustedClick(first, '[data-standalone-dom-review] button')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-permission-authorization]"))'))

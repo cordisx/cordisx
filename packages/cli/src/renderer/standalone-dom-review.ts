@@ -1,7 +1,6 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
-import { isStandaloneDomOnceReviewTarget, isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import { consumeStandaloneDomReset } from './standalone-dom-reset-button.js'
-export { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
   CordisXPermissionAuthorizationDecisionV3,
@@ -31,7 +30,7 @@ export interface StandaloneDomReviewContext {
   readonly runtimeGeneration: string
   readonly moduleGeneration: string
   readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
-  /** Only the owner-selected configured Channel participates in persistent handoff. */
+  /** The owner explicitly supplies a persistent policy handoff for this graph. */
   readonly persistentEligible: boolean
   readonly isCurrent: () => boolean
   /** Checks the owner-bound renderer and its resources, without exposing its session token. */
@@ -79,7 +78,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   supportsPersistentDecision(context: StandaloneDomReviewContext): boolean {
     return !this.closed && context.persistentEligible
-      && isStandaloneDomReviewTarget(context.identity, context.pointId) && this.persistentDecision !== undefined
+      && isStandaloneManagerDomTarget(context.identity, context.pointId) && this.persistentDecision !== undefined
   }
 
   bindPersistentReset(callback: NonNullable<StandaloneDomReview['persistentReset']>): boolean {
@@ -90,7 +89,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   supportsPersistentReset(context: StandaloneDomReviewContext): boolean {
     return !this.closed && context.persistentEligible
-      && isStandaloneDomReviewTarget(context.identity, context.pointId) && this.persistentReset !== undefined
+      && isStandaloneManagerDomTarget(context.identity, context.pointId) && this.persistentReset !== undefined
   }
 
   private current(active: ActiveReview): boolean {
@@ -132,7 +131,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   async review(context: StandaloneDomReviewContext, operation: () => Promise<boolean>): Promise<boolean> {
     if (
-      this.closed || this.active || !isStandaloneDomOnceReviewTarget(context.identity, context.pointId)
+      this.closed || this.active || !isStandaloneManagerDomTarget(context.identity, context.pointId)
       || !ID.test(context.profileId)
       || !ID.test(context.runtimeGeneration) || !ID.test(context.moduleGeneration)
       || !context.artifact.version || context.artifact.version.length > 128

@@ -2,6 +2,7 @@ import path from 'node:path'
 import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js'
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
 import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
+import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { type CordisXConfig, loadConfig } from '../launcher/config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
@@ -38,7 +39,6 @@ import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from '
 import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
 import { ServiceRendererLifecycleHandoff } from './service-renderer-lifecycle-handoff.js'
 import { ServiceRendererPermissionAccess } from './service-renderer-permission-access.js'
-import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
@@ -74,7 +74,8 @@ export class ServiceRendererBootstrap {
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
   private readonly ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>
   private readonly lifecycleHandoff: ServiceRendererLifecycleHandoff
-  private readonly permissionAccess: ServiceRendererPermissionAccess
+  /** Owner-only policy projection and handoff; never exposed to the browser. */
+  readonly permissionAccess: ServiceRendererPermissionAccess
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
   private closed = false
@@ -103,6 +104,10 @@ export class ServiceRendererBootstrap {
       readonly experimentalChannelCredentials?: boolean
       /** Owner-created verifier, enabled only with an independently coordinated policy channel. */
       readonly permissionProof?: Pick<ManagerPermissionProofAuthority, 'register'>
+      /** Service owner has a coordinated policy channel for configured Channel UI. */
+      readonly experimentalConfiguredPermissionPolicy?: boolean
+      /** Service owner has a coordinated policy channel for installed Manager UI graphs. */
+      readonly experimentalInstalledPermissionPolicy?: boolean
       /** Service owner only: the full lifecycle federation and owner plan cleanup are available. */
       readonly restrictedManagement?: {
         readonly available: () => boolean
@@ -118,6 +123,11 @@ export class ServiceRendererBootstrap {
       readonly desktopPackageConfigEnabled?: () => boolean
     },
   ) {
+    if (
+      input.experimentalInstalledPermissionPolicy === true
+      && (!input.protectProfileInputs || !input.permissionProof
+        || !(input.lifecycle instanceof ServiceRendererLifecycle))
+    ) throw new Error('renderer-permission-handoff-unavailable')
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
     this.configuredChannel = input.experimentalConfiguredChannel
     this.managedServiceUI = input.managedServiceUI
@@ -130,6 +140,8 @@ export class ServiceRendererBootstrap {
     this.permissionAccess = new ServiceRendererPermissionAccess({
       profileId: input.profileId,
       generation: input.generation,
+      configuredPolicyEnabled: input.experimentalConfiguredPermissionPolicy === true,
+      installedPolicyEnabled: input.experimentalInstalledPermissionPolicy === true,
       channel: () => this.configuredChannel,
       permissionFence: this.permissionFence,
       entries: this.entries,
@@ -415,39 +427,6 @@ export class ServiceRendererBootstrap {
       origin,
       action,
     )
-  }
-
-  permissionSnapshot(context: ManagerRendererChannelContext): readonly CordisXPersistedPermissionPolicyRecord[] {
-    return this.permissionAccess.snapshot(context)
-  }
-
-  resolvePermissionPolicies(
-    records: readonly CordisXPersistedPermissionPolicyRecord[],
-    context: ManagerRendererChannelContext,
-  ): readonly CordisXPersistedPermissionPolicyRecord[] {
-    return this.permissionAccess.resolve(records, context)
-  }
-
-  projectPermissionPolicies(
-    records: readonly CordisXPersistedPermissionPolicyRecord[],
-    context: ManagerRendererChannelContext,
-  ): readonly CordisXPersistedPermissionPolicyRecord[] {
-    return this.permissionAccess.project(records, context)
-  }
-
-  permissionEvidence(context: ManagerRendererChannelContext) {
-    return this.permissionAccess.evidence(context)
-  }
-
-  async reservePermissionPolicy(
-    origin: ManagerOriginFence,
-    context: ManagerRendererChannelContext,
-    requestId: string,
-    expected: readonly CordisXPersistedPermissionPolicyRecord[],
-    updates: readonly CordisXPersistedPermissionPolicyRecord[],
-    consumers: ServiceRendererPermissionConsumerFence,
-  ) {
-    return await this.permissionAccess.reserve(origin, context, requestId, expected, updates, consumers)
   }
 
   async prepare(rendererId: string): Promise<unknown> {
@@ -784,6 +763,9 @@ export class ServiceRendererBootstrap {
             profileId: this.input.profileId,
             generation: this.input.generation,
             managerOrigin,
+            installedPermissionPolicy: this.input.experimentalInstalledPermissionPolicy === true,
+            configuredChannelPermissionPolicy: this.input.experimentalConfiguredPermissionPolicy === true
+              && this.input.permissionProof !== undefined,
             isCurrent: async () => await this.unchanged(rendererId, entry),
           },
           profileId: this.input.profileId,

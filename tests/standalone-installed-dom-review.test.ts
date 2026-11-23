@@ -19,7 +19,7 @@ const packageItem = {
   dependencies: [],
 }
 
-function fixture() {
+function fixture(persistentAvailable = false) {
   const decisions: string[][] = []
   const gate = new StandaloneDomReview(() => ({
     request: async () => undefined,
@@ -63,7 +63,12 @@ function fixture() {
   const verify = vi.fn(async () => true)
   const scope = {
     disposed: false,
-    metadata: () => ({ hostKind: 'standalone', profileId: 'default', standaloneReviewSession: verify }),
+    metadata: () => ({
+      hostKind: 'standalone',
+      profileId: 'default',
+      standaloneReviewSession: verify,
+      ...(persistentAvailable ? { standaloneInstalledPolicyReview: true } : {}),
+    }),
     broker: () => broker,
     generation: () => 'owner-1',
     activeController: () => (id: string, source: string) =>
@@ -101,6 +106,17 @@ it('reviews an installed graph only for this tab and never offers a persistent d
   } finally {
     first.broker.dispose()
     other.broker.dispose()
+  }
+})
+
+it('offers persistent choices only when the service owner provides their handoff', async () => {
+  const f = fixture(true)
+  try {
+    expect(f.model.describe(identity, point)?.persistentAvailable).toBe(true)
+    expect(await f.model.request(identity, point)).toBe(true)
+    expect(f.decisions[0]).toEqual(expect.arrayContaining(['allow-once', 'allow-persistent', 'deny-persistent']))
+  } finally {
+    f.broker.dispose()
   }
 })
 

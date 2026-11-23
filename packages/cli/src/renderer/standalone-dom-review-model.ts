@@ -1,7 +1,7 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
 import type { ManagerModel } from './manager.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
-import { isStandaloneDomOnceReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import { standaloneDomReview } from './standalone-dom-review.js'
 
 /** Bind the Manager control to an exact owner-issued graph and the live owner session. */
@@ -15,7 +15,7 @@ export function createStandaloneDomReviewModel(
   if (metadata.hostKind !== 'standalone' || verifySession === undefined || gate === undefined) return undefined
 
   const select = (identity: CordisXPluginIdentity, pointId: string, requireReview = true) => {
-    if (runtime.disposed || !isStandaloneDomOnceReviewTarget(identity, pointId)) return undefined
+    if (runtime.disposed || !isStandaloneManagerDomTarget(identity, pointId)) return undefined
     const controller = runtime.activeController()!(identity.id, identity.source)
     if (
       controller === undefined || controller.status !== 'active' || !controller.principalLive
@@ -47,7 +47,9 @@ export function createStandaloneDomReviewModel(
       controller,
       artifact,
       moduleGeneration,
-      persistentEligible: configured,
+      persistentEligible: configured && metadata.standaloneConfiguredPolicyReview === true
+        || controller.item.standaloneInstalledGraph === true
+          && metadata.standaloneInstalledPolicyReview === true,
       packageDigest: packageItem?.digest,
     }
   }

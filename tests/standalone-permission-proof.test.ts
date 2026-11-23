@@ -117,6 +117,76 @@ it('does not sign an unconfirmed or mismatched decision', async () => {
   }
 })
 
+it('binds an installed plugin decision to its renderer alias and exact artifact', async () => {
+  const plugin = { id: 'fixture-service', source: `https://renderer.cordisx.invalid/plugin/${'d'.repeat(64)}` }
+  const installed = { ...review, identity: plugin, moduleGeneration: 'installed-1' }
+  const installedPlan = buildDomPermissionAuthorizationPlanV3({
+    planId: 'installed-review',
+    profileId: scope.profileId,
+    identity: { source: plugin.source, pluginId: plugin.id },
+    binding: { operationId: 'installed-review', runtimeGeneration: scope.generation, moduleGeneration: 'installed-1' },
+    declaration: { name: 'ui.extension-points.render', required: false, scope: { extensionPoints: [review.pointId] } },
+    policies: [],
+  })
+  const view = new PermissionAuthorizationViewModel(installedPlan)
+  view.select('ui.extension-points.render', 'allow-persistent')
+  const result = view.confirm()
+  if (result.status !== 'confirmed' || result.decision.schemaVersion !== 3) throw new Error('fixture decision failed')
+  const declaration = installedPlan.declarations[0]!
+  const installedRecord = normalizePermissionPolicyRecordV3({
+    $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+    schemaVersion: 3,
+    key: {
+      profileId: scope.profileId,
+      identity: installedPlan.identity,
+      capability: declaration.capability,
+      scope: declaration.scope,
+      securityFingerprint: declaration.securityFingerprint,
+    },
+    policy: 'allow-persistent',
+  })
+  const signer = await createStandalonePermissionSigner(scope, { crypto: webcrypto as unknown as Crypto })
+  const controller = new AbortController()
+  const context = {
+    profileId: scope.profileId,
+    rendererId: scope.rendererId,
+    ownerGeneration: scope.generation,
+    signal: controller.signal,
+  }
+  const authority = new ManagerPermissionProofAuthority({
+    profileId: scope.profileId,
+    generation: scope.generation,
+    isCurrent: () => true,
+  })
+  try {
+    authority.register(context, signer.publicKey)
+    expect(
+      signer.noteConfirmed(
+        { ...installed, identity: { ...plugin, source: 'https://example.test/wrong' } },
+        installedPlan,
+        result.decision,
+      ),
+    ).toBe(false)
+    expect(signer.noteConfirmed(installed, installedPlan, result.decision)).toBe(true)
+    const proof = await signer.sign('installed-request', [installedRecord])
+    const input = {
+      context: { ...context, admitted: true },
+      requestId: 'installed-request',
+      records: [installedRecord],
+      expected: [],
+      moduleGeneration: installed.moduleGeneration,
+      artifact: installed.artifact,
+      proof,
+    }
+    expect(authority.authorize({ ...input, artifact: { ...installed.artifact, version: 'other' } })).toBe(false)
+    expect(authority.authorize(input)).toBe(true)
+    expect(authority.authorize(input)).toBe(false)
+  } finally {
+    signer.close()
+    authority.close()
+  }
+})
+
 it('binds a reset to the exact previously persisted policy and consumes the decision once', async () => {
   const signer = await createStandalonePermissionSigner(scope, { crypto: webcrypto as unknown as Crypto })
   const controller = new AbortController()

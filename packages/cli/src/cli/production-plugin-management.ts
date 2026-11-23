@@ -118,7 +118,10 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererPermissionPolicy?: {
     readonly bootstrap: ServiceRendererBootstrap
     readonly proof: ManagerPermissionProofAuthority
-    readonly reserveOtherConsumers: (origin: ManagerOriginFence) => Promise<ServiceRendererPermissionConsumerFence>
+    readonly reserveOtherConsumers: (
+      origin: ManagerOriginFence,
+      evidence: import('./service-renderer-permission-access.js').ServiceRendererPermissionEvidence,
+    ) => Promise<ServiceRendererPermissionConsumerFence>
   }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
@@ -142,8 +145,9 @@ export async function openProductionPluginManagementComposition(input: {
   if (
     input.rendererPermissionPolicy && (
       input.mode !== 'service' || !input.rendererParticipants || !input.rendererLifecycle
-      || !input.rendererConfiguredChannelService || !input.rendererBootstrap
-      || input.rendererPermissionPolicy.bootstrap !== input.rendererConfiguredChannelService.bootstrap
+      || !input.rendererBootstrap
+      || input.rendererPermissionPolicy.bootstrap !== input.rendererManagementAuthority
+        && input.rendererPermissionPolicy.bootstrap !== input.rendererConfiguredChannelService?.bootstrap
       || !input.rendererPermissionPolicy.bootstrap.usesPermissionProof(input.rendererPermissionPolicy.proof)
     )
   ) throw new Error('manager-consumer-fence-scope-invalid')

@@ -250,7 +250,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
           })
           : undefined
-        if (configuredServiceOwner && channelOwner?.plugin.source) {
+        if (protectProfileInputs && releaseRuntimeOwner !== undefined) {
           rendererPermissionProof = new ManagerPermissionProofAuthority({
             profileId,
             generation,
@@ -261,7 +261,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererPermissionConsumers = new ServiceOwnerPermissionConsumers({
             profileId,
             generation,
-            channelSource: channelOwner.plugin.source,
+            ...(channelOwner?.plugin.source === undefined ? {} : { channelSource: channelOwner.plugin.source }),
             participants: rendererParticipants,
             lifecycle: rendererLifecycle,
             ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
@@ -280,6 +280,10 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           store,
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
+          experimentalInstalledPermissionPolicy: rendererPermissionProof !== undefined
+            && rendererPermissionConsumers !== undefined,
+          experimentalConfiguredPermissionPolicy: configuredServiceOwner !== undefined
+            && rendererPermissionProof !== undefined && rendererPermissionConsumers !== undefined,
           ...(rendererPermissionProof === undefined ? {} : { permissionProof: rendererPermissionProof }),
           restrictedManagement: {
             available: () =>
@@ -344,7 +348,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             rendererPermissionPolicy: {
               bootstrap: rendererBootstrap,
               proof: rendererPermissionProof,
-              reserveOtherConsumers: async origin => rendererPermissionConsumers!.reserve(origin),
+              reserveOtherConsumers: async (origin, evidence) =>
+                rendererPermissionConsumers!.reserve(origin, {
+                  identity: evidence.ownerIdentity,
+                  isCurrent: () => rendererBootstrap!.permissionAccess.isCurrentEvidence(evidence),
+                }),
             },
           }),
           mode: 'service',

@@ -307,6 +307,10 @@ export interface CordisXRuntimeMetadata {
   readonly hostKind?: 'codex' | 'playground' | 'standalone'
   /** Non-authoritative identifier for this owner-attached renderer. */
   readonly standaloneRendererId?: string
+  /** The service owner coordinates persistent Manager UI policies for installed graphs. */
+  readonly standaloneInstalledPolicyReview?: true
+  /** The service owner coordinates persistent UI policies for the configured Channel. */
+  readonly standaloneConfiguredPolicyReview?: true
   /** Host-private owner and resource check supplied by the standalone session. */
   readonly standaloneReviewSession?: () => Promise<boolean>
   readonly standaloneWriteUncertain?: () => void

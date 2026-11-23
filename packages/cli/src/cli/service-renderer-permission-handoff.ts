@@ -17,6 +17,7 @@ import type {
 } from './service-renderer-bootstrap-state.js'
 import { synchronizeServiceRendererPolicies } from './service-renderer-permission-fleet.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { ManagerPolicyTarget } from './service-renderer-installed-permission.js'
 
 /** A separate owner must cover every policy consumer outside the Manager cohort. */
 export interface ServiceRendererPermissionConsumerFence {
@@ -85,10 +86,11 @@ type HandoffInput = {
   readonly readLifetimes: ManagerRendererReadLifetimes
   readonly policies: () => Promise<readonly CordisXPersistedPermissionPolicyRecord[]>
   readonly current: (rendererId: string, entry: ServiceRendererBootstrapEntry) => boolean
+  readonly target: (context: ManagerRendererChannelContext, pluginId: string) => ManagerPolicyTarget
 }
 
 /**
- * Reserve the exact configured Channel and Manager cohort for one policy write.
+ * Reserve the exact owner-selected UI target and Manager cohort for one policy write.
  * This primitive does not prove a user decision or supply the other-consumer fence.
  */
 export async function reserveServiceRendererPermissionHandoff(
@@ -137,27 +139,51 @@ async function reserve(
     }
   }
   if (
-    !channel || !permissionFence || !ownerLive() || !/^[A-Za-z0-9._:-]{1,160}$/u.test(requestId)
+    !permissionFence || !ownerLive() || !/^[A-Za-z0-9._:-]{1,160}$/u.test(requestId)
   ) throw new Error('renderer-permission-handoff-unavailable')
   const snapshot = input.lifecycle.snapshot()
+  const targetIdentity = changes[0]?.key.identity
+  if (
+    !targetIdentity || changes.some(record =>
+      record.key.identity.pluginId !== targetIdentity.pluginId
+      || record.key.identity.source !== targetIdentity.source
+    )
+  ) throw new Error('renderer-permission-handoff-unavailable')
   const cohort = input.participants.ownerPeers().map(peer => {
     const id = peer.identity.rendererId
     const entry = input.entries.get(id)
     const configured = entry?.configuredChannel
     if (
-      !entry || entry.peer !== peer || !entry.bootstrapConfirmed || !configured || !entry.policies
+      !entry || entry.peer !== peer || !entry.bootstrapConfirmed || !entry.policies
       || entry.channelTransition || entry.lifecycleTransition || entry.pendingIdentity
-      || !input.current(id, entry) || !configured.isCurrent() || !attachmentEqual(entry.snapshot, snapshot)
+      || !input.current(id, entry) || Boolean(channel) !== Boolean(configured)
+      || configured && !configured.isCurrent() || !attachmentEqual(entry.snapshot, snapshot)
       || !attachmentEqual(entry.policies, previous)
     ) throw new Error('renderer-permission-handoff-unavailable')
-    return { id, entry, configured, peer }
+    const binding = entry.identityContext ?? configured?.permissionContext()
+    if (!binding || binding.rendererId !== id) throw new Error('renderer-permission-handoff-unavailable')
+    const target = input.target({ ...binding, admitted: true }, targetIdentity.pluginId)
+    if (
+      !target.isCurrent() || target.ownerIdentity.id !== targetIdentity.pluginId
+      || target.ownerIdentity.source !== targetIdentity.source
+    ) throw new Error('renderer-permission-handoff-unavailable')
+    return { id, entry, configured, peer, target }
   })
   const writer = cohort.find(item => item.id === origin.rendererId)
   if (!writer || cohort.length === 0 || changes.length === 0 || changes.length > 2) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
-  const projected = writer.configured.projectPermissionPolicies(changes)
-  if (!attachmentEqual(writer.configured.resolvePermissionPolicies(context, projected.policies), changes)) {
+  if (
+    cohort.some(item =>
+      item.target.kind !== writer.target.kind || item.target.digest !== writer.target.digest
+      || !attachmentEqual(item.target.artifact, writer.target.artifact)
+      || item.target.kind === 'installed' && item.target.moduleGeneration !== writer.target.moduleGeneration
+    )
+  ) {
+    throw new Error('renderer-permission-handoff-unavailable')
+  }
+  const projected = writer.target.project(changes)
+  if (!attachmentEqual(writer.target.resolve(projected.policies), changes)) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
   let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspendAll']>> | undefined
@@ -171,8 +197,9 @@ async function reserve(
     try {
       return !ended && ownerLive() && (reservation?.isCurrent() ?? true)
         && attachmentEqual(input.lifecycle.snapshot(), snapshot)
-        && cohort.every(({ id, entry, configured }) =>
-          entry.lifecycleTransition === transition && input.current(id, entry) && configured.isCurrent()
+        && cohort.every(({ id, entry, configured, target }) =>
+          entry.lifecycleTransition === transition && input.current(id, entry) && target.isCurrent()
+          && (configured === undefined || configured.isCurrent())
         )
     } catch {
       return false
@@ -209,7 +236,7 @@ async function reserve(
     if (checks.some(result => result.status !== 'fulfilled' || !result.value) || !current()) {
       throw new Error('renderer-permission-handoff-unavailable')
     }
-    reservation = await channel.bridge.suspendAll(cohort.map(item => item.id))
+    if (channel) reservation = await channel.bridge.suspendAll(cohort.map(item => item.id))
     const drained = await Promise.all(cohort.map(async item => await input.readLifetimes.drainCurrent(item.id)))
     if (
       drained.some(value => !value) || !current() || !attachmentEqual(await input.policies(), previous) || !current()
@@ -272,7 +299,7 @@ async function reserve(
               peers: items.map(item => ({
                 peer: item.peer,
                 origin: item === writer,
-                project: records => item.configured.projectPermissionPolicies(records),
+                project: records => item.target.project(records),
               })),
               requestId,
               expected: previous,
@@ -287,8 +314,10 @@ async function reserve(
             throw new Error('renderer-permission-handoff-unavailable')
           }
           for (const { entry } of cohort) entry.policies = candidate
-          for (const item of cohort) await item.configured.handoff(reservation!.forRenderer(item.id))
-          if (!current() || !reservation!.release()) {
+          if (reservation) {
+            for (const item of cohort) await item.configured!.handoff(reservation.forRenderer(item.id))
+          }
+          if (!current() || reservation && !reservation.release()) {
             throw new Error('renderer-permission-handoff-unavailable')
           }
           for (const { entry } of cohort) delete entry.lifecycleTransition

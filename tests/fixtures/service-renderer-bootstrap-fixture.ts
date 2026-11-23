@@ -73,6 +73,7 @@ export async function fixture(
     channelCredentialCleanupFails?: boolean
     channelCredentialCommitUnknown?: boolean
     permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
+    channelPermissionPolicy?: boolean
     browserManagement?: boolean
     coordinateLifecycle?: boolean
     projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
@@ -332,6 +333,7 @@ export async function fixture(
       : {}),
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
     experimentalChannelCredentials: options.channelCredentials === true,
+    experimentalConfiguredPermissionPolicy: options.channelPermissionPolicy === true,
     ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {

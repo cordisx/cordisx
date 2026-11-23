@@ -1,7 +1,7 @@
 import type { CordisXPermissionPolicyRecordV3 } from '../permission-contracts.js'
 import { normalizePermissionPolicyRecordV3, permissionRecordKeyV3 } from '../permission-model-v3.js'
 import { mergePersistedPermissionPolicies } from '../permission-persistence.js'
-import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 
 export interface StandalonePolicyHandoff {
   readonly rendererId: string
@@ -16,7 +16,7 @@ export interface StandalonePolicyHandoff {
   readonly candidate: readonly CordisXPermissionPolicyRecordV3[]
 }
 
-/** Validate only a redacted, exact Channel Manager policy handoff for one renderer. */
+/** Validate a redacted, exact Manager UI policy handoff for one renderer. */
 export function parseStandalonePolicyHandoff(
   value: unknown,
   scope: { readonly profileId: string; readonly generation: string; readonly rendererId: string },
@@ -51,7 +51,7 @@ export function parseStandalonePolicyHandoff(
   if (
     Object.keys(rawIdentity).length !== 2 || typeof rawIdentity.id !== 'string'
     || typeof rawIdentity.source !== 'string'
-    || !isStandaloneDomReviewTarget({ id: rawIdentity.id, source: rawIdentity.source }, 'manager.content')
+    || !isStandaloneManagerDomTarget({ id: rawIdentity.id, source: rawIdentity.source }, 'manager.content')
   ) return invalid()
   const identity = { id: rawIdentity.id, source: rawIdentity.source }
   const policies = (input: unknown): readonly CordisXPermissionPolicyRecordV3[] => {
@@ -63,7 +63,7 @@ export function parseStandalonePolicyHandoff(
       if (
         record.key.profileId !== scope.profileId || record.key.identity.pluginId !== identity.id
         || record.key.identity.source !== identity.source || record.key.scope.extensionPoints?.length !== 1
-        || point === undefined || !isStandaloneDomReviewTarget(identity, point)
+        || point === undefined || !isStandaloneManagerDomTarget(identity, point)
       ) return invalid()
       const key = permissionRecordKeyV3(record)
       if (seen.has(key)) return invalid()

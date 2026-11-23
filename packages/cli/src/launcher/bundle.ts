@@ -28,6 +28,10 @@ export interface StandaloneOwnerAttachment {
   readonly profileId: string
   readonly generation: string
   readonly managerOrigin: string
+  /** The service owner supplies a coordinated policy handoff for installed graphs. */
+  readonly installedPermissionPolicy?: boolean
+  /** The selected configured Channel has its own coordinated policy handoff. */
+  readonly configuredChannelPermissionPolicy?: boolean
   /** Must recheck the current owner generation and live renderer session. */
   readonly isCurrent: () => boolean | Promise<boolean>
 }
@@ -139,6 +143,10 @@ async function assertStandaloneOwner(
     || options.permission?.profileId !== owner.profileId
     || options.permission.policies.some(policy => policy.key.profileId !== owner.profileId)
     || options.permission.bridgeToken !== undefined
+      && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
+    || owner.installedPermissionPolicy === true
+      && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
+    || owner.configuredChannelPermissionPolicy === true
       && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
     || activation?.recordKind !== 'active' || !Array.isArray(activation.plugins)
     || activation.profileId !== owner.profileId
@@ -520,6 +528,14 @@ export async function buildRendererCompositionSource(
     JSON.stringify(permission.policies)
   }${options.playground === true ? ', hostKind: "playground"' : attachedStandalone ? ', hostKind: "standalone"' : ''}${
     attachedStandalone ? `, standaloneRendererId: ${JSON.stringify(options.standaloneOwner!.rendererId)}` : ''
+  }${
+    attachedStandalone && options.standaloneOwner!.installedPermissionPolicy === true
+      ? ', standaloneInstalledPolicyReview: true'
+      : ''
+  }${
+    attachedStandalone && options.standaloneOwner!.configuredChannelPermissionPolicy === true
+      ? ', standaloneConfiguredPolicyReview: true'
+      : ''
   }${
     options.managerPresentationMode === undefined
       ? ''

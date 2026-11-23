@@ -6,12 +6,12 @@ import {
   permissionRecordKeyV3,
 } from '../permission-model-v3.js'
 import { type CordisXPersistedPermissionPolicyRecord, isPermissionPolicyRecordV3 } from '../permission-persistence.js'
-import { isStandaloneDomReviewTarget } from '../standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import type { StandaloneDomPolicyAdoption } from '../standalone-permission-contract.js'
 
 type Policy = { readonly key: string; readonly pointId: string; readonly record: CordisXPermissionPolicyRecordV3 }
 
-/** Validate an owner-projected Channel Manager policy transition without changing runtime state. */
+/** Validate an owner-projected Manager UI policy transition without changing runtime state. */
 export function prepareStandaloneDomPolicyAdoption(input: {
   readonly profileId: string
   readonly identity: CordisXPluginIdentity
@@ -25,7 +25,7 @@ export function prepareStandaloneDomPolicyAdoption(input: {
     throw new Error('standalone-policy-adoption-unavailable')
   }
   try {
-    if (!isStandaloneDomReviewTarget(input.identity, 'manager.content')) invalid()
+    if (!isStandaloneManagerDomTarget(input.identity, 'manager.content')) invalid()
     const normalize = (records: readonly unknown[]): Map<string, Policy> => {
       if (!Array.isArray(records) || records.length > 64) invalid()
       const values = new Map<string, Policy>()
@@ -35,7 +35,7 @@ export function prepareStandaloneDomPolicyAdoption(input: {
         if (
           record.key.profileId !== input.profileId || record.key.identity.pluginId !== input.identity.id
           || record.key.identity.source !== input.identity.source || record.key.scope.extensionPoints?.length !== 1
-          || pointId === undefined || !isStandaloneDomReviewTarget(input.identity, pointId)
+          || pointId === undefined || !isStandaloneManagerDomTarget(input.identity, pointId)
         ) invalid()
         const key = permissionRecordKeyV3(record)
         if (values.has(key)) invalid()
@@ -51,7 +51,7 @@ export function prepareStandaloneDomPolicyAdoption(input: {
       const point = record.key.scope.extensionPoints?.[0]
       return record.key.profileId === input.profileId && record.key.identity.pluginId === input.identity.id
         && record.key.identity.source === input.identity.source && record.key.scope.extensionPoints?.length === 1
-        && point !== undefined && isStandaloneDomReviewTarget(input.identity, point)
+        && point !== undefined && isStandaloneManagerDomTarget(input.identity, point)
     }))
     const sorted = (records: Map<string, Policy>) =>
       [...records.values()].sort((a, b) => a.key.localeCompare(b.key)).map(value => value.record)

@@ -69,6 +69,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       channelArchive: archive,
       protectProfileInputs: true,
       permissionProof: proof,
+      channelPermissionPolicy: true,
       writeDispatch: async (context, payload) => {
         requestContext = context
         return await channel.prepare(payload, context).dispatch()

@@ -1,7 +1,7 @@
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from './capability-risk-catalog.js'
 import type { CordisXPermissionPolicyRecordV3, CordisXPermissionPolicyV2 } from './permission-contracts.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from './permission-model-v3.js'
-import { isStandaloneDomReviewTarget } from './standalone-permission-contract.js'
+import { isStandaloneManagerDomTarget } from './standalone-permission-contract.js'
 
 export interface StandalonePermissionProofPayload {
   readonly version: 1
@@ -66,7 +66,7 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
   const identity = { id: record.key.identity.pluginId, source: record.key.identity.source }
   if (
     record.key.profileId !== item.profileId || record.key.scope.extensionPoints?.length !== 1
-    || pointId === undefined || !isStandaloneDomReviewTarget(identity, pointId)
+    || pointId === undefined || !isStandaloneManagerDomTarget(identity, pointId)
     || (item.observed === 'ask'
       ? record.policy !== 'allow-persistent' && record.policy !== 'deny-persistent'
       : record.policy !== 'ask')

@@ -15,7 +15,7 @@ import type { ServiceRendererPermissionConsumerFence } from './service-renderer-
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 
 /**
- * The service owner has no non-renderer consumer of these Channel UI policies.
+ * The service owner has no non-renderer consumer of these Manager UI policies.
  * The origin fence proves that every attached renderer is in the Manager
  * cohort and prevents new attachments. Other policy kinds and owners must
  * provide their own consumer fence.
@@ -29,7 +29,7 @@ export class ServiceOwnerPermissionConsumers {
     private readonly input: {
       readonly profileId: string
       readonly generation: string
-      readonly channelSource: string
+      readonly channelSource?: string
       readonly participants: ServiceRendererParticipants
       readonly lifecycle: ServiceRendererLifecycle
       readonly ownerCurrent: () => boolean
@@ -37,7 +37,19 @@ export class ServiceOwnerPermissionConsumers {
     },
   ) {}
 
-  reserve(origin: ManagerOriginFence): ServiceRendererPermissionConsumerFence {
+  reserve(
+    origin: ManagerOriginFence,
+    target?: { readonly identity: { readonly id: string; readonly source: string }; readonly isCurrent: () => boolean },
+  ): ServiceRendererPermissionConsumerFence {
+    const identity = target?.identity ?? { id: 'channel', source: this.input.channelSource ?? '' }
+    const selected = Object.freeze({ id: identity.id, source: identity.source })
+    const targetCurrent = () => {
+      try {
+        return target === undefined || target.isCurrent() === true
+      } catch {
+        return false
+      }
+    }
     const ownerCurrent = () => {
       try {
         return !this.closed && !this.fenced && this.input.ownerCurrent() === true
@@ -46,7 +58,9 @@ export class ServiceOwnerPermissionConsumers {
       }
     }
     if (
-      !ownerCurrent() || this.reservation !== undefined || !this.input.channelSource
+      !ownerCurrent() || this.reservation !== undefined || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(selected.id)
+      || typeof selected.source !== 'string' || selected.source.length === 0 || selected.source.length > 4096
+      || !targetCurrent()
       || !isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
     ) throw new Error('service-permission-consumers-unavailable')
     const reservation = Symbol('service-permission-consumers')
@@ -55,7 +69,7 @@ export class ServiceOwnerPermissionConsumers {
     let started = false
     let adopted = false
     const current = () =>
-      !ended && ownerCurrent() && this.reservation === reservation
+      !ended && ownerCurrent() && targetCurrent() && this.reservation === reservation
       && isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
     const fence = () => {
       if (ended) return
@@ -78,8 +92,8 @@ export class ServiceOwnerPermissionConsumers {
           request.profileId !== this.input.profileId || request.ownerGeneration !== this.input.generation
           || !/^[A-Za-z0-9._:-]{1,160}$/u.test(request.requestId) || expected.length > 4096
           || updates.length !== 1 || !update || !isPermissionPolicyRecordV3(update)
-          || update.key.profileId !== this.input.profileId || update.key.identity.pluginId !== 'channel'
-          || update.key.identity.source !== this.input.channelSource
+          || update.key.profileId !== this.input.profileId || update.key.identity.pluginId !== selected.id
+          || update.key.identity.source !== selected.source
           || update.key.capability !== 'ui.extension-points.render'
           || update.key.scope.extensionPoints?.length !== 1
           || !['manager.settings.navigation-items', 'manager.content'].includes(update.key.scope.extensionPoints[0]!)
@@ -100,7 +114,7 @@ export class ServiceOwnerPermissionConsumers {
       },
       release: () => {
         if (
-          ended || !adopted || !ownerCurrent() || this.reservation !== reservation
+          ended || !adopted || !ownerCurrent() || !targetCurrent() || this.reservation !== reservation
           || !consumeReleasedManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
         ) {
           fence()

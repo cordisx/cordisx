@@ -79,6 +79,7 @@ export function createManagerRendererPermissionChannel(input: {
     readonly project: (
       records: readonly CordisXPersistedPermissionPolicyRecord[],
       context: ManagerRendererChannelContext,
+      target: CordisXPluginIdentity,
     ) => readonly CordisXPersistedPermissionPolicyRecord[]
   }
 }): ManagerRendererChannel {
@@ -106,7 +107,8 @@ export function createManagerRendererPermissionChannel(input: {
   const project = (
     records: readonly CordisXPersistedPermissionPolicyRecord[],
     context: ManagerRendererChannelContext,
-  ) => normalize(input.identityProjection ? input.identityProjection.project(records, context) : records)
+    target: CordisXPluginIdentity,
+  ) => normalize(input.identityProjection ? input.identityProjection.project(records, context, target) : records)
   return {
     prepare(payload, context) {
       if (
@@ -116,9 +118,19 @@ export function createManagerRendererPermissionChannel(input: {
       const parsedValue: unknown = JSON.parse(payload)
       const { request, proof } = parse(parsedValue, context)
       const requested = normalize(request.records)
+      const first = requested[0]!.key.identity
+      const target = { id: first.pluginId, source: first.source }
+      if (
+        requested.some(record =>
+          record.key.identity.pluginId !== target.id || record.key.identity.source !== target.source
+        )
+      ) {
+        throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+      }
       const resolved = resolve(requested, context)
       if (
-        resolved.length !== requested.length || JSON.stringify(project(resolved, context)) !== JSON.stringify(requested)
+        resolved.length !== requested.length
+        || JSON.stringify(project(resolved, context, target)) !== JSON.stringify(requested)
       ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
       // Capture the owner's record of the renderer snapshot before waiting on
       // a writer. The user-action proof must cover browser transport too.
@@ -180,7 +192,7 @@ export function createManagerRendererPermissionChannel(input: {
               }, resolved)
             )
             await assertAdmission()
-            const responseRecords = project(result.records, context)
+            const responseRecords = project(result.records, context, target)
             if (JSON.stringify(responseRecords) !== JSON.stringify(requested)) {
               throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
             }

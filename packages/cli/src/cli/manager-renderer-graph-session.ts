@@ -363,7 +363,7 @@ export function createManagerRendererGraphSession(input: {
             generation: input.generation,
             rendererId: input.rendererId,
           })
-          if (active.get('channel')?.descriptor.moduleGeneration !== handoff.moduleGeneration) throw invalid()
+          if (active.get(handoff.identity.id)?.descriptor.moduleGeneration !== handoff.moduleGeneration) throw invalid()
           payload = handoff as unknown as Record<string, unknown>
         } else if (command.method === 'desktop-package-configuration') {
           if (

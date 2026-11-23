@@ -241,6 +241,14 @@ export class ServiceRendererConfiguredChannel {
     }
   }
 
+  /** Owner-only context for an already admitted peer during a fleet handoff. */
+  permissionContext(): ManagerRendererChannelContext {
+    if (!this.bound) throw new Error('renderer-configured-channel-unavailable')
+    const context = { ...this.bound, admitted: true }
+    if (!this.isPermissionContextCurrent(context)) throw new Error('renderer-configured-channel-unavailable')
+    return context
+  }
+
   /** Project the owner ledger to this Manager's exact Channel alias and graph. */
   projectPermissionPolicies(records: readonly CordisXPersistedPermissionPolicyRecord[]) {
     if (!this.bound) throw new Error('renderer-configured-channel-unavailable')
