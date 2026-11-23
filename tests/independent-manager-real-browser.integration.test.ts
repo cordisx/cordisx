@@ -93,7 +93,7 @@ it.skipIf(chrome === undefined)(
         .toMatchObject({ status: 'ready', mode: 'service' })
       const open = async () => {
         const link = new URL((await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!)
-        link.searchParams.set('host', '1')
+        expect(link.search).toBe('')
         return link.href
       }
       const firstUrl = await open()

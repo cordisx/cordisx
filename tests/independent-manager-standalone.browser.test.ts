@@ -198,7 +198,7 @@ it.skipIf(chrome === undefined)(
       const first = await CdpClient.connect(socketUrl)
       clients.push(first)
       await first.send('Page.enable')
-      await first.send('Page.navigate', { url: `${origin}/?host=1#${'a'.repeat(64)}` })
+      await first.send('Page.navigate', { url: `${origin}/#${'a'.repeat(64)}` })
       await expect.poll(() => first.evaluate("document.querySelector('[role=status]')?.hidden === true"), {
         timeout: 15_000,
       }).toBe(true)

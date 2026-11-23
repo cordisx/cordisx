@@ -14,7 +14,7 @@ import { ManagerObservationPolls } from './manager-observation-polls.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
-  '/': 'index.html',
+  '/': 'manager-standalone.html',
   '/manager.js': 'manager.js',
   '/manager-shell.js': 'manager-shell.js',
   '/manager-host.css': 'manager-host.css',
@@ -253,9 +253,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     } catch {
       return json(response, 400, { error: 'INVALID_REQUEST' })
     }
-    const file = url.pathname === '/' && url.search === '?host=1'
-      ? 'manager-standalone.html'
-      : files[url.pathname]
+    const file = files[url.pathname]
     const shared = sharedStyles[url.pathname]
     if (request.method === 'GET' && (file !== undefined || shared !== undefined)) {
       try {

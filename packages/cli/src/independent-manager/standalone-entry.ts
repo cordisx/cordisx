@@ -1,7 +1,7 @@
 import { startStandaloneManager } from './standalone-client.js'
 
 // The existing Manager bundle owns all product UI. This entry only describes
-// startup and failure for the opt-in independent Host document.
+// startup and failure for the independent Host document.
 const status = document.createElement('p')
 status.setAttribute('role', 'status')
 status.textContent = '正在连接 CordisX…'
@@ -14,7 +14,7 @@ const unavailable = (reason?: 'result-unknown') => {
     : 'CordisX 连接不可用，请重新打开管理页面。'
   status.hidden = false
 }
-if (location.pathname !== '/' || new URL(location.href).searchParams.get('host') !== '1') {
+if (location.pathname !== '/' || (location.search !== '' && location.search !== '?host=1')) {
   unavailable()
 } else {
   const manager = startStandaloneManager({ window, onUnavailable: unavailable })

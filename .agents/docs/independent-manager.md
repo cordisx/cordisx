@@ -37,9 +37,8 @@ reject new grants and fence remaining peers after a disconnect. The reservation
 does not drain adapter work or synchronize policies by itself, and it is not
 connected to real Codex or Claude adapter startup.
 
-An experimental `host=1` query on the manager entry loads the existing Host
-Manager and plugin registration instead of the default preview pages. It is not
-the default experience. Eligible service and Desktop owners can project initial
+The manager entry loads the existing Host Manager and its registered plugin
+pages. Eligible service and Desktop owners can project initial
 capability-free v1 package graphs and host-owned v14/v15 managed backends whose
 only declared renderer capability is UI extension rendering. These packages
 must have no durable documents or entity templates and must have a verified

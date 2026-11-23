@@ -271,7 +271,13 @@ describe('independent manager production boundaries', () => {
         body: JSON.stringify(value),
       })
     try {
-      expect((await fetch(origin)).status).toBe(200)
+      const index = await fetch(origin)
+      expect(index.status).toBe(200)
+      const indexHtml = await index.text()
+      expect(indexHtml).toContain('/manager-standalone.js')
+      expect(indexHtml).not.toContain('/manager.js')
+      const previousHostEntry = await fetch(`${origin}/?host=1`)
+      expect(await previousHostEntry.text()).toBe(indexHtml)
       const malformed = await new Promise<string>((resolve, reject) => {
         const socket = connect(Number(url.port), '127.0.0.1', () => {
           socket.write(`GET http://[ HTTP/1.1\r\nHost: ${url.host}\r\nConnection: close\r\n\r\n`)
