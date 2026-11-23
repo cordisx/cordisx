@@ -209,3 +209,24 @@ it('enforces primitive array element types and bounded natural numbers', () => {
   expect(isDesktopConfigFieldValue(field('natural'), [0, 2])).toBe(true)
   expect(isDesktopConfigFieldValue(field('natural'), [-1, 2.5])).toBe(false)
 })
+
+it('rejects values that do not match the declared scalar field in a native readback', () => {
+  const numericPlugin = { ...plugin, config: { count: 'not-a-number' } }
+  const numericProof = structuredClone(proof)
+  numericProof.plugin.configuration.value = numericPlugin.config
+  numericProof.plugin.configuration.fields = [{ path: ['count'], type: 'number' }]
+  numericProof.plugin.configuration.secrets = []
+  expect(() => projectDesktopManagerConfig(snapshot, numericPlugin, numericProof)).toThrow(
+    'desktop-manager-config-unavailable',
+  )
+  const scalar = (type: string, choices?: unknown[]) => ({ type, choices }) as never
+  expect(isDesktopConfigFieldValue(scalar('string'), true)).toBe(false)
+  expect(isDesktopConfigFieldValue(scalar('boolean'), 'true')).toBe(false)
+  expect(isDesktopConfigFieldValue(scalar('number'), 2.5)).toBe(true)
+  expect(isDesktopConfigFieldValue(scalar('natural'), -1)).toBe(false)
+  expect(isDesktopConfigFieldValue(scalar('natural'), 1.5)).toBe(false)
+  expect(isDesktopConfigFieldValue(scalar('natural'), 2)).toBe(true)
+  const choices = [{ label: 'one', value: 'one' }, { label: 'two', value: 'two' }]
+  expect(isDesktopConfigFieldValue(scalar('union', choices), 'one')).toBe(true)
+  expect(isDesktopConfigFieldValue(scalar('union', choices), 'other')).toBe(false)
+})

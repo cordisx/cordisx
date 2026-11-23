@@ -141,6 +141,12 @@ it('refuses stale, sensitive, undeclared, disabled and non-live configuration in
       operation: { ...operation, operations: [{ op: 'set', path: ['unknown'], value: 'x' }] },
     })
   ).toThrow('desktop-package-config-unavailable')
+  expect(() =>
+    new DesktopPackageConfigWrite({
+      ...base,
+      operation: { ...operation, operations: [{ op: 'set', path: ['label'], value: true }] },
+    })
+  ).toThrow('desktop-package-config-unavailable')
   const disabled = structuredClone(proof)
   disabled.plugin.configuration.fields[0].disabled = true
   expect(() => new DesktopPackageConfigWrite({ ...base, proof: disabled })).toThrow(

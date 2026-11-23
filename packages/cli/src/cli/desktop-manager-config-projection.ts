@@ -33,9 +33,17 @@ function supportedDesktopConfigField(field: DesktopConfigField): boolean {
 export function isDesktopConfigFieldValue(field: DesktopConfigField, value: unknown): boolean {
   if (!supportedDesktopConfigField(field)) return false
   if (value === null) return true
-  if (field.type !== 'array') {
-    return ['string', 'number', 'boolean'].includes(typeof value)
-      && (typeof value !== 'number' || Number.isFinite(value))
+  if (field.type === 'string') return typeof value === 'string'
+  if (field.type === 'boolean') return typeof value === 'boolean'
+  if (field.type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (field.type === 'natural') {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+  }
+  if (field.type === 'const' || field.type === 'union') {
+    if (typeof value === 'number' && !Number.isFinite(value)) return false
+    if (!['string', 'number', 'boolean'].includes(typeof value)) return false
+    return field.choices === undefined
+      || field.choices.some(choice => Object.is(choice.value, value) || choice.value === value)
   }
   return Array.isArray(value) && value.length <= 256 && value.every(item => {
     if (field.arrayItemType === 'string') return typeof item === 'string'
