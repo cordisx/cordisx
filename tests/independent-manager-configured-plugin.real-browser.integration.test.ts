@@ -60,11 +60,16 @@ it.skipIf(chrome === undefined)(
       await mkdir(homeDir, { mode: 0o700 })
       const good = await configuredManagerPlugin(root)
       const broken = await configuredManagerPlugin(root, 'broken-demo', { invalidPage: true })
+      const unsupported = await configuredManagerPlugin(root, 'needs-config')
       await writeFile(
         configPath,
         JSON.stringify({
           ...createDefaultHomeConfig(),
-          plugins: [{ id: 'configured-demo', entry: good.archive }, { id: 'broken-demo', entry: broken.archive }],
+          plugins: [
+            { id: 'configured-demo', entry: good.archive },
+            { id: 'broken-demo', entry: broken.archive },
+            { id: 'needs-config', entry: unsupported.archive, config: { token: 'fixture-private' } },
+          ],
         }),
         { mode: 0o600 },
       )
@@ -160,7 +165,32 @@ it.skipIf(chrome === undefined)(
       expect(await states()).toEqual(expect.arrayContaining([
         { id: 'configured-demo', status: 'active' },
         { id: 'broken-demo', status: 'failed' },
+        { id: 'needs-config', status: 'failed' },
       ]))
+      expect(await page.evaluate("document.body.textContent.includes('fixture-private')")).toBe(false)
+      await page.evaluate('document.querySelector("[data-plugin-id=needs-config]").click()')
+      await vi.waitFor(async () => {
+        const state = await page!.evaluate<{ locale: string; error?: string; notice?: string }>(`(() => {
+          const snapshot = globalThis.__cordisxRuntime.snapshot()
+          const plugin = snapshot.plugins.find(item => item.id === 'needs-config')
+          const detail = document.querySelector('[data-plugin-detail="needs-config"]')
+          return { locale: snapshot.localization.locale, error: plugin?.error,
+            notice: detail?.querySelector('[role="alert"]')?.textContent }
+        })()`)
+        const expected = state.locale.startsWith('zh')
+          ? '此插件暂不支持独立管理页面。'
+          : 'This plugin is not yet available in the standalone Manager.'
+        expect(state).toMatchObject({ error: expected, notice: expected })
+      }, { timeout: 10_000 })
+      const actions = await page.evaluate<Array<{ label: string | null; disabled: boolean; className: string }>>(
+        `(() => {
+        return [...document.querySelectorAll('[data-plugin-detail="needs-config"] .cxr-plugin-identity-actions [aria-label]')]
+          .map(button => ({ label: button.getAttribute('aria-label'), disabled: button.matches(':disabled'),
+            className: button.className }))
+      })()`,
+      )
+      const disable = actions.find(button => ['Disable plugin', '禁用插件'].includes(button.label ?? ''))
+      if (!disable?.disabled) throw new Error('Plugin disable action is not disabled: ' + JSON.stringify(actions))
       const navigationSelector = '[data-settings-navigation-item="configured-demo:navigation"]'
       const openFixturePage = async () => {
         await vi.waitFor(async () => {
@@ -206,6 +236,7 @@ it.skipIf(chrome === undefined)(
       expect(await states()).toEqual(expect.arrayContaining([
         { id: 'configured-demo', status: 'active' },
         { id: 'broken-demo', status: 'failed' },
+        { id: 'needs-config', status: 'failed' },
       ]))
       await openFixturePage()
       expect(await page.evaluate("sessionStorage.getItem('fixture-migration-count')")).toBe('1')

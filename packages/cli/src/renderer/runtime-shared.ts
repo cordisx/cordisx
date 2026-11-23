@@ -341,6 +341,8 @@ export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'packag
   readonly artifactGeneration?: string
   /** Owner-issued initial graph for a configured plugin in an independent Host. */
   readonly standaloneConfiguredGraph?: true
+  /** Owner-issued placeholder without a loaded plugin graph. */
+  readonly standaloneUnavailable?: true
   /** Owner-issued initial graph for an installed package in an independent Host. */
   readonly standaloneInstalledGraph?: true
   /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
@@ -824,7 +826,10 @@ export function createController(item: RuntimeBrowserPlugin, pluginConsole: Plug
       activation,
       principalLive: true,
       manifest,
-      status: !item.enabled || (!isolated && module === undefined) ? 'configured-disabled' : 'active',
+      status: item.standaloneUnavailable ? 'failed' : !item.enabled || (!isolated && module === undefined)
+        ? 'configured-disabled'
+        : 'active',
+      ...(item.standaloneUnavailable ? { error: 'This plugin is not yet available in the standalone Manager.' } : {}),
     }
   } catch (error) {
     return {

@@ -1,4 +1,5 @@
 import { usagePermissionAvailability } from './usage-availability.js'
+import { managerCopy } from './ui-copy.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -450,7 +451,11 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
           developmentReloadAvailable: developmentReloadAvailable(runtimeScope, controller.item.id),
         }),
         status: controller.status,
-        ...(controller.error === undefined ? {} : { error: controller.error }),
+        ...(controller.error === undefined ? {} : {
+          error: controller.item.standaloneUnavailable
+            ? managerCopy(locale, 'plugins.standalone-unavailable')
+            : controller.error,
+        }),
         ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
       }
     }),

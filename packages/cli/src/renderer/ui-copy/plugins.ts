@@ -17,6 +17,10 @@ export const PLUGIN_COLLECTION_COPY = {
   'plugins.details-tabs': { en: 'Plugin details', 'zh-CN': '插件详情' },
   'plugins.missing': { en: 'This plugin is no longer available.', 'zh-CN': '插件已不存在' },
   'plugins.no-readme': { en: 'This plugin does not provide a README.', 'zh-CN': '此插件没有提供 README。' },
+  'plugins.standalone-unavailable': {
+    en: 'This plugin is not yet available in the standalone Manager.',
+    'zh-CN': '此插件暂不支持独立管理页面。',
+  },
   'plugins.operation-result': { en: 'Operation result', 'zh-CN': '操作结果' },
   'plugins.source-path': { en: 'Source path', 'zh-CN': '源码路径' },
   'plugins.build-status': { en: 'Build status', 'zh-CN': '构建状态' },

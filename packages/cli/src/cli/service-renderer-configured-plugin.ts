@@ -32,23 +32,25 @@ export class ServiceRendererConfiguredPlugin {
     readonly plugin: CordisXConfigPlugin
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
-  }): Promise<ServiceRendererConfiguredPlugin> {
+  }): Promise<ServiceRendererConfiguredPlugin | undefined> {
     const value = input.plugin.config
+    if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
     if (
-      !input.current() || value === null || typeof value !== 'object' || Array.isArray(value)
-      || Object.keys(value).length !== 0
-    ) throw new Error('renderer-configured-plugin-unavailable')
+      value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 0
+      || !input.plugin.configuredArchiveDigest || !input.plugin.manifest || !input.plugin.distributionArtifact
+      || input.plugin.package !== undefined || input.plugin.development !== undefined
+    ) return undefined
     const staged = await loadServiceConfiguredArchive(input.homeDir, input.plugin)
     const manifest = staged.manifest.runtimeManifest
     const startup = 'startup' in manifest ? manifest.startup : undefined
     const artifact = staged.browserArtifact
     if (
-      !input.current() || !artifact || !input.plugin.manifest || !input.plugin.distributionArtifact
-      || !('services' in manifest) || manifest.services.length !== 0 || manifest.capabilities.length !== 0
+      !artifact || !('services' in manifest) || manifest.services.length !== 0 || manifest.capabilities.length !== 0
       || staged.serviceModules.length !== 0 || staged.managedServiceResources.length !== 0
       || staged.entityTemplates.length !== 0 || (staged.documents?.length ?? 0) !== 0
       || startup !== undefined && (startup.pages.length !== 0 || startup.capabilities.length !== 0)
-    ) throw new Error('renderer-configured-plugin-unavailable')
+    ) return undefined
+    if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
     const lease = await input.server.lease(
       {
         packageIdentity: { pluginId: input.plugin.id, version: staged.manifest.version, integrity: staged.digest },
@@ -134,6 +136,22 @@ export function disabledConfiguredPlugin(plugin: CordisXConfigPlugin): CordisXCo
   }
 }
 
+/** Do not project private data or a browser graph for an unsupported enabled plugin. */
+export function unavailableConfiguredPlugin(plugin: CordisXConfigPlugin): CordisXConfigPlugin {
+  return { ...disabledConfiguredPlugin(plugin), standaloneUnavailable: true }
+}
+
+/** Configured source identities stay private even when a graph is unavailable. */
+export function assertConfiguredSourcesHidden(
+  bundle: string,
+  plugins: readonly CordisXConfigPlugin[],
+  ids: ReadonlySet<string>,
+): void {
+  if (plugins.some(plugin => ids.has(plugin.id) && plugin.source && bundle.includes(plugin.source))) {
+    throw new Error('renderer-bootstrap-unavailable')
+  }
+}
+
 export async function prepareConfiguredPlugins(input: {
   readonly homeDir: string
   readonly plugins: readonly CordisXConfigPlugin[]
@@ -141,13 +159,18 @@ export async function prepareConfiguredPlugins(input: {
   readonly configured: ServiceRendererConfiguredPlugin[]
   readonly leases: PluginGenerationGraphLease[]
   readonly current: () => boolean
-}): Promise<void> {
+}): Promise<CordisXConfigPlugin[]> {
+  const unavailable: CordisXConfigPlugin[] = []
   for (const plugin of input.plugins) {
     const configured = await ServiceRendererConfiguredPlugin.prepare({ ...input, plugin })
-    input.configured.push(configured)
-    input.leases.push(configured.lease)
+    if (configured === undefined) unavailable.push(plugin)
+    else {
+      input.configured.push(configured)
+      input.leases.push(configured.lease)
+    }
     if (!input.current()) throw new Error('renderer-bootstrap-stale')
   }
+  return unavailable
 }
 
 export async function projectConfiguredPlugins(input: {

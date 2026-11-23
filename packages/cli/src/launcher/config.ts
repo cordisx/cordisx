@@ -89,6 +89,8 @@ export interface CordisXConfigPlugin {
   /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
   readonly moduleFactorySource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
+  /** Owner-only placeholder for a configured plugin unavailable in standalone Manager. */
+  readonly standaloneUnavailable?: true
   /** Host-private launch-scoped browser graph; never accepted from configuration files. */
   readonly runtimeGraph?: {
     readonly moduleGeneration: string

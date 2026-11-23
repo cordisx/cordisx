@@ -87,7 +87,7 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
 )
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
-  'keeps configured plugin values private until their configuration bridge exists',
+  'keeps the Manager available without exposing an unsupported configured plugin',
   async () => {
     const f = await fixture({ protectProfileInputs: true })
     try {
@@ -96,9 +96,21 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
         ...current,
         plugins: [{ id: 'configured-demo', entry: plugin.archive, config: { token: 'fixture-private' } }],
       }), f.configPath)
-      const result = await f.call({ action: 'prepare' })
-      expect(result).toEqual({ status: 'unavailable' })
-      expect(JSON.stringify(result)).not.toContain('fixture-private')
+      const prepared = await f.call({ action: 'prepare' }) as any
+      expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [] } })
+      const completed = await f.call({ action: 'complete', managerOrigin: origin, graphs: [] }) as any
+      expect(completed).toMatchObject({ status: 'ok', value: { status: 'ok' } })
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      try {
+        const bundle = bytes.toString('utf8')
+        expect(bundle).toContain('configured-demo')
+        expect(bundle).toContain('standaloneUnavailable')
+        expect(bundle).not.toContain('fixture-private')
+        expect(bundle).not.toContain(plugin.archive)
+        expect(bundle).not.toContain(plugin.source)
+      } finally {
+        bytes.fill(0)
+      }
     } finally {
       await f.close()
     }
@@ -126,6 +138,36 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
         status: 'unavailable',
       })
       await vi.waitFor(async () => expect((await fetch(privateGraph.entryUrl)).status).toBe(404))
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'rejects admission if an unsupported configured plugin changes before completion',
+  async () => {
+    const f = await fixture({ protectProfileInputs: true })
+    try {
+      const plugin = await configuredManagerPlugin(f.root)
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'configured-demo', entry: plugin.archive, config: { token: 'fixture-private' } }],
+      }), f.configPath)
+      const prepared = await f.call({ action: 'prepare' }) as any
+      expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [] } })
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'configured-demo', entry: plugin.archive, config: { token: 'fixture-updated' } }],
+      }), f.configPath)).rejects.toMatchObject({ name: 'ProfilePluginConfigFenceBusyError' })
+      // Even an external writer that bypasses the normal fence must invalidate admission.
+      const config = JSON.parse(await readFile(f.configPath, 'utf8'))
+      config.plugins[0].config.token = 'fixture-updated'
+      await writeFile(f.configPath, JSON.stringify(config))
+      expect(await f.call({ action: 'complete', managerOrigin: origin, graphs: [] })).toEqual({
+        status: 'unavailable',
+      })
     } finally {
       await f.close()
     }

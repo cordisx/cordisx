@@ -190,6 +190,8 @@ export function PluginDetailPage(
         </span>
         <span className="cxr-plugin-identity-actions">
           <Button
+            tag="button"
+            type="button"
             shape="square"
             variant="outline"
             aria-label={managerCopy(snapshot.localization.locale, 'plugins.reload')}
@@ -206,6 +208,8 @@ export function PluginDetailPage(
           {plugin.status === 'configured-disabled'
             ? (
               <Button
+                tag="button"
+                type="button"
                 shape="square"
                 theme="primary"
                 aria-label={managerCopy(snapshot.localization.locale, 'plugins.enable')}
@@ -219,6 +223,8 @@ export function PluginDetailPage(
             )
             : (
               <Button
+                tag="button"
+                type="button"
                 shape="square"
                 variant="outline"
                 aria-label={managerCopy(snapshot.localization.locale, 'plugins.disable')}
@@ -231,6 +237,8 @@ export function PluginDetailPage(
               />
             )}
           <Button
+            tag="button"
+            type="button"
             shape="square"
             variant="outline"
             theme="danger"
@@ -244,6 +252,9 @@ export function PluginDetailPage(
           />
         </span>
       </section>
+      {plugin.status === 'failed' && plugin.error !== undefined && route.page !== 'runtime'
+        ? <div className="cxr-notice cxr-danger" role="alert">{plugin.error}</div>
+        : null}
       <ManagerTabs
         label={managerCopy(snapshot.localization.locale, 'plugins.details-tabs')}
         tabs={tabs(snapshot.localization.locale)}

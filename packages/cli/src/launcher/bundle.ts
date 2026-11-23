@@ -156,6 +156,10 @@ async function assertStandaloneOwner(
   ) throw new Error('Standalone Manager owner scope is invalid')
   const configuredPackages = config.plugins.filter(plugin => plugin.package !== undefined)
   for (const plugin of config.plugins) {
+    if (
+      plugin.standaloneUnavailable === true
+      && (plugin.enabled || plugin.package !== undefined || plugin.runtimeGraph !== undefined)
+    ) throw new Error('Standalone Manager unavailable plugin projection is invalid')
     if (plugin.enabled && usesIsolatedWorker(plugin)) {
       throw new Error('Standalone Manager isolated worker projection is unavailable')
     }
@@ -435,6 +439,9 @@ export async function buildRendererCompositionSource(
       const configuredGraphField = attachedStandalone && plugin.package === undefined && graphModule !== undefined
         ? ', standaloneConfiguredGraph: true'
         : ''
+      const unavailableField = attachedStandalone && plugin.standaloneUnavailable === true
+        ? ', standaloneUnavailable: true'
+        : ''
       const installedGraphField = attachedStandalone && plugin.package !== undefined && graphModule !== undefined
         ? ', standaloneInstalledGraph: true'
         : ''
@@ -462,7 +469,7 @@ export async function buildRendererCompositionSource(
         JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)
       }, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${
         plugin.revision ?? 0
-      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${configuredGraphField}${installedGraphField}${moduleField}${isolatedArtifactField} }`
+      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${configuredGraphField}${unavailableField}${installedGraphField}${moduleField}${isolatedArtifactField} }`
     }).join(',')
   }]`
   const providers = [

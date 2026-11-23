@@ -56,6 +56,7 @@ export type ServiceRendererBootstrapEntry = {
   cleanupFailed?: boolean
   configuredChannel?: ServiceRendererConfiguredChannel
   configuredPlugins?: ServiceRendererConfiguredPlugin[]
+  unavailableConfiguredPlugins?: CordisXConfigPlugin[]
   channelTransition?: { readonly isCurrent: () => boolean }
   lifecycleTransition?: { readonly isCurrent: () => boolean }
   preparing?: Promise<unknown>

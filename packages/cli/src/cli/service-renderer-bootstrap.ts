@@ -29,9 +29,11 @@ import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetime
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
 import {
+  assertConfiguredSourcesHidden,
   disabledConfiguredPlugin,
   prepareConfiguredPlugins,
   projectConfiguredPlugins,
+  unavailableConfiguredPlugin,
 } from './service-renderer-configured-plugin.js'
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import { allowsManagementWrite, projectManagementRequest } from './service-renderer-management-projection.js'
@@ -585,7 +587,7 @@ export class ServiceRendererBootstrap {
         }
         if (configuredPlugins.length > 0) {
           entry.configuredPlugins = []
-          await prepareConfiguredPlugins({
+          entry.unavailableConfiguredPlugins = await prepareConfiguredPlugins({
             homeDir: this.input.homeDir,
             plugins: configuredPlugins,
             server: await this.input.lifecycle.artifactServer(),
@@ -703,7 +705,11 @@ export class ServiceRendererBootstrap {
         let projectedSnapshot: Snapshot | undefined
         const disabledConfigured = entry.config.plugins.filter(plugin => !plugin.enabled)
         const disabledIds = new Set(disabledConfigured.map(plugin => plugin.id))
-        const configuredIds = new Set(configuredPlugins.map(item => item.plugin.id))
+        const unavailableConfigured = entry.unavailableConfiguredPlugins ?? []
+        const configuredIds = new Set([
+          ...configuredPlugins.map(item => item.plugin.id),
+          ...unavailableConfigured.map(plugin => plugin.id),
+        ])
         let projectedPolicies = entry.policies.filter(policy =>
           !disabledIds.has(policy.key.identity.pluginId) && !configuredIds.has(policy.key.identity.pluginId)
         )
@@ -760,6 +766,7 @@ export class ServiceRendererBootstrap {
               return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }
             }),
             ...disabledConfigured.map(disabledConfiguredPlugin),
+            ...unavailableConfigured.map(unavailableConfiguredPlugin),
             ...configuredPlugins.map(item => item.plugin),
             ...(configured === undefined ? [] : [configured.plugin]),
           ],
@@ -826,13 +833,7 @@ export class ServiceRendererBootstrap {
         if (entry.identity && entry.plugins.some(plugin => plugin.source && bundle.includes(plugin.source))) {
           throw new Error('renderer-bootstrap-unavailable')
         }
-        if (
-          entry.config.plugins.some(plugin =>
-            configuredIds.has(plugin.id) && plugin.source && bundle.includes(plugin.source)
-          )
-        ) {
-          throw new Error('renderer-bootstrap-unavailable')
-        }
+        assertConfiguredSourcesHidden(bundle, entry.config.plugins, configuredIds)
         if (entry.leases.some(lease => bundle.includes(lease.baseUrl)) || !await this.unchanged(rendererId, entry)) {
           throw new Error('renderer-bootstrap-unavailable')
         }

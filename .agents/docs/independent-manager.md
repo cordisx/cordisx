@@ -106,7 +106,11 @@ graph. Existing matching permissions are projected
 to a session-local identity; a new review is limited to the current tab. Its
 configuration, credentials, persistent permission changes and lifecycle
 operations remain unavailable. A plugin whose activation fails is shown as
-failed without disconnecting the Manager. Real adapter startup and recovery
+failed without disconnecting the Manager. An identifiable configured plugin
+that requires currently unsupported configuration or capabilities is also
+shown as unavailable without loading its browser module or exposing its
+configuration, credentials, or source. Its lifecycle actions remain disabled;
+invalid or stale owner identities still prevent admission. Real adapter startup and recovery
 after an uncertain result are not yet supported. The isolated browser tests do
 not constitute real Codex App validation.
 
