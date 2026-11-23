@@ -20,15 +20,27 @@ export function renderFeishuTypedContent(
       content: {
         en_us: {
           title: '',
-          content: content.blocks.map(block => [
-            block.style === 'code'
-              ? { tag: 'code_block', text: block.text }
-              : {
-                tag: 'text',
-                text: block.text,
-                ...(block.style === 'plain' ? {} : { style: [block.style === 'strong' ? 'bold' : 'italic'] }),
-              },
-          ]),
+          content: content.blocks.map(block =>
+            'type' in block
+              ? block.nodes.map(node =>
+                node.type === 'mention'
+                  ? { tag: 'at', user_id: node.userId }
+                  : {
+                    tag: 'text',
+                    text: node.text,
+                    ...(node.style === 'plain' ? {} : { style: [node.style === 'strong' ? 'bold' : 'italic'] }),
+                  }
+              )
+              : [
+                block.style === 'code'
+                  ? { tag: 'code_block', text: block.text }
+                  : {
+                    tag: 'text',
+                    text: block.text,
+                    ...(block.style === 'plain' ? {} : { style: [block.style === 'strong' ? 'bold' : 'italic'] }),
+                  },
+              ]
+          ),
         },
       },
     }

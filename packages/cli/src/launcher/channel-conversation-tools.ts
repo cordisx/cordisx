@@ -5,6 +5,7 @@ import type {
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
+import { richtextRequirements } from '@cordisx/channel-runtime'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
@@ -754,8 +755,17 @@ export class ChannelConversationTools {
             if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
             const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
             const requested = contents[index]!
+            const requirements = richtextRequirements(requested.content)
+            if (requirements.userIds.length) {
+              await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)
+            }
+            const richtext = requirements.paragraphs
+              ? (await current.runtime.outboundCapabilitiesV2(parsed[index]!, caller)).richtext
+              : undefined
             if (
-              !capabilities.types.includes(requested.content.type)
+              (!capabilities.types.includes(requested.content.type)
+                || requirements.paragraphs && richtext?.paragraphs !== true
+                || requirements.userIds.length > 0 && richtext?.mentions !== true)
               && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
             ) {
               throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')

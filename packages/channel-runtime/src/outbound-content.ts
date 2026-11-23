@@ -1,12 +1,18 @@
 import { ChannelIntegrityError } from './runtime-validation.js'
 
 export type ChannelOutboundType = 'text' | 'image' | 'audio' | 'file' | 'video' | 'richtext' | 'card'
+export type ChannelRichtextInline =
+  | { readonly type: 'text'; readonly text: string; readonly style: 'plain' | 'strong' | 'emphasis' }
+  | { readonly type: 'mention'; readonly userId: string }
+export type ChannelRichtextBlock =
+  | { readonly text: string; readonly style: 'plain' | 'strong' | 'emphasis' | 'code' }
+  | { readonly type: 'paragraph'; readonly nodes: readonly ChannelRichtextInline[] }
 export type ChannelOutboundContent =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'image' | 'audio' | 'file' | 'video'; readonly handle: string }
   | {
     readonly type: 'richtext'
-    readonly blocks: readonly { readonly text: string; readonly style: 'plain' | 'strong' | 'emphasis' | 'code' }[]
+    readonly blocks: readonly ChannelRichtextBlock[]
   }
   | { readonly type: 'card'; readonly title: string; readonly body: string }
 export type ChannelOutboundFallback = { readonly mode: 'reject' } | { readonly mode: 'text'; readonly text: string }
@@ -54,6 +60,26 @@ export function validateOutboundContent(value: unknown): ChannelOutboundContent 
       }
       const blocks = content.blocks.map(value => {
         const block = object(value)
+        if (block.type === 'paragraph') {
+          keys(block, ['type', 'nodes'])
+          if (!Array.isArray(block.nodes) || block.nodes.length === 0 || block.nodes.length > 128) {
+            throw new ChannelIntegrityError('Invalid richtext nodes')
+          }
+          const nodes: ChannelRichtextInline[] = block.nodes.map(value => {
+            const node = object(value)
+            if (node.type === 'mention') {
+              keys(node, ['type', 'userId'])
+              if (!validMentionUserId(node.userId)) throw new ChannelIntegrityError('Invalid mention identity')
+              return { type: 'mention', userId: node.userId }
+            }
+            keys(node, ['type', 'text', 'style'])
+            if (node.type !== 'text' || !['plain', 'strong', 'emphasis'].includes(String(node.style))) {
+              throw new ChannelIntegrityError('Invalid richtext inline text')
+            }
+            return { type: 'text', text: text(node.text, 4096), style: node.style as 'plain' | 'strong' | 'emphasis' }
+          })
+          return { type: 'paragraph' as const, nodes }
+        }
         keys(block, ['text', 'style'])
         if (!['plain', 'strong', 'emphasis', 'code'].includes(String(block.style))) {
           throw new ChannelIntegrityError('Invalid richtext style')
@@ -64,6 +90,22 @@ export function validateOutboundContent(value: unknown): ChannelOutboundContent 
     }
     default:
       throw new ChannelIntegrityError('Invalid outbound type')
+  }
+}
+export function validMentionUserId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,256}$/u.test(value)
+    && !/^(?:all|everyone|here)$/iu.test(value)
+}
+export function richtextRequirements(content: ChannelOutboundContent): { paragraphs: boolean; userIds: string[] } {
+  if (content.type !== 'richtext') return { paragraphs: false, userIds: [] }
+  const paragraphs = content.blocks.filter(block => 'type' in block)
+  return {
+    paragraphs: paragraphs.length > 0,
+    userIds: [
+      ...new Set(
+        paragraphs.flatMap(block => block.nodes.flatMap(node => node.type === 'mention' ? [node.userId] : [])),
+      ),
+    ],
   }
 }
 export function validateOutboundFallback(value: unknown): ChannelOutboundFallback {

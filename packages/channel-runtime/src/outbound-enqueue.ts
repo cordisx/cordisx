@@ -10,7 +10,7 @@ import type {
 import type { ChannelQuestionCard } from './question-card.js'
 import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord, StoredOutboxRecord } from './store.js'
 import { accountKey, canonical, ChannelIntegrityError, sanitizedThread } from './runtime-validation.js'
-import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
+import { richtextRequirements, validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
 import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
 
 interface EnqueueContext {
@@ -59,8 +59,24 @@ export async function enqueueOutbound(
   let effectiveType = content?.type
   let effectiveText = notification.text
   if (content) {
-    const types = context.connections.get(key)?.connection.outboundTypes ?? ['text']
-    if (!priorTyped?.content && !types.includes(content.type)) {
+    const connection = context.connections.get(key)?.connection
+    const types = connection?.outboundTypes ?? ['text']
+    const requirements = richtextRequirements(content)
+    if (requirements.userIds.length) {
+      await context.requirePermission({
+        caller,
+        capability: 'channel.messages.send',
+        source: target,
+        generation: adapter.generation,
+        operationId: deliveryId,
+      })
+      if (!connection?.verifyMentions) throw new ChannelIntegrityError('CHANNEL_MENTION_UNVERIFIED')
+      await connection.verifyMentions(target, requirements.userIds)
+    }
+    const unsupported = !types.includes(content.type)
+      || requirements.paragraphs && connection?.richtext?.paragraphs !== true
+      || requirements.userIds.length > 0 && connection?.richtext?.mentions !== true
+    if (!priorTyped?.content && unsupported) {
       if (fallback?.mode !== 'text' || !types.includes('text')) {
         throw new ChannelIntegrityError('Channel outbound type is unsupported; fallback rejected')
       }

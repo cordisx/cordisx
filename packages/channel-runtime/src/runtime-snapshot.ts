@@ -1,0 +1,38 @@
+import type { ChannelStoreState } from './store.js'
+import type { ChannelRuntimeSnapshot } from './types.js'
+
+export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): ChannelRuntimeSnapshot {
+  const accounts = Object.entries(state.adapters)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, adapter]) => {
+      const inbox = Object.values(state.inbox).filter(record => record.accountKey === key)
+      const outbox = Object.values(state.outbox).filter(record => record.accountKey === key)
+      return {
+        ref: adapter.ref,
+        adapterKind: adapter.kind,
+        implementationStatus: adapter.implementationStatus,
+        connectionState: adapter.connectionState,
+        secretState: adapter.secretState,
+        generation: adapter.generation,
+        lastGoodRevision: adapter.lastGoodRevision,
+        ...(adapter.cursorUpdatedAt === undefined ? {} : { cursorUpdatedAt: adapter.cursorUpdatedAt }),
+        ...(adapter.lastErrorCode === undefined ? {} : { lastErrorCode: adapter.lastErrorCode }),
+        inbound: {
+          pending: inbox.filter(record => record.status === 'queued' || record.status === 'processing').length,
+          retrying: inbox.filter(record => record.status === 'retrying').length,
+          deadLetter: inbox.filter(record => record.status === 'dead-letter').length,
+        },
+        outbound: {
+          pending: outbox.filter(record => record.status === 'queued' || record.status === 'processing').length,
+          retrying: outbox.filter(record => record.status === 'retrying').length,
+          deadLetter: outbox.filter(record => record.status === 'dead-letter').length,
+        },
+      }
+    })
+  return Object.freeze({
+    contract: 'cordisx.channel-runtime-snapshot/v1',
+    schemaVersion: 1,
+    observedAt: observedAt,
+    accounts,
+  })
+}
