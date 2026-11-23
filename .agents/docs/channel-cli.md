@@ -169,8 +169,10 @@ Feishu/Lark tasks accepted by the existing wake, binding and dispatch rules
 receive best-effort feedback. Default behavior attempts `Get` on receipt,
 switches to `OnIt` after the native turn starts, and switches to `DONE` when
 that exact turn is confirmed stopped. DONE describes the end of this round,
-not successful completion of the user's whole goal. One waiting message is sent
-after 30 seconds if the task has not replied or finished. Group chatter that does not wake the bot and
+not successful completion of the user's whole goal. Default progress reminders
+are injected into the existing Agent turn after 5 seconds without new input;
+they ask the Agent to assess whether work can finish within 10 seconds and, if
+not, send a factual progress update through Channel CLI. Group chatter that does not wake the bot and
 Host slash commands do not trigger task feedback. Reaction failure does not
 block native work. Feedback is separate from automatic final-response forwarding.
 
@@ -190,22 +192,41 @@ Configure `channel-feedback.json` beside the selected profile's
   },
   "wait": {
     "enabled": true,
-    "delaySeconds": 30,
-    "texts": [
-      "已收到，正在处理。",
-      "还在处理中，请稍候。",
-      "任务正在进行，我会继续处理。"
-    ]
+    "mode": "agent",
+    "quietSeconds": 5,
+    "repeatSeconds": 30,
+    "finishSeconds": 10
   }
 }
 ```
 
-Reaction and waiting hints can be disabled independently. Delay is an integer
-from 1 to 86400 seconds; the text list contains 1–50 nonempty strings of at most
-1000 characters each. One entry is chosen randomly per attempted hint. A legacy
-single `wait.text` remains supported; `texts` takes precedence. A file at
+Reaction and progress reminders can be disabled independently. The three Agent
+timings accept integer seconds from 1 to 86400. Continuous input resets one timer
+for this account, tenant, conversation and group topic; it never schedules one
+fixed response per message. After the quiet period, reminders repeat at
+`repeatSeconds` until an actual correlated message is confirmed sent, a new input
+resets the timer or the task stops. A tool invocation, queued message or reaction
+does not count as a reply. Question cards and typed/media sends through the same
+Channel CLI also count only after their sent receipt.
+
+The native transport uses exact-turn `turn/steer` with an explicitly labeled Host
+notice. It creates neither another task nor a fabricated Channel user input. The
+native protocol represents this notice as a text input in the current turn; it
+does not offer a separate system-message role. CLI progress sends should include
+the notice's `progressToken`; stale tokens reject and queued guarded sends are
+cancelled before transport if new input arrives or a reply was confirmed. Ordinary
+business sends retain their existing behavior. The token changes no permissions.
+
+Legacy `wait.delaySeconds`, `wait.text` and `wait.texts` select `mode:"fixed"` when
+no mode is explicitly set; this preserves existing deployments. To switch, add
+`mode:"agent"`; legacy fixed fields can remain but are ignored by the Agent timer.
+To retain fixed hints explicitly, use `mode:"fixed"`, `delaySeconds` and optional
+`texts` (1–50 nonempty strings, up to 1000 characters each). One entry is chosen
+randomly per attempt; `texts` takes precedence over single `text`. Fixed and Agent
+modes never run concurrently. A file at
 `CORDISX_HOME/channel-feedback.json` is the legacy fallback when the profile
-file is absent. Settings are reread for new inputs and at the hint deadline;
+file is absent. Agent timing is captured for each newly accepted input; fixed
+settings are reread at the hint deadline.
 no App restart is needed. Invalid configuration disables feedback for that
 input and records a diagnostic, without blocking the task.
 
@@ -228,11 +249,19 @@ completion mapping. `reaction.enabled:false` also disables stopped feedback unle
 `stoppedEnabled:true` is explicitly set. No feedback operation blocks native work.
 
 Feedback uses the existing account SDK connection and the configured reply
-route. Reserved attempts are not replayed after restart. An observed authorized
-Channel reply or question attempt conservatively cancels all waiting hints for
-the same account and destination, including hints for concurrent tasks there;
-a failed/uncertain send can therefore suppress a hint. Sends outside the Channel
-transport cannot be correlated. Unknown native turn state suppresses the hint.
+route. Reminders are process-local and are not replayed after restart. Multiple
+bindings or ambiguous simultaneous tasks are not reminded; queued inputs wait
+for their own confirmed active turn. Different senders do not steer one another.
+Unknown native state or an uncertain reminder receipt stops further reminders
+until a new input; the Host never repeats an uncertain `turn/steer`. A reminder
+already accepted can still send its guarded update if its scope remains current.
+Sends outside Channel cannot be correlated. Delivery created before the latest
+input does not cancel that input's timer, even if its receipt arrives late.
+
+In legacy fixed mode, an observed reply/question enqueue attempt conservatively
+cancels all fixed hints for that account/destination, including concurrent tasks;
+failed sends may therefore suppress a fixed hint. Agent mode instead relies on
+confirmed receipts correlated to the active native task and destination.
 Task completion and cancellation are rechecked before sending, but an HTTP
 request already issued cannot be withdrawn atomically with task completion.
 Hints are auxiliary notices and do not represent final task results.
@@ -445,7 +474,40 @@ Use `--page-token` with returned pagination. `--page-all` is bounded by
 history was retrieved. Check pagination completion and thread coverage. A
 permission failure in the selected app cannot be bypassed by switching tools.
 
-Send requests use `{account, target, text, operationId}`, with
+For explicit CLI `send` / `send-many`, prefer `richtext` for ordinary prose,
+progress updates and results, even when only one plain block is needed:
+
+```json
+{
+  "account": {
+    "adapterId": "feishu",
+    "accountId": "bot",
+    "tenantId": "tenant"
+  },
+  "target": { "id": "oc_chat", "kind": "group", "replyMode": "conversation" },
+  "content": {
+    "type": "richtext",
+    "blocks": [{ "text": "Message", "style": "plain" }]
+  },
+  "operationId": "distinct-stable-message-id"
+}
+```
+
+Choose `strong`, `emphasis` or `code` blocks when useful; richtext has 1..128
+blocks, each with 1..4096 characters. Blocks carry literal text and explicit
+styles, not Markdown parsing. For `send-many`, replace `target` with `targets`.
+Use `text` only when preserving verbatim original text, when the user explicitly
+requests plain text, or for compatibility when the running Host/platform lacks
+richtext support. Legacy `{account,target,text,operationId}` and typed
+`content:{type:"text",text}` retain plain-text wire semantics: this preference
+does not convert text inputs. `payload` is a `content` alias; never combine
+content fields. Images, audio, files, video and cards remain distinct types,
+not richtext substitutes. Discover installed arguments with `help send` and
+`help send-many`; CLI guidance does not establish platform capability or grant
+permissions. This preference does not change automatic final-response runtime
+defaults.
+
+Send requests use `{account, target, content, operationId}`, with
 `target: {id, kind, replyTo?, replyMode?}`. `conversation` posts to the main stream;
 `reply` quotes `replyTo` there; `thread` replies in a topic. Reply/thread require
 an `om_*` message ID and an `oc_*` chat ID; a conversation send must omit
@@ -494,6 +556,52 @@ receipts and platform UUID deduplication have their own lifetime and do not
 establish indefinite exactly-once delivery.
 
 ## Explicit replies and optional final forwarding
+
+### Native mentions in explicit richtext sends
+
+Use an inline paragraph to keep a native mention and its explanation on the
+same line:
+
+```json
+{
+  "type": "richtext",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "nodes": [
+        { "type": "mention", "userId": "ou_verified" },
+        { "type": "text", "text": " please review", "style": "plain" }
+      ]
+    }
+  ]
+}
+```
+
+Each paragraph is one line; existing text/style blocks keep their separate
+lines. Use exact platform-native IDs only, never guess them from display names.
+The current Feishu/Lark Host verifies only accepted inbound senders observed in
+the last five minutes in the exact account, tenant and target conversation during
+the active connection lifetime. This is historical identity evidence, not a
+current membership check: a member leaving within that window is not immediately
+detected. After expiry, missing fresh sender evidence rejects. Users who have
+never sent a message are unsupported, including users merely named by an inbound
+mention; inbound mention metadata is not currently accepted as identity proof.
+Arbitrary contact-directory users and screenshot names cannot be mentioned.
+SDK raw sender evidence must explicitly match the application's tenant, native
+open_id, user sender type, message ID and chat ID. Missing raw metadata or an
+external-tenant sender does not issue evidence; normalized sender IDs alone
+are insufficient. Raw event bodies are not retained in the evidence cache.
+A reconnect/replacement requiring a new connection loses that evidence; missing
+evidence rejects with `CHANNEL_MENTION_UNVERIFIED`. This does not request contact
+or directory scopes and does not enable `@all`. A direct-chat ID is not evidence
+of a user's identity. Richtext alone does not imply paragraph or native mention
+support: inspect outbound v2 flags. Unsupported structure requires an explicit
+text fallback; identity and permission failures never fall back. Batch sends
+validate all target identities before queueing the first delivery.
+
+Plugin consumers use additive runtime v3 `outboundV2` with send v2 documents;
+frozen `outbound` and `adaptersV2` retain v1 content only. No automatic forwarding
+behavior changes. Only a sent receipt proves delivery.
 
 Automatic final-response forwarding defaults to off. Addressed Channel inputs
 can still create or continue a Codex chat. Commentary and final answers remain

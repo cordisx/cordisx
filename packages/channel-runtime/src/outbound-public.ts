@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import type { ChannelMessageSendV1 } from '@cordisx/protocol/channel-outbound/v1'
+import type { ChannelMessageSendV2 } from '@cordisx/protocol/channel-outbound/v2'
+import { richtextRequirements, validateOutboundContent } from './outbound-content.js'
 import type { ChannelAdapterDefinition, ChannelRuntimeOptions } from './types.js'
 import type { StoredOutboxRecord } from './store.js'
 import { accountKey, canonical, ChannelIntegrityError } from './runtime-validation.js'
@@ -92,7 +94,7 @@ export function outboundAdapterDefinition(
 export function outboundReceipt(
   record: StoredOutboxRecord | undefined,
   deliveryId: string,
-  request: ChannelMessageSendV1,
+  request: ChannelMessageSendV1 | ChannelMessageSendV2,
 ): import('@cordisx/protocol/channel-outbound/v1').ChannelSendReceiptV1 {
   if (!record) {
     return {
@@ -135,7 +137,7 @@ export function outboundReceipt(
 }
 
 export async function sendOutboundPublic(
-  request: ChannelMessageSendV1,
+  request: ChannelMessageSendV1 | ChannelMessageSendV2,
   caller: import('./types.js').ChannelPluginIdentity,
   enqueue: (
     notification: import('./types.js').ChannelNotification,
@@ -145,13 +147,20 @@ export async function sendOutboundPublic(
   recordFor: (id: string) => StoredOutboxRecord | undefined,
 ): Promise<import('@cordisx/protocol/channel-outbound/v1').ChannelSendHandleV1> {
   if (
-    request.contract !== 'cordisx.channel-message-send/v1' || request.schemaVersion !== 1
+    !(request.contract === 'cordisx.channel-message-send/v1' && request.schemaVersion === 1
+      || request.contract === 'cordisx.channel-message-send/v2' && request.schemaVersion === 2)
     || typeof request.idempotencyKey !== 'string' || request.idempotencyKey.length === 0
     || Array.from(request.idempotencyKey).length > 256
     || Object.keys(request).some(key =>
       !['contract', 'schemaVersion', 'target', 'kind', 'idempotencyKey', 'content', 'fallback'].includes(key)
     )
   ) throw new ChannelIntegrityError('Invalid typed send request')
+  if (Buffer.byteLength(JSON.stringify(request), 'utf8') > 196_608) {
+    throw new ChannelIntegrityError('Typed send request exceeds transport bound')
+  }
+  if (request.schemaVersion === 1 && richtextRequirements(validateOutboundContent(request.content)).paragraphs) {
+    throw new ChannelIntegrityError('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+  }
   const deliveryId = `delivery:${
     createHash('sha256').update(canonical(caller)).update('\0').update(request.idempotencyKey).digest('hex')
   }`

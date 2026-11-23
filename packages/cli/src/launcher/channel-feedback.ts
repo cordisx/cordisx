@@ -3,10 +3,11 @@ import { randomInt } from 'node:crypto'
 import type { ChannelEventRef, ChannelThreadRef } from '@cordisx/channel-runtime'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { ChannelConversationState, ChannelConversationStore } from './channel-conversation-store.js'
-import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { channelPolicyAllows, channelWakePrefix } from './channel-conversation-policy.js'
 import { channelReplyDefaults, channelReplyTarget } from './channel-reply-routing.js'
 import { type ChannelFeedbackSettings } from './channel-feedback-settings.js'
 import { ChannelStoppedFeedback } from './channel-feedback-stopped.js'
+import type { ChannelProgressReminders } from './channel-progress-reminders.js'
 
 export interface ChannelReactionReceipt {
   reactionId: string
@@ -31,6 +32,7 @@ type Options = {
   report?(code: string): void
   now?: () => number
   randomIndex?: (length: number) => number
+  progress?: ChannelProgressReminders
 }
 /** Best-effort feedback for accepted routed inputs; native work and transport replies never wait for it. */
 export class ChannelFeedback {
@@ -50,6 +52,31 @@ export class ChannelFeedback {
     try {
       this.options.report?.(code)
     } catch { /* feedback cannot block work */ }
+  }
+  inputReceived(recordId: string, source: ChannelEventRef) {
+    const state = this.options.store.snapshot(), record = state.inputs[recordId]
+    const text = record?.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
+    if (source.eventId.startsWith('reaction:') || !record || !this.permitted(state, source)) return
+    const addressed = source.kind === 'direct' || record.mentionedBot
+      || channelWakePrefix(state.policy, source, text ?? '') !== undefined
+    if (addressed && (source.kind === 'direct' || record.mentionedBot || state.policy.groupReception === 'all')) {
+      this.options.progress?.inputReceived(recordId, source)
+    }
+  }
+  accepted(recordId: string) {
+    void this.options.progress?.accepted(recordId).catch(() => this.diagnostic('CHANNEL_PROGRESS_UNAVAILABLE'))
+  }
+  assertProgress(token: unknown, source: ChannelEventRef | undefined, sessionId: string | undefined) {
+    if (!this.options.progress) throw new Error('CHANNEL_PROGRESS_NOTICE_STALE')
+    this.options.progress.assertCurrent(token, source, sessionId)
+  }
+  trackDelivery(
+    id: string,
+    source: ChannelEventRef | undefined,
+    session: string | undefined,
+    turn: string | undefined,
+  ) {
+    this.options.progress?.trackDelivery(id, source, session, turn)
   }
   private jobs(state: ChannelConversationState, id: string) {
     return Object.values(state.jobs).filter(job =>
@@ -85,6 +112,7 @@ export class ChannelFeedback {
     entry.timer.unref?.()
   }
   sync() {
+    this.options.progress?.sync()
     const access = this.options.access()
     if (access && !this.subscriptions.has(access.runtime) && typeof access.runtime.observeOutbound === 'function') {
       for (const remove of this.subscriptions.values()) remove()
@@ -187,7 +215,8 @@ export class ChannelFeedback {
         this.finish(entry)
         return
       }
-      if (config.wait.enabled && !feedback.waitAttempted && !feedback.replyObserved) {
+      if (config.wait.mode === 'agent') this.finish(entry)
+      else if (config.wait.enabled && !feedback.waitAttempted && !feedback.replyObserved) {
         this.arm(entry, entry.since + config.wait.delaySeconds * 1000 - this.now())
       } else this.finish(entry)
     } catch {
@@ -362,7 +391,7 @@ export class ChannelFeedback {
       return
     }
     const config = await this.options.settings()
-    if (!config.wait.enabled) {
+    if (!config.wait.enabled || config.wait.mode === 'agent') {
       this.finish(entry)
       return
     }
@@ -423,6 +452,7 @@ export class ChannelFeedback {
   dispose() {
     this.disposed = true
     this.stopped.dispose()
+    this.options.progress?.dispose()
     for (const entry of this.pending.values()) this.finish(entry)
     for (const remove of this.subscriptions.values()) remove()
     this.subscriptions.clear()

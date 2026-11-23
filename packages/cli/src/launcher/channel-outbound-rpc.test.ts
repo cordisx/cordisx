@@ -49,6 +49,7 @@ function fixture() {
     taskSettings: { isBound: () => false },
     commandAllowed,
     sendAllowed,
+    trackProgressDelivery: vi.fn(),
   }
   const receipts = new Map<string, { state: string }>()
   const notifyOnce = vi.fn(async (_notification: unknown, _caller: unknown, id: string) => {
@@ -66,6 +67,8 @@ function fixture() {
         types: ['text', 'image', 'audio', 'video', 'file', 'card', 'richtext'],
         maxMediaBytes: 30000000,
       })),
+      outboundCapabilitiesV2: vi.fn(async () => ({ richtext: { paragraphs: true, mentions: true } })),
+      validateMentionContent: vi.fn(async () => {}),
     },
     drain: vi.fn(async () => {}),
   } as unknown as ChannelConversationAccess
@@ -307,6 +310,55 @@ it('rechecks ready account on chunks and commits and rejects unavailable service
   accounts.mockRestore()
   f.clear()
   expect(await f.call(begin)).toMatchObject({ status: 'unavailable' })
+})
+
+it('rejects aggregate inline content size before any batch effect', async () => {
+  const f = fixture()
+  const content = {
+    type: 'richtext',
+    blocks: [{
+      type: 'paragraph',
+      nodes: Array.from({ length: 128 }, () => ({ type: 'text', text: 'x'.repeat(4096), style: 'plain' })),
+    }],
+  }
+  expect(
+    await f.tools.call(
+      'send-many',
+      { account, targets: [begin.target], operationId: 'oversized', content },
+      f.metadata,
+    ),
+  ).toMatchObject({ status: 'rejected', code: 'INVALID_CHANNEL_PAYLOAD' })
+  expect(f.notifyOnce).not.toHaveBeenCalled()
+})
+
+it('preflights every mention identity before any batch effect and never falls back on identity denial', async () => {
+  const f = fixture()
+  const verify = vi.spyOn(f.access.runtime, 'validateMentionContent')
+  verify.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('CHANNEL_MENTION_UNVERIFIED'))
+  const request = {
+    account,
+    targets: [begin.target, { id: 'oc_other', kind: 'group' }],
+    operationId: 'mention-batch',
+    content: {
+      type: 'richtext',
+      blocks: [{
+        type: 'paragraph',
+        nodes: [{ type: 'mention', userId: 'ou_verified' }, { type: 'text', text: ' review', style: 'plain' }],
+      }],
+    },
+    fallback: { mode: 'text', text: 'explicit fallback' },
+  }
+  expect(await f.tools.call('send-many', request, f.metadata)).toMatchObject({ code: 'CHANNEL_MENTION_UNVERIFIED' })
+  expect(verify).toHaveBeenCalledTimes(2)
+  expect(f.notifyOnce).not.toHaveBeenCalled()
+  verify.mockResolvedValue(undefined)
+  vi.spyOn(f.access.runtime, 'outboundCapabilitiesV2').mockResolvedValue(
+    { richtext: { paragraphs: true, mentions: false } } as never,
+  )
+  expect(await f.tools.call('send-many', { ...request, fallback: { mode: 'reject' } }, f.metadata)).toMatchObject({
+    code: 'CHANNEL_OUTBOUND_TYPE_UNSUPPORTED',
+  })
+  expect(f.notifyOnce).not.toHaveBeenCalled()
 })
 
 it('preflights every typed batch capability before enqueueing and only accepts explicit fallback', async () => {

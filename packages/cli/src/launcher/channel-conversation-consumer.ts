@@ -163,6 +163,17 @@ export class ChannelConversationConsumer {
       signal: this.lifetime.signal,
     })
   }
+  assertProgressNotice(token: unknown, source: ChannelEventRef | undefined, sessionId: string | undefined) {
+    this.feedback.assertProgress(token, source, sessionId)
+  }
+  trackProgressDelivery(
+    id: string,
+    source: ChannelEventRef | undefined,
+    session: string | undefined,
+    turn: string | undefined,
+  ) {
+    this.feedback.trackDelivery(id, source, session, turn)
+  }
   profileLogicalOwner() {
     return this.logicalOwner
   }
@@ -401,7 +412,7 @@ export class ChannelConversationConsumer {
     addressing?: ChannelCommandAddressing,
   ): Promise<void> {
     if (this.lifetime.signal.aborted) return
-    await this.store.mutate(state => {
+    const fresh = await this.store.mutate(state => {
       const prior = state.inputs[recordId]
       if (prior) {
         state.inputs[recordId] = {
@@ -422,7 +433,9 @@ export class ChannelConversationConsumer {
         accepted: false,
         routed: false,
       }
+      return true
     })
+    if (fresh) this.feedback.inputReceived(recordId, message.source.event)
     void this.pump()
   }
   private async catchup(): Promise<void> {
@@ -529,6 +542,7 @@ export class ChannelConversationConsumer {
       }
       return
     } else if (received && addressed && policy.enabled && channelDispatchAllowed(state, event)) {
+      this.feedback.accepted(record.recordId)
       // Acknowledge receipt before a busy conversation is ready to create a job.
       void this.feedback.received(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
       const waiting = await this.store.mutate(state => {

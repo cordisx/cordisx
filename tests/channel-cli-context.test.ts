@@ -4,6 +4,21 @@ import { channelCliSendInstructions } from '../packages/cli/src/launcher/channel
 const cli = { node: '/node', entry: '/cli.js', home: '/home', profile: 'fixture' }
 
 describe('Channel route selection guidance', () => {
+  it('prefers richtext only for explicit CLI sends and retains text and safety boundaries', () => {
+    const prompt = channelCliSendInstructions(cli).join('\n')
+    expect(prompt).toContain('prefer richtext for ordinary prose, progress and results')
+    expect(prompt).toContain('including a single plain block')
+    expect(prompt).toContain('verbatim original text, an explicit plain-text request, or compatibility')
+    expect(prompt).toContain('retain their plain-text wire semantics')
+    expect(prompt).toContain('not Markdown parsing')
+    expect(prompt).toContain('Image, audio, file, video and card remain distinct types')
+    expect(prompt).toContain('never permission or send failures')
+    expect(prompt).toContain('Host capabilities and authorization')
+    expect(prompt).toContain('Only receipt.state=sent proves delivery')
+    expect(prompt).toContain('never blindly resend')
+    expect(prompt).toContain('not a change to automatic final-response runtime defaults')
+  })
+
   it.each([undefined, cli])('guides progress and final without persistent routing state, cli=%j', context => {
     const prompt = channelCliSendInstructions(context, 'scope-token').join('\n')
     expect(prompt).toContain('not a persistent current-chat-location rule')

@@ -8,9 +8,9 @@ import type {
   ChannelThreadRef,
 } from './types.js'
 import type { ChannelQuestionCard } from './question-card.js'
-import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord } from './store.js'
+import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord, StoredOutboxRecord } from './store.js'
 import { accountKey, canonical, ChannelIntegrityError, sanitizedThread } from './runtime-validation.js'
-import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
+import { richtextRequirements, validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
 import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
 
 interface EnqueueContext {
@@ -20,6 +20,7 @@ interface EnqueueContext {
   requirePermission(request: ChannelPermissionRequest): Promise<void>
   mediaDescriptor: ChannelRuntimeOptions['outboundMediaDescriptor']
   observers: ReadonlySet<(target: ChannelThreadRef) => void>
+  guarded?(id: string): boolean
   now(): string
   cancel(id: string): Promise<'cancelled' | 'irreversible' | 'not-found'>
   FencedError: new() => Error
@@ -44,6 +45,20 @@ export async function enqueueOutbound(
   }
   const content = notification.content === undefined ? undefined : validateOutboundContent(notification.content)
   const fallback = content ? validateOutboundFallback(notification.fallback ?? { mode: 'reject' }) : undefined
+  if (
+    content && Buffer.byteLength(
+        JSON.stringify({
+          contract: 'cordisx.channel-message-send/v2',
+          schemaVersion: 2,
+          target,
+          kind: notification.kind,
+          idempotencyKey: notification.idempotencyKey ?? deliveryId,
+          content,
+          fallback,
+        }),
+        'utf8',
+      ) > 196_608
+  ) throw new ChannelIntegrityError('Typed send request exceeds transport bound')
   if (content && (notification.text !== '' || notification.media !== undefined || questionCard !== undefined)) {
     throw new ChannelIntegrityError('Typed content cannot be combined with legacy content')
   }
@@ -58,8 +73,24 @@ export async function enqueueOutbound(
   let effectiveType = content?.type
   let effectiveText = notification.text
   if (content) {
-    const types = context.connections.get(key)?.connection.outboundTypes ?? ['text']
-    if (!priorTyped?.content && !types.includes(content.type)) {
+    const connection = context.connections.get(key)?.connection
+    const types = connection?.outboundTypes ?? ['text']
+    const requirements = richtextRequirements(content)
+    if (requirements.userIds.length) {
+      await context.requirePermission({
+        caller,
+        capability: 'channel.messages.send',
+        source: target,
+        generation: adapter.generation,
+        operationId: deliveryId,
+      })
+      if (!connection?.verifyMentions) throw new ChannelIntegrityError('CHANNEL_MENTION_UNVERIFIED')
+      await connection.verifyMentions(target, requirements.userIds)
+    }
+    const unsupported = !types.includes(content.type)
+      || requirements.paragraphs && connection?.richtext?.paragraphs !== true
+      || requirements.userIds.length > 0 && connection?.richtext?.mentions !== true
+    if (!priorTyped?.content && unsupported) {
       if (fallback?.mode !== 'text' || !types.includes('text')) {
         throw new ChannelIntegrityError('Channel outbound type is unsupported; fallback rejected')
       }
@@ -138,6 +169,7 @@ export async function enqueueOutbound(
       createdAt: now,
       updatedAt: now,
       status: 'queued',
+      ...(context.guarded?.(deliveryId) ? { guardedDelivery: true } : {}),
       attempts: 0,
     }
     context.appendAudit(
@@ -187,4 +219,10 @@ export async function outboundCapabilitiesPublic(
       connection?.maxMediaBytes ?? (connection?.supportsOutboundMedia ? 30_000_000 : 0),
     ),
   }
+}
+
+export function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: number): boolean {
+  if (record.status === 'queued') return true
+  if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
+  return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now
 }

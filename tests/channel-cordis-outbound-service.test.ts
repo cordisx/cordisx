@@ -48,6 +48,23 @@ function fixture(backend: object = {}) {
 }
 
 describe('Protocol V2 Cordis outbound service', () => {
+  it('adds outboundV2 without replacing frozen services and binds exact caller authority', async () => {
+    const backend = {
+      outboundCapabilitiesV2: vi.fn().mockResolvedValue({ richtext: { paragraphs: true, mentions: true } }),
+      sendTypedV2: vi.fn().mockResolvedValue({ deliveryId: 'mention' }),
+    }
+    const { ctx, root } = fixture(backend)
+    const channel = (ctx as unknown as import('@cordisx/protocol/channel-runtime/v3').ChannelRuntimeContextV3).channel
+    const request = { ...send, contract: 'cordisx.channel-message-send/v2' as const, schemaVersion: 2 as const }
+    expect(Object.isFrozen(channel.outboundV2)).toBe(true)
+    await channel.outboundV2.capabilities(target)
+    await channel.outboundV2.send(request)
+    expect(backend.outboundCapabilitiesV2).toHaveBeenCalledWith(target, identity)
+    expect(backend.sendTypedV2).toHaveBeenCalledWith(request, identity)
+    await expect(channel.outboundV2.send(send as never)).rejects.toThrow('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    const unbound = root as unknown as import('@cordisx/protocol/channel-runtime/v3').ChannelRuntimeContextV3
+    await expect(unbound.channel.outboundV2.send(request)).rejects.toThrow('launcher-bound')
+  })
   it('registers and sends through real Runtime V2 with a durable receipt', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-cordis-v2-'))
     const runtime = await ChannelRuntime.open({

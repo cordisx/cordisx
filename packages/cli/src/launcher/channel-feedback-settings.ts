@@ -12,7 +12,16 @@ export interface ChannelFeedbackSettings {
     stoppedEnabled?: boolean
     stoppedEmojiType?: string
   }
-  wait: { enabled: boolean; delaySeconds: number; text: string; texts?: readonly string[] }
+  wait: {
+    enabled: boolean
+    delaySeconds: number
+    text: string
+    texts?: readonly string[]
+    mode?: 'agent' | 'fixed'
+    quietSeconds?: number
+    repeatSeconds?: number
+    finishSeconds?: number
+  }
 }
 export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
   reaction: {
@@ -24,7 +33,15 @@ export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
     stoppedEnabled: true,
     stoppedEmojiType: 'DONE',
   },
-  wait: { enabled: true, delaySeconds: 30, text: '已收到，正在处理，请稍候。' },
+  wait: {
+    enabled: true,
+    mode: 'agent',
+    quietSeconds: 5,
+    repeatSeconds: 30,
+    finishSeconds: 10,
+    delaySeconds: 30,
+    text: '已收到，正在处理，请稍候。',
+  },
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_FEEDBACK_CONFIG')
@@ -49,7 +66,11 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
       ]
         .includes(key)
     )
-    || Object.keys(wait).some(key => !['enabled', 'delaySeconds', 'text', 'texts'].includes(key))
+    || Object.keys(wait).some(key =>
+      !['enabled', 'delaySeconds', 'text', 'texts', 'mode', 'quietSeconds', 'repeatSeconds', 'finishSeconds'].includes(
+        key,
+      )
+    )
   ) throw new Error('INVALID_FEEDBACK_CONFIG')
   const result = {
     reaction: {
@@ -67,7 +88,11 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
           : false)
         : reaction.stoppedEnabled,
     },
-    wait: { ...DEFAULT_CHANNEL_FEEDBACK.wait, ...wait },
+    wait: {
+      ...DEFAULT_CHANNEL_FEEDBACK.wait,
+      ...wait,
+      mode: wait.mode ?? (['delaySeconds', 'text', 'texts'].some(key => key in wait) ? 'fixed' : 'agent'),
+    },
   }
   if (
     typeof result.reaction.enabled !== 'boolean' || typeof result.reaction.emojiType !== 'string'
@@ -82,6 +107,12 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
       && (typeof result.reaction.completionEmojiType !== 'string'
         || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.completionEmojiType))
     || typeof result.wait.enabled !== 'boolean' || !Number.isSafeInteger(result.wait.delaySeconds)
+    || !['agent', 'fixed'].includes(String(result.wait.mode))
+    || ['quietSeconds', 'repeatSeconds', 'finishSeconds'].some(key =>
+      !Number.isSafeInteger(result.wait[key as keyof typeof result.wait])
+      || Number(result.wait[key as keyof typeof result.wait]) < 1
+      || Number(result.wait[key as keyof typeof result.wait]) > 86400
+    )
     || result.wait.delaySeconds < 1 || result.wait.delaySeconds > 86400 || !text(result.wait.text)
     || result.wait.texts !== undefined && (!Array.isArray(result.wait.texts) || result.wait.texts.length < 1
         || result.wait.texts.length > 50 || !result.wait.texts.every(text))

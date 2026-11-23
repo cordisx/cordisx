@@ -8,6 +8,15 @@ import {
 } from '../packages/cli/src/cli/channel-send-payload.js'
 
 describe('configured Channel send payload boundary', () => {
+  it.each(['send', 'send-many'])('documents richtext preference without changing text semantics: %s', operation => {
+    const help = channelCliHelp(operation)
+    expect(help).toContain('Prefer richtext for ordinary prose, progress and results')
+    expect(help).toContain('verbatim original text, an explicit plain-text request, or Host/platform compatibility')
+    expect(help).toContain('plain-text wire semantics')
+    expect(help).toContain('type:"richtext",blocks:[{text:"Message",style:"plain"}]')
+    expect(help).toContain('never blindly resend')
+  })
+
   it('validates bounded bytes prepare without treating names, paths or claimed grants as authority', () => {
     const input = {
       account: { adapterId: 'feishu', accountId: 'bot', tenantId: 'tenant' },

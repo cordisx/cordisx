@@ -31,6 +31,7 @@ import {
 } from './feishu-outbound-media.js'
 import { channelReactionInput, type KnownBotMessage } from './channel-reaction-input.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
+import { ChannelMentionEvidence, verifiedFeishuSender } from './channel-mention-evidence.js'
 import { createFeishuDiagnostics } from './feishu-diagnostics.js'
 import { FeishuCardActionQueue } from './feishu-card-action-queue.js'
 import { type ChannelCommandAddressing, channelCommandAddressing } from './channel-command-users.js'
@@ -186,6 +187,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         logger: observation.logger,
       })
       let stopped = false
+      const mentions = new ChannelMentionEvidence(input.connection.ref)
       const knownBotMessages = new Map<string, KnownBotMessage>()
       const originalInputs = new Map<string, ChannelInboundEnvelope['input']>()
       const ambiguousOriginals = new Set<string>()
@@ -266,6 +268,10 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           observation.message('staged', message.messageId)
           if (stopped) return
           const receipt = await host.receive(envelope)
+          if (receipt.recordId === recordId && !receipt.duplicate && !stopped) {
+            const senderId = verifiedFeishuSender(message, input.connection.ref.tenantId)
+            if (senderId) mentions.observe(envelope.input.source.event, senderId)
+          }
           observation.message('persisted', message.messageId, {
             verified: receipt.recordId === recordId,
             outcome: receipt.duplicate ? 'duplicate' : receipt.status,
@@ -327,6 +333,8 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       }, 1_000)
       interval.unref()
       return {
+        richtext: { paragraphs: channel.rawClient !== undefined, mentions: channel.rawClient !== undefined },
+        verifyMentions: (target, userIds) => mentions.verify(target, userIds),
         outboundTypes: channel.rawClient
           ? ['text', 'image', 'audio', 'file', 'video', 'richtext', 'card'] as const
           : ['text'] as const,
@@ -409,6 +417,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           }
         },
         stop: async () => {
+          mentions.dispose()
           if (stopped) return
           stopped = true
           await resources.dispose()
