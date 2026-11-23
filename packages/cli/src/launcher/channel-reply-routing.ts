@@ -68,6 +68,23 @@ export function channelReplyTarget(event: ChannelEventRef, mode: Exclude<Channel
   }
 }
 
+export function channelAutoReplyTarget(
+  event: ChannelEventRef,
+  defaults: ChannelReplyDefaults,
+  selectedMode?: ChannelReplyMode,
+): ChannelThreadRef | undefined {
+  const mode = selectedMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
+  if (mode === 'none') return undefined
+  if (
+    selectedMode === undefined && defaults.mode === 'agent' && mode === 'conversation'
+    && event.semantics === 'topic' && event.threadId
+  ) {
+    const { adapterId, accountId, tenantId, conversationId, kind, threadId, semantics } = event
+    return { adapterId, accountId, tenantId, conversationId, kind, threadId, semantics }
+  }
+  return channelReplyTarget(event, mode)
+}
+
 /** Host command results use supported threads independently of the Agent's automatic reply policy. */
 export function channelCommandReplyTarget(
   event: ChannelEventRef,

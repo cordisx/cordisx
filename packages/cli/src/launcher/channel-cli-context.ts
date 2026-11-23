@@ -48,14 +48,23 @@ export function channelCliSendInstructions(
   context: ChannelNativeCliContext | undefined,
   token?: string,
 ): readonly string[] {
+  const routing = [
+    'Choose each route deliberately from the current request and verified source/history, not a persistent current-chat-location rule. Apply the same routing principle to progress sends and terminal results, including automatic final delivery.',
+    'When the source is a topic and the user has not explicitly asked to return to the main conversation, continue synchronizing in that original topic. Progress and final should stay in the same intended topic unless the user asks to change destination.',
+    'If the user explicitly requests the main conversation, use target.replyMode conversation for explicit sends and channel_reply_mode conversation for an enabled automatic final. Returning to a known topic may use target.replyMode thread with its verified anchor as replyTo. These choices remain subject to existing permissions.',
+    'For explicit sends, reply quotes a verified messageId as replyTo; thread uses a verified topic root or message anchor. For an existing source topic, prefer source.threadId as the topic anchor rather than inventing an anchor from the latest child message. Never guess replyTo or a topic ID; use verified source/history, an authorized lookup, or ask for clarification.',
+    'For an enabled automatic final, keep the original topic fallback when no route change is requested; channel_reply_mode can select conversation, reply, thread, or none for this turn only and cannot accept a custom replyTo. To target another known topic, use an explicit send with its verified anchor and suppress the duplicate final only after confirmed terminal delivery. Do not change global settings or bindings to track routing location.',
+  ]
   if (!context) {
     return [
+      ...routing,
       'Use the configured Channel CLI to send messages. If its runtime scope is unavailable, report that locally; do not forward your final answer.',
     ]
   }
   const prefix = `env CORDISX_HOME=${quote(context.home)} ${quote(context.node)} ${quote(context.entry)} channel`
   const scope = `--profile ${quote(context.profile)}${token ? ` --context ${quote(token)}` : ''}`
   return [
+    ...routing,
     ...(token ? channelCliMemoryInstructions(context, token) : []),
     `Read the installed Channel manual with ${prefix} docs ${scope} --input '{"pluginId":"channel","id":"usage"}'. Use help <operation> for exact arguments.`,
     `Only when the current user explicitly requests whitelisting or revoking this group, use ${prefix} group-access ${scope} --input '{}' then group-access-set with {enabled,expectedRevision}. The Host checks the real sender's allow-user (enable) or reset-user (revoke) permission and original request. No arbitrary group/account/actor is accepted; if the request is ambiguous ask for “给本群开白” or “本群取消开白”. This grants only future mentioned task dispatch, never management permissions.`,
@@ -69,7 +78,7 @@ export function channelCliSendInstructions(
     'Incoming image/post resources use actual localImage inputs when supported. Audio/files/video are accessible attachment descriptions, not automatic transcription or video understanding. No arbitrary resource URL fetching. Public media send CLI remains unavailable; scoped launcher media resend is not a plugin API.',
     'Human reactions to known bot messages include original context. Decide whether a reply is useful; never loop on bot reactions. OnIt means processing, not completion. Completion emoji is separately configured and used only after real task completion.',
     'Use the incoming source account and conversation identifiers below for a reply; do not guess another account or destination.',
-    'Choose target.replyMode per send: conversation posts in the main stream; reply quotes replyTo; thread replies in a topic. Reply/thread require the source messageId as replyTo.',
+    'Choose target.replyMode per send: conversation posts in the main stream; reply quotes replyTo; thread replies in a topic. Reply/thread require a verified message or topic anchor as replyTo.',
     `To ask a question with optional choices, use ${prefix} ask ${scope} --input '<JSON>'; the input is {account,target:{id,kind,replyMode?,replyTo?},question,options:[{label,value}],targetUserId?,operationId,expiresInSeconds?}.`,
     'Prefer the external Channel CLI when asking a channel user: choose plain send or ask as appropriate. Native request_user_input is often invisible to the external user. After sending, end your turn and wait for a subsequent Channel user message; do not expect the CLI call to wait for an answer.',
     'A card button or submitted card text is a user answer; the user may also send free text under the normal message policy (group replies may need to mention the bot or use a wake prefix). Unsupported platforms receive a numbered text question, not clickable buttons. Never assume an answer was received just because a question was sent.',

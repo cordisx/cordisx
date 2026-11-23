@@ -50,6 +50,7 @@ import { logicalContinuationManagement } from './logical-continuation-management
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
+  channelAutoReplyTarget,
   channelCommandReplyTarget,
   channelReplyDefaults,
   type ChannelReplyMode,
@@ -911,7 +912,9 @@ export class ChannelConversationConsumer {
         return undefined
       }
       try {
-        current.replyTarget ??= existingTarget ?? channelReplyTarget(event, mode)
+        const replyTarget = existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
+        if (!replyTarget) throw new Error('INVALID_REPLY_MODE')
+        current.replyTarget ??= replyTarget
       } catch (error) {
         current.state = 'failed'
         current.code = error instanceof Error && error.message === 'REPLY_MESSAGE_REQUIRED'
@@ -950,7 +953,8 @@ export class ChannelConversationConsumer {
     const mode = defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode
     if (!reservedTarget && mode === 'none') return 'denied'
     const target = reservedTarget ?? access.runtime.deliverySnapshot(deliveryId, CALLER)?.target
-      ?? channelReplyTarget(event, mode as Exclude<ChannelReplyMode, 'none'>)
+      ?? channelAutoReplyTarget(event, defaults)
+    if (!target) return 'denied'
     await access.runtime.notifyOnce({ target, kind: 'reply', text }, CALLER, deliveryId)
     if (this.lifetime.signal.aborted) return 'queued'
     await access.drain(event)
