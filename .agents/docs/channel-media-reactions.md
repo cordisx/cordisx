@@ -9,6 +9,19 @@ provide the exact CLI, profile and `--context`; do not substitute another servic
 
 ## Media availability
 
+The candidate Host public media prepare broker supports only `input.kind: bytes`.
+Public bytes are limited to the smaller of 131072 bytes and the target's advertised
+`maxMediaBytes`. This is separate from the Host CLI's bounded chunk-upload flow.
+Source tickets currently fail explicitly with `CHANNEL_MEDIA_UNAVAILABLE`; they are
+not treated as paths and the broker never reads a caller-provided filesystem path.
+The serialized prepare request is limited to 196608 UTF-8 bytes. This bound,
+metadata, declared size and encoded byte length are checked before decoding.
+Prepared handles are issued only after complete size, SHA256 and minimal format
+signature validation (PNG, JPEG, Ogg Opus, PDF or MP4; binary has no signature).
+These checks are not full media decoding or a safety guarantee. Adapter upload
+validation remains independent. Handles are memory-only, scoped and expire after
+ten minutes; restarting or replacing the owning Host generation revokes them.
+
 Image and rich-post images are downloaded through the authenticated source-message
 resource API and composed as native `localImage` inputs. Receiving/downloading an
 image is not proof the selected model understands it. Audio, files and video are
@@ -19,10 +32,24 @@ bounded quoted structure when raw content is supplied; stickers have explicit
 text fallbacks. Never
 fetch arbitrary URLs or reconstruct a local filename from an image key.
 
-Public outbound image/audio CLI and plugin calls remain unavailable pending a
-versioned Protocol media descriptor and caller/source-scoped handle-resolution
-contract. The launcher-private scoped resend path is implemented and tested;
-there is no supported `send --image <path>` or `send --audio <path>` command.
+The multi-type outbound candidate adds text, image, audio, file, video, richtext
+and bounded title/body cards. Discover the running CLI's `help send` and
+`help media-prepare`; an older installed Host may not expose the candidate.
+Typed content and explicit text fallback are separate from legacy text sends.
+No fallback is inferred for upload, permission, validation or platform errors.
+
+Media preparation uses begin, sequential base64 chunks of at most 64 KiB, and
+commit. The Host checks declared size, SHA256, type and source/target authority;
+it never opens a caller-supplied local path or URL. Prepared handles expire
+after ten minutes and are lost on restart. Images support PNG/JPEG up to 10 MB;
+audio supports Opus, video MP4, and files PDF or binary up to 30 MB. File/video
+names must be safe filenames. These are transport formats, not transcoding or
+understanding services. The scoped inbound resend path remains separate.
+
+The public contract belongs to Protocol Channel runtime v2 and outbound v1;
+its source draft, Host adoption, formal merge, release, installation and live
+platform evidence are separate states. There is no supported
+`send --image <path>` or `send --audio <path>` command.
 
 ## Reactions
 

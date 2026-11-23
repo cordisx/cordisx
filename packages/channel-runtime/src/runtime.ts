@@ -1,5 +1,30 @@
-import { randomUUID } from 'node:crypto'
-import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
+import { createHash, randomUUID } from 'node:crypto'
+import { validateOutboundMedia } from './outbound-media.js'
+import { validateOutboundContent } from './outbound-content.js'
+import { outboundAdapterDefinition, sendOutboundPublic } from './outbound-public.js'
+import { enqueueOutbound, outboundCapabilitiesPublic } from './outbound-enqueue.js'
+import {
+  ChannelGenerationFencedError,
+  ChannelPermissionError,
+  errorCode,
+  RetryableChannelError,
+  secretStateForStartFailure,
+  UncertainChannelSendError,
+} from './runtime-errors.js'
+export {
+  ChannelGenerationFencedError,
+  ChannelPermissionError,
+  RetryableChannelError,
+  UncertainChannelSendError,
+} from './runtime-errors.js'
+import type {
+  ChannelMediaPrepareRequestV1,
+  ChannelMessageSendV1,
+  ChannelOutboundCapabilitiesV1,
+  ChannelPreparedMediaV1,
+  ChannelSendHandleV1,
+} from '@cordisx/protocol/channel-outbound/v1'
+import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
 import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
@@ -24,13 +49,11 @@ import type {
   ChannelAdapterDescriptor,
   ChannelAdapterHandle,
   ChannelAuditSnapshot,
-  ChannelCapability,
   ChannelClock,
   ChannelDeliveryHandle,
   ChannelInboundEnvelope,
   ChannelMessageListener,
   ChannelNotification,
-  ChannelPermissionDecision,
   ChannelPermissionRequest,
   ChannelPluginIdentity,
   ChannelReceiveReceipt,
@@ -50,59 +73,9 @@ const MAX_AUDIT_RECORDS = 2_000
 
 const SYSTEM_CLOCK: ChannelClock = Object.freeze({ now: () => new Date() })
 
-export class RetryableChannelError extends Error {
-  readonly code: string
-
-  constructor(code: string, message: string) {
-    super(message)
-    this.name = 'RetryableChannelError'
-    this.code = normalizedErrorCode(code)
-  }
-}
-
-export class ChannelPermissionError extends Error {
-  readonly capability: ChannelCapability
-  readonly decision: Exclude<ChannelPermissionDecision, 'allow'>
-
-  constructor(capability: ChannelCapability, decision: Exclude<ChannelPermissionDecision, 'allow'>) {
-    super(`Channel capability ${capability} is ${decision}`)
-    this.name = 'ChannelPermissionError'
-    this.capability = capability
-    this.decision = decision
-  }
-}
-
-export class ChannelGenerationFencedError extends Error {
-  constructor() {
-    super('Channel adapter generation is no longer current')
-    this.name = 'ChannelGenerationFencedError'
-  }
-}
-
 interface ActiveConnection {
   readonly generation: number
   readonly connection: Awaited<ReturnType<ChannelAdapterDefinition['start']>>
-}
-
-function normalizedErrorCode(value: string): string {
-  const normalized = value.toUpperCase().replace(/[^A-Z0-9._-]+/g, '_').slice(0, 128)
-  return normalized.length === 0 ? 'CHANNEL_ERROR' : normalized
-}
-
-function errorCode(error: unknown): string {
-  if (error instanceof RetryableChannelError) return error.code
-  if (error instanceof ChannelIntegrityError) return 'INTEGRITY_ERROR'
-  return normalizedErrorCode(error instanceof Error ? error.name : 'CHANNEL_ERROR')
-}
-
-function secretStateForStartFailure(
-  descriptor: ChannelAdapterDescriptor,
-  error: unknown,
-): ChannelAdapterDescriptor['secretState'] {
-  if (!(error instanceof Error)) return descriptor.secretState
-  if (error.name === 'CHANNEL_SECRET_MISSING') return 'missing'
-  if (error.name === 'CHANNEL_SECRET_UNAVAILABLE' || error.name === 'CHANNEL_SECRET_REF_INVALID') return 'unavailable'
-  return descriptor.secretState
 }
 
 function appendAudit(state: ChannelStoreState, record: StoredAuditRecord): void {
@@ -138,6 +111,9 @@ function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: numb
 
 export class ChannelRuntime {
   readonly #permissions: ChannelRuntimeOptions['permissions']
+  readonly #outboundMediaDescriptor: ChannelRuntimeOptions['outboundMediaDescriptor']
+  readonly #prepareOutbound: ChannelRuntimeOptions['prepareOutbound']
+  readonly #resolveOutboundMedia: ChannelRuntimeOptions['resolveOutboundMedia']
   readonly #store: JsonChannelStore
   readonly #clock: ChannelClock
   readonly #maxAttempts: number
@@ -152,7 +128,6 @@ export class ChannelRuntime {
   #disposed = false
   readonly #outboundObservers = new Set<(target: ChannelThreadRef) => void>()
 
-  /** Launcher-only observation before enqueue; failures never change delivery. */
   observeOutbound(listener: (target: ChannelThreadRef) => void): () => void {
     this.#outboundObservers.add(listener)
     return () => {
@@ -162,6 +137,9 @@ export class ChannelRuntime {
 
   private constructor(options: ChannelRuntimeOptions, store: JsonChannelStore) {
     this.#permissions = options.permissions
+    this.#outboundMediaDescriptor = options.outboundMediaDescriptor
+    this.#prepareOutbound = options.prepareOutbound
+    this.#resolveOutboundMedia = options.resolveOutboundMedia
     this.#store = store
     this.#clock = options.clock ?? SYSTEM_CLOCK
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
@@ -320,7 +298,6 @@ export class ChannelRuntime {
     )
   }
 
-  /** Launcher lifecycle control for one account; queues and every other connection remain intact. */
   async deactivate(ref: ChannelTenantRef): Promise<void> {
     this.#assertRuntimeActive()
     const key = accountKey(sanitizedTenant(ref))
@@ -348,7 +325,6 @@ export class ChannelRuntime {
     return this.notifyOnce(notification, caller, `delivery:${randomUUID()}`)
   }
 
-  /** Launcher-only operation identity. Public plugin send retains its existing API. */
   async notifyOnce(
     notification: ChannelNotification,
     caller: ChannelPluginIdentity,
@@ -357,7 +333,63 @@ export class ChannelRuntime {
     return this.#enqueueNotification(notification, caller, deliveryId)
   }
 
-  /** Host-only bounded question; plugin notifications remain text-only. */
+  async sendTyped(
+    request: ChannelMessageSendV1,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelSendHandleV1> {
+    return sendOutboundPublic(
+      request,
+      caller,
+      (notification, identity, id) => this.notifyOnce(notification, identity, id),
+      id => this.#store.snapshot().outbox[id],
+    )
+  }
+
+  sendOutbound(request: ChannelMessageSendV1, caller: ChannelPluginIdentity): Promise<ChannelSendHandleV1> {
+    return this.sendTyped(request, caller)
+  }
+
+  async outboundCapabilities(
+    target: ChannelThreadRef,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelOutboundCapabilitiesV1> {
+    return outboundCapabilitiesPublic(
+      {
+        assertActive: () => this.#assertRuntimeActive(),
+        store: this.#store,
+        requirePermission: request => this.#requirePermission(request),
+        connections: this.#connections,
+        FencedError: ChannelGenerationFencedError,
+      },
+      target,
+      caller,
+    )
+  }
+
+  async prepareOutbound(
+    request: ChannelMediaPrepareRequestV1,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelPreparedMediaV1> {
+    await this.outboundCapabilities(request.target, caller)
+    if (!this.#prepareOutbound) throw new ChannelIntegrityError('Prepared media broker unavailable')
+    return this.#prepareOutbound(request, caller)
+  }
+
+  async activateV2(
+    definition: ChannelAdapterDefinitionV2,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelAdapterHandle> {
+    return this.activate(
+      outboundAdapterDefinition(
+        definition,
+        id => this.#store.snapshot().outbox[id],
+        this.#resolveOutboundMedia,
+        ref => this.#store.snapshot().adapters[accountKey(ref)]?.generation,
+      ),
+      caller,
+    )
+  }
+
   async notifyQuestionOnce(
     notification: ChannelNotification,
     caller: ChannelPluginIdentity,
@@ -373,75 +405,25 @@ export class ChannelRuntime {
     deliveryId: string,
     questionCard?: ChannelQuestionCard,
   ): Promise<ChannelDeliveryHandle> {
-    this.#assertRuntimeActive()
-    const target = sanitizedThread(notification.target)
-    if (!['completion', 'approval', 'failure', 'reply'].includes(notification.kind)) {
-      throw new ChannelIntegrityError('Channel notification kind is invalid')
-    }
-    const media = validateNotificationMedia(notification, questionCard !== undefined)
-    const key = accountKey(target)
-    const adapter = this.#store.snapshot().adapters[key]
-    if (adapter === undefined) throw new ChannelGenerationFencedError()
-    if (!/^delivery:[A-Za-z0-9-]{1,128}$/u.test(deliveryId)) {
-      throw new ChannelIntegrityError('Invalid delivery identity')
-    }
-    await this.#requirePermission({
+    return enqueueOutbound(
+      {
+        assertActive: () => this.#assertRuntimeActive(),
+        store: this.#store,
+        connections: this.#connections,
+        requirePermission: request => this.#requirePermission(request),
+        mediaDescriptor: this.#outboundMediaDescriptor,
+        observers: this.#outboundObservers,
+        now: () => this.#now(),
+        cancel: id => this.#cancelDelivery(id),
+        FencedError: ChannelGenerationFencedError,
+        appendAudit,
+        auditRecord,
+      },
+      notification,
       caller,
-      capability: 'channel.messages.send',
-      source: target,
-      generation: adapter.generation,
-      operationId: deliveryId,
-    })
-    for (const listener of this.#outboundObservers) {
-      try {
-        listener(target)
-      } catch { /* ancillary feedback cannot affect delivery */ }
-    }
-    const now = this.#now()
-    await this.#store.transaction(state => {
-      if (state.adapters[key]?.generation !== adapter.generation) throw new ChannelGenerationFencedError()
-      const prior = state.outbox[deliveryId]
-      if (prior) {
-        if (
-          canonical(prior.caller) !== canonical(caller) || canonical(prior.target) !== canonical(target)
-          || prior.kind !== notification.kind || prior.text !== notification.text
-          || canonical(prior.media ?? null) !== canonical(media ?? null)
-          || canonical(prior.questionCard ?? null) !== canonical(questionCard ?? null)
-        ) throw new ChannelIntegrityError('Operation conflict')
-        return
-      }
-      state.outbox[deliveryId] = {
-        deliveryId,
-        accountKey: key,
-        generation: adapter.generation,
-        caller,
-        target,
-        kind: notification.kind,
-        text: notification.text,
-        ...(media ? { media } : {}),
-        ...(questionCard ? { questionCard } : {}),
-        createdAt: now,
-        updatedAt: now,
-        status: 'queued',
-        attempts: 0,
-      }
-      appendAudit(
-        state,
-        auditRecord({
-          caller,
-          recordedAt: now,
-          accountKey: key,
-          generation: adapter.generation,
-          operationId: deliveryId,
-          action: 'channel.delivery.enqueue',
-          outcome: 'queued',
-        }),
-      )
-    })
-    return Object.freeze({
       deliveryId,
-      cancel: () => this.#cancelDelivery(deliveryId),
-    })
+      questionCard,
+    )
   }
 
   async connections(caller: ChannelPluginIdentity): Promise<readonly ChannelRuntimeAccountSnapshot[]> {
@@ -827,6 +809,9 @@ export class ChannelRuntime {
       if (claimed === undefined) continue
 
       try {
+        if (claimed.content && !(active.connection.outboundTypes ?? ['text']).includes(claimed.effectiveType!)) {
+          throw new ChannelIntegrityError('Effective outbound type is no longer supported')
+        }
         if (claimed.media && active.connection.supportsOutboundMedia !== true) {
           throw new ChannelIntegrityError('Channel adapter media support is unavailable')
         }
@@ -835,11 +820,25 @@ export class ChannelRuntime {
           target: claimed.target,
           kind: claimed.kind,
           text: claimed.text,
+          ...(claimed.idempotencyKey === undefined ? {} : { idempotencyKey: claimed.idempotencyKey }),
+          ...(claimed.content
+            ? {
+              content: claimed.effectiveType === 'text'
+                ? { type: 'text' as const, text: claimed.text }
+                : validateOutboundContent(claimed.content),
+              fallback: claimed.fallback!,
+              requestedType: claimed.requestedType!,
+              effectiveType: claimed.effectiveType!,
+            }
+            : {}),
           ...(claimed.media ? { media: validateOutboundMedia(claimed.media) } : {}),
           ...(claimed.questionCard ? { questionCard: claimed.questionCard } : {}),
           createdAt: claimed.createdAt,
         })
         const completedAt = this.#now()
+        if (!result || typeof result.externalMessageId !== 'string' || result.externalMessageId.length === 0) {
+          throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')
+        }
         await this.#store.transaction(state => {
           const current = state.outbox[claimed.deliveryId]
           if (current?.generation !== generation || current.status !== 'processing') return
@@ -871,7 +870,7 @@ export class ChannelRuntime {
           if (current?.generation !== generation || current.status !== 'processing') return
           if (state.adapters[current.accountKey]?.generation !== generation) return
           const retry = error instanceof RetryableChannelError && current.attempts < this.#maxAttempts
-          const status = retry ? 'retrying' : 'dead-letter'
+          const status = error instanceof UncertainChannelSendError ? 'unknown' : retry ? 'retrying' : 'dead-letter'
           state.outbox[claimed.deliveryId] = {
             ...current,
             status,
@@ -905,7 +904,9 @@ export class ChannelRuntime {
     return this.#store.transaction(state => {
       const current = state.outbox[deliveryId]
       if (current === undefined) return 'not-found'
-      if (current.status === 'processing' || current.status === 'sent') return 'irreversible'
+      if (current.status === 'processing' || current.status === 'sent' || current.status === 'unknown') {
+        return 'irreversible'
+      }
       if (current.status !== 'queued' && current.status !== 'retrying') return 'not-found'
       state.outbox[deliveryId] = { ...current, status: 'cancelled', updatedAt: now }
       appendAudit(

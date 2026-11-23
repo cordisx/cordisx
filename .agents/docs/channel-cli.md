@@ -331,6 +331,30 @@ destinations per request. Reuse the returned operation ID for reconciliation;
 includes attempted count and completed receipts. An uncertain effect must not
 be blindly replayed. This budget does not limit bindings.
 
+The multi-type outbound candidate also accepts `content` instead of `text`:
+text, image, audio, file, video, richtext or a bounded title/body card. Media
+content contains a prepared `media:` handle, never a path, URL or base64.
+Optional `fallback: {mode:"text",text}` is used only when the requested type
+is unsupported; permission, integrity, upload and dispatch failures do not
+downgrade. Omit fallback or use `{mode:"reject"}` to reject unsupported types.
+
+Discover `help media-prepare` on the exact running Host. The candidate's
+begin/chunk/commit upload keeps each decoded chunk within 64 KiB and each RPC
+under the existing 256 KiB transport limit. Begin declares account, exact
+target, operation ID, media kind/format, size and SHA256; file/video require a
+safe filename. Commit returns a usable handle only after complete bytes,
+digest and format checks. Preparation and send both recheck send authority.
+Handles are caller-, target- and generation-scoped, expire after ten minutes,
+and are invalidated on disposal/restart. Queue acceptance does not extend their
+lifetime. For formats, limits and candidate/release boundaries, see
+[media availability](channel-media-reactions.md#media-availability).
+
+Protocol runtime v2 defines the separate public outbound surface; its inline
+bytes preparation is limited to 128 KiB and does not define the launcher-private
+chunk CLI. Public source tickets are unavailable without an authorized producer.
+These source changes do not establish release, installation or live platform
+verification; older running Hosts may not implement the operations.
+
 The Host owns the policy form and persistent policy revision. The Channel
 page’s “Messages and commands” action configures user groups, intersecting
 allow/deny rules, group reception and wake prefixes. Receiving all group

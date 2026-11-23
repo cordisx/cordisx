@@ -5,7 +5,11 @@ import { expect, it } from 'vitest'
 import { JsonChannelStore } from '../packages/channel-runtime/src/store.js'
 import { ChannelRuntime } from '../packages/channel-runtime/src/runtime.js'
 
-it('preserves media and sent receipts across reopen and rejects malformed media', async () => {
+it.each([
+  { type: 'image' as const, format: 'png' as const },
+  { type: 'file' as const, format: 'pdf' as const, filename: 'report.pdf' },
+  { type: 'video' as const, format: 'mp4' as const, filename: 'clip.mp4', durationMs: 1000 },
+])('preserves $type media and sent receipts across reopen and rejects malformed media', async descriptor => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-media-'))
   const file = path.join(directory, 'store.json')
   try {
@@ -32,9 +36,8 @@ it('preserves media and sent receipts across reopen and rejects malformed media'
       attempts: 1,
       externalMessageId: 'synthetic-receipt',
       media: {
-        type: 'image' as const,
+        ...descriptor,
         handle: 'media:synthetic',
-        format: 'png' as const,
         size: 8,
         sha256: 'a'.repeat(64),
       },
@@ -52,7 +55,11 @@ it('preserves media and sent receipts across reopen and rejects malformed media'
   }
 })
 
-it('deduplicates the media descriptor, preserves receipts, and fences unsupported adapters', async () => {
+it.each([
+  { type: 'image' as const, format: 'png' as const },
+  { type: 'file' as const, format: 'pdf' as const, filename: 'report.pdf' },
+  { type: 'video' as const, format: 'mp4' as const, filename: 'clip.mp4', durationMs: 1000 },
+])('deduplicates the $type descriptor, preserves receipts, and fences unsupported adapters', async descriptor => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-media-'))
   const runtime = await ChannelRuntime.open({
     storePath: path.join(directory, 'store.json'),
@@ -73,9 +80,8 @@ it('deduplicates the media descriptor, preserves receipts, and fences unsupporte
     kind: 'reply' as const,
     text: '',
     media: {
-      type: 'image' as const,
+      ...descriptor,
       handle: 'media:synthetic',
-      format: 'png' as const,
       size: 8,
       sha256: 'a'.repeat(64),
     },
@@ -109,6 +115,13 @@ it('deduplicates the media descriptor, preserves receipts, and fences unsupporte
         'delivery:synthetic',
       ),
     ).rejects.toThrow('Operation conflict')
+    if ('filename' in descriptor) {
+      await expect(runtime.notifyOnce(
+        { ...notification, media: { ...notification.media, filename: `other.${descriptor.format}` } },
+        caller,
+        'delivery:synthetic',
+      )).rejects.toThrow('Operation conflict')
+    }
     await handle.drainOutbound(10)
     await runtime.notifyOnce(notification, caller, 'delivery:synthetic')
     await handle.drainOutbound(10)

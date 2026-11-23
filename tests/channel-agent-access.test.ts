@@ -31,6 +31,18 @@ const argv = (op: string, input: unknown = {}, token?: string) => [
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 describe('configured Channel CLI routine approval', () => {
+  it('classifies chunked media preparation as a send effect, never a read', () => {
+    for (const action of ['begin', 'chunk', 'commit']) {
+      const command = argv('media-prepare', { action }, 'current')
+      expect(configuredChannelApprovalOperation(command, context)?.kind).toBe('send')
+      const subcommand = argv('media-prepare', {}, 'current')
+      subcommand.splice(6, 0, action)
+      expect(configuredChannelApprovalOperation(subcommand, context)?.input.action).toBe(action)
+      expect(configuredChannelApprovalOperation(argv('media-prepare', { action }), context)).toBeUndefined()
+    }
+    expect(configuredChannelApprovalOperation(argv('media-prepare', { action: 'open-path' }, 'current'), context))
+      .toBeUndefined()
+  })
   it('recognizes exact literal argv and nested shell quoting, but never expansions or a different runtime', () => {
     const command = argv('connections')
     expect(configuredChannelApprovalOperation(command, context)?.kind).toBe('read')

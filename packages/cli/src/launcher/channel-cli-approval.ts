@@ -46,7 +46,7 @@ const MEMORY_WRITES = new Set([
   'identity-confirm',
 ])
 export function channelCliOperationKind(operation: string): ChannelCliOperationKind | undefined {
-  return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask'].includes(operation)
+  return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask', 'media-prepare'].includes(operation)
     ? 'send'
     : ['continuation-checkpoint-set', 'continuation-takeover-ready'].includes(operation)
     ? 'checkpoint'
@@ -130,10 +130,12 @@ export function configuredChannelApprovalOperation(
   const helpTopic = operation === 'help' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
   if (helpTopic && helpTopic !== 'memory' && !channelCliOperationKind(helpTopic)) return undefined
   const memoryAction = operation === 'memory' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
+  const mediaAction = operation === 'media-prepare' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
+  if (mediaAction && !['begin', 'chunk', 'commit'].includes(mediaAction)) return undefined
   const kind = channelCliOperationKind(operation)
   if (!kind && operation !== 'memory') return undefined
   const options = new Map<string, string>()
-  for (let i = helpTopic || memoryAction ? 7 : 6; i < words.length; i += 2) {
+  for (let i = helpTopic || memoryAction || mediaAction ? 7 : 6; i < words.length; i += 2) {
     const flag = words[i], value = words[i + 1]
     if (!flag || !['--profile', '--input', '--context'].includes(flag) || value === undefined || options.has(flag)) {
       return undefined
@@ -145,6 +147,12 @@ export function configuredChannelApprovalOperation(
     const input: unknown = JSON.parse(options.get('--input') ?? '{}')
     if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
     const record = input as Record<string, unknown>
+    if (operation === 'media-prepare') {
+      if (!options.get('--context') || mediaAction && 'action' in record) return undefined
+      const action = mediaAction ?? record.action
+      if (typeof action !== 'string' || !['begin', 'chunk', 'commit'].includes(action)) return undefined
+      record.action = action
+    }
     let selectedKind = kind
     if (operation === 'memory') {
       if (!options.get('--context') || memoryAction && 'action' in record) return undefined

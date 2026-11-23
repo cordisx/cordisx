@@ -12,12 +12,14 @@ import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 import type { ChannelDirectoryReadback } from './channel-live-directory.js'
 import type { ChannelCommandUserReadback } from './channel-command-users.js'
-import { type ChannelReplyCapabilities, channelReplyMode, channelReplyTarget } from './channel-reply-routing.js'
+import { type ChannelReplyCapabilities } from './channel-reply-routing.js'
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
 import type { ChannelAdminPairing } from './channel-admin-pairing.js'
 import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
+import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
 
 export interface ChannelConversationAccess {
+  readonly outbound?: ChannelOutboundRpc
   feedbackReact?(
     event: import('@cordisx/channel-runtime').ChannelEventRef,
     emoji: string,
@@ -456,6 +458,7 @@ export class ChannelConversationTools {
         && [
           'send',
           'send-many',
+          'media-prepare',
           'ask',
           'question-cancel',
           'bind',
@@ -535,6 +538,22 @@ export class ChannelConversationTools {
         if (Object.keys(input).length) throw new Error('INVALID_REQUEST')
         return { status: 'ok', generation: current.generation, connections: current.accounts() }
       }
+      const outboundCaller = { session: callerSession, turnId: scopedCaller?.turnId ?? callerTurnId(metadata), source }
+      const authorizeOutbound = (target: ChannelThreadRef) => {
+        if (source && this.consumer && !this.consumer.sendAllowed(source)) throw new Error('CHANNEL_POLICY_DENIED')
+        if (
+          this.consumer
+          && !this.consumer.sendAllowed({
+            ...target,
+            eventId: String(input.operationId ?? 'media-prepare'),
+            ...(source?.actor ? { actor: source.actor } : {}),
+          })
+        ) throw new Error('CHANNEL_POLICY_DENIED')
+      }
+      if (operation === 'media-prepare') {
+        if (!current.outbound) throw new Error('CHANNEL_MEDIA_PREPARE_UNAVAILABLE')
+        return current.outbound.prepare(input, outboundCaller, current.accounts(), authorizeOutbound)
+      }
       const account = object(input.account)
       if (Object.keys(account).some(key => !['adapterId', 'accountId', 'tenantId'].includes(key))) {
         throw new Error('INVALID_REQUEST')
@@ -555,7 +574,7 @@ export class ChannelConversationTools {
         source: 'cordisx:native-channel',
         pluginId: 'host-channel-tools',
         // Correlation is not an ownership or permission grant. The endpoint is launch/user scoped.
-        generation: callerThreadId(metadata) ?? 'local-cli',
+        generation: outboundCallerScope(outboundCaller),
       }
       if (operation === 'ask' || operation === 'question-cancel') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
@@ -653,9 +672,9 @@ export class ChannelConversationTools {
       }
       if (operation === 'send' || operation === 'send-many' || operation === 'receipt') {
         const allowed = operation === 'send'
-          ? ['account', 'target', 'text', 'operationId']
+          ? ['account', 'target', 'text', 'operationId', 'payload', 'content', 'fallback']
           : operation === 'send-many'
-          ? ['account', 'targets', 'text', 'operationId']
+          ? ['account', 'targets', 'text', 'operationId', 'payload', 'content', 'fallback']
           : ['account', 'operationId', 'targetCount']
         if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('INVALID_REQUEST')
         const operationId = text(input.operationId, 128)
@@ -663,71 +682,78 @@ export class ChannelConversationTools {
         if (operation === 'send-many' && (!Array.isArray(targets) || !targets.length || targets.length > 1000)) {
           throw new Error('INVALID_TARGET')
         }
-        const sendText = operation === 'receipt' ? undefined : text(input.text, 8192, true)
+        const typed = input.payload !== undefined || input.content !== undefined
+        const sendText = operation === 'receipt' || typed ? undefined : text(input.text, 8192, true)
         // Validate the entire batch before enqueueing its first effect.
         const parsed = operation === 'receipt' ? [] : (targets as unknown[]).map(value => {
-          const raw = object(value)
-          if (Object.keys(raw).some(key => !['id', 'kind', 'replyTo', 'replyMode'].includes(key))) {
-            throw new Error('INVALID_REQUEST')
-          }
-          const id = text(raw.id)
-          if (
-            !['direct', 'group'].includes(String(raw.kind)) || !/^(?:oc_|ou_)[A-Za-z0-9_]+$/u.test(id)
-            || raw.kind === 'group' && !id.startsWith('oc_')
-          ) throw new Error('INVALID_TARGET')
-          const replyTo = raw.replyTo === undefined ? undefined : text(raw.replyTo)
-          if (replyTo !== undefined && (!id.startsWith('oc_') || !/^om_[A-Za-z0-9_]+$/u.test(replyTo))) {
-            throw new Error('INVALID_TARGET')
-          }
-          const mode = raw.replyMode === undefined
-            ? replyTo === undefined ? 'conversation' : 'reply'
-            : channelReplyMode(raw.replyMode)
-          if (mode === 'none' || mode === 'agent' || mode === 'conversation' && replyTo !== undefined) {
-            throw new Error('INVALID_REPLY_MODE')
-          }
-          const target: ChannelThreadRef = channelReplyTarget({
-            ...ref,
-            conversationId: id,
-            kind: raw.kind as 'direct' | 'group',
-            threadId: id,
-            semantics: 'conversation',
-            eventId: operationId,
-            ...(replyTo === undefined ? {} : { messageId: replyTo }),
-          }, mode)
-          if (
-            this.consumer
-            && !this.consumer.sendAllowed({
-              ...target,
-              eventId: input.operationId as string,
-              ...(source?.actor ? { actor: source.actor } : {}),
-            })
-          ) {
-            throw new Error('CHANNEL_POLICY_DENIED')
-          }
+          const target = parseOutboundTarget(value, ref, operationId)
+          authorizeOutbound(target)
           return target
         })
+        if (typed && !current.outbound) throw new Error('CHANNEL_MEDIA_PREPARE_UNAVAILABLE')
         if (
           operation === 'receipt' && input.targetCount !== undefined && (!Number.isSafeInteger(input.targetCount)
             || Number(input.targetCount) < 1 || Number(input.targetCount) > 1000)
         ) throw new Error('INVALID_REQUEST')
         const multiple = operation === 'send-many' || operation === 'receipt' && input.targetCount !== undefined
         const count = operation === 'receipt' ? Number(input.targetCount ?? 1) : parsed.length
+        const deliveryIdFor = (index: number) =>
+          `delivery:${
+            createHash('sha256').update(
+              JSON.stringify([caller, ref, multiple ? `${operationId}:${index}` : operationId]),
+            ).digest('hex')
+          }`
+        const contents = operation === 'receipt'
+          ? undefined
+          : current.outbound?.content(
+            input,
+            outboundCaller,
+            parsed,
+            index => current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined,
+          )
         const receipts: unknown[] = []
+        if (typed && contents) {
+          for (let index = 0; index < parsed.length; index += 1) {
+            if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
+            const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
+            const requested = contents[index]!
+            if (
+              !capabilities.types.includes(requested.content.type)
+              && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
+            ) {
+              throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')
+            }
+            if ('handle' in requested.content && capabilities.types.includes(requested.content.type)) {
+              const media = current.outbound!.store.descriptor(
+                outboundCallerScope(outboundCaller),
+                requested.content.handle,
+                parsed[index]!,
+              )
+              if (!Number.isSafeInteger(capabilities.maxMediaBytes) || media.size > capabilities.maxMediaBytes) {
+                throw new Error('MEDIA_SIZE_DENIED')
+              }
+            }
+            if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+              throw new Error('CHANNEL_GENERATION_CHANGED')
+            }
+          }
+        }
         let attempted = 0
         try {
           for (let index = 0; index < count; index += 1) {
             if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
               throw new Error('CHANNEL_GENERATION_CHANGED')
             }
-            const deliveryId = `delivery:${
-              createHash('sha256').update(
-                JSON.stringify([caller, ref, multiple ? `${operationId}:${index}` : operationId]),
-              ).digest('hex')
-            }`
+            const deliveryId = deliveryIdFor(index)
             if (operation !== 'receipt') {
               attempted += 1
               await current.runtime.notifyOnce(
-                { target: parsed[index]!, kind: 'reply', text: sendText! },
+                {
+                  target: parsed[index]!,
+                  kind: 'reply',
+                  text: sendText ?? '',
+                  ...(contents ? contents[index]! : {}),
+                },
                 caller,
                 deliveryId,
               )

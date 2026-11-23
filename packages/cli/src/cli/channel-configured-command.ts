@@ -8,6 +8,8 @@ import {
   usesNamespacedManagementRpc,
 } from '../launcher/management-rpc.js'
 import { processIdentityStatus } from './supervisor-state.js'
+import { prepareChannelSendInput } from './channel-send-payload.js'
+import { parseChannelMediaPrepareArgv, validateChannelMediaPrepareRequest } from './channel-media-prepare-payload.js'
 
 const OPERATIONS = [
   'memory',
@@ -46,6 +48,7 @@ const OPERATIONS = [
   'listen',
   'send',
   'send-many',
+  'media-prepare',
   'ask',
   'question-cancel',
   'receipt',
@@ -71,6 +74,16 @@ export async function runConfiguredChannelCommand(
   stdout: (line: string) => void,
 ): Promise<void> {
   const operation = args[0]
+  if (operation === 'media-prepare' && args[1] && !args[1].startsWith('--')) {
+    const parsed = parseChannelMediaPrepareArgv(args.slice(1))
+    return runConfiguredChannelCommand([
+      'media-prepare',
+      ...(parsed.profile === undefined ? [] : ['--profile', parsed.profile]),
+      ...(parsed.context === undefined ? [] : ['--context', parsed.context]),
+      '--input',
+      JSON.stringify(parsed.input),
+    ], stdout)
+  }
   if (operation === 'memory' && args[1] && !args[1].startsWith('--')) {
     const action = args[1], remaining = args.slice(2), inputIndex = remaining.indexOf('--input')
     let input: Record<string, unknown> = {}
@@ -97,6 +110,14 @@ export async function runConfiguredChannelCommand(
     }
     options[key] = value
   }
+  let input: unknown
+  try {
+    input = options['--input'] === undefined ? {} : JSON.parse(options['--input'])
+  } catch {
+    throw new Error('INVALID_CHANNEL_INPUT')
+  }
+  if (operation === 'send' || operation === 'send-many') input = prepareChannelSendInput(input)
+  if (operation === 'media-prepare') input = validateChannelMediaPrepareRequest(input)
   const configPath = resolveHomeConfigPath({ env: process.env })
   const config = await loadHomeConfig(configPath), appId = config.defaultApp
   const profileId = options['--profile'] ?? config.apps[appId]?.defaultProfile
@@ -114,21 +135,19 @@ export async function runConfiguredChannelCommand(
     if (identity === 'unknown') throw new Error('CHANNEL_HOST_IDENTITY_UNVERIFIABLE')
     if (identity !== 'alive') throw new Error('CHANNEL_HOST_IDENTITY_STALE')
   }
-  let input: unknown
-  try {
-    input = options['--input'] === undefined ? {} : JSON.parse(options['--input'])
-  } catch {
-    throw new Error('INVALID_CHANNEL_INPUT')
+  const request = {
+    kind: 'channel' as const,
+    operation,
+    input,
+    ...(options['--context'] ? { context: options['--context'] } : {}),
+    ...(process.env.CODEX_THREAD_ID ? { callerThreadId: process.env.CODEX_THREAD_ID } : {}),
+  }
+  if (Buffer.byteLength(JSON.stringify(request), 'utf8') + 1 >= 256 * 1024) {
+    throw new Error('CHANNEL_RPC_INPUT_TOO_LARGE')
   }
   let result: unknown
   try {
-    result = await (namespaced ? requestNamespacedManagementRpc : requestPluginManagementRpc)(paths, endpoint, {
-      kind: 'channel',
-      operation,
-      input,
-      ...(options['--context'] ? { context: options['--context'] } : {}),
-      ...(process.env.CODEX_THREAD_ID ? { callerThreadId: process.env.CODEX_THREAD_ID } : {}),
-    })
+    result = await (namespaced ? requestNamespacedManagementRpc : requestPluginManagementRpc)(paths, endpoint, request)
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     throw new Error(
