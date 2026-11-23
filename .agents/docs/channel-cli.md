@@ -557,6 +557,52 @@ establish indefinite exactly-once delivery.
 
 ## Explicit replies and optional final forwarding
 
+### Native mentions in explicit richtext sends
+
+Use an inline paragraph to keep a native mention and its explanation on the
+same line:
+
+```json
+{
+  "type": "richtext",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "nodes": [
+        { "type": "mention", "userId": "ou_verified" },
+        { "type": "text", "text": " please review", "style": "plain" }
+      ]
+    }
+  ]
+}
+```
+
+Each paragraph is one line; existing text/style blocks keep their separate
+lines. Use exact platform-native IDs only, never guess them from display names.
+The current Feishu/Lark Host verifies only accepted inbound senders observed in
+the last five minutes in the exact account, tenant and target conversation during
+the active connection lifetime. This is historical identity evidence, not a
+current membership check: a member leaving within that window is not immediately
+detected. After expiry, missing fresh sender evidence rejects. Users who have
+never sent a message are unsupported, including users merely named by an inbound
+mention; inbound mention metadata is not currently accepted as identity proof.
+Arbitrary contact-directory users and screenshot names cannot be mentioned.
+SDK raw sender evidence must explicitly match the application's tenant, native
+open_id, user sender type, message ID and chat ID. Missing raw metadata or an
+external-tenant sender does not issue evidence; normalized sender IDs alone
+are insufficient. Raw event bodies are not retained in the evidence cache.
+A reconnect/replacement requiring a new connection loses that evidence; missing
+evidence rejects with `CHANNEL_MENTION_UNVERIFIED`. This does not request contact
+or directory scopes and does not enable `@all`. A direct-chat ID is not evidence
+of a user's identity. Richtext alone does not imply paragraph or native mention
+support: inspect outbound v2 flags. Unsupported structure requires an explicit
+text fallback; identity and permission failures never fall back. Batch sends
+validate all target identities before queueing the first delivery.
+
+Plugin consumers use additive runtime v3 `outboundV2` with send v2 documents;
+frozen `outbound` and `adaptersV2` retain v1 content only. No automatic forwarding
+behavior changes. Only a sent receipt proves delivery.
+
 Automatic final-response forwarding defaults to off. Addressed Channel inputs
 can still create or continue a Codex chat. Commentary and final answers remain
 in that chat; normal completion or Stop does not send their text to the channel.

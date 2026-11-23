@@ -1,6 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { ChannelRuntimeV1 } from '@cordisx/protocol/channel-runtime/v1'
-import type { ChannelAdapterDefinitionV2, ChannelRuntimeV2 } from '@cordisx/protocol/channel-runtime/v2'
+import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import type { ChannelMediaPrepareRequestV1, ChannelMessageSendV1 } from '@cordisx/protocol/channel-outbound/v1'
 import { ChannelRuntime } from './runtime.js'
 import type {
@@ -34,7 +34,7 @@ export interface CordisXChannelMessages {
   subscribe(filter: ChannelSubscriptionFilter, listener: ChannelMessageListener): Promise<() => void>
 }
 
-export type CordisXChannel = ChannelRuntimeV2
+export type CordisXChannel = import('@cordisx/protocol/channel-runtime/v3').ChannelRuntimeV3
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -189,6 +189,21 @@ export class CordisXChannelService extends Service implements CordisXChannel {
           `channel.adaptersV2.register(${JSON.stringify(definition.descriptor.ref.adapterId)})`,
         )
         return handle
+      },
+    })
+  }
+
+  get outboundV2(): CordisXChannel['outboundV2'] {
+    return Object.freeze({
+      capabilities: async (target: ChannelThreadRef) =>
+        runtimeFor(this).outboundCapabilitiesV2(target, identityFrom(this.ctx)),
+      prepare: async (request: ChannelMediaPrepareRequestV1) =>
+        runtimeFor(this).prepareOutbound(request, identityFrom(this.ctx)),
+      send: async (request: import('@cordisx/protocol/channel-outbound/v2').ChannelMessageSendV2) => {
+        if (request.contract !== 'cordisx.channel-message-send/v2' || request.schemaVersion !== 2) {
+          throw new Error('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+        }
+        return runtimeFor(this).sendTypedV2(request, identityFrom(this.ctx))
       },
     })
   }

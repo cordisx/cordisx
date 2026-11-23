@@ -5,6 +5,7 @@ import type {
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
+import { richtextRequirements } from '@cordisx/channel-runtime'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
@@ -755,7 +756,30 @@ export class ChannelConversationTools {
             const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
             const requested = contents[index]!
             if (
-              !capabilities.types.includes(requested.content.type)
+              Buffer.byteLength(
+                JSON.stringify({
+                  contract: 'cordisx.channel-message-send/v2',
+                  schemaVersion: 2,
+                  target: parsed[index],
+                  kind: 'reply',
+                  idempotencyKey: deliveryIdFor(index),
+                  content: requested.content,
+                  fallback: requested.fallback,
+                }),
+                'utf8',
+              ) > 196_608
+            ) throw new Error('INVALID_CHANNEL_PAYLOAD')
+            const requirements = richtextRequirements(requested.content)
+            if (requirements.userIds.length) {
+              await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)
+            }
+            const richtext = requirements.paragraphs
+              ? (await current.runtime.outboundCapabilitiesV2(parsed[index]!, caller)).richtext
+              : undefined
+            if (
+              (!capabilities.types.includes(requested.content.type)
+                || requirements.paragraphs && richtext?.paragraphs !== true
+                || requirements.userIds.length > 0 && richtext?.mentions !== true)
               && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
             ) {
               throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')

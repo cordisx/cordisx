@@ -3,8 +3,10 @@ import { isEligibleOutbox } from './outbound-enqueue.js'
 import { ChannelDeliveryObservers } from './delivery-observers.js'
 export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
+import { runtimeSnapshot, visibleConnections } from './runtime-snapshot.js'
 import { validateOutboundMedia } from './outbound-media.js'
 import { validateOutboundContent } from './outbound-content.js'
+import { mentionCapabilities, validateMentionAuthority, validateMentionDispatch } from './outbound-mention.js'
 import { outboundAdapterDefinition, sendOutboundPublic } from './outbound-public.js'
 import { enqueueOutbound, outboundCapabilitiesPublic } from './outbound-enqueue.js'
 import {
@@ -322,12 +324,52 @@ export class ChannelRuntime {
     request: ChannelMessageSendV1,
     caller: ChannelPluginIdentity,
   ): Promise<ChannelSendHandleV1> {
+    if (request.contract !== 'cordisx.channel-message-send/v1' || request.schemaVersion !== 1) {
+      throw new ChannelIntegrityError('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    }
     return sendOutboundPublic(
       request,
       caller,
       (notification, identity, id) => this.notifyOnce(notification, identity, id),
       id => this.#store.snapshot().outbox[id],
     )
+  }
+
+  async sendTypedV2(
+    request: import('@cordisx/protocol/channel-outbound/v2').ChannelMessageSendV2,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelSendHandleV1> {
+    if (request.contract !== 'cordisx.channel-message-send/v2' || request.schemaVersion !== 2) {
+      throw new ChannelIntegrityError('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    }
+    return sendOutboundPublic(
+      request,
+      caller,
+      (notification, identity, id) => this.notifyOnce(notification, identity, id),
+      id => this.#store.snapshot().outbox[id],
+    )
+  }
+
+  async outboundCapabilitiesV2(
+    target: ChannelThreadRef,
+    caller: ChannelPluginIdentity,
+  ): Promise<import('@cordisx/protocol/channel-outbound/v2').ChannelOutboundCapabilitiesV2> {
+    const original = await this.outboundCapabilities(target, caller)
+    const connection = this.#connections.get(accountKey(target))?.connection
+    return mentionCapabilities(original, connection)
+  }
+
+  async validateMentionContent(
+    target: ChannelThreadRef,
+    content: import('./outbound-content.js').ChannelOutboundContent,
+    caller: ChannelPluginIdentity,
+  ): Promise<void> {
+    this.#assertRuntimeActive()
+    const safeTarget = sanitizedThread(target)
+    const active = this.#connections.get(accountKey(safeTarget))
+    if (!active) throw new ChannelGenerationFencedError()
+    await validateMentionAuthority(safeTarget, content, caller, active, request => this.#requirePermission(request))
+    this.#assertGeneration(safeTarget, active.generation)
   }
 
   sendOutbound(request: ChannelMessageSendV1, caller: ChannelPluginIdentity): Promise<ChannelSendHandleV1> {
@@ -414,19 +456,7 @@ export class ChannelRuntime {
 
   async connections(caller: ChannelPluginIdentity): Promise<readonly ChannelRuntimeAccountSnapshot[]> {
     this.#assertRuntimeActive()
-    const snapshot = this.snapshot()
-    const visible: ChannelRuntimeAccountSnapshot[] = []
-    for (const account of snapshot.accounts) {
-      const decision = await this.#permissions.authorize({
-        caller,
-        capability: 'channel.accounts.read',
-        source: account.ref,
-        generation: account.generation,
-        operationId: `connections:${digest([caller, account.ref, account.generation])}`,
-      })
-      if (decision === 'allow') visible.push(account)
-    }
-    return visible
+    return visibleConnections(this.snapshot(), this.#permissions, caller)
   }
 
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
@@ -500,40 +530,7 @@ export class ChannelRuntime {
   }
 
   snapshot(): ChannelRuntimeSnapshot {
-    const state = this.#store.snapshot()
-    const accounts = Object.entries(state.adapters)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, adapter]) => {
-        const inbox = Object.values(state.inbox).filter(record => record.accountKey === key)
-        const outbox = Object.values(state.outbox).filter(record => record.accountKey === key)
-        return {
-          ref: adapter.ref,
-          adapterKind: adapter.kind,
-          implementationStatus: adapter.implementationStatus,
-          connectionState: adapter.connectionState,
-          secretState: adapter.secretState,
-          generation: adapter.generation,
-          lastGoodRevision: adapter.lastGoodRevision,
-          ...(adapter.cursorUpdatedAt === undefined ? {} : { cursorUpdatedAt: adapter.cursorUpdatedAt }),
-          ...(adapter.lastErrorCode === undefined ? {} : { lastErrorCode: adapter.lastErrorCode }),
-          inbound: {
-            pending: inbox.filter(record => record.status === 'queued' || record.status === 'processing').length,
-            retrying: inbox.filter(record => record.status === 'retrying').length,
-            deadLetter: inbox.filter(record => record.status === 'dead-letter').length,
-          },
-          outbound: {
-            pending: outbox.filter(record => record.status === 'queued' || record.status === 'processing').length,
-            retrying: outbox.filter(record => record.status === 'retrying').length,
-            deadLetter: outbox.filter(record => record.status === 'dead-letter').length,
-          },
-        }
-      })
-    return Object.freeze({
-      contract: 'cordisx.channel-runtime-snapshot/v1',
-      schemaVersion: 1,
-      observedAt: this.#now(),
-      accounts,
-    })
+    return runtimeSnapshot(this.#store.snapshot(), this.#now())
   }
 
   auditSnapshot(): readonly ChannelAuditSnapshot[] {
@@ -800,6 +797,9 @@ export class ChannelRuntime {
       }
 
       try {
+        if (claimed.content && claimed.effectiveType !== 'text') {
+          await validateMentionDispatch(claimed.target, claimed.content, active.connection)
+        }
         if (claimed.content && !(active.connection.outboundTypes ?? ['text']).includes(claimed.effectiveType!)) {
           throw new ChannelIntegrityError('Effective outbound type is no longer supported')
         }

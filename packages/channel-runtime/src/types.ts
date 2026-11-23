@@ -249,6 +249,8 @@ export interface ChannelSendResult {
 }
 
 export interface ChannelAdapterConnection {
+  readonly richtext?: { readonly paragraphs: boolean; readonly mentions: boolean }
+  verifyMentions?(target: ChannelThreadRef, userIds: readonly string[]): Promise<void>
   readonly maxMediaBytes?: number
   readonly outboundTypes?: readonly import('./outbound-content.js').ChannelOutboundType[]
   readonly supportsOutboundMedia?: boolean
