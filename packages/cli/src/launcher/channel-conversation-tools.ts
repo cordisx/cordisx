@@ -376,6 +376,7 @@ export class ChannelConversationTools {
           input,
           metadata,
           this.consumer.memoryAuthority,
+          this.consumer.userMemory.directory,
         )
       }
       if (

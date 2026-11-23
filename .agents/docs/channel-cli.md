@@ -167,6 +167,28 @@ actor/admin claims are rejected. See the
 [memory design and delivery ledger](channel-memory-design.md) for tested
 boundaries, identity confirmation gaps and production gates.
 
+### User-scoped introductions and recall
+
+Channel reuses the existing memory store for explicit self-introductions, preferred names, relationships, stable preferences, and useful personal facts. Before starting or steering a business turn, the Host analyzes an eligible first-person text message using tool-free structured Responses inference and saves or updates individual records. This does not depend on the business Agent choosing to call a memory tool. Record owner and provenance come from the verified adapter/account/tenant/user tuple, never from a display name or model claim. A self-declared relationship is attributed evidence, not management authority. Task admission, send denials, and persona separation still apply.
+
+On an explicit self-question, the Host retrieves a bounded set of relevant exact-owner records from the effective persona space and supplies them in `messageContext.userMemory`. For example, a private introduction followed by “认识我是谁吗？” in another addressed group can recall the same sender's name and relationship; “我的名字是什么？” supplies only name records. Explicit own-topic questions can recall matching preferences or facts. The existing scoped memory CLI can also search and get these records. No permanent group grant is created, and another person, bot account, tenant, or persona does not gain access. The Agent must use relevant returned evidence and keep the current audience and uncertainty in view. A read result is not proof of model consumption.
+
+Local operators can place `channel-user-memory.json` beside the profile's `channel-conversations.json` (under `apps/codex/profiles/<profile>`):
+
+```json
+{
+  "enabled": true,
+  "remember": true,
+  "recall": true,
+  "groupRecall": true,
+  "timeoutMs": 5000
+}
+```
+
+These are the defaults. `providerId` and `model` may be set together to an already admitted Responses model service for extraction; otherwise, the task's selected provider/model is used. Shared model services work in headless mode; Desktop also supports Host-managed plugin gateways. Official account-only models without a plain Responses connection cannot run automatic extraction; the business Agent retains the normal memory CLI. The analysis request contains only this message, has no tools, requests structured JSON, and disables provider storage. It adds one bounded model request to eligible introductions. The timeout range is 100–10,000 ms. Timeout, invalid output, or unavailable inference reports a bounded diagnostic and continues ordinary task dispatch; it never claims a successful save. Settings are read for each eligible message.
+
+This is selective extraction of Chinese/English first-person statements, not transcript ingestion or universal semantic search. Quoted/unsupported text, secrets, and speculative or sensitive profiles are excluded. Topic matching is lexical; arbitrary paraphrases may require a shorter supplied keyword through the existing CLI. Corrections use a stable model-extracted topic key and revisioned records; a changed key may require normal CLI deduplication. Disabling the feature stops new automatic actions without deleting existing records. Existing `update`/`forget` remain available. No stored-data migration or automatic platform history import occurs.
+
 ### Automatic request-local recall for an administrator
 
 For a direct project-status request such as “青杉项目现在进度是什么？” or a

@@ -7,6 +7,8 @@ import type { ChannelMemoryAuthority } from './channel-memory-authority.js'
 import { memoryKey } from './channel-memory-policy.js'
 import { MemoryRecordValidationError, validateMemoryRecord } from './channel-memory-record-validation.js'
 import { ownAdministratorRecall } from './channel-memory-recall.js'
+import { channelUserMemoryRequest } from './channel-user-memory-request.js'
+import { channelUserMemorySettings } from './channel-user-memory-settings.js'
 
 export async function channelMemoryCommand(
   store: ChannelMemoryStore,
@@ -14,6 +16,7 @@ export async function channelMemoryCommand(
   value: Record<string, unknown>,
   metadata: unknown,
   authorization?: ChannelMemoryAuthority,
+  userMemoryDirectory?: string,
 ): Promise<unknown> {
   const caller = access.caller(metadata)
   if (!caller?.source.actor?.userId || access.preparation(metadata)) {
@@ -62,6 +65,13 @@ export async function channelMemoryCommand(
   const administrator = access.memoryAdministrator(metadata, !!authority.administer?.length)
   const recall = administrator ? ownAdministratorRecall(access.requestText(metadata)) : undefined
   if (recall) authority.ownRecall = recall
+  const userRequest = channelUserMemoryRequest(access.requestText(metadata))
+  if (userRequest && userMemoryDirectory && access.userMemoryAllowed(metadata)) {
+    const config = await channelUserMemorySettings(userMemoryDirectory)
+    if (config.enabled && config.recall && (source.kind !== 'group' || config.groupRecall)) {
+      authority.userRecall = userRequest
+    }
+  }
   const action = String(value.action)
   if ((action === 'remember' || action === 'update') && value.record === undefined) {
     throw new MemoryRecordValidationError([{
@@ -146,5 +156,6 @@ export async function channelMemoryCommand(
     result = await store.confirm(authority, challenge)
   } else if (action === 'grant-list') result = await store.grants(authority)
   else throw new Error('MEMORY_INVALID_REQUEST')
+  if (authority.userRecall && !access.userMemoryAllowed(metadata)) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
   return { status: 'ok', result }
 }

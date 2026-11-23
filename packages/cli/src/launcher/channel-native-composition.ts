@@ -25,10 +25,12 @@ export function createChannelNativeSession(input: {
     metadata?: unknown,
     beforeEffect?: () => Promise<boolean>,
   ) => Promise<unknown>
+  memoryConnect?: import('./channel-user-memory-model.js').ChannelMemoryModelConnection | undefined
 }) {
   const { options, bridge, control, execution, models } = input
   return new ChannelNativeSessions({
     bridge,
+    memoryConnect: input.memoryConnect,
     models: (operation, value, beforeEffect) => models(operation, value, undefined, beforeEffect),
     sourceConfiguration: input.selection,
     nativeRequest: (method, params) => control.nativeRequest(method, params),

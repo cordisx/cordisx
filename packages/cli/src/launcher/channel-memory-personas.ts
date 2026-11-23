@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto'
 import { MemoryFiles } from './channel-memory-files.js'
 import { ChannelMemoryStore } from './channel-memory-store.js'
 
+export const channelPersonaTask = (operationId: string, sessionId?: string) =>
+  sessionId ?? `dispatch-${createHash('sha256').update(operationId).digest('hex')}`
+
 export interface PersonaBotAccount {
   adapterId: string
   accountId: string

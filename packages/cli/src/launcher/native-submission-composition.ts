@@ -50,6 +50,7 @@ import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { nativeTaskSelectionAllowed } from './native-agent-task-effort.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
 import { createChannelNativeSession } from './channel-native-composition.js'
+import { channelMemoryRuntimeConnection } from './channel-user-memory-connection.js'
 import * as desktopContext from './desktop-native-context-observer.js'
 import type { DesktopStaticCatalogLease } from './desktop-static-catalog.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
@@ -953,6 +954,13 @@ export async function prepareNativeSubmissionBootstrap(
         lifetime.signal.throwIfAborted()
         reportStage('native-submission-controller-bound')
         channelSession = createChannelNativeSession({
+          memoryConnect: channelMemoryRuntimeConnection({
+            active: () => closePromise === undefined && !!completeOptions.managedCatalog,
+            managed: id => managed?.owns(id) === true || hasPluginProvider(id),
+            prepare: resolveConnection,
+            config: () => loadHomeConfig(path.join(completeOptions.managedCatalog!.homeDir, 'config.json')),
+            environment: completeOptions.nativeDiscoveryEnvironment ?? process.env,
+          }),
           options: completeOptions,
           codexHome,
           ...(nativeVersion ? { nativeVersion } : {}),
