@@ -324,6 +324,9 @@ export class ChannelRuntime {
     request: ChannelMessageSendV1,
     caller: ChannelPluginIdentity,
   ): Promise<ChannelSendHandleV1> {
+    if (request.contract !== 'cordisx.channel-message-send/v1' || request.schemaVersion !== 1) {
+      throw new ChannelIntegrityError('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    }
     return sendOutboundPublic(
       request,
       caller,

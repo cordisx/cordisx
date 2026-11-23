@@ -88,6 +88,9 @@ it('requires separate mention support, never falls back on invalid evidence, and
     await expect(
       runtime.sendTyped({ ...request, contract: 'cordisx.channel-message-send/v1', schemaVersion: 1 } as never, caller),
     ).rejects.toThrow('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    await expect(runtime.sendTyped(request as never, caller)).rejects.toThrow(
+      'CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE',
+    )
     const handle = await runtime.sendTypedV2(request, caller)
     valid = false
     await adapter.drainOutbound(10)
