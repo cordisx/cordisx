@@ -10,7 +10,6 @@ const target: ChannelThreadRef = {
   kind: 'group',
   threadId: 'oc_group',
   semantics: 'conversation',
-  eventId: 'event',
 }
 describe('generation-local accepted sender evidence', () => {
   it('requires matching raw native sender, tenant and message provenance', () => {
