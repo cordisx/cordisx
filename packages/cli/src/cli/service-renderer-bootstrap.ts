@@ -3,6 +3,7 @@ import { SharedProfilePermissionFence } from '../config/profile-permission-fence
 import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
+import { StandaloneRuntimeBundleCache } from '../launcher/standalone-runtime-bundle.js'
 import { type CordisXConfig, loadConfig } from '../launcher/config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
@@ -53,6 +54,7 @@ import type { DesktopConfigurationReservation } from '../launcher/desktop-config
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
+import { closeBootstrapFences } from './service-renderer-bootstrap-cleanup.js'
 import {
   type ConfiguredChannelHandoffResult,
   mutateServiceRendererConfiguredChannel,
@@ -80,6 +82,7 @@ export class ServiceRendererBootstrap {
   readonly writeLifetimes = new ManagerRendererWriteLifetimes()
   readonly readLifetimes = new ManagerRendererReadLifetimes()
   private readonly entries = new Map<string, Entry>()
+  private readonly runtimeBundle = new StandaloneRuntimeBundleCache()
   private readonly retirements = new Map<string, Promise<boolean>>()
   private readonly unsubscribeFinalization: () => void
   private readonly permissionFence: SharedProfilePermissionFence | undefined
@@ -828,7 +831,7 @@ export class ServiceRendererBootstrap {
               : {}),
           }),
           ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),
-        })
+        }, this.runtimeBundle)
         if (entry.managedContext) this.managedServiceUI?.assertBundleSafe(context, bundle)
         if (entry.identity && entry.plugins.some(plugin => plugin.source && bundle.includes(plugin.source))) {
           throw new Error('renderer-bootstrap-unavailable')
@@ -971,30 +974,14 @@ export class ServiceRendererBootstrap {
   close(): Promise<boolean> {
     if (this.closing) return this.closing
     this.closed = true
+    this.runtimeBundle.close()
     this.lifecycleHandoff.close()
     this.unsubscribeFinalization()
     for (const [rendererId, entry] of this.entries) {
       entry.peer.close()
       this.retire(rendererId, entry)
     }
-    this.closing = (async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        const results = await Promise.race([
-          Promise.all(this.retirements.values()),
-          new Promise<undefined>(resolve => {
-            timer = setTimeout(() => resolve(undefined), 15_000)
-          }),
-        ])
-        if (!results || !results.every(Boolean)) return false
-        await Promise.all([this.permissionFence?.close(), this.pluginConfigFence?.close()])
-        return true
-      } catch {
-        return false
-      } finally {
-        if (timer !== undefined) clearTimeout(timer)
-      }
-    })()
+    this.closing = closeBootstrapFences(this.retirements.values(), [this.permissionFence, this.pluginConfigFence])
     return this.closing
   }
 }

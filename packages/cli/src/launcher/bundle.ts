@@ -21,6 +21,7 @@ import { resourceRegistryInstallSource } from './plugin-generation-artifact-serv
 import { isStandaloneRuntimeGraph } from './standalone-runtime-graph.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import { createStandaloneMarketplaceTrustFilter } from './standalone-marketplace-trust.js'
+import type { StandaloneRuntimeBundleCache } from './standalone-runtime-bundle.js'
 
 /** Owner-private, per-session admission; never populated from a browser request. */
 export interface StandaloneOwnerAttachment {
@@ -738,6 +739,7 @@ export function startStandaloneManagerComposition(signal, verifySession, onResul
 export async function buildRendererBundle(
   config: CordisXConfig,
   options: BuildRendererBundleOptions = {},
+  standaloneRuntime?: StandaloneRuntimeBundleCache,
 ): Promise<string> {
   // Config roots can be outside this checkout (for example shared-profile
   // launch tests). Keep the private Host runtime resolvable independently of
@@ -745,6 +747,12 @@ export async function buildRendererBundle(
   const runtimeExtension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
   const runtimeImport = fileURLToPath(new URL(`../renderer/runtime.${runtimeExtension}`, import.meta.url))
   const { source } = await buildRendererCompositionSource(config, options, { runtimeImport })
+  if (standaloneRuntime !== undefined) {
+    if (options.standaloneOwner === undefined) throw new Error('Standalone runtime cache requires an owner')
+    const bundle = await standaloneRuntime.compose(source, runtimeImport)
+    await assertStandaloneOwner(config, options)
+    return bundle
+  }
   const trustFilter = options.standaloneOwner === undefined ? undefined : createStandaloneMarketplaceTrustFilter([
     fileURLToPath(new URL('../renderer/marketplace-trust.' + runtimeExtension, import.meta.url)),
     fileURLToPath(new URL('../permission-model-v4.' + runtimeExtension, import.meta.url)),
