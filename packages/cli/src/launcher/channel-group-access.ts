@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
+import { identity } from './channel-conversation-refs.js'
+import { channelGroupBlockIntent } from './channel-permission-intent.js'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelAgentAccess } from './channel-agent-access.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
@@ -20,6 +22,27 @@ export interface ChannelGroupTaskAccess {
   readonly tenantId: string
   readonly conversationId: string
   readonly fromSequence: number
+}
+
+export interface ChannelGroupUserTaskAccess extends ChannelGroupTaskAccess {
+  readonly userId: string
+}
+
+export function parseChannelGroupUserTaskAccess(value: unknown): readonly ChannelGroupUserTaskAccess[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 4096) throw new Error('INVALID_GROUP_USER_ACCESS')
+  const result = value.map(raw => {
+    const item = channelRecord(raw)
+    channelExact(item, ['adapterId', 'accountId', 'tenantId', 'conversationId', 'fromSequence', 'userId'])
+    const { userId, ...group } = item
+    return { ...parseChannelGroupTaskAccess([group])[0]!, userId: channelText(userId) }
+  })
+  if (
+    result.some((item, index) =>
+      result.slice(0, index).some(prior => channelSameScope(prior, item) && prior.userId === item.userId)
+    )
+  ) throw new Error('INVALID_GROUP_USER_ACCESS')
+  return result
 }
 
 export function parseChannelGroupTaskAccess(value: unknown): readonly ChannelGroupTaskAccess[] {
@@ -58,12 +81,32 @@ export function channelGroupSourceRecord(state: ChannelConversationState, event:
 /** Recheck the original authenticated input at dispatch, steer and subsequent authorization boundaries. */
 export function channelDispatchAllowed(state: ChannelConversationState, event: ChannelEventRef): boolean {
   if (channelPolicyAllows(state.policy, 'dispatch', event)) return true
+  // A managed group block must remain recoverable by an authorized, explicitly addressed request.
+  // Only that block is ignored; every other denial and positive admission bucket still applies.
+  if (event.kind === 'group' && verifiedActor(event) && state.policy.enabled) {
+    const record = channelGroupSourceRecord(state, event)
+    const id = `command:${identity([channelCommandScope(event, false), 'messages'])}`
+    if (
+      record?.mentionedBot && state.policy.rules.some(rule => rule.id === id && rule.effect === 'deny')
+      && channelPolicyAllows(state.policy, 'command', event, 'messages-on')
+      && channelGroupBlockIntent(
+        record.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n'),
+        false,
+      )
+      && channelDispatchAllowed({
+        ...state,
+        policy: { ...state.policy, rules: state.policy.rules.filter(rule => rule.id !== id) },
+      }, event)
+    ) return true
+  }
   if (event.kind !== 'group' || !verifiedActor(event) || channelPolicyDenied(state.policy, 'dispatch', event)) {
     return false
   }
-  const grant = state.groupTaskAccess?.find(item => channelSameScope(item, event))
-  const record = grant && channelGroupSourceRecord(state, event)
-  return !!grant && !!record?.mentionedBot && record.sequence >= grant.fromSequence
+  const record = channelGroupSourceRecord(state, event)
+  return !!record?.mentionedBot && [
+    ...state.groupTaskAccess ?? [],
+    ...(state.groupUserTaskAccess ?? []).filter(item => item.userId === event.actor!.userId),
+  ].some(grant => channelSameScope(grant, event) && record.sequence >= grant.fromSequence)
 }
 
 /** Accept direct requests and common explanatory suffixes, never a quoted, negated or other-group instruction. */

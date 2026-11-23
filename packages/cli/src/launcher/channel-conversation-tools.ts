@@ -382,6 +382,10 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (['user-access', 'user-access-set', 'group-block', 'group-block-set'].includes(operation)) {
+        if (!this.consumer) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
+        return await this.consumer.permissionOperation(operation, input, metadata)
+      }
       if (operation === 'group-access' || operation === 'group-access-set') {
         if (!this.consumer) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
         return await channelGroupAccessOperation({
