@@ -24,6 +24,7 @@ import {
 } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { ChannelOutboundRpc } from './channel-outbound-rpc.js'
+import { createChannelForwardService } from './channel-forward-service.js'
 import { channelOutboundRuntimeOptions } from './channel-outbound-runtime-options.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
@@ -38,6 +39,7 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
   generation: string
   readonly runtime: ChannelRuntime
@@ -321,6 +323,15 @@ export function createLocalChannelService(input: {
         // that account unavailable without preventing the rest of CordisX from
         // starting.
         const current: ActiveRuntime = {
+          forward: createChannelForwardService({
+            filename: path.join(input.dataDir, 'forward.json'),
+            channel: request => directory.channel(request.source),
+            active: () => !disposed && active === current,
+            supported: request =>
+              configuration.connections.some(connection =>
+                ['feishu', 'lark'].includes(connection.adapterKind) && key(connection.ref) === key(request.source)
+              ),
+          }),
           outbound,
           generation,
           runtime,
@@ -562,6 +573,7 @@ export function createLocalChannelService(input: {
         generation: current.generation,
         runtime: current.runtime,
         outbound: current.outbound,
+        forward: current.forward,
         ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
