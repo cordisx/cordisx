@@ -18,7 +18,12 @@ function fixture() {
     data: { items: [{ message_id: path.message_id, chat_id: 'oc_source', deleted: false }] },
   }))
   const forward = vi.fn(async () => ({ code: 0, data: { message_id: 'om_result' } }))
-  const mergeForward = vi.fn(async () => ({
+  const mergeForward = vi.fn(async (
+    _input: {
+      params: { receive_id_type: string; uuid: string }
+      data: { receive_id: string; message_id_list: string[] }
+    },
+  ) => ({
     code: 0,
     data: { message: { message_id: 'om_merge' }, invalid_message_id_list: ['om_two'] },
   }))

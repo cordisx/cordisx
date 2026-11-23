@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { channelForwardRpc } from './channel-forward-rpc.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
+import type { ChannelForwardRequestV1 } from '@cordisx/protocol/channel-forward/v1'
 
 const account = { adapterId: 'feishu', accountId: 'bot', tenantId: 'tenant' }
 const value = {
@@ -11,7 +12,12 @@ const value = {
   messageIds: ['om_one'],
 }
 function fixture() {
-  const forward = vi.fn(async () => ({ state: 'sent' }))
+  const forward = vi.fn(async (
+    _request: ChannelForwardRequestV1,
+    _scope: string,
+    _readOnly: boolean,
+    _authorize: () => void,
+  ) => ({ state: 'sent' }))
   const access = { accounts: () => [{ ref: account, state: 'ready' }], forward } as unknown as
     & ChannelConversationAccess
     & { forward: typeof forward }
