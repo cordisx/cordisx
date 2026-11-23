@@ -1,4 +1,5 @@
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
 import { createChannelMemory } from './channel-memory-composition.js'
@@ -514,7 +515,7 @@ export class ChannelConversationConsumer {
         )
       }
       return
-    } else if (received && addressed && policy.enabled && channelPolicyAllows(policy, 'dispatch', event)) {
+    } else if (received && addressed && policy.enabled && channelDispatchAllowed(state, event)) {
       // Acknowledge receipt before a busy conversation is ready to create a job.
       void this.feedback.received(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
       const waiting = await this.store.mutate(state => {
@@ -730,7 +731,7 @@ export class ChannelConversationConsumer {
             mode: binding.mode,
           })),
           enabled: this.store.snapshot().policy.enabled,
-          messagesAllowed: channelPolicyAllows(this.store.snapshot().policy, 'dispatch', event),
+          messagesAllowed: channelDispatchAllowed(this.store.snapshot(), event),
         })
         : `/${command}: completed`,
     )
@@ -743,7 +744,7 @@ export class ChannelConversationConsumer {
       return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
-      if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)) return
+      if (!state.policy.enabled || !channelDispatchAllowed(state, event)) return
       if (job.sessionId && ChannelConversationStore.logicalSourceFenced(state, job.sessionId)) return
       if (job.bindingId && state.bindings[job.bindingId]?.state !== 'active') {
         await this.store.mutate(state => {
@@ -873,7 +874,7 @@ export class ChannelConversationConsumer {
     const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
     const includeFinal = job.finalDeliveryEnabled === true && state.policy.enabled && state.policy.autoReply
       && binding?.state === 'active' && binding.autoReply && mode !== 'none'
-      && channelPolicyAllows(state.policy, 'dispatch', event) && channelPolicyAllows(state.policy, 'send', event)
+      && channelDispatchAllowed(state, event) && channelPolicyAllows(state.policy, 'send', event)
     const completion = await native.completion(job.sessionId, job.turnId, includeFinal)
     if (completion.state === 'running') return
     if (completion.state === 'failed') {
@@ -903,7 +904,7 @@ export class ChannelConversationConsumer {
       const mode = current.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
       if (
         current.finalDeliveryEnabled !== true || !state.policy.enabled || !state.policy.autoReply
-        || !channelPolicyAllows(state.policy, 'dispatch', event)
+        || !channelDispatchAllowed(state, event)
         || binding?.state !== 'active' || !binding.autoReply || !completion.text || mode === 'none'
       ) {
         current.state = 'completed'

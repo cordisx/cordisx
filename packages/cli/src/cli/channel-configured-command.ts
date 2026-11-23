@@ -52,6 +52,8 @@ const OPERATIONS = [
   'reaction',
   'policy',
   'policy-set',
+  'group-access',
+  'group-access-set',
   'execution-defaults',
   'execution-defaults-set',
   'execution-settings',

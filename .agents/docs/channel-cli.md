@@ -5,6 +5,41 @@ arguments, completion semantics, capability boundaries and unavailable media API
 
 ## Configured runtime
 
+### Let an administrator open the current group for tasks
+
+In a group, an administrator can mention the bot and say “给这个群开白，在这个群里都能和他说话”
+or “给本群开白吧”. To revoke it, say “本群取消开白”. The AI receives the current
+message's scoped CLI instructions and can run:
+
+```bash
+cordisx channel group-access --context <incoming-context> --input '{}'
+cordisx channel group-access-set --context <incoming-context> --input '{"enabled":true,"expectedRevision":<revision>}'
+```
+
+Use the revision returned by `group-access`; revocation uses `enabled:false`.
+Both operations require a live authenticated incoming context. The caller cannot
+provide another account, group or actor. Enabling requires the sender's existing
+`allow-user` command permission in this group; revocation requires `reset-user`.
+A Feishu group administrator title alone does not establish a CordisX command
+grant. Explicit command denials still win. The Host validates the original
+direct request, not an AI-provided paraphrase; an ambiguous or quoted request
+needs clarification.
+
+The grant bypasses positive task-dispatch allowlists only for future messages
+in this exact account, tenant and group that mention the bot. Explicit dispatch
+denials, disabled policy and configured receive selectors remain authoritative.
+It does not expand management commands, outgoing-message permissions, memory
+sharing, private-chat access or other groups. Current and future group members
+use the verified sender identity of their incoming message; no cached roster is
+used as authorization. Requests denied before the grant are not replayed.
+
+The Host persists this task-only grant separately from ordinary policy rules.
+Revocation removes only this grant and rechecks queued work before dispatch;
+it does not interrupt an already-running turn. Re-enabling starts a new message
+cutoff. Revision conflicts require a fresh read. An unknown RPC outcome is not
+success and must be read back before another write. General `policy-set` remains
+local-user-only for profile changes.
+
 ### Scoped memory (local implementation)
 
 Use `cordisx channel memory guide --context <incoming-context> --input '{}'`

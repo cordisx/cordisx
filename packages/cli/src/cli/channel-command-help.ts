@@ -1,4 +1,8 @@
 const HELP: Readonly<Record<string, string>> = {
+  'group-access':
+    'Incoming --context required: read this exact group task whitelist and revision. Input: {}. No caller-selected account, group or actor.',
+  'group-access-set':
+    'Incoming --context required. Input: {enabled:boolean,expectedRevision:integer}. An explicit current-group request requires allow-user permission to enable, reset-user permission to revoke. Later @ messages can initiate tasks; explicit denies win. Other groups, private chats, send and management permissions remain unchanged. Re-read a revision conflict; do not replay uncertain writes.',
   reaction:
     'Incoming --context required. React to that known source message only. Input: {action:"add",emojiType:"OnIt"} or {action:"remove",reactionId:"returned-id"}. Remove only reactions this bot created. Preserve receipt reactionId; unknown API outcome is not success and must not be blindly retried. Completion emoji is separately configured, never literal "done".',
   connections: 'List configured live Channel connections. Input: {}.',
