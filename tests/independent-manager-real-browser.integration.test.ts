@@ -339,6 +339,7 @@ it.skipIf(chrome === undefined)(
           expect(await page.evaluate("document.querySelector('.cxms-provider-identity')?.textContent"))
             .toContain('Fixture provider')
         }, { timeout: 20_000 })
+        expect(await page.evaluate("document.querySelector('[data-empty-state=unavailable]') === null")).toBe(true)
         await page.evaluate("document.querySelector('.cxms-provider-toggle').click()")
         expect(await page.evaluate("document.querySelector('.cxms-model-identity')?.textContent"))
           .toContain('fixture-model')
@@ -361,6 +362,7 @@ it.skipIf(chrome === undefined)(
         expect(await first!.evaluate("document.querySelector('.cxms-model-identity')?.textContent"))
           .toContain('updated-model')
       }, { timeout: 20_000 })
+      expect(await first.evaluate("document.querySelector('[data-empty-state=unavailable]') === null")).toBe(true)
       for (const page of [first, second]) {
         await page.evaluate('document.querySelector("[data-tab=plugins]").click()')
       }

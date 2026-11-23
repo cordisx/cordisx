@@ -110,7 +110,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected
   const loading = state.loading || catalog.loading || Boolean(state.startup && !state.startup.snapshot)
   const refreshing = loading || state.refreshing === true || catalog.refreshing === true
-  const unavailable = !registry || !client && !state.startup
+  const unavailable = !registry || !client && !state.startup && !registry.hasLiveSource()
   const failed = Boolean(state.error) || Boolean(client && !catalog.connected && !catalog.loading)
   const canCreate = Boolean(onCreate && client && catalog.connected && catalog.canCreateConnection && !loading)
   const refresh = () => {

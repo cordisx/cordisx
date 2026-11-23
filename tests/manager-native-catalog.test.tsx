@@ -32,6 +32,7 @@ describe('Manager native catalog coverage', () => {
       },
       refresh: async () => {},
       snapshot: () => snapshot,
+      hasLiveSource: () => false,
     }
     try {
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
@@ -50,6 +51,38 @@ describe('Manager native catalog coverage', () => {
       expect(fixture.document.querySelector('[aria-label="DeepSeek · Models"]')).not.toBeNull()
       expect(fixture.element('.cxmc-muted').textContent).toBe('Read only')
     } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('shows a healthy standalone catalog without an unavailable warning and reports read failures', async () => {
+    const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+    let source: 'ready' | 'empty' | 'failed' = 'ready'
+    const registry = nativeModelProviderRegistry(undefined, {
+      nativeProviders: async () => {
+        if (source === 'failed') throw new Error('source unavailable')
+        return source === 'empty' ? [] : providers.map(provider => ({ ...provider, readOnly: true }))
+      },
+      dispose: () => {},
+    })
+    try {
+      await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+      await act(async () => await registry.refresh())
+      expect(fixture.document.querySelector('.cxms-provider')).not.toBeNull()
+      expect(fixture.document.querySelector('[data-empty-state="unavailable"]')).toBeNull()
+      expect(fixture.document.querySelector('[data-empty-state="error"]')).toBeNull()
+
+      source = 'failed'
+      await act(async () => await registry.refresh())
+      expect(fixture.document.querySelector('[data-empty-state="error"]')).not.toBeNull()
+
+      source = 'empty'
+      await act(async () => await registry.refresh())
+      expect(fixture.document.querySelector('[data-empty-state="empty"]')).not.toBeNull()
+      expect(fixture.document.querySelector('[data-empty-state="unavailable"]')).toBeNull()
+    } finally {
+      registry.dispose()
       await fixture.dispose()
     }
   })
