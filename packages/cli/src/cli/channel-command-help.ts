@@ -1,4 +1,12 @@
 const HELP: Readonly<Record<string, string>> = {
+  'user-access':
+    'Incoming --context required. Input: {user:"original ID, native @ mention or full name",scope?:"conversation"|"account"}. Read this managed user rule, revision and effective ordinary dispatch policy. Requires one of the existing user-management permissions. Account scope requires a global command grant; no other account is accepted.',
+  'user-access-set':
+    'Incoming --context required. Input: {user,scope?:"conversation"|"account",effect:"allow"|"deny"|"reset",expectedRevision}. Requires the matching allow-user/deny-user/reset-user permission and an explicit original request naming that same target. Examples: 给 @用户 授权; 禁止 @用户 发起任务; 恢复 @用户 权限. In a group, allow grants only that user future mentioned tasks, bypassing positive dispatch lists but never explicit denies. Direct/account rules retain positive-list intersections. Account scope requires 在本账号 plus a global command grant. Ambiguous names need a new explicit request with native mention/ID; do not choose a candidate yourself. Reset removes only this managed rule/grant, never other denials or command grants.',
+  'group-block':
+    'Incoming --context required. Input: {}. Read this group managed task block, revision and restore capability.',
+  'group-block-set':
+    'Incoming --context required. Input: {blocked:boolean,expectedRevision}. Explicit 禁止本群任务 requires messages-off permission; 恢复本群任务 requires messages-on. Only the current group is accepted. A blocked group accepts the addressed authorized restore request only if other task rules permit it. Other messages remain blocked. Restore removes only the managed block, not other denies; /messages-on remains available. Do not replay uncertain writes.',
   'group-access':
     'Incoming --context required: read this exact group task whitelist and revision. Input: {}. No caller-selected account, group or actor.',
   'group-access-set':

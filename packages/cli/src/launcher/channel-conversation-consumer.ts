@@ -1,5 +1,7 @@
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
 import { channelDispatchAllowed } from './channel-group-access.js'
+import { channelTaskPolicyChange } from './channel-task-policy-change.js'
+import { channelPermissionOperation } from './channel-permission-cli.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
 import { createChannelMemory } from './channel-memory-composition.js'
@@ -65,10 +67,8 @@ import {
   channelGlobalCommandAllowed,
   channelPolicyAllows,
   channelRecord,
-  channelSameScope,
   channelText,
   channelWakePrefix,
-  parseChannelConversationPolicy,
 } from './channel-conversation-policy.js'
 import type * as Conversation from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
@@ -150,6 +150,18 @@ export class ChannelConversationConsumer {
   }
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
     return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
+  }
+  permissionOperation(operation: string, value: unknown, metadata: unknown) {
+    return channelPermissionOperation({
+      operation,
+      value,
+      metadata,
+      store: this.store,
+      agent: this.agentAccess,
+      users: this.commandUsers,
+      access: this.input.access,
+      signal: this.lifetime.signal,
+    })
   }
   profileLogicalOwner() {
     return this.logicalOwner
@@ -697,25 +709,7 @@ export class ChannelConversationConsumer {
           !state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)
           || global && !channelGlobalCommandAllowed(state.policy, event, command)
         ) return false
-        const id = `command:${identity([scope, command.includes('user') ? userArgument : 'messages'])}`
-        const rules = state.policy.rules.filter(rule => rule.id !== id)
-        if (command === 'messages-off' || command === 'allow-user' || command === 'deny-user') {
-          rules.push({
-            id,
-            ...scope,
-            action: 'dispatch',
-            effect: command === 'allow-user' ? 'allow' : 'deny',
-            ...(command.includes('user') ? { userIds: [channelText(userArgument)] } : {}),
-          })
-        }
-        const wakePrefixes = command === 'wake'
-          ? [
-            ...state.policy.wakePrefixes.filter(item => !channelSameScope(item, scope)),
-            ...(userArgument === '--clear' ? [] : [{ ...scope, prefixes: [channelText(userArgument)] }]),
-          ]
-          : state.policy.wakePrefixes
-        state.policy = parseChannelConversationPolicy({ ...state.policy, rules, wakePrefixes })
-        state.policyRevision += 1
+        channelTaskPolicyChange(state, scope, command, userArgument)
         return true
       })
       if (!applied) return
