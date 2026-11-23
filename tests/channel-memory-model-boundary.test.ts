@@ -151,6 +151,70 @@ it('Chinese owned project recall matches concise stored subjects without opening
   }
 })
 
+it('a configured command administrator recalls own relevant work in a group without a persistent sharing grant', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'memory-admin-recall-'))
+  try {
+    const boundary = mockMemoryBoundary(root)
+    boundary.policy({
+      enabled: true,
+      rules: [{
+        id: 'admin',
+        adapterId: 'feishu',
+        accountId: 'synthetic-bot',
+        tenantId: 'synthetic-tenant',
+        action: 'command',
+        effect: 'allow',
+        userIds: ['alice'],
+        commands: ['allow-user', 'deny-user', 'reset-user'],
+      }],
+    })
+    const record = {
+      kind: 'fact',
+      title: 'Cedar project',
+      summary: 'Deployment verified: ADMIN-42',
+      tags: ['Cedar'],
+      entityRefs: [],
+      evidenceType: 'verified',
+      confidence: 1,
+    }
+    boundary.dispatch('alice', 'A', 'direct', 'feishu', 'save', 'save-context', 'Save Cedar progress')
+    const saved = await boundary.call({ action: 'remember', record }, 'save-context') as any
+    boundary.dispatch('bob', 'C', 'direct', 'feishu', 'other', 'other-context')
+    const other = await boundary.call(
+      { action: 'remember', record: { ...record, summary: 'OTHER-PRIVATE' } },
+      'other-context',
+    ) as any
+    boundary.dispatch('alice', 'B', 'group', 'feishu', 'recall', 'recall-context', '你记得自己最近都做了什么吗？')
+    expect(await boundary.call({ action: 'guide', topic: 'recall' }, 'recall-context')).toMatchObject({
+      result: { recallAccess: { administrator: true, ownRequestScope: 'recent-work', persistentGrantCreated: false } },
+    })
+    const hits = await boundary.call({ action: 'search-page', query: '' }, 'recall-context') as any
+    expect(hits.result.cards.map((card: any) => card.id)).toEqual([saved.result.id])
+    expect(JSON.stringify(hits)).not.toContain('OTHER-PRIVATE')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'recall-context')).toMatchObject({
+      result: { summary: 'Deployment verified: ADMIN-42' },
+    })
+    expect(await boundary.call({ action: 'get', id: other.result.id }, 'recall-context')).toMatchObject({
+      code: 'MEMORY_NOT_FOUND',
+    })
+    expect(await boundary.call({ action: 'grant-list' }, 'recall-context')).toMatchObject({ result: [] })
+    boundary.dispatch('bob', 'B', 'group', 'feishu', 'member-recall', 'member-context', '你记得自己最近都做了什么吗？')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'member-context')).toMatchObject({
+      code: 'MEMORY_NOT_FOUND',
+    })
+    boundary.dispatch('alice', 'B', 'group', 'feishu', 'new', 'new-context', '你好')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'new-context')).toMatchObject({
+      code: 'MEMORY_NOT_FOUND',
+    })
+    boundary.dispatch('alice', 'B', 'group', 'feishu', 'topic', 'topic-context', 'What is Cedar project progress?')
+    expect(await boundary.call({ action: 'get', id: saved.result.id }, 'topic-context')).toMatchObject({ status: 'ok' })
+    expect(await boundary.call({ action: 'get', id: saved.result.id, administrator: true }, 'topic-context'))
+      .toMatchObject({ code: 'MEMORY_INVALID_REQUEST' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 it('the verified owner can find and update a record in its source group without a recall phrase', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'memory-group-update-'))
   try {

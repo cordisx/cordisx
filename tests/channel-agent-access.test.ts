@@ -31,6 +31,29 @@ const argv = (op: string, input: unknown = {}, token?: string) => [
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 describe('configured Channel CLI routine approval', () => {
+  it('does not let an earlier input keep request-local memory administrator scope after new input', () => {
+    const first = { ...source, messageId: 'one' }, second = { ...source, messageId: 'two' }
+    const policy = parseChannelConversationPolicy({
+      enabled: true,
+      rules: [{
+        id: 'admin',
+        action: 'command',
+        effect: 'allow',
+        userIds: ['ou_alice'],
+        commands: ['allow-user', 'deny-user', 'reset-user'],
+      }],
+    })
+    const state: any = { policy, inputs: { first: { sequence: 1, input: { source: { event: first } } } } }
+    const access = new ChannelAgentAccess(() => state, () =>
+      ({
+        contextFor: (token: string) => ({ threadId: 'chat', turnId: 'turn', source: token === 'one' ? first : second }),
+        sourceFor: () => first,
+      }) as never)
+    expect(access.memoryAdministrator({ 'cordisx/channelContext': 'one' })).toBe(true)
+    state.inputs.second = { sequence: 2, input: { source: { event: second } } }
+    expect(access.memoryAdministrator({ 'cordisx/channelContext': 'one' })).toBe(false)
+    expect(access.memoryAdministrator({ 'cordisx/channelContext': 'two' })).toBe(true)
+  })
   it('classifies chunked media preparation as a send effect, never a read', () => {
     for (const action of ['begin', 'chunk', 'commit']) {
       const command = argv('media-prepare', { action }, 'current')

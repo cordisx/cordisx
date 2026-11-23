@@ -18,6 +18,12 @@ export function channelMemoryGuide(topic?: string): unknown {
   return {
     topic,
     guidance: topics[topic],
+    ...(topic === 'recall'
+      ? {
+        administratorRecall:
+          "The Host checks live caller identity and actual incoming request. A configured Channel user-management administrator or memory-source administrator can automatically read their own relevant task facts for a recognized project-status request or a recent-work overview (last 30 days). guide recall returns recallAccess for the current context. No grant is written and no sharing/authorization phrase is needed. Topic/status requests are scoped to supplied subjects; overview excludes personal preferences, profiles and unrelated facts. Another person's private records still need source authorization and a grant. Current-group output must stay within the requested task facts. Ambiguous/quoted/negated requests do not activate this path; use the normal authorized memory scope and explain missing results without claiming hidden records exist.",
+      }
+      : {}),
     ...(topic === 'write'
       ? {
         recordFormat: {

@@ -7,6 +7,7 @@ import path from 'node:path'
 import { ChannelMemoryPersonas } from '../../packages/cli/src/launcher/channel-memory-personas.js'
 import { ChannelNativeSessions } from '../../packages/cli/src/launcher/channel-native-sessions.js'
 import { ChannelConversationTools } from '../../packages/cli/src/launcher/channel-conversation-tools.js'
+import { parseChannelConversationPolicy } from '../../packages/cli/src/launcher/channel-conversation-policy.js'
 
 export function mockMemoryBoundary(root: string) {
   let store = new ChannelMemoryStore(root)
@@ -14,6 +15,7 @@ export function mockMemoryBoundary(root: string) {
   let source: Record<string, unknown> = {}
   let token = ''
   let requestText = ''
+  let policy = parseChannelConversationPolicy({ enabled: true })
   const outbound: { text: string; target: unknown }[] = []
   const receipts = new Map<string, { state: string }>()
   const tools = new ChannelConversationTools(() =>
@@ -39,6 +41,7 @@ export function mockMemoryBoundary(root: string) {
   const access = new ChannelAgentAccess(
     () =>
       ({
+        policy,
         inputs: { current: { input: { source: { event: source }, content: [{ type: 'text', text: requestText }] } } },
       }) as never,
     () =>
@@ -92,7 +95,7 @@ export function mockMemoryBoundary(root: string) {
         adapterId: adapter,
         accountId,
         tenantId: 'synthetic-tenant',
-        actor: { userId: actor },
+        actor: { adapterId: adapter, accountId, tenantId: 'synthetic-tenant', userId: actor },
         conversationId: conversation,
         kind,
         messageId,
@@ -120,6 +123,9 @@ export function mockMemoryBoundary(root: string) {
     async configureAdministrator(userId: string, conversations: string[]) {
       const account = { adapterId: 'feishu', accountId: 'synthetic-bot', tenantId: 'synthetic-tenant', userId }
       return authorization.configure(account, conversations.map(conversationId => ({ ...account, conversationId })), 0)
+    },
+    policy(value: unknown) {
+      policy = parseChannelConversationPolicy(value)
     },
     async records() {
       await store.files.prepare()

@@ -5,6 +5,7 @@ import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import { continuationRoutine } from './channel-continuation-approval.js'
 import { sameChannelPrincipal } from './channel-source-principal.js'
+import { channelMemoryAdministrator } from './channel-memory-recall.js'
 
 /** Resolve authority from a real dispatch, never from an Agent-supplied actor or name. */
 export class ChannelAgentAccess {
@@ -72,6 +73,16 @@ export class ChannelAgentAccess {
     })
     if (matches.length !== 1) return undefined
     return matches[0]!.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  }
+  memoryAdministrator(metadata: unknown, sourceAdministrator = false): boolean {
+    const source = this.caller(metadata)?.source
+    const state = this.state(), policy = state.policy
+    const records = Object.values(state.inputs ?? {}).filter(record =>
+      source && sameChannelPrincipal(record.input.source.event, source)
+    )
+    const selected = records.find(record => record.input.source.event.messageId === source?.messageId)
+    if (selected && records.some(record => record.sequence > selected.sequence)) return false
+    return !!source && !!policy && channelMemoryAdministrator(policy, source, sourceAdministrator)
   }
   routine(command: unknown, threadId: string, turnId: string): boolean {
     const operation = this.native()?.cliApprovalOperation?.(command)

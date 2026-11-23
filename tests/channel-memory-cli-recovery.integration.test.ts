@@ -13,7 +13,7 @@ import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
 
-it('real CLI recovers rejected memory writes in the same turn and reads only an explicitly granted source in another chat', async () => {
+it('real CLI recovers writes and rechecks explicit sharing or request-local owner recall in another chat', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'memory-cli-recovery-'))
   const ref = { adapterId: 'feishu', accountId: 'fixture', tenantId: 'fixture' }
   const sessionA = '01a10000-0000-7000-8000-000000000001', sessionB = '01a10000-0000-7000-8000-000000000002'
@@ -73,7 +73,7 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
           if (!['start_session', 'send_message'].includes(_operation)) return {}
           phase++
           active = true
-          session = phase === 2 || phase === 4 || phase === 6 ? sessionB : sessionA
+          session = [1, 3, 5].includes(phase) ? sessionA : sessionB
           const turn = 'turn-' + phase
           const currentTurn = { id: turn, status: 'inProgress' }
           turns.set(session, [...(turns.get(session) ?? []), currentTurn])
@@ -112,7 +112,7 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
                 .toMatchObject({ status: 'ok', result: { revision: 2 } })
               expect(await command('update', { id: storedId, revision: 1, record: valid }))
                 .toMatchObject({ status: 'rejected', code: 'MEMORY_REVISION_CONFLICT' })
-            } else if (phase === 2 || phase === 6) {
+            } else if ([2, 6, 8, 9].includes(phase)) {
               expect(await command('search', { query: 'Cedar' })).toMatchObject({ status: 'ok', result: [] })
               expect(await command('get', { id: storedId })).toMatchObject({
                 status: 'rejected',
@@ -131,6 +131,22 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
               const answer = `According to stored evidence: ${read.result.summary}`
               expect(answer).toContain('validation passed: SYNTH-27')
             } else if (phase === 5) expect(await command('revoke', { id: grantId })).toMatchObject({ status: 'ok' })
+            else if (phase === 7) {
+              const guide = await command('guide', { topic: 'recall' })
+              expect(guide.result.recallAccess).toMatchObject({
+                administrator: true,
+                ownRequestScope: 'recent-work',
+                persistentGrantCreated: false,
+              })
+              const hits = await command('search-page', { query: '' })
+              expect(hits.result.cards.map((card: { id: string }) => card.id)).toEqual([storedId])
+              expect(await command('get', { id: storedId })).toMatchObject({
+                result: { summary: 'Cedar validation passed: SYNTH-27' },
+              })
+              const memoryState = await consumer.memory.files.read('state.json') as { grants: { revokedAt?: string }[] }
+              expect(memoryState.grants).toHaveLength(1)
+              expect(memoryState.grants[0]?.revokedAt).toBeDefined()
+            }
           } catch (error) {
             failures.push(error)
           }
@@ -168,7 +184,18 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
     channel: handler.channel,
   })
   try {
-    await consumer.policySet({ enabled: true, autoReply: false }, 0)
+    await consumer.policySet({
+      enabled: true,
+      autoReply: false,
+      rules: [{
+        id: 'admin',
+        ...ref,
+        action: 'command',
+        effect: 'allow',
+        userIds: ['admin'],
+        commands: ['allow-user', 'deny-user', 'reset-user'],
+      }],
+    }, 0)
     await consumer.memoryAuthority.configure({ ...ref, userId: 'admin' }, [{ ...ref, conversationId: 'oc_A' }], 0)
     const inputs = [
       ['oc_A', 'admin', 'save useful progress'],
@@ -177,8 +204,12 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
       ['oc_B', 'member', 'what is Cedar progress?'],
       ['oc_A', 'admin', 'Revoke sharing'],
       ['oc_B', 'member', 'what is Cedar progress?'],
+      ['oc_B', 'admin', '你记得自己最近都做了什么吗？'],
+      ['oc_B', 'admin', 'hello'],
+      ['oc_B', 'member', '你记得自己最近都做了什么吗？'],
     ]
     for (const [conversationId, userId, text] of inputs) {
+      if (phase === 6) await consumer.memoryAuthority.configure({ ...ref, userId: 'admin' }, [], 1)
       const id = 'om_' + (phase + 1)
       await consumer.receive(id, {
         contract: 'cordisx.channel-user-input/v1',
@@ -204,7 +235,7 @@ it('real CLI recovers rejected memory writes in the same turn and reads only an 
       await consumer.pump()
       await consumer.pump()
     }
-    expect(phase).toBe(6)
+    expect(phase).toBe(9)
     expect(failures).toEqual([])
   } finally {
     await server.close()
