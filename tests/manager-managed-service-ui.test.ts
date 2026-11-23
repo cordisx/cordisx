@@ -43,7 +43,14 @@ function descriptor() {
   }
 }
 
-function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean; allowAccountReads?: boolean } = {}) {
+function fixture(
+  options: {
+    allowAuthentication?: boolean
+    allowLogout?: boolean
+    allowAccountReads?: boolean
+    allowAccountToggle?: boolean
+  } = {},
+) {
   let epoch = 1
   let live = true
   let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
@@ -55,6 +62,7 @@ function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean
       value: input.operation === 'get' ? descriptor() : { status: 'available', projection: { binding } },
     }
   })
+  const prepareAccountToggle = vi.fn(async () => ({ operations: [{ operationId: 'toggle', maxInvocations: 1 }] }))
   const bridge = createManagerManagedServiceUIBridge({
     profileId: 'work',
     runtimeGeneration: 'runtime-1',
@@ -64,11 +72,16 @@ function fixture(options: { allowAuthentication?: boolean; allowLogout?: boolean
     allowAuthentication: options.allowAuthentication,
     allowLogout: options.allowLogout,
     allowAccountReads: options.allowAccountReads,
-    runtime: { capabilities: () => capabilities, managedServiceUI: { handleBindingValue: handle } },
+    allowAccountToggle: options.allowAccountToggle,
+    runtime: {
+      capabilities: () => capabilities,
+      managedServiceUI: { handleBindingValue: handle, prepareAccountToggle },
+    },
   })
   return {
     bridge,
     handle,
+    prepareAccountToggle,
     advance: () => {
       epoch++
     },
@@ -237,6 +250,131 @@ describe('manager managed-service UI bridge', () => {
       expect(await bridge.channel.prepare(request(token, 'toggleAccount'), a).dispatch())
         .toEqual({ requestId: 'request-1', ok: false, code: 'unsupported' })
     } finally {
+      bridge.dispose()
+    }
+  })
+
+  it('prepares an admitted account toggle without dispatching outside owner reservations', async () => {
+    const { bridge, handle, prepareAccountToggle } = fixture({ allowAccountReads: true, allowAccountToggle: true })
+    const a = { ...context('1', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(a)[0]!.token
+    const toggle = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-account-toggle/v1',
+      schemaVersion: 1,
+      requestId: 'toggle-1',
+      binding,
+      accountId: 'account-1',
+      disabled: true,
+      expectedRevision: 4,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    const account = {
+      accountId: 'account-1',
+      authIndex: 'index-1',
+      provider: 'codex',
+      label: 'Example',
+      status: 'active',
+      disabled: false,
+      unavailable: false,
+      authKind: 'oauth',
+      sourceKind: 'memory',
+      runtimeOnly: false,
+    }
+    const projection = (disabled: boolean) => ({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+      schemaVersion: 1,
+      binding,
+      sequence: 1,
+      observedAt: '2026-01-01T00:00:00Z',
+      revision: disabled ? 5 : 4,
+      serviceGeneration: 'service-1',
+      accounts: [{ ...account, disabled }],
+    })
+    let disabled = false
+    handle.mockImplementation(async value => {
+      const call = JSON.parse(value) as { requestId: string; operation: string }
+      let result: unknown = { status: 'available', projection: { binding, serviceGeneration: 'service-1' } }
+      if (call.operation === 'readAccounts') result = { status: 'available', accounts: projection(disabled) }
+      if (call.operation === 'toggleAccount') {
+        disabled = true
+        result = {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle-result.v1.schema.json',
+          contract: 'cordisx.managed-service-cli-proxy-account-toggle-result/v1',
+          schemaVersion: 1,
+          requestId: toggle.requestId,
+          binding,
+          status: 'accepted',
+          accountId: toggle.accountId,
+          disabled: true,
+          sequence: 2,
+        }
+      }
+      return { requestId: call.requestId, ok: true, value: result }
+    })
+    try {
+      const prepared = bridge.channel.prepare(request(token, 'toggleAccount', { binding, request: toggle }), a)
+      expect(await prepared.dispatch()).toEqual({ requestId: 'request-1', ok: false, code: 'unsupported' })
+      expect(handle).not.toHaveBeenCalled()
+      const ui = await bridge.reserveAccountAction(() => true)
+      const clients = {
+        isCurrent: () => true,
+        release: () => true,
+        fence: () => {},
+        runBorrowed: async <T>(_policy: unknown, action: () => Promise<T>) => await action(),
+      }
+      expect(
+        await prepared.managedServiceAccountToggle!.run({
+          clients,
+          ui,
+          isCurrent: () => true,
+          preparePeers: async () => true,
+        }),
+      )
+        .toMatchObject({ status: 'applied', accounts: { revision: 5 } })
+      expect(prepareAccountToggle).toHaveBeenCalledOnce()
+      expect(ui.release()).toBe(true)
+    } finally {
+      bridge.dispose()
+    }
+  })
+
+  it('keeps existing renderer status available during a valid account handoff without opening reads', async () => {
+    const { bridge } = fixture({ allowAccountReads: true, allowAccountToggle: true })
+    const first = { ...context('1', new AbortController().signal), admitted: true }
+    const second = { ...context('2', new AbortController().signal), admitted: true }
+    const token = bridge.projectInitial(first)[0]!.token
+    bridge.projectInitial(second)
+    const held = await bridge.reserveAccountAction(() => true)
+    try {
+      expect(() => bridge.assertStatusCurrent(first)).not.toThrow()
+      expect(() => bridge.assertStatusCurrent(second)).not.toThrow()
+      expect(() => bridge.assertStatusCurrent(context('3', new AbortController().signal))).toThrow()
+      expect(() => bridge.projectInitial(first)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(() => bridge.channel.prepare(request(token), first)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(held.release()).toBe(true)
+      expect(() => bridge.assertStatusCurrent(first)).not.toThrow()
+    } finally {
+      held.fence()
+      bridge.dispose()
+    }
+  })
+
+  it('rejects a parked renderer status if the account reservation loses its owner', async () => {
+    const { bridge, replace } = fixture({ allowAccountReads: true, allowAccountToggle: true })
+    const first = { ...context('1', new AbortController().signal), admitted: true }
+    bridge.projectInitial(first)
+    const held = await bridge.reserveAccountAction(() => true)
+    try {
+      replace()
+      expect(() => bridge.assertStatusCurrent(first)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+      expect(held.release()).toBe(false)
+    } finally {
+      held.fence()
       bridge.dispose()
     }
   })

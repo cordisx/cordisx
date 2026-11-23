@@ -187,6 +187,61 @@ it('allows managed-service readback only for the active plugin generation of the
   }
 })
 
+it('forwards account adoption only to the active plugin graph and matching renderer', async () => {
+  const fixture = await managerRendererGraphFixture()
+  const session = createManagerRendererGraphSession(baseInput)
+  try {
+    const lease = await fixture.lease('old')
+    session.projectInitial([descriptor(lease)])
+    const binding = {
+      bindingId: 'binding-1',
+      identity: { pluginId: 'fixture', serviceId: 'gateway' },
+      scope: { profileId: baseInput.profileId, generation: baseInput.generation },
+    }
+    const accounts = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+      schemaVersion: 1,
+      binding,
+      sequence: 1,
+      observedAt: '2026-01-01T00:00:00Z',
+      revision: 4,
+      serviceGeneration: 'service-1',
+      accounts: [],
+    }
+    const payload = {
+      rendererId,
+      ownerGeneration: baseInput.generation,
+      requestId: 'request-1',
+      pluginId: 'fixture',
+      pluginGeneration: 'old',
+      serviceId: 'gateway',
+      phase: 'prepare',
+      binding,
+      accounts,
+    }
+    const value = command('managed-service-accounts', 1, payload)
+    expect(session.projectCommand(value)).toEqual(value)
+    session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+    for (
+      const bad of [{ ...payload, pluginGeneration: 'other' }, { ...payload, rendererId: '5'.repeat(64) }, {
+        ...payload,
+        accounts: { ...accounts, accounts: [{ token: 'private' }] },
+      }]
+    ) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([descriptor(lease)])
+      expect(() => target.projectCommand(command('managed-service-accounts', 1, bad)))
+        .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+      target.close()
+    }
+  } finally {
+    session.close()
+    await fixture.close()
+  }
+})
+
 it('forwards a configuration receipt only for an active package and the exact renderer', async () => {
   const fixture = await managerRendererGraphFixture()
   try {

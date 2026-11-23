@@ -2,11 +2,15 @@ import { isDeepStrictEqual } from 'node:util'
 import type {
   ManagedServiceBindingV1,
   ManagedServiceCliProxyAccountsResultV1,
+  ManagedServiceCliProxyAccountToggleRequestV1,
+  ManagedServiceCliProxyAccountToggleResultV1,
 } from '@cordisx/protocol/managed-service/v1'
 import { ManagedServiceSchemaRegistry } from '../launcher/managed-service-schema.js'
 
 const accountsSchema =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json'
+const toggleResultSchema =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle-result.v1.schema.json'
 const unavailableCodes = new Set([
   'owner-unavailable',
   'stale-generation',
@@ -43,5 +47,27 @@ export class ManagerManagedServiceAccounts {
     await this.schemas.validate(accountsSchema, accounts, 'managed service accounts')
     if (!isDeepStrictEqual(accounts.binding, binding)) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
     return result as unknown as ManagedServiceCliProxyAccountsResultV1
+  }
+
+  async toggle(
+    value: unknown,
+    request: ManagedServiceCliProxyAccountToggleRequestV1,
+  ): Promise<ManagedServiceCliProxyAccountToggleResultV1> {
+    const result = object(value)
+    await this.schemas.validate(toggleResultSchema, result, 'managed service account toggle')
+    if (!isDeepStrictEqual(result.binding, request.binding) || result.requestId !== request.requestId) {
+      throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+    }
+    if (result.status === 'accepted') {
+      if (result.accountId !== request.accountId || result.disabled !== request.disabled) {
+        throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+      }
+      return result as unknown as ManagedServiceCliProxyAccountToggleResultV1
+    }
+    const error = object(result.error)
+    return {
+      ...result,
+      error: { code: error.code, message: 'Account operation could not be completed.' },
+    } as unknown as ManagedServiceCliProxyAccountToggleResultV1
   }
 }

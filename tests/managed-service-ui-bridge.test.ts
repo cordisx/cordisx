@@ -19,6 +19,80 @@ const generation = 'runtime-7'
 const owner = { pluginId: 'cli-proxy-api', pluginGeneration: 'plugin-3' }
 
 describe('browser managed service UI bridge', () => {
+  it('exposes an independent toggle and delivers owner-confirmed account updates', async () => {
+    const binding = {
+      bindingId: 'binding-9',
+      identity: { pluginId: owner.pluginId, serviceId: 'gateway' },
+      scope: { profileId, generation },
+    }
+    const calls: string[] = []
+    globals.__cordisxManagedServiceUIRequestV1 = payload => {
+      const request = JSON.parse(payload) as { requestId: string; operation: string }
+      calls.push(request.operation)
+      const value = request.operation === 'get'
+        ? {
+          status: 'available',
+          service: {
+            $schema: 'fixture',
+            contract: 'cordisx.managed-service/v1',
+            schemaVersion: 1,
+            binding,
+            capabilities: {
+              logout: false,
+              readCatalog: false,
+              readAccounts: true,
+              toggleAccount: true,
+              observeAccounts: true,
+              accountControl: false,
+            },
+          },
+        }
+        : { status: 'accepted' }
+      queueMicrotask(() =>
+        globals.__cordisxManagedServiceUIReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+      )
+    }
+    const bridge = BrowserManagedServiceUIBridge.connect([{ ...owner, token }], profileId, generation)
+    try {
+      const result = await bridge.bind(owner)!.get({ serviceId: 'gateway' })
+      if (result.status !== 'available') throw new Error('fixture service unavailable')
+      expect(result.service.accountControl).toBeUndefined()
+      expect(result.service.toggleAccount).toBeTypeOf('function')
+      const observer = vi.fn()
+      const stop = result.service.observeAccounts!(observer)
+      const projection = {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json' as const,
+        contract: 'cordisx.managed-service-cli-proxy-accounts/v1' as const,
+        schemaVersion: 1 as const,
+        binding,
+        sequence: 1,
+        observedAt: '2026-01-01T00:00:00Z',
+        revision: 2,
+        serviceGeneration: 'service-1',
+        accounts: [],
+      }
+      const adoption = {
+        ...owner,
+        serviceId: 'gateway',
+        requestId: 'request-1',
+        binding,
+        phase: 'prepare' as const,
+        accounts: projection,
+      }
+      expect(await bridge.adoptAccounts(adoption)).toBe(true)
+      expect(await bridge.adoptAccounts({ ...adoption, phase: 'confirm', accounts: { ...projection, revision: 3 } }))
+        .toBe(true)
+      expect(observer.mock.calls.map(call => call[0].revision)).toEqual([2, 3])
+      expect(await bridge.adoptAccounts({ ...adoption, pluginGeneration: 'other' })).toBe(false)
+      stop()
+      await result.service.toggleAccount!({} as never)
+      expect(calls).toEqual(['get', 'toggleAccount'])
+    } finally {
+      bridge.dispose()
+    }
+  })
+
   it('confirms a managed service through its own active capability and scope', async () => {
     const binding = {
       bindingId: 'binding-9',

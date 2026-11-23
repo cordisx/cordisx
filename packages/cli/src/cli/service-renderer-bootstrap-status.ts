@@ -5,7 +5,7 @@ export async function serviceRendererBootstrapStatus(input: {
   readonly entry: ServiceRendererBootstrapEntry | undefined
   readonly current: (entry: ServiceRendererBootstrapEntry) => boolean
   readonly configurationCurrent: (entry: ServiceRendererBootstrapEntry) => Promise<boolean>
-  readonly projectManagedServiceUI: () => void
+  readonly checkManagedServiceUI: () => void
 }): Promise<{ readonly status: 'ok'; readonly current: boolean }> {
   const { entry } = input
   if (entry?.lifecycleTransition) {
@@ -25,7 +25,7 @@ export async function serviceRendererBootstrapStatus(input: {
   }
   if (entry?.managedContext) {
     try {
-      input.projectManagedServiceUI()
+      input.checkManagedServiceUI()
     } catch {
       return { status: 'ok', current: false }
     }

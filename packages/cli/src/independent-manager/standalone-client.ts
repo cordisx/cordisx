@@ -524,6 +524,8 @@ export function startStandaloneManager(input: {
           startedRuntime.adoptStandaloneChannelProjection?.(projection, revision) === true,
         onManagedServiceState: async value =>
           await (startedRuntime.confirmStandaloneManagedServiceState?.(value) ?? Promise.resolve(false)),
+        onManagedServiceAccounts: async value =>
+          await (startedRuntime.adoptStandaloneManagedServiceAccounts?.(value) ?? Promise.resolve(false)),
         onDesktopPackageConfiguration: async value =>
           await (startedRuntime.adoptStandaloneDesktopPackageConfig?.(value) ?? Promise.resolve(false)),
         onPermissionPolicy: async value => {

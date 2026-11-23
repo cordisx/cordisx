@@ -5,6 +5,7 @@ import type { ManagerRendererGraph } from '../independent-manager/graph-stage-lo
 import { normalizeProjection as normalizeChannelProjection } from '../renderer/channel-manager-projection.js'
 import { isStandaloneConfigOperations } from '../renderer/standalone-desktop-package-config-binding.js'
 import { parseStandalonePolicyHandoff } from '../independent-manager/standalone-policy-handoff.js'
+import { parseManagedServiceAccountAdoption } from '../managed-service-account-adoption.js'
 import {
   createSessionPluginGraphProjection,
   type ProjectedGraphResponse,
@@ -283,6 +284,7 @@ export function createManagerRendererGraphSession(input: {
             'quiesce',
             'channel-configuration',
             'managed-service-state',
+            'managed-service-accounts',
             'desktop-package-configuration',
             'permission-policy',
           ].includes(
@@ -389,6 +391,14 @@ export function createManagerRendererGraphSession(input: {
             || payload.revision !== Number(payload.expectedRevision) + 1
             || typeof payload.origin !== 'boolean' || !isStandaloneConfigOperations(payload.operations)
           ) throw invalid()
+        } else if (command.method === 'managed-service-accounts') {
+          if (transaction !== undefined) throw invalid()
+          const adoption = parseManagedServiceAccountAdoption(payload, {
+            profileId: input.profileId,
+            generation: input.generation,
+            rendererId: input.rendererId,
+          })
+          if (active.get(adoption.pluginId)?.descriptor.moduleGeneration !== adoption.pluginGeneration) throw invalid()
         } else if (command.method === 'managed-service-state') {
           if (
             transaction !== undefined || Object.keys(payload).length !== 8

@@ -1,6 +1,10 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
+import {
+  type ManagedServiceAccountAdoption,
+  parseManagedServiceAccountAdoption,
+} from '../managed-service-account-adoption.js'
 import { parseStandalonePolicyHandoff, type StandalonePolicyHandoff } from './standalone-policy-handoff.js'
 import {
   isStandaloneConfigOperations,
@@ -18,6 +22,7 @@ type Method =
   | 'quiesce'
   | 'channel-configuration'
   | 'managed-service-state'
+  | 'managed-service-accounts'
   | 'desktop-package-configuration'
   | 'permission-policy'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
@@ -93,6 +98,7 @@ const methods = new Set<Method>([
   'quiesce',
   'channel-configuration',
   'managed-service-state',
+  'managed-service-accounts',
   'desktop-package-configuration',
   'permission-policy',
 ])
@@ -174,6 +180,7 @@ export function createManagerRendererLifecycleClient(input: {
   readonly onChannelConfiguration?: (projection: unknown, revision: number) => boolean | Promise<boolean>
   /** Confirm a service through this renderer's own capability before or after an owner action. */
   readonly onManagedServiceState?: (value: ManagedServiceStateConfirmation) => boolean | Promise<boolean>
+  readonly onManagedServiceAccounts?: (value: ManagedServiceAccountAdoption) => boolean | Promise<boolean>
   /** Adopt only the pending write and exact redacted value confirmed by this owner. */
   readonly onDesktopPackageConfiguration?: (value: StandaloneDesktopConfigAdoption) => boolean | Promise<boolean>
   /** Apply only the exact owner-projected Channel Manager policy snapshot. */
@@ -317,6 +324,25 @@ export function createManagerRendererLifecycleClient(input: {
         pluginId: adoption.pluginId,
         revision: adoption.revision,
         adopted: true,
+      }
+    }
+    if (method === 'managed-service-accounts') {
+      if (!synchronized || transaction !== undefined || awaitingAdoption !== undefined) {
+        throw new Error('renderer-managed-account-unavailable')
+      }
+      const adoption = parseManagedServiceAccountAdoption(payload, scope)
+      const confirmed = await input.onManagedServiceAccounts?.(adoption) === true
+      assertLive()
+      return {
+        rendererId: scope.rendererId,
+        ownerGeneration: scope.generation,
+        requestId: adoption.requestId,
+        pluginId: adoption.pluginId,
+        pluginGeneration: adoption.pluginGeneration,
+        serviceId: adoption.serviceId,
+        phase: adoption.phase,
+        revision: adoption.accounts?.revision ?? null,
+        confirmed,
       }
     }
     if (method === 'managed-service-state') {

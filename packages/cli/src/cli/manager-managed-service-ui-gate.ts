@@ -2,6 +2,7 @@
 export class ManagerManagedServiceUIGate {
   private inFlight = 0
   private reservation: symbol | undefined
+  private reservationCurrent: (() => boolean) | undefined
   private fenced = false
   private closed = false
   private readonly waiters = new Set<() => void>()
@@ -13,6 +14,16 @@ export class ManagerManagedServiceUIGate {
   /** Existing observations may wait across a reservation, but may not deliver yet. */
   get parked(): boolean {
     return !this.closed && !this.fenced && this.reservation !== undefined
+  }
+
+  /** Status checks may recognize an existing reservation only while its owner still holds it. */
+  get parkedCurrent(): boolean {
+    if (!this.parked) return false
+    try {
+      return this.reservationCurrent?.() === true
+    } catch {
+      return false
+    }
   }
 
   private wake(): void {
@@ -57,6 +68,7 @@ export class ManagerManagedServiceUIGate {
 
   async reserve(current: () => boolean, timeoutMs = 15_000): Promise<{
     isCurrent(): boolean
+    run<T>(action: () => Promise<T>): Promise<T>
     release(): boolean
     fence(): void
   }> {
@@ -65,6 +77,7 @@ export class ManagerManagedServiceUIGate {
     }
     const token = Symbol('managed-service-ui-transition')
     this.reservation = token
+    this.reservationCurrent = current
     const alive = () => {
       try {
         return !this.closed && !this.fenced && this.reservation === token && current() === true
@@ -89,24 +102,39 @@ export class ManagerManagedServiceUIGate {
     if (!drained || !alive() || this.inFlight !== 0) {
       if (alive()) this.reservation = undefined
       else this.fenced = true
+      this.reservationCurrent = undefined
       this.wake()
       throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
     }
     let ended = false
+    let running = false
     const valid = () => !ended && alive() && this.inFlight === 0
     return {
       isCurrent: valid,
+      run: async <T>(action: () => Promise<T>): Promise<T> => {
+        if (!valid() || running) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+        running = true
+        try {
+          const result = await action()
+          if (!valid()) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+          return result
+        } finally {
+          running = false
+        }
+      },
       release: () => {
         if (ended) return false
-        if (!valid()) {
+        if (!valid() || running) {
           ended = true
           this.fenced = true
           this.reservation = undefined
+          this.reservationCurrent = undefined
           this.wake()
           return false
         }
         ended = true
         this.reservation = undefined
+        this.reservationCurrent = undefined
         this.wake()
         return true
       },
@@ -115,6 +143,7 @@ export class ManagerManagedServiceUIGate {
         ended = true
         this.fenced = true
         this.reservation = undefined
+        this.reservationCurrent = undefined
         this.wake()
       },
     }
@@ -122,6 +151,7 @@ export class ManagerManagedServiceUIGate {
 
   close(): void {
     this.closed = true
+    this.reservationCurrent = undefined
     this.wake()
   }
 }

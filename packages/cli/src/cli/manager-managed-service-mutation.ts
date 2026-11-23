@@ -3,6 +3,8 @@ import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { fenceManagerOrigin } from './manager-origin-fence.js'
+import { coordinateManagerAccountToggle } from './manager-managed-service-account-coordinator.js'
+import type { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import type {
   ManagedServiceClientIdentity,
   ManagedServiceClientReservation,
@@ -17,6 +19,9 @@ export function coordinateManagerManagedServiceMutations(input: {
   readonly reserveServiceClients?: (
     identity: ManagedServiceClientIdentity,
   ) => ManagedServiceClientReservation | undefined
+  readonly reserveAccountUI?: (
+    current: () => boolean,
+  ) => Promise<Awaited<ReturnType<ManagerManagedServiceUIGate['reserve']>>>
 }): ManagerRendererChannel {
   return {
     prepare(payload, context) {
@@ -36,6 +41,34 @@ export function coordinateManagerManagedServiceMutations(input: {
       }
       const participants = input.participants
       const lifecycle = input.lifecycle
+      if (prepared.managedServiceAccountToggle) {
+        const action = prepared.managedServiceAccountToggle
+        const reserveUI = input.reserveAccountUI
+        const reserveClients = input.reserveServiceClients
+        if (action.requestId !== requestId) throw new Error('MANAGED_SERVICE_UI_UNAVAILABLE')
+        if (!reserveUI || !reserveClients) {
+          return {
+            mode: 'read',
+            async dispatch() {
+              return { requestId, ok: false, code: 'unsupported' }
+            },
+          }
+        }
+        return {
+          mode: 'write',
+          async dispatch() {
+            return await coordinateManagerAccountToggle({
+              action,
+              context,
+              sessions: input.sessions(),
+              participants,
+              lifecycle,
+              reserveUI,
+              reserveClients,
+            })
+          },
+        }
+      }
       const authentication = prepared.managedServiceAuthentication
       if (
         !authentication || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(authentication.pluginId)

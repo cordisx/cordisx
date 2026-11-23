@@ -12,6 +12,7 @@ import type { ManagerRendererChannel, ManagerRendererChannelContext } from './ma
 import { ManagerStartupObservation } from './manager-startup-observation.js'
 import { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import { ManagerManagedServiceAccounts } from './manager-managed-service-accounts.js'
+import { createManagerManagedServiceAccountRoute } from './manager-managed-service-account-route.js'
 import {
   ManagerManagedServiceObservation,
   type ManagerManagedServiceObservationRequest,
@@ -227,12 +228,15 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly allowLogout?: boolean
   /** Read-only accounts require an admitted Manager and owner-bound validation. */
   readonly allowAccountReads?: boolean
+  /** Enabled only with owner-side service, Manager and UI-read reservations. */
+  readonly allowAccountToggle?: boolean
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
     waitForInitialManagedServiceUI?(signal: AbortSignal): Promise<void>
     reserveManagedServiceUIContinuity?(): { finish(): number | undefined; cancel(): boolean }
     readonly managedServiceUI: {
       handleBindingValue(value: string, signal?: AbortSignal): Promise<Record<string, unknown>>
+      prepareAccountToggle?(value: string): Promise<unknown>
     }
   }
 }) {
@@ -243,6 +247,9 @@ export function createManagerManagedServiceUIBridge(input: {
   const retirements = new Map<string, Promise<boolean>>()
   const gate = new ManagerManagedServiceUIGate()
   const accountReads = input.allowAccountReads ? new ManagerManagedServiceAccounts() : undefined
+  if (input.allowAccountToggle && (!accountReads || !input.runtime.managedServiceUI.prepareAccountToggle)) {
+    throw unavailable()
+  }
   const lifetime = new AbortController()
   let disposed = false
 
@@ -318,6 +325,16 @@ export function createManagerManagedServiceUIBridge(input: {
       retire(context.rendererId)
       throw unavailable()
     }
+  }
+
+  /** Check an existing renderer without issuing capabilities during a reserved handoff. */
+  function assertStatusCurrent(context: ManagerRendererChannelContext): void {
+    const session = sessions.get(context.rendererId)
+    if (!session) throw unavailable()
+    if (gate.open) return assertCurrent(session, context)
+    if (!gate.parkedCurrent) throw unavailable()
+    assertObservationCurrent(session, context)
+    if (!gate.parkedCurrent) throw unavailable()
   }
 
   function sanitize(session: Session, value: unknown, requestId: string): Record<string, unknown> {
@@ -439,6 +456,30 @@ export function createManagerManagedServiceUIBridge(input: {
           const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
           if (!observationOperations.has(parsed.operation)) throw unavailable()
           return session.observation.prepare(parsed as ManagerManagedServiceObservationRequest, alias)
+        }
+        if (request.operation === 'toggleAccount' && input.allowAccountToggle && accountReads) {
+          if (context.admitted !== true) throw unavailable()
+          const forwarded = { ...request, token: alias.ownerToken }
+          const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
+          const parsed = parseManagedServiceUIBindingRequest(
+            forwarded,
+            validator(alias.ownerToken, input.profileId, input.runtimeGeneration),
+            owner,
+          )
+          if (parsed.operation !== 'toggleAccount') throw unavailable()
+          return createManagerManagedServiceAccountRoute({
+            context,
+            owner,
+            ownerToken: alias.ownerToken,
+            requestId,
+            scope,
+            forwarded,
+            parsed,
+            accounts: accountReads,
+            runtime: input.runtime.managedServiceUI,
+            sanitize: (value, id) => sanitize(session, value, id),
+            assertCurrent: () => assertCurrent(session, context),
+          })
         }
         if (
           request.operation === 'authenticate' && input.allowAuthentication
@@ -632,6 +673,7 @@ export function createManagerManagedServiceUIBridge(input: {
               || service.schemaVersion !== 1 || typeof service.$schema !== 'string'
               || typeof capabilities.readCatalog !== 'boolean' || typeof capabilities.logout !== 'boolean'
               || capabilities.readAccounts !== undefined && typeof capabilities.readAccounts !== 'boolean'
+              || capabilities.accountTogglePlan !== undefined && typeof capabilities.accountTogglePlan !== 'boolean'
             ) throw unavailable()
             // Reuse the native parser to check the returned binding's owner and scope.
             parseManagedServiceUIBindingRequest(
@@ -689,6 +731,10 @@ export function createManagerManagedServiceUIBridge(input: {
                     logout,
                     readCatalog: capabilities.readCatalog,
                     ...(input.allowAccountReads && capabilities.readAccounts === true ? { readAccounts: true } : {}),
+                    ...(input.allowAccountToggle && capabilities.accountTogglePlan === true
+                        && capabilities.readAccounts === true
+                      ? { toggleAccount: true, observeAccounts: true }
+                      : {}),
                     accountControl: false,
                   },
                 },
@@ -735,6 +781,31 @@ export function createManagerManagedServiceUIBridge(input: {
         },
       }
     },
+  }
+
+  /** Stop and drain service UI reads while one owner action is in progress. */
+  async function reserveAccountAction(isCurrent: () => boolean) {
+    if (!input.allowAccountToggle || !gate.open) throw unavailable()
+    const cohort = [...sessions.values()]
+    const initialFence = fence()
+    const capabilities = copyCapabilities(input.runtime.capabilities())
+    const current = () => {
+      try {
+        return isCurrent() && !disposed && input.ownerCurrent() && fence() === initialFence
+          && sameCapabilities(capabilities, copyCapabilities(input.runtime.capabilities()))
+          && sessions.size === cohort.length && cohort.every(session =>
+            sessions.get(session.context.rendererId) === session && !session.context.signal.aborted
+          )
+      } catch {
+        return false
+      }
+    }
+    try {
+      return await gate.reserve(current)
+    } catch {
+      if (!gate.open) { for (const session of cohort) retire(session.context.rendererId) }
+      throw unavailable()
+    }
   }
 
   /**
@@ -845,7 +916,9 @@ export function createManagerManagedServiceUIBridge(input: {
   return {
     waitForInitialReadiness,
     projectInitial,
+    assertStatusCurrent,
     reserveTransition,
+    reserveAccountAction,
     /** Abort one owner-issued projection if its bootstrap cannot complete. */
     retire(context: ManagerRendererChannelContext): void {
       const session = sessions.get(context.rendererId)

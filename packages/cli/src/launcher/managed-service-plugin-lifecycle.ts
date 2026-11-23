@@ -46,12 +46,8 @@ import {
   type ManagedServiceClientReservation,
   reserveActiveManagedServiceClients,
 } from './managed-service-client-reservation.js'
-import {
-  createManagedServiceUIBridgeHandler,
-  type ManagedServiceUIOwner,
-  MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
-  parseManagedServiceUIBindingRequest,
-} from './managed-service-ui-rpc.js'
+import { createManagedServiceUIBridgeHandler, type ManagedServiceUIOwner } from './managed-service-ui-rpc.js'
+import { handleManagedServiceUIBindingValue, prepareManagedServiceUIAccountToggle } from './managed-service-ui-route.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { safeDiagnosticMessage } from './diagnostic-redaction.js'
 import {
@@ -336,7 +332,18 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
 
   readonly managedServiceUI = {
     handleBindingValue: async (value: string, documentSignal?: AbortSignal): Promise<Record<string, unknown>> =>
-      await this.handleBindingValue(value, documentSignal),
+      await handleManagedServiceUIBindingValue({
+        value,
+        documentSignal,
+        routes: this.routesByToken,
+        tombstones: this.startupTombstones,
+      }),
+    prepareAccountToggle: async (value: string) =>
+      await prepareManagedServiceUIAccountToggle({
+        value,
+        routes: this.routesByToken,
+        isDisposed: () => this.disposed,
+      }),
   }
 
   /** The local manager owns its browser session; no plugin token crosses this boundary. */
@@ -805,42 +812,6 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       ) return token
     }
     throw new Error('managed service UI token generation failed')
-  }
-
-  private async handleBindingValue(value: string, documentSignal?: AbortSignal): Promise<Record<string, unknown>> {
-    let requestId = 'invalid'
-    let envelope: Record<string, unknown> | undefined
-    try {
-      if (Buffer.byteLength(value) > MAX_MANAGED_SERVICE_UI_REQUEST_BYTES) {
-        throw new Error('managed service UI request exceeds maximum size')
-      }
-      envelope = JSON.parse(value) as Record<string, unknown>
-      if (typeof envelope.requestId === 'string') requestId = envelope.requestId
-      if (typeof envelope.token !== 'string') throw new Error('managed service UI request is not authorized')
-      const terminated = this.startupTombstones.result(envelope)
-      if (terminated !== undefined) return { requestId, ok: true, value: terminated }
-      const route = this.routesByToken.get(envelope.token)
-      if (route === undefined) throw new Error('managed service UI request is not authorized')
-      const request = parseManagedServiceUIBindingRequest(envelope, route.handler, route.owner)
-      if (request.operation === 'consoleBrowser' && (!documentSignal || documentSignal.aborted)) {
-        return { requestId, ok: true, value: { status: 'unavailable', reason: 'owner-unavailable' } }
-      }
-      return { requestId, ok: true, value: await route.handler.handle(route.owner, request, documentSignal) }
-    } catch (error) {
-      const terminated = envelope === undefined ? undefined : this.startupTombstones.result(envelope)
-      if (terminated !== undefined) return { requestId, ok: true, value: terminated }
-      const message = safeDiagnosticMessage(error)
-      const code = message.includes('not declared')
-        ? 'service-not-declared'
-        : message.includes('binding') && message.includes('replaced')
-        ? 'binding-replaced'
-        : message.includes('stale') || message.includes('spoofed')
-        ? 'stale-generation'
-        : message.includes('disposed')
-        ? 'disposed'
-        : 'owner-unavailable'
-      return { requestId, ok: false, code }
-    }
   }
 
   private async rollbackManaged(

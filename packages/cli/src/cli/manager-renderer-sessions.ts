@@ -48,6 +48,9 @@ export interface ManagerRendererChannel {
       readonly expectedSequence: number
       readonly action: 'login' | 'logout'
     }
+    /** Owner-created account action; callers must reserve its service and renderer cohort. */
+    readonly managedServiceAccountToggle?:
+      import('./manager-managed-service-account-toggle.js').ManagerManagedServiceAccountToggle
     dispatch(): Promise<unknown>
   }
 }

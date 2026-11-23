@@ -581,6 +581,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   confirmStandaloneManagedServiceState?(
     input: import('../managed-service-state-confirmation.js').ManagedServiceStateConfirmation,
   ): Promise<boolean>
+  /** Adopt an owner-confirmed account projection in this renderer only. */
+  adoptStandaloneManagedServiceAccounts?(
+    input: import('../managed-service-account-adoption.js').ManagedServiceAccountAdoption,
+  ): Promise<boolean>
   /** Host-private registry readback for confirming an attached renderer's snapshot. */
   pluginRegistryEpoch(): number
   /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */

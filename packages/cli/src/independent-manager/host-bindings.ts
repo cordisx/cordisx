@@ -30,6 +30,7 @@ interface Pending {
 }
 const MAX_IN_FLIGHT = 64
 const MAX_PAYLOAD_CHARS = 8 * 1024 * 1024
+const MAX_BUSY_READ_WAIT_MS = 3_000
 // The manager web server enforces this limit on the complete JSON envelope,
 // in bytes, before dispatching to the owner.
 const MAX_WIRE_BYTES = 1_048_576
@@ -159,6 +160,8 @@ export function installIndependentHostBindings(input: {
       const operation = (JSON.parse(payload) as { operation?: unknown }).operation
       const observationWait = channel === 'managed-service-ui'
         && ['next', 'pull', 'closed', 'startupNext'].includes(String(operation))
+      const retryBusyRead = channel === 'managed-service-ui'
+        && ['snapshot', 'readCatalog', 'readAccounts'].includes(String(operation))
       const request: Pending = {
         requestId: id,
         receiverName,
@@ -177,6 +180,7 @@ export function installIndependentHostBindings(input: {
               'get',
               'snapshot',
               'readCatalog',
+              'readAccounts',
               'nativeProviders',
               'subscribe',
               'next',
@@ -200,6 +204,7 @@ export function installIndependentHostBindings(input: {
         const requiresAdmission = channel === 'channel-actions' || channel === 'service-config'
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
           || channel === 'permission-policy'
+          || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')
             && !request.readOnly
         if (requiresAdmission && input.rendererAdmission !== undefined) {
@@ -207,6 +212,7 @@ export function installIndependentHostBindings(input: {
         }
         if (controller.signal.aborted) throw new Error('independent-host-session-revoked')
         request.dispatched = true
+        const retryDeadline = Date.now() + MAX_BUSY_READ_WAIT_MS
         for (;;) {
           const response = await input.window.fetch('/api/renderer/binding', {
             method: 'POST',
@@ -218,6 +224,13 @@ export function installIndependentHostBindings(input: {
             referrerPolicy: 'no-referrer',
             signal: controller.signal,
           })
+          if (retryBusyRead && response.status === 503 && Date.now() < retryDeadline) {
+            const value = await response.clone().json().catch(() => undefined) as { error?: unknown } | undefined
+            if (value && Object.keys(value).length === 1 && value.error === 'RENDERER_BINDING_UNAVAILABLE') {
+              await yieldObservation(controller.signal)
+              continue
+            }
+          }
           if (!observationWait || response.status !== 202) return response
           const status = await response.json() as { status?: unknown }
           if (status?.status !== 'pending' || Object.keys(status).length !== 1) {

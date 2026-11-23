@@ -648,6 +648,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
+        let accountToggle = false
         if (input.channel === 'service-config') {
           try {
             const envelope = object(JSON.parse(input.payload))
@@ -662,7 +663,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (input.channel === 'managed-service-ui') {
           try {
             const envelope = object(JSON.parse(input.payload))
-            rendererWrite = envelope?.operation === 'authenticate' || envelope?.operation === 'logout'
+            accountToggle = envelope?.operation === 'toggleAccount'
+            rendererWrite = envelope?.operation === 'authenticate' || envelope?.operation === 'logout' || accountToggle
           } catch {
             return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
           }
@@ -704,19 +706,22 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
         }
         if (
-          input.channel === 'desktop-package-config' && result?.status === 'unavailable'
+          (input.channel === 'desktop-package-config' || accountToggle) && result?.status === 'unavailable'
           && Object.keys(result).length === 1
         ) {
-          // The session authority returns unavailable only before this write
-          // reaches its handler. Preserve the draft instead of treating the
-          // owner's busy fence as an uncertain backend mutation.
+          // An unavailable write has not reached its handler. Preserve the
+          // session instead of treating a busy owner as an uncertain mutation.
           let requestId: unknown
           try {
             requestId = object(JSON.parse(input.payload))?.requestId
           } catch { /* Invalid requests remain unavailable. */ }
           if (typeof requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/u.test(requestId)) {
             mutationDispatched = false
-            return scopedReply({ requestId, ok: true, value: { status: 'rejected', reason: 'busy' } })
+            return scopedReply(
+              accountToggle
+                ? { requestId, ok: false, code: 'owner-unavailable' }
+                : { requestId, ok: true, value: { status: 'rejected', reason: 'busy' } },
+            )
           }
         }
         if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })

@@ -12,7 +12,7 @@ import { createBrowserStartupObserver, StartupObservationTerminated } from './st
 import type {
   ManagedServiceBindingV1,
   ManagedServiceCliProxyAccountControlV1,
-  ManagedServiceCliProxyAccountToggleRequestV1,
+  ManagedServiceCliProxyAccountsV1,
   ManagedServiceCliProxyOAuthCancelRequestV1,
   ManagedServiceCliProxyOAuthStartRequestV1,
   ManagedServiceLoginRequestV1,
@@ -28,6 +28,8 @@ import type { StartupUIPrincipal } from '../launcher/startup-ui-rpc.js'
 import type { ManagedServiceUIBindingRequest, ManagedServiceUIOwner } from '../launcher/managed-service-ui-rpc.js'
 import type { NativeProviderProjection } from './model-providers.js'
 import type { ManagedServiceStateConfirmation } from '../managed-service-state-confirmation.js'
+import type { ManagedServiceAccountAdoption } from '../managed-service-account-adoption.js'
+import { ManagedServiceAccountObservers } from './managed-service-account-observers.js'
 
 const MANAGED_SERVICE_UI_BINDING = '__cordisxManagedServiceUIRequestV1'
 const MANAGED_SERVICE_UI_RECEIVER = '__cordisxManagedServiceUIReceiveV1'
@@ -63,6 +65,8 @@ interface AvailableServiceDescriptor {
     readonly logout: boolean
     readonly readCatalog: boolean
     readonly readAccounts?: boolean
+    readonly toggleAccount?: boolean
+    readonly observeAccounts?: boolean
     readonly accountControl: boolean
   }
 }
@@ -90,6 +94,7 @@ function nextRequestId(): string {
 /** Renderer transport. Only owner-bound registries receive a capability token. */
 export class BrowserManagedServiceUIBridge {
   private readonly pending = new Map<string, Pending>()
+  private readonly accountObservers = new ManagedServiceAccountObservers()
   private readonly capabilities = new Map<
     string,
     { token: string; startup?: boolean; state: 'active' | 'staged' | 'retiring' }
@@ -142,6 +147,32 @@ export class BrowserManagedServiceUIBridge {
     const capability = this.capabilities.get(ownerKey(owner))
     if (capability === undefined) return undefined
     return new BrowserManagedServiceUIRegistry(this, owner, capability.token)
+  }
+
+  observeAccounts(
+    owner: ManagedServiceUIOwner,
+    serviceId: string,
+    binding: ManagedServiceBindingV1,
+    observer: (accounts: ManagedServiceCliProxyAccountsV1) => void | Promise<void>,
+  ): () => void {
+    const key = ownerKey(owner)
+    const capability = this.capabilities.get(key)
+    if (!capability || capability.state !== 'active' || this.closed || this.disposing) {
+      throw new Error('managed-account-observer-unavailable')
+    }
+    return this.accountObservers.observe(key, serviceId, binding, observer)
+  }
+
+  async adoptAccounts(value: ManagedServiceAccountAdoption): Promise<boolean> {
+    const key = ownerKey({ pluginId: value.pluginId, pluginGeneration: value.pluginGeneration })
+    const capability = this.capabilities.get(key)
+    if (!capability || capability.state !== 'active' || this.closed || this.disposing) return false
+    return await this.accountObservers.adopt(
+      key,
+      value,
+      () =>
+        !this.closed && !this.disposing && this.capabilities.get(key) === capability && capability.state === 'active',
+    )
   }
 
   /** Confirm state using only this renderer's existing owner-scoped capability. */
@@ -209,6 +240,7 @@ export class BrowserManagedServiceUIBridge {
   }
 
   private removeCapability(key: string): void {
+    this.accountObservers.releaseOwner(key)
     for (const [id, pending] of this.pending) {
       if (pending.webEntryOwner !== key) continue
       pending.cancel?.()
@@ -324,6 +356,7 @@ export class BrowserManagedServiceUIBridge {
   dispose(): void {
     if (this.closed || this.disposing) return
     this.disposing = true
+    this.accountObservers.close()
     // Dispatch the owner-bound close requests while the transport can still send them.
     for (const observer of this.startupObservers.values()) observer.dispose('host-replaced')
     this.startupObservers.clear()
@@ -546,17 +579,18 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
         serviceId,
         binding: descriptor.binding,
       }) as Awaited<ReturnType<ManagedServiceCliProxyAccountControlV1['readAccounts']>>
+    const toggleAccount: ManagedServiceCliProxyAccountControlV1['toggleAccount'] = async request =>
+      await invoke({
+        requestId: nextRequestId(),
+        operation: 'toggleAccount',
+        serviceId,
+        binding: descriptor.binding,
+        request,
+      }) as Awaited<ReturnType<ManagedServiceCliProxyAccountControlV1['toggleAccount']>>
     const accountControl: ManagedServiceCliProxyAccountControlV1 | undefined = descriptor.capabilities.accountControl
       ? {
         readAccounts,
-        toggleAccount: async (request: ManagedServiceCliProxyAccountToggleRequestV1) =>
-          await invoke({
-            requestId: nextRequestId(),
-            operation: 'toggleAccount',
-            serviceId,
-            binding: descriptor.binding,
-            request,
-          }) as Awaited<ReturnType<ManagedServiceCliProxyAccountControlV1['toggleAccount']>>,
+        toggleAccount,
         startOAuth: async (request: ManagedServiceCliProxyOAuthStartRequestV1) =>
           await invoke({
             requestId: nextRequestId(),
@@ -641,6 +675,13 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
         }
         : {}),
       ...(descriptor.capabilities.readAccounts === true ? { readAccounts } : {}),
+      ...(descriptor.capabilities.toggleAccount === true ? { toggleAccount } : {}),
+      ...(descriptor.capabilities.observeAccounts === true
+        ? {
+          observeAccounts: (observer: (accounts: ManagedServiceCliProxyAccountsV1) => void | Promise<void>) =>
+            this.bridge.observeAccounts(this.owner, serviceId, descriptor.binding, observer),
+        }
+        : {}),
       ...(accountControl === undefined ? {} : { accountControl }),
       ...(descriptor.authenticatedConsole?.contract !== 'cordisx.managed-service-console/v1' ? {} : {
         authenticatedConsole: createBrowserManagedServiceConsole({

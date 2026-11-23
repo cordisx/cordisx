@@ -233,6 +233,57 @@ it('acknowledges managed-service readback for the exact renderer without retirin
   }
 })
 
+it('acknowledges an account projection only after this renderer adopts it', async () => {
+  const { runtime } = fixture()
+  const adopt = vi.fn(async () => true)
+  const client = createManagerRendererLifecycleClient({
+    runtime: runtime as never,
+    scope,
+    onManagedServiceAccounts: adopt,
+  })
+  const binding = {
+    bindingId: 'binding-1',
+    identity: { pluginId: 'example', serviceId: 'gateway' },
+    scope: { profileId: scope.profileId, generation: scope.generation },
+  }
+  const accounts = {
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-accounts.v1.schema.json',
+    contract: 'cordisx.managed-service-cli-proxy-accounts/v1',
+    schemaVersion: 1,
+    binding,
+    sequence: 1,
+    observedAt: '2026-01-01T00:00:00Z',
+    revision: 4,
+    serviceGeneration: 'service-1',
+    accounts: [],
+  }
+  const payload = {
+    rendererId,
+    ownerGeneration: scope.generation,
+    requestId: 'request-1',
+    pluginId: 'example',
+    pluginGeneration: 'plugin-1',
+    serviceId: 'gateway',
+    phase: 'prepare',
+    binding,
+    accounts,
+  }
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(await client.handle(command(2, 'managed-service-accounts', payload))).toMatchObject({
+      ok: true,
+      value: { requestId: 'request-1', phase: 'prepare', revision: 4, confirmed: true },
+    })
+    expect(adopt).toHaveBeenCalledOnce()
+    expect(await client.handle(command(3, 'managed-service-accounts', { ...payload, rendererId: 'b'.repeat(64) })))
+      .toMatchObject({ ok: false })
+    expect(client.closed).toBe(true)
+  } finally {
+    await client.close()
+  }
+})
+
 it('allows resource recovery only after synchronization and outside a lifecycle transaction', async () => {
   const { runtime, loader } = fixture()
   const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })

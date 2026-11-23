@@ -912,8 +912,9 @@ export class ServiceRendererBootstrap {
                 entry: this.entries.get(context.rendererId),
                 current: entry => this.current(context.rendererId, entry),
                 configurationCurrent: async entry => await this.configurationCurrent(context.rendererId, entry),
-                projectManagedServiceUI: () => {
-                  this.managedServiceUI?.projectInitial(context)
+                checkManagedServiceUI: () => {
+                  if (!this.managedServiceUI) throw new Error('renderer-bootstrap-unavailable')
+                  this.managedServiceUI.assertStatusCurrent(context)
                 },
               })
             },

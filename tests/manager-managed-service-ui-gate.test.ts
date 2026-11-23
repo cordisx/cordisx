@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest'
 import { ManagerManagedServiceUIGate } from '../packages/cli/src/cli/manager-managed-service-ui-gate.js'
 
 describe('managed service UI transition gate', () => {
+  it('runs only the owner action while ordinary reads remain blocked', async () => {
+    const gate = new ManagerManagedServiceUIGate()
+    const held = await gate.reserve(() => true)
+    expect(() => gate.begin()).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(await held.run(async () => 'confirmed')).toBe('confirmed')
+    expect(held.release()).toBe(true)
+    expect(gate.open).toBe(true)
+  })
+
+  it('recognizes a parked reservation only while its owner is current', async () => {
+    const gate = new ManagerManagedServiceUIGate()
+    let current = true
+    const held = await gate.reserve(() => current)
+    expect(gate.parkedCurrent).toBe(true)
+    current = false
+    expect(gate.parkedCurrent).toBe(false)
+    expect(held.release()).toBe(false)
+    expect(gate.parkedCurrent).toBe(false)
+  })
+
+  it('fences an exclusive action if its reservation is released before it settles', async () => {
+    const gate = new ManagerManagedServiceUIGate()
+    const held = await gate.reserve(() => true)
+    let finish!: () => void
+    const pending = held.run(async () => await new Promise<void>(resolve => finish = resolve))
+    expect(held.release()).toBe(false)
+    finish()
+    await expect(pending).rejects.toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(gate.open).toBe(false)
+  })
+
   it('blocks new calls and waits for earlier calls to finish before releasing a reservation', async () => {
     const gate = new ManagerManagedServiceUIGate()
     const finishRead = gate.begin()

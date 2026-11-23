@@ -130,6 +130,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           allowAuthentication: true,
           allowLogout: true,
           allowAccountReads: true,
+          allowAccountToggle: true,
           runtime: services,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
@@ -366,6 +367,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               value => terminalProvider!.reserveForService(value),
               value => services!.reserveServiceClients(value),
             ]),
+          reserveManagedAccountUI: async current => await rendererManagedServiceUI!.reserveAccountAction(current),
           ...(channel?.channel === undefined
             ? {}
             : {

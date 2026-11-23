@@ -139,6 +139,17 @@ it('projects an already-running managed backend into two isolated read-only rend
       })
     const get = await f.sessions.call(f.invocation, 'managed-service-ui', request(first.token, 'get')) as any
     expect(get).toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+    const handoff = await f.managedUI.reserveTransition()
+    try {
+      for (const invocation of [f.invocation, second]) {
+        expect(await f.sessions.call(invocation, 'manager-bootstrap', { action: 'status' }))
+          .toEqual({ status: 'ok', value: { status: 'ok', current: true } })
+      }
+      expect(await f.sessions.call(f.invocation, 'managed-service-ui', request(first.token, 'get')))
+        .toEqual({ status: 'unavailable' })
+    } finally {
+      expect(handoff.cancel()).toBe(true)
+    }
     expect(await f.sessions.call(second, 'managed-service-ui', request(first.token, 'get')))
       .toEqual({ status: 'unavailable' })
     expect(

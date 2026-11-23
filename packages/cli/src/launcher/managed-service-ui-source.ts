@@ -706,6 +706,13 @@ export function createManagedServiceSource(
     ...(extension?.readAccounts === undefined
       ? {}
       : { readAccounts: () => extension.readAccounts!() }),
+    ...(extension?.prepareAccountToggle === undefined
+      ? {}
+      : {
+        prepareAccountToggle: (
+          request: Parameters<NonNullable<ManagedServiceNodeUISourceExtensionV1['prepareAccountToggle']>>[0],
+        ) => extension.prepareAccountToggle!(request),
+      }),
     ...(extension?.toggleAccount === undefined
       ? {}
       : {

@@ -12,6 +12,7 @@ export type ManagerRendererCommandMethod =
   | 'quiesce'
   | 'channel-configuration'
   | 'managed-service-state'
+  | 'managed-service-accounts'
   | 'desktop-package-configuration'
   | 'permission-policy'
 
@@ -54,6 +55,7 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'quiesce',
   'channel-configuration',
   'managed-service-state',
+  'managed-service-accounts',
   'desktop-package-configuration',
   'permission-policy',
 ])

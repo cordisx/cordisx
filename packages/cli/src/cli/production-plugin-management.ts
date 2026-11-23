@@ -34,6 +34,7 @@ import { createManagerRendererDesktopPackageConfig } from './manager-renderer-de
 import type { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
 import type { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 import { coordinateManagerManagedServiceMutations } from './manager-managed-service-mutation.js'
+import type { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { createServiceRendererPermissionChannel } from './service-renderer-permission-channel.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
@@ -73,6 +74,9 @@ export async function openProductionPluginManagementComposition(input: {
   readonly reserveServiceClients?: (
     identity: ManagedServiceClientIdentity,
   ) => ManagedServiceClientReservation | undefined
+  readonly reserveManagedAccountUI?: (
+    current: () => boolean,
+  ) => Promise<Awaited<ReturnType<ManagerManagedServiceUIGate['reserve']>>>
   readonly channel?: (operation: string, input: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
@@ -125,6 +129,10 @@ export async function openProductionPluginManagementComposition(input: {
   }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
+  if (
+    input.reserveManagedAccountUI && (input.mode !== 'service' || !input.rendererManagedServiceUI
+      || !input.rendererParticipants || !input.rendererLifecycle || !input.reserveServiceClients)
+  ) throw new Error('manager-consumer-fence-scope-invalid')
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
@@ -200,6 +208,9 @@ export async function openProductionPluginManagementComposition(input: {
         : {}),
       ...(input.mode === 'service' && input.reserveServiceClients
         ? { reserveServiceClients: input.reserveServiceClients }
+        : {}),
+      ...(input.mode === 'service' && input.reserveManagedAccountUI
+        ? { reserveAccountUI: input.reserveManagedAccountUI }
         : {}),
     })
   const rendererServiceConfig = input.rendererConfiguredChannelService

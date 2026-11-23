@@ -265,6 +265,7 @@ export class ServiceRendererLifecycleProjection {
     if (this.awaiting) throw new Error('renderer-identity-lifecycle-unavailable')
     if (
       method === 'quiesce' || method === 'channel-configuration' || method === 'managed-service-state'
+      || method === 'managed-service-accounts'
       || method === 'desktop-package-configuration' || method === 'permission-policy'
     ) {
       return { payload: value }

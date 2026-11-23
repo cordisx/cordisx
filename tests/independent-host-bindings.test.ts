@@ -30,6 +30,112 @@ it('uses the transport id for a managed-service action with a separate domain id
   }
 })
 
+it('keeps the renderer available when an account read is temporarily rejected', async () => {
+  const receive = vi.fn()
+  const lost = vi.fn()
+  const fetch = vi.fn(async () => new Response('', { status: 503 }))
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+    rendererAdmission: Promise.resolve(true),
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'account-read', operation: 'readAccounts' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(lost).not.toHaveBeenCalled()
+    expect(dispose.canResume()).toBe(true)
+    expect(target.__cordisxManagedServiceUIRequestV1).toBeTypeOf('function')
+  } finally {
+    dispose()
+  }
+})
+
+it('waits for renderer admission before reading managed accounts', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const receive = vi.fn()
+  const fetch = vi.fn(async (_url: string, options: RequestInit) => {
+    const body = JSON.parse(String(options.body))
+    const request = JSON.parse(body.payload)
+    return new Response(JSON.stringify({ requestId: request.requestId, ok: true, value: 'available' }))
+  })
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'accounts', operation: 'readAccounts' }))
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'snapshot', operation: 'snapshot' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(JSON.parse(JSON.parse(String(fetch.mock.calls[0]![1].body)).payload).operation).toBe('snapshot')
+    expect(dispose.canResume()).toBe(true)
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(JSON.parse(String(fetch.mock.calls[1]![1].body)).payload).operation).toBe('readAccounts')
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(2))
+  } finally {
+    dispose()
+  }
+})
+
+it('does not dispatch a queued account read after admission is denied', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const receive = vi.fn()
+  const fetch = vi.fn()
+  const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['managed-service-ui'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'accounts', operation: 'readAccounts' }))
+    admit(false)
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(fetch).not.toHaveBeenCalled()
+    expect(JSON.parse(receive.mock.calls[0]![0])).toMatchObject({ ok: false })
+  } finally {
+    dispose()
+  }
+})
+
+it.each(['snapshot', 'readCatalog', 'readAccounts'] as const)(
+  'retries a temporarily busy managed-service %s read without losing the session',
+  async operation => {
+    const receive = vi.fn()
+    const lost = vi.fn()
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'RENDERER_BINDING_UNAVAILABLE' }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ requestId: 'read-1', ok: true, value: 'available' })))
+    const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as TestWindow
+    const dispose = installIndependentHostBindings({
+      window: target,
+      sessionToken: token,
+      channels: ['managed-service-ui'],
+      onSessionLost: lost,
+    })
+    try {
+      target.__cordisxManagedServiceUIRequestV1(JSON.stringify({ requestId: 'read-1', operation }))
+      await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+      expect(JSON.parse(receive.mock.calls[0]![0])).toEqual({ requestId: 'read-1', ok: true, value: 'available' })
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(fetch.mock.calls[0]![1].body).toBe(fetch.mock.calls[1]![1].body)
+      expect(lost).not.toHaveBeenCalled()
+      expect(dispose.canResume()).toBe(true)
+    } finally {
+      dispose()
+    }
+  },
+)
+
 it('reuses one observation request while the sidecar yields browser connections', async () => {
   const receive = vi.fn()
   const fetch = vi.fn()
