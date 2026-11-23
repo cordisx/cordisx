@@ -7,6 +7,19 @@ import type {
 import type { ChannelStoreState } from './store.js'
 import { canonical, exactKeys, nonEmptyText, objectRecord, sanitizedTenant } from './runtime-validation.js'
 
+export function ownsPlainCard(
+  state: ChannelStoreState,
+  target: import('./types.js').ChannelConversationRef,
+  messageId: string,
+): boolean {
+  return Object.values(state.outbox).some(record =>
+    record.status === 'sent'
+    && record.externalMessageId === messageId && record.content?.type === 'card' && !record.questionCard
+    && record.target.adapterId === target.adapterId && record.target.accountId === target.accountId
+    && record.target.tenantId === target.tenantId && record.target.conversationId === target.conversationId
+  )
+}
+
 const key = (value: ChannelSubscriptionFilter['account']) =>
   JSON.stringify([value.adapterId, value.accountId, value.tenantId])
 const cursorFor = (state: ChannelStoreState, offset: number) =>
