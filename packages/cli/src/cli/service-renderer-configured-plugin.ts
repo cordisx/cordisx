@@ -16,6 +16,8 @@ import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
 /** An owner-selected, service-free configured archive with no private configuration. */
 export class ServiceRendererConfiguredPlugin {
   private identity?: ServiceRendererIdentityProjection
+  private bound: ManagerRendererChannelContext | undefined
+  private sourceAlias: string | undefined
   private closed = false
 
   private constructor(
@@ -71,6 +73,45 @@ export class ServiceRendererConfiguredPlugin {
     return !this.closed && this.input.current()
   }
 
+  get pluginId(): string {
+    return this.input.plugin.id
+  }
+
+  /** Owner-only evidence for this session's exact configured archive and alias. */
+  permissionBinding(context: ManagerRendererChannelContext) {
+    const identity = this.identity
+    const bound = this.bound
+    const alias = this.sourceAlias
+    const plugin = this.input.plugin
+    if (
+      !identity || !bound || !alias || !this.isCurrent() || context.admitted !== true || context.signal.aborted
+      || context.signal !== bound.signal || context.rendererId !== bound.rendererId
+      || context.profileId !== bound.profileId || context.ownerGeneration !== bound.ownerGeneration
+      || !plugin.source || !plugin.configuredArchiveDigest || !plugin.distributionArtifact
+      || this.lease.pluginId !== plugin.id
+    ) throw new Error('renderer-configured-permission-unavailable')
+    const original = identity.resolve(context, alias, plugin.id)
+    if (original.source !== plugin.source || original.digest !== plugin.configuredArchiveDigest) {
+      throw new Error('renderer-configured-permission-unavailable')
+    }
+    return {
+      identity,
+      alias,
+      original,
+      digest: plugin.configuredArchiveDigest,
+      artifact: { ...plugin.distributionArtifact },
+      lease: this.lease,
+    }
+  }
+
+  /** Reuse the owner-bound context when coordinating another Manager page. */
+  permissionContext(): ManagerRendererChannelContext {
+    if (!this.bound) throw new Error('renderer-configured-permission-unavailable')
+    const context = { ...this.bound, admitted: true }
+    this.permissionBinding(context)
+    return context
+  }
+
   async project(
     context: ManagerRendererChannelContext,
     graph: ManagerRendererGraph,
@@ -92,6 +133,8 @@ export class ServiceRendererConfiguredPlugin {
       if (!this.isCurrent() || !this.input.plugin.manifest || !this.input.plugin.distributionArtifact) {
         throw new Error('renderer-configured-plugin-unavailable')
       }
+      this.bound = Object.freeze({ ...context })
+      this.sourceAlias = source
       return {
         plugin: {
           id: this.input.plugin.id,
@@ -119,6 +162,8 @@ export class ServiceRendererConfiguredPlugin {
     if (this.closed) return
     this.closed = true
     this.identity?.close()
+    this.bound = undefined
+    this.sourceAlias = undefined
   }
 }
 

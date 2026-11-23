@@ -63,7 +63,7 @@ export async function fixture(
     managedStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
     protectProfileInputs?: boolean
     writeDispatch?: (context: ManagerRendererChannelContext, payload: unknown) => Promise<unknown>
-    readDispatch?: () => Promise<unknown>
+    readDispatch?: (context: ManagerRendererChannelContext) => Promise<unknown>
     channelArchive?: string
     channelUiGrant?: boolean
     channelGrantOtherSource?: boolean
@@ -77,6 +77,7 @@ export async function fixture(
     channelCredentialCommitUnknown?: boolean
     permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
     channelPermissionPolicy?: boolean
+    configuredPluginPermissionPolicy?: boolean
     browserManagement?: boolean
     coordinateLifecycle?: boolean
     projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
@@ -339,6 +340,7 @@ export async function fixture(
     experimentalChannelReconnect: options.channelServiceConfig === true && options.channelReconnect === true,
     experimentalChannelCredentials: options.channelCredentials === true,
     experimentalConfiguredPermissionPolicy: options.channelPermissionPolicy === true,
+    experimentalConfiguredPluginPermissionPolicy: options.configuredPluginPermissionPolicy === true,
     ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {
@@ -499,7 +501,12 @@ export async function fixture(
         ] as const,
       ]),
       ...(options.readDispatch === undefined ? [] : [
-        ['fixture-read', { prepare: () => ({ mode: 'read' as const, dispatch: options.readDispatch! }) }] as const,
+        ['fixture-read', {
+          prepare: (_payload: unknown, context: ManagerRendererChannelContext) => ({
+            mode: 'read' as const,
+            dispatch: async () => await options.readDispatch!(context),
+          }),
+        }] as const,
       ]),
     ]),
   })

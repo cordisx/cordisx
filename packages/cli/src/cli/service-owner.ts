@@ -284,6 +284,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           protectProfileInputs,
           experimentalInstalledPermissionPolicy: rendererPermissionProof !== undefined
             && rendererPermissionConsumers !== undefined,
+          experimentalConfiguredPluginPermissionPolicy: rendererPermissionProof !== undefined
+            && rendererPermissionConsumers !== undefined,
           experimentalConfiguredPermissionPolicy: configuredServiceOwner !== undefined
             && rendererPermissionProof !== undefined && rendererPermissionConsumers !== undefined,
           ...(rendererPermissionProof === undefined ? {} : { permissionProof: rendererPermissionProof }),

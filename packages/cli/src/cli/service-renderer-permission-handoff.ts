@@ -16,6 +16,7 @@ import type {
   ServiceRendererConfiguredChannelInput,
 } from './service-renderer-bootstrap-state.js'
 import { synchronizeServiceRendererPolicies } from './service-renderer-permission-fleet.js'
+import { serviceRendererPermissionInputsCurrent } from './service-renderer-permission-inputs.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ManagerPolicyTarget } from './service-renderer-installed-permission.js'
 
@@ -160,7 +161,8 @@ async function reserve(
       || configured && !configured.isCurrent() || !attachmentEqual(entry.snapshot, snapshot)
       || !attachmentEqual(entry.policies, previous)
     ) throw new Error('renderer-permission-handoff-unavailable')
-    const binding = entry.identityContext ?? configured?.permissionContext()
+    const configuredPlugin = entry.configuredPlugins?.find(plugin => plugin.pluginId === targetIdentity.pluginId)
+    const binding = entry.identityContext ?? configured?.permissionContext() ?? configuredPlugin?.permissionContext()
     if (!binding || binding.rendererId !== id) throw new Error('renderer-permission-handoff-unavailable')
     const target = input.target({ ...binding, admitted: true }, targetIdentity.pluginId)
     if (
@@ -205,6 +207,19 @@ async function reserve(
       return false
     }
   }
+  const inputsCurrent = async () => {
+    if (!current()) return false
+    const checks = await Promise.all(cohort.map(async ({ entry }) =>
+      await serviceRendererPermissionInputsCurrent({
+        entry,
+        profileId: input.profileId,
+        pluginId: targetIdentity.pluginId,
+        signal: context.signal,
+        isCurrent: current,
+      })
+    ))
+    return current() && checks.every(Boolean)
+  }
   const fence = () => {
     if (ended) return
     ended = true
@@ -239,23 +254,24 @@ async function reserve(
     if (channel) reservation = await channel.bridge.suspendAll(cohort.map(item => item.id))
     const drained = await Promise.all(cohort.map(async item => await input.readLifetimes.drainCurrent(item.id)))
     if (
-      drained.some(value => !value) || !current() || !attachmentEqual(await input.policies(), previous) || !current()
+      drained.some(value => !value) || !await inputsCurrent()
+      || !attachmentEqual(await input.policies(), previous) || !current()
     ) {
       throw new Error('renderer-permission-handoff-unavailable')
     }
     return {
-      isCurrent: current,
+      isCurrent: inputsCurrent,
       async run<T>(action: () => Promise<T>): Promise<T> {
         try {
-          if (started || !current()) throw new Error('renderer-permission-handoff-unavailable')
+          if (started || !await inputsCurrent()) throw new Error('renderer-permission-handoff-unavailable')
           started = true
           const value = await permissionFence.runPolicyMutation({
             expected: previous,
             updates: changes,
             isCurrent: current,
           }, action)
-          if (!current()) throw new Error('renderer-permission-handoff-unavailable')
           wrote = true
+          if (!await inputsCurrent()) throw new Error('renderer-permission-handoff-unavailable')
           return value
         } catch (error) {
           fence()
@@ -263,7 +279,7 @@ async function reserve(
         }
       },
       async complete(raw): Promise<boolean> {
-        if (!wrote || completing || !current()) {
+        if (!wrote || completing || !await inputsCurrent()) {
           fence()
           return false
         }
@@ -285,7 +301,7 @@ async function reserve(
             candidate,
           }, context.signal)
           if (
-            !current() || !attachmentEqual(receipt, {
+            !await inputsCurrent() || !attachmentEqual(receipt, {
               profileId: input.profileId,
               ownerGeneration: input.generation,
               requestId,
@@ -317,7 +333,7 @@ async function reserve(
           if (reservation) {
             for (const item of cohort) await item.configured!.handoff(reservation.forRenderer(item.id))
           }
-          if (!current() || reservation && !reservation.release()) {
+          if (!await inputsCurrent() || reservation && !reservation.release()) {
             throw new Error('renderer-permission-handoff-unavailable')
           }
           for (const { entry } of cohort) delete entry.lifecycleTransition

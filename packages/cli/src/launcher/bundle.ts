@@ -33,6 +33,8 @@ export interface StandaloneOwnerAttachment {
   readonly installedPermissionPolicy?: boolean
   /** The selected configured Channel has its own coordinated policy handoff. */
   readonly configuredChannelPermissionPolicy?: boolean
+  /** The owner selected these configured graphs for coordinated UI-policy review. */
+  readonly configuredPluginPermissionPolicy?: readonly string[]
   /** Must recheck the current owner generation and live renderer session. */
   readonly isCurrent: () => boolean | Promise<boolean>
 }
@@ -149,6 +151,21 @@ async function assertStandaloneOwner(
       && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
     || owner.configuredChannelPermissionPolicy === true
       && options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
+    || owner.configuredPluginPermissionPolicy !== undefined && (
+        options.permission.bridgeToken !== STANDALONE_PERMISSION_BINDING_MARKER
+        || !Array.isArray(owner.configuredPluginPermissionPolicy) || owner.configuredPluginPermissionPolicy.length > 256
+        || new Set(owner.configuredPluginPermissionPolicy).size !== owner.configuredPluginPermissionPolicy.length
+        || owner.configuredPluginPermissionPolicy.some(id => {
+          const matches = config.plugins.filter(plugin => plugin.id === id)
+          const plugin = matches[0]
+          return id === 'channel' || matches.length !== 1 || !plugin?.enabled || plugin.package !== undefined
+            || plugin.runtimeGraph === undefined || !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
+              origin: owner.managerOrigin,
+              pluginId: plugin.id,
+              generation: plugin.runtimeGraph.moduleGeneration,
+            })
+        })
+      )
     || activation?.recordKind !== 'active' || !Array.isArray(activation.plugins)
     || activation.profileId !== owner.profileId
     || activation.runtimeGeneration !== owner.generation
@@ -543,6 +560,12 @@ export async function buildRendererCompositionSource(
   }${
     attachedStandalone && options.standaloneOwner!.configuredChannelPermissionPolicy === true
       ? ', standaloneConfiguredPolicyReview: true'
+      : ''
+  }${
+    attachedStandalone && (options.standaloneOwner!.configuredPluginPermissionPolicy?.length ?? 0) > 0
+      ? `, standaloneConfiguredPluginPolicyReview: ${
+        JSON.stringify(options.standaloneOwner!.configuredPluginPermissionPolicy)
+      }`
       : ''
   }${
     options.managerPresentationMode === undefined

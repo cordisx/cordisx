@@ -46,7 +46,10 @@ export function createStandaloneDomReviewModel(
       controller,
       artifact,
       moduleGeneration,
-      persistentEligible: configured && identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
+      persistentEligible: configured && (
+            identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
+            || metadata.standaloneConfiguredPluginPolicyReview?.includes(identity.id) === true
+          )
         || controller.item.standaloneInstalledGraph === true
           && metadata.standaloneInstalledPolicyReview === true,
       packageDigest: packageItem?.digest,

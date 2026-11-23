@@ -102,9 +102,15 @@ credentials stay with the owner. An eligible service-free configured archive
 with empty configuration and no declared capabilities, durable documents or
 entity templates can also contribute Manager pages through its verified browser
 graph. Existing matching permissions are projected
-to a session-local identity; a new review is limited to the current tab. Its
-configuration, credentials, persistent permission changes and lifecycle
-operations remain unavailable. A plugin whose activation fails is shown as
+to a session-local identity. In service mode, an explicit user decision can
+persist, deny, or reset the selected configured archive’s two Manager UI
+permissions. The owner verifies each page’s source and archive and waits for
+all admitted Manager pages to adopt the change. It rechecks the effective
+configuration and selected archive during the write; a changed input fences
+the pages and may require reconciliation. Unaccounted renderers prevent the
+change; Desktop and external adapter consumers are not yet included. Plugin
+configuration, credentials, and lifecycle operations remain unavailable. A
+plugin whose activation fails is shown as
 failed without disconnecting the Manager. An identifiable configured plugin
 that requires currently unsupported configuration or capabilities is also
 shown as unavailable without loading its browser module or exposing its

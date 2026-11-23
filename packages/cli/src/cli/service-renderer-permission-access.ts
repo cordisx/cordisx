@@ -15,6 +15,7 @@ import {
 } from './service-renderer-permission-handoff.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { installedManagerPermissionTarget, type ManagerPolicyTarget } from './service-renderer-installed-permission.js'
+import { configuredManagerPermissionTarget } from './service-renderer-configured-permission.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 
 export interface ServiceRendererPermissionEvidence {
@@ -35,6 +36,7 @@ export class ServiceRendererPermissionAccess {
       readonly profileId: string
       readonly generation: string
       readonly configuredPolicyEnabled: boolean
+      readonly configuredPluginPolicyEnabled: boolean
       readonly installedPolicyEnabled: boolean
       readonly channel: () => ServiceRendererConfiguredChannelInput | undefined
       readonly permissionFence: SharedProfilePermissionFence | undefined
@@ -112,6 +114,19 @@ export class ServiceRendererPermissionAccess {
         entry,
         context,
         pluginId,
+        lifecycle: this.input.lifecycle,
+        current: () => this.input.current(context.rendererId, entry),
+      })
+    }
+    const plugins = entry.configuredPlugins?.filter(plugin => plugin.pluginId === pluginId) ?? []
+    if (plugins.length > 0) {
+      if (!this.input.configuredPluginPolicyEnabled || plugins.length !== 1) {
+        throw new Error('renderer-permission-handoff-unavailable')
+      }
+      return configuredManagerPermissionTarget({
+        entry,
+        context,
+        plugin: plugins[0]!,
         lifecycle: this.input.lifecycle,
         current: () => this.input.current(context.rendererId, entry),
       })

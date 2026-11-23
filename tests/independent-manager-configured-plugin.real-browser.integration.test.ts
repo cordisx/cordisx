@@ -10,7 +10,7 @@ import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
 import { configuredManagerPlugin } from './fixtures/configured-manager-plugin.js'
-import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
+import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
@@ -50,6 +50,7 @@ it.skipIf(chrome === undefined)(
     let cli: string | undefined
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
+    let peer: CdpClient | undefined
     const run = async (...args: string[]) =>
       await execute(process.execPath, [cli!, ...args], {
         env,
@@ -61,6 +62,7 @@ it.skipIf(chrome === undefined)(
       const good = await configuredManagerPlugin(root)
       const broken = await configuredManagerPlugin(root, 'broken-demo', { invalidPage: true })
       const unsupported = await configuredManagerPlugin(root, 'needs-config')
+      const review = await configuredManagerPlugin(root, 'review-demo')
       await writeFile(
         configPath,
         JSON.stringify({
@@ -69,12 +71,15 @@ it.skipIf(chrome === undefined)(
             { id: 'configured-demo', entry: good.archive },
             { id: 'broken-demo', entry: broken.archive },
             { id: 'needs-config', entry: unsupported.archive, config: { token: 'fixture-private' } },
+            { id: 'review-demo', entry: review.archive },
           ],
         }),
         { mode: 0o600 },
       )
       const configured = (await loadConfig(configPath, { profileId: 'default', projectRoot: homeDir })).plugins
         .find(plugin => plugin.id === 'configured-demo')!
+      const reviewSource = (await loadConfig(configPath, { profileId: 'default', projectRoot: homeDir })).plugins
+        .find(plugin => plugin.id === 'review-demo')!.source
       const policies = exactDomPermissionPolicies('default', [{
         id: configured.id,
         entry: configured.entry,
@@ -118,7 +123,8 @@ it.skipIf(chrome === undefined)(
       link.searchParams.set('host', '1')
       const launched = launchChrome(chrome!, profile)
       browser = launched.browser
-      page = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
+      const socket = await waitForChromeTarget(profile, browser, launched.stderr)
+      page = await CdpClient.connect(socket)
       await page.send('Runtime.enable')
       await page.send('Page.enable')
       // The owner completes the idempotent startup migration, but the page
@@ -211,6 +217,107 @@ it.skipIf(chrome === undefined)(
         expect(home.apps?.codex?.profiles?.default?.management?.migrations?.legacyBrowserSourcesV2).toBe(true)
         expect(await page!.evaluate("sessionStorage.getItem('fixture-migration-lost')")).toBe('1')
       }, { timeout: 20_000 })
+
+      const secondLink = new URL((await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!)
+      secondLink.searchParams.set('host', '1')
+      const response = await fetch(
+        'http://' + new URL(socket).host + '/json/new?' + encodeURIComponent(secondLink.href),
+        {
+          method: 'PUT',
+        },
+      )
+      peer = await CdpClient.connect((await response.json() as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl)
+      await peer.send('Page.enable')
+      await peer.send('Runtime.enable')
+      const peerReady = async () =>
+        await vi.waitFor(async () => {
+          expect(
+            await peer!.evaluate(
+              "document.documentElement.dataset.cordisxReady === 'true' && document.querySelector('p[role=status]')?.hidden === true",
+            ),
+          ).toBe(true)
+        }, { timeout: 45_000 })
+      await peerReady()
+      const reviewNavigation = '[data-settings-navigation-item="review-demo:navigation"]'
+      const policy = async (point: string) => {
+        const home = JSON.parse(await readFile(configPath, 'utf8')) as {
+          permissions: Array<{
+            key: { identity: { pluginId: string; source: string }; scope: { extensionPoints?: string[] } }
+            policy: string
+          }>
+        }
+        return home.permissions.find(record =>
+          record.key.identity.pluginId === 'review-demo'
+          && record.key.scope.extensionPoints?.[0] === point
+        )
+      }
+      const peerPolicy = async (point: string) =>
+        await peer!.evaluate<string | undefined>(
+          'globalThis.__cordisxRuntime.snapshot().permissions.find(item => item.identity.id === "review-demo"'
+            + ' && item.scope.extensionPoints?.[0] === ' + JSON.stringify(point) + ')?.policy',
+        )
+      const points = new Set<string>()
+      for (let index = 0; index < 2; index++) {
+        await vi.waitFor(async () => {
+          expect(await page!.evaluate('Boolean(document.querySelector(' + JSON.stringify(reviewNavigation) + '))'))
+            .toBe(true)
+        }, { timeout: 15_000 })
+        await page.evaluate('document.querySelector(' + JSON.stringify(reviewNavigation) + ').click()')
+        await vi.waitFor(async () => {
+          expect(
+            await page!.evaluate(
+              'Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))',
+            ),
+          )
+            .toBe(true)
+        }, { timeout: 15_000 })
+        const point = await page.evaluate<string>(
+          'document.querySelector("[data-standalone-dom-review]").dataset.standaloneDomReview',
+        )
+        points.add(point)
+        await trustedClick(page, '[data-standalone-dom-review] button')
+        await vi.waitFor(async () => {
+          expect(await page!.evaluate('Boolean(document.querySelector("[data-permission-decision=allow-persistent]"))'))
+            .toBe(true)
+        }, { timeout: 15_000 })
+        await trustedClick(page, '[data-permission-decision=allow-persistent]')
+        await trustedClick(page, '[data-permission-action=confirm]')
+        await vi.waitFor(async () => expect((await policy(point))?.policy).toBe('allow-persistent'), {
+          timeout: 60_000,
+        })
+        expect((await policy(point))?.key.identity.source).toBe(reviewSource)
+        await vi.waitFor(async () => expect(await peerPolicy(point)).toBe('allow'), { timeout: 60_000 })
+        await vi.waitFor(async () => {
+          expect(await page!.evaluate('Boolean(document.querySelector("[data-standalone-dom-reset]:not(:disabled)"))'))
+            .toBe(true)
+        }, { timeout: 60_000 })
+      }
+      expect([...points].sort()).toEqual(['manager.content', 'manager.settings.navigation-items'])
+      await peer.evaluate('globalThis.__beforeConfiguredPolicyReload = true')
+      await peer.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await peer!.evaluate('globalThis.__beforeConfiguredPolicyReload === undefined')).toBe(true)
+      }, { timeout: 30_000 })
+      await peerReady()
+      for (const point of points) {
+        await vi.waitFor(async () => expect(await peerPolicy(point)).toBe('allow'), { timeout: 30_000 })
+      }
+      const resetPoint = await page.evaluate<string>(
+        'document.querySelector("[data-standalone-dom-reset]").dataset.standaloneDomReset',
+      )
+      await trustedClick(page, '[data-standalone-dom-reset]')
+      await vi.waitFor(async () => expect((await policy(resetPoint))?.policy).toBe('ask'), { timeout: 60_000 })
+      await vi.waitFor(async () => expect(await peerPolicy(resetPoint)).toBe('ask'), { timeout: 60_000 })
+      // The peer can adopt the reset before the writer receives its result.
+      // A refresh during that unresolved write must remain fenced.
+      await vi.waitFor(async () => {
+        expect(
+          await page!.evaluate(
+            'Boolean(document.querySelector("[data-standalone-dom-review] button:not(:disabled)"))',
+          ),
+        ).toBe(true)
+      }, { timeout: 30_000 })
+
       const previousResume = await page.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(previousResume).toMatch(/^[a-f0-9]{64}$/u)
       await page.evaluate([
@@ -242,6 +349,7 @@ it.skipIf(chrome === undefined)(
       expect(await page.evaluate("sessionStorage.getItem('fixture-migration-count')")).toBe('1')
       expect(await page.evaluate("sessionStorage.getItem('fixture-migration-aborted')")).toBe('1')
     } finally {
+      await peer?.close().catch(() => undefined)
       await page?.close().catch(() => undefined)
       if (browser) await stopChrome(browser)
       if (cli) {

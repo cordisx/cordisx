@@ -125,6 +125,8 @@ export class ServiceRendererBootstrap {
       readonly permissionProof?: Pick<ManagerPermissionProofAuthority, 'register'>
       /** Service owner has a coordinated policy channel for configured Channel UI. */
       readonly experimentalConfiguredPermissionPolicy?: boolean
+      /** Service owner has the same policy handoff for eligible configured plugin graphs. */
+      readonly experimentalConfiguredPluginPermissionPolicy?: boolean
       /** Service owner has a coordinated policy channel for installed Manager UI graphs. */
       readonly experimentalInstalledPermissionPolicy?: boolean
       /** Service owner only: the full lifecycle federation and owner plan cleanup are available. */
@@ -143,7 +145,8 @@ export class ServiceRendererBootstrap {
     },
   ) {
     if (
-      input.experimentalInstalledPermissionPolicy === true
+      (input.experimentalInstalledPermissionPolicy === true
+        || input.experimentalConfiguredPluginPermissionPolicy === true)
       && (!input.protectProfileInputs || !input.permissionProof
         || !(input.lifecycle instanceof ServiceRendererLifecycle))
     ) throw new Error('renderer-permission-handoff-unavailable')
@@ -160,6 +163,7 @@ export class ServiceRendererBootstrap {
       profileId: input.profileId,
       generation: input.generation,
       configuredPolicyEnabled: input.experimentalConfiguredPermissionPolicy === true,
+      configuredPluginPolicyEnabled: input.experimentalConfiguredPluginPermissionPolicy === true,
       installedPolicyEnabled: input.experimentalInstalledPermissionPolicy === true,
       channel: () => this.configuredChannel,
       permissionFence: this.permissionFence,
@@ -796,6 +800,9 @@ export class ServiceRendererBootstrap {
             installedPermissionPolicy: this.input.experimentalInstalledPermissionPolicy === true,
             configuredChannelPermissionPolicy: this.input.experimentalConfiguredPermissionPolicy === true
               && this.input.permissionProof !== undefined,
+            ...(this.input.experimentalConfiguredPluginPermissionPolicy === true
+              ? { configuredPluginPermissionPolicy: configuredPlugins.map(item => item.plugin.id) }
+              : {}),
             isCurrent: async () => await this.unchanged(rendererId, entry),
           },
           profileId: this.input.profileId,

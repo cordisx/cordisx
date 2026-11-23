@@ -62,8 +62,8 @@ async function setup() {
             configPath: f.configPath,
             profileId: f.profileId,
             expected,
-            assertCurrent: () => {
-              if (!barrier.isCurrent()) throw new Error('fixture policy reservation is stale')
+            assertCurrent: async () => {
+              if (!await barrier.isCurrent()) throw new Error('fixture policy reservation is stale')
             },
           }, updates)
         )

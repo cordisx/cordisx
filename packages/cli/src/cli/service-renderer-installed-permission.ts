@@ -6,7 +6,7 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 
 /** Owner-private, generation-bound projection; possession is not a permission grant. */
 export interface ManagerPolicyTarget {
-  readonly kind: 'installed' | 'configured-channel'
+  readonly kind: 'installed' | 'configured-channel' | 'configured-plugin'
   readonly identity: { readonly id: string; readonly source: string }
   readonly ownerIdentity: { readonly id: string; readonly source: string }
   readonly moduleGeneration: string

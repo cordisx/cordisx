@@ -311,6 +311,8 @@ export interface CordisXRuntimeMetadata {
   readonly standaloneInstalledPolicyReview?: true
   /** The service owner coordinates persistent UI policies for the configured Channel. */
   readonly standaloneConfiguredPolicyReview?: true
+  /** Owner-selected configured graphs that support coordinated persistent UI review. */
+  readonly standaloneConfiguredPluginPolicyReview?: readonly string[]
   /** Host-private owner and resource check supplied by the standalone session. */
   readonly standaloneReviewSession?: () => Promise<boolean>
   readonly standaloneWriteUncertain?: () => void

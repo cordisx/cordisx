@@ -6,6 +6,7 @@ import {
   isStandaloneRuntimeGraph,
 } from '../packages/cli/src/launcher/standalone-runtime-graph.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../packages/cli/src/standalone-permission-contract.js'
 
 const origin = 'http://127.0.0.1:43123'
 const baseUrl = `${origin}/api/renderer/graphs/${'b'.repeat(64)}/`
@@ -102,4 +103,63 @@ it('accepts only owner-issued graph values matching the active package and manag
     ...options,
     standaloneOwner: { ...owner, managerOrigin: 'http://127.0.0.1:43124' },
   })).rejects.toThrow('plugin graph projection is unavailable')
+})
+
+it('advertises configured policy review only for an owner-issued graph and permission channel', async () => {
+  const graph = createStandaloneRuntimeGraph(descriptor, origin)
+  const plugin = {
+    id: descriptor.pluginId,
+    entry: path.resolve('tests/fixtures/generation-base-plugin.ts'),
+    enabled: true,
+    config: {},
+    runtimeGraph: graph,
+  }
+  const config = {
+    version: 1 as const,
+    rootDir: path.resolve('.'),
+    codex: { debugPort: 9229 },
+    providers: [],
+    plugins: [plugin],
+  }
+  const owner = {
+    rendererId: 'd'.repeat(64),
+    profileId: 'work',
+    generation: 'owner-test',
+    managerOrigin: origin,
+    configuredPluginPermissionPolicy: [plugin.id],
+    isCurrent: () => true,
+  }
+  const options = {
+    managerPresentationMode: 'standalone' as const,
+    standaloneOwner: owner,
+    profileId: 'work',
+    generation: 'owner-test',
+    pluginActivation: {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      recordKind: 'active' as const,
+      profileId: 'work',
+      revision: 0,
+      lastGoodRevision: 0,
+      runtimeGeneration: 'owner-test',
+      plugins: [],
+    },
+    initialRegistryEpoch: 0,
+    permission: { profileId: 'work', policies: [], bridgeToken: STANDALONE_PERMISSION_BINDING_MARKER },
+  }
+  const result = await buildRendererCompositionSource(config, options)
+  expect(result.metadataSource).toContain('standaloneConfiguredPluginPolicyReview')
+  expect(result.metadataSource).toContain(plugin.id)
+  await expect(buildRendererCompositionSource(config, {
+    ...options,
+    permission: { profileId: 'work', policies: [] },
+  })).rejects.toThrow('owner scope is invalid')
+  await expect(buildRendererCompositionSource(config, {
+    ...options,
+    standaloneOwner: { ...owner, configuredPluginPermissionPolicy: ['unissued'] },
+  })).rejects.toThrow('owner scope is invalid')
+  await expect(buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...plugin, runtimeGraph: { ...graph } }],
+  }, options)).rejects.toThrow('owner scope is invalid')
 })

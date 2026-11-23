@@ -164,6 +164,19 @@ it('reviews a configured plugin only in the current session even when persistent
   }
 })
 
+it('offers a persistent review only for the configured graph selected by the owner', () => {
+  const f = configuredFixture()
+  try {
+    const existing = f.scope.metadata()
+    f.scope.metadata = () => ({ ...existing, standaloneConfiguredPluginPolicyReview: ['other-plugin'] })
+    expect(createStandaloneDomReviewModel(f.scope as never)!.describe(identity, point)?.persistentAvailable).toBe(false)
+    f.scope.metadata = () => ({ ...existing, standaloneConfiguredPluginPolicyReview: [identity.id] })
+    expect(createStandaloneDomReviewModel(f.scope as never)!.describe(identity, point)?.persistentAvailable).toBe(true)
+  } finally {
+    f.broker.dispose()
+  }
+})
+
 it('rejects a configured graph that changes during the owner review', async () => {
   const f = configuredFixture()
   try {
