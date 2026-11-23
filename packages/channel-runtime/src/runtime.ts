@@ -1,5 +1,6 @@
 import { appendAudit, auditRecord } from './runtime-audit.js'
 import { isEligibleOutbox } from './outbound-enqueue.js'
+import { cancelOutboundDelivery } from './outbound-cancel.js'
 import { ChannelDeliveryObservers } from './delivery-observers.js'
 export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -32,7 +33,7 @@ import type {
 } from '@cordisx/protocol/channel-outbound/v1'
 import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
-import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
+import { deliverySnapshot, inputsSince, latestInputCursor, ownsPlainCard } from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
   accountKey,
@@ -461,6 +462,10 @@ export class ChannelRuntime {
 
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
     return deliverySnapshot(this.#store.snapshot(), id, caller)
+  }
+  ownsPlainCard(target: import('./types.js').ChannelConversationRef, messageId: string): boolean {
+    this.#assertRuntimeActive()
+    return ownsPlainCard(this.#store.snapshot(), target, messageId)
   }
   latestInputCursor(): string {
     return latestInputCursor(this.#store.snapshot())
@@ -901,29 +906,7 @@ export class ChannelRuntime {
   }
 
   async #cancelDelivery(deliveryId: string): Promise<'cancelled' | 'irreversible' | 'not-found'> {
-    const now = this.#now()
-    return this.#store.transaction(state => {
-      const current = state.outbox[deliveryId]
-      if (current === undefined) return 'not-found'
-      if (current.status === 'processing' || current.status === 'sent' || current.status === 'unknown') {
-        return 'irreversible'
-      }
-      if (current.status !== 'queued' && current.status !== 'retrying') return 'not-found'
-      state.outbox[deliveryId] = { ...current, status: 'cancelled', updatedAt: now }
-      appendAudit(
-        state,
-        auditRecord({
-          caller: current.caller,
-          recordedAt: now,
-          accountKey: current.accountKey,
-          generation: current.generation,
-          operationId: deliveryId,
-          action: 'channel.delivery.cancel',
-          outcome: 'cancelled-before-claim',
-        }),
-      )
-      return 'cancelled'
-    })
+    return cancelOutboundDelivery(this.#store, deliveryId, this.#now())
   }
 
   async #publishInput(

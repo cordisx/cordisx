@@ -1,5 +1,7 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
 import { channelMessageRead } from './channel-message-read.js'
+import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
+import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -41,6 +43,7 @@ export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract 
 interface ActiveRuntime {
   readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
+  readonly messageOperations: ChannelMessageOperationLedger
   generation: string
   readonly runtime: ChannelRuntime
   readonly host: LauncherChannelServiceHost
@@ -286,6 +289,9 @@ export function createLocalChannelService(input: {
     const generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     await mkdir(input.dataDir, { recursive: true })
     const outbound = new ChannelOutboundRpc()
+    const messageOperations = await ChannelMessageOperationLedger.open(
+      path.join(input.dataDir, 'message-operations.json'),
+    )
     try {
       const runtime: ChannelRuntime = await ChannelRuntime.open({
         ...channelOutboundRuntimeOptions(
@@ -333,6 +339,7 @@ export function createLocalChannelService(input: {
               ),
           }),
           outbound,
+          messageOperations,
           generation,
           runtime,
           host,
@@ -574,6 +581,14 @@ export function createLocalChannelService(input: {
         runtime: current.runtime,
         outbound: current.outbound,
         forward: current.forward,
+        messageOperations: (operation, request, context) =>
+          channelMessageOperationsRpc(operation, request, {
+            ...context,
+            ledger: current.messageOperations,
+            channel: event => current.directory.channel(event),
+            active: () => active === current && !disposed,
+            ownsPlainCard: (event, messageId) => current.runtime.ownsPlainCard(event, messageId),
+          }),
         ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
