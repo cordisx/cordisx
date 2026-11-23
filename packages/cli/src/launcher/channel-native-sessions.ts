@@ -1,4 +1,6 @@
 import { readChannelCompletion } from './channel-legacy-completion.js'
+import { channelPersonaTask } from './channel-memory-personas.js'
+import { type ChannelMemoryModelConnection, channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash, randomBytes } from 'node:crypto'
 import { channelAttachmentTicket } from './channel-inbound-resources.js'
@@ -107,6 +109,7 @@ export class ChannelNativeSessions {
       readonly logicalOwnerIdentity?: () => Promise<string | undefined>
       readonly providerId?: string
       readonly model?: string
+      readonly memoryConnect?: ChannelMemoryModelConnection | undefined
       readonly cli?: ChannelNativeCliContext
       readonly execution?: ChatExecutionPreferences
       readonly configuration?: import('./codex-chat-configuration.js').CodexChatConfiguration
@@ -504,6 +507,7 @@ export class ChannelNativeSessions {
     }
     return selection
   }
+  readonly analyzeUserMemory = channelUserMemoryAnalyzer(() => this.input, () => this.modelOperation('list', {}))
   projects(caller?: string) {
     return this.input.configuration?.projects(caller) ?? Promise.reject(new Error('PROJECT_AUTHORITY_UNAVAILABLE'))
   }
@@ -791,7 +795,7 @@ export class ChannelNativeSessions {
       if (metadata?.status && object(metadata.status).type === 'active') return { state: 'busy' }
     }
     const event = message.source.event
-    const personaTask = sessionId ?? `dispatch-${createHash('sha256').update(operationId).digest('hex')}`
+    const personaTask = channelPersonaTask(operationId, sessionId)
     const capsule = this.personaRegistry && await this.personaRegistry.taskConfigured(personaTask, event)
       ? await this.personaRegistry.bootstrap(personaTask, event, event.conversationId)
       : undefined

@@ -24,6 +24,7 @@ import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
+import { channelMemoryServiceConnection } from '../launcher/channel-user-memory-connection.js'
 import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../launcher/headless-static-catalog.js'
 import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
 import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
@@ -313,6 +314,7 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => chatConfiguration.close())
     native = new ChannelNativeSessions({
+      memoryConnect: channelMemoryServiceConnection(homeConfig, backendEnvironment),
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
       logicalOwnerIdentity: () => backend.nativeOwnerIdentity(),

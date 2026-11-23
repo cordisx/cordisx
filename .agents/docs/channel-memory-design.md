@@ -462,6 +462,8 @@ being denied, one-way versus two-way access, and immediate revocation.
 
 ## Structured directory
 
+The tree below remains the proposed scope-based layout, not the current disk format. The Host currently stores `personas/registry/state.json` separately from each `personas/spaces/<persona-id>/memory` directory. An unbound bot uses the profile's `memory` directory. Each memory directory contains `state.json` for active revisions, catalog, grants, and confirmed bindings; individual `<uuid>-<revision>.json` record files; and an optional rebuildable `index.json`. Records are flat inside that directory, with owner/scope/provenance fields enforcing logical isolation. `scopes/.../records`, separate scope policy files, `schema.json`, and the proposed audit tree are not implemented. This is an implementation difference with remaining layout work, not a single JSON memory store or a completed directory migration. The user-scoped introduction/recall hook uses these existing record files and does not introduce another store. See [the current CLI guide](channel-cli.md#user-scoped-introductions-and-recall).
+
 ```text
 memory/
   schema.json
