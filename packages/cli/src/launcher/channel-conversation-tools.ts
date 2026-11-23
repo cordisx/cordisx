@@ -21,8 +21,11 @@ import { questionDeliveryId } from './channel-questions.js'
 import { channelProgressTarget } from './channel-progress-reminders.js'
 import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
+import { channelForwardRpc } from './channel-forward-rpc.js'
+import { authorizeChannelForward } from './channel-forward-permissions.js'
 
 export interface ChannelConversationAccess {
+  readonly forward?: ReturnType<typeof import('./channel-forward-service.js').createChannelForwardService>
   readonly outbound?: ChannelOutboundRpc
   feedbackReact?(
     event: import('@cordisx/channel-runtime').ChannelEventRef,
@@ -387,6 +390,29 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (['forward', 'merge-forward', 'forward-receipt'].includes(operation)) {
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        const access = this.access()
+        if (!access) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        return await channelForwardRpc({
+          operation,
+          value: input,
+          access,
+          scope: outboundCallerScope({
+            session: callerSession,
+            turnId: scopedCaller?.turnId ?? callerTurnId(metadata),
+            source,
+          }),
+          ...(source ? { source } : {}),
+          authorize: (event, action) => {
+            if (source && this.consumer) {
+              authorizeChannelForward(this.consumer.profileLogicalOwner().store.snapshot().policy, event, action)
+            }
+          },
+        })
+      }
       if (['user-access', 'user-access-set', 'group-block', 'group-block-set'].includes(operation)) {
         if (!this.consumer) throw new Error('CHANNEL_CONSUMER_UNAVAILABLE')
         return await this.consumer.permissionOperation(operation, input, metadata)

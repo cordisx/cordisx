@@ -12,6 +12,9 @@ import { prepareChannelSendInput } from './channel-send-payload.js'
 import { parseChannelMediaPrepareArgv, validateChannelMediaPrepareRequest } from './channel-media-prepare-payload.js'
 
 const OPERATIONS = [
+  'forward',
+  'merge-forward',
+  'forward-receipt',
   'memory',
   'memory-authority-set',
   'memory-persona-profile',
