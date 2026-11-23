@@ -35,6 +35,9 @@ type Entry = {
   settings: NonNullable<ChannelFeedbackSettings['wait']>
   count: number
   uncertain: boolean
+  acknowledged?: boolean
+  ackOverdue?: boolean
+  ackTimer?: ReturnType<typeof setTimeout>
   timer?: ReturnType<typeof setTimeout>
 }
 type Options = {
@@ -70,6 +73,7 @@ export class ChannelProgressReminders {
   }
   private finish(entry: Entry) {
     if (entry.timer) clearTimeout(entry.timer)
+    if (entry.ackTimer) clearTimeout(entry.ackTimer)
     if (this.entries.get(scopeKey(entry.source)) === entry) this.entries.delete(scopeKey(entry.source))
   }
   private allowed(state: ChannelConversationState, source: ChannelEventRef) {
@@ -133,6 +137,20 @@ export class ChannelProgressReminders {
       return
     }
     entry.settings = config.wait
+    const ackSeconds = config.wait.ackTimeoutSeconds ?? 60
+    if (ackSeconds > 0) {
+      entry.ackTimer = setTimeout(() => {
+        const jobs = Object.values(this.options.store.snapshot().jobs).filter(job => job.recordId === entry.recordId)
+        if (
+          this.current(entry) && !entry.acknowledged
+          && jobs.some(job => ['queued', 'dispatching', 'running', 'reconciliation-required'].includes(job.state))
+        ) {
+          entry.ackOverdue = true
+          this.report('CHANNEL_INPUT_ACK_OVERDUE')
+        }
+      }, Math.max(0, entry.since + ackSeconds * 1000 - this.now()))
+      entry.ackTimer.unref?.()
+    }
     this.arm(entry, entry.since + (config.wait.quietSeconds ?? 5) * 1000 - this.now())
   }
   private arm(entry: Entry, delay: number) {
@@ -272,6 +290,31 @@ export class ChannelProgressReminders {
       || !sameChannelPrincipal(entry.source, source)
     ) {
       throw new Error('CHANNEL_PROGRESS_NOTICE_STALE')
+    }
+  }
+  inputStatus(source: ChannelEventRef, sessionId: string, acknowledge: boolean) {
+    const entry = this.entries.get(scopeKey(source))
+    const jobs = entry
+      && Object.values(this.options.store.snapshot().jobs).filter(job => job.recordId === entry.recordId)
+    // The native caller may acknowledge before dispatch's promise has committed its running state.
+    const job = entry
+      && (this.job(entry) ?? (jobs?.length === 1 && jobs[0]?.state === 'dispatching' ? jobs[0] : undefined))
+    if (
+      !entry || !this.current(entry) || !job || job.sessionId !== undefined && job.sessionId !== sessionId
+      || entry.source.messageId !== source.messageId || !sameChannelPrincipal(entry.source, source)
+    ) {
+      return { status: 'ok', acknowledgment: 'not-monitored', consumption: 'unconfirmed' }
+    }
+    if (acknowledge) {
+      entry.acknowledged = true
+      if (entry.ackTimer) clearTimeout(entry.ackTimer)
+    }
+    return {
+      status: 'ok',
+      acknowledgment: entry.acknowledged ? 'agent-acknowledged' : 'awaiting-agent',
+      consumption: entry.acknowledged ? 'acknowledged-by-caller' : 'unconfirmed',
+      overdue: entry.ackOverdue === true && !entry.acknowledged,
+      elapsedMs: Math.max(0, this.now() - entry.since),
     }
   }
   dispose() {

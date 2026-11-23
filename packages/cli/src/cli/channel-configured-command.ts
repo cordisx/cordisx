@@ -73,6 +73,8 @@ const OPERATIONS = [
   'group-block',
   'group-block-set',
   'group-access',
+  'input-ack',
+  'input-status',
   'group-access-set',
   'execution-defaults',
   'execution-defaults-set',

@@ -131,6 +131,28 @@ takes `query` and optional `entity`; update takes `id`, `revision`, `record`;
 forget takes `id`, `revision`; index takes `{}` and rebuilds only the caller's
 current-conversation records. Read `cordisx channel help memory` for details.
 
+For a verified task milestone or decision, `kind` is `fact`; `task` and `decision`
+are not supported kind values. `confidence` is a JSON number from 0 to 1, not
+`"high"` or a numeric string. Keep all record fields inside the `record` wrapper:
+
+```sh
+cordisx channel memory remember --context <incoming-context> --input '{"record":{"kind":"fact","title":"Cedar progress","summary":"Deployment verified; validation remains","tags":["Cedar"],"entityRefs":[],"evidenceType":"verified","confidence":1}}'
+```
+
+Accepted kinds are `fact`, `preference`, `person`, `conversation`, `collaboration`
+and `impression`; an impression also requires `observedAt` in UTC ISO format with
+milliseconds. `memory guide --input '{"topic":"write"}'` returns a complete example.
+Invalid record fields return `MEMORY_INVALID_RECORD`, field-level `issues`, and
+`retrySafe:true` only when validation rejected the request before writing.
+The Agent should correct those fields and retry once in the same authenticated turn,
+without inventing missing evidence. If still rejected, read the write guide and
+report unresolved failure rather than looping. Confirm `status:"ok"` before saying it saved
+anything. Revision conflicts require a fresh `get` and reconsideration; storage
+or transport failures do not authorize blind retries. Search/get first when the
+effect is unknown. Corrupt stored data does not receive the retry-safe flag.
+Successful retrieval proves authorized readback, not that a model used the fact
+in its answer; relevant answers should refer to the returned dated evidence.
+
 This is selective model-driven maintenance, not automatic transcript ingestion
 or platform history access. It never configures a persona or widens sharing.
 Direct-chat own
@@ -144,6 +166,44 @@ use verified second-account requests with expiry/replay checks. Caller
 actor/admin claims are rejected. See the
 [memory design and delivery ledger](channel-memory-design.md) for tested
 boundaries, identity confirmation gaps and production gates.
+
+### Automatic request-local recall for an administrator
+
+For a direct project-status request such as “青杉项目现在进度是什么？” or a
+recent-work question such as “你记得自己最近都做了什么吗？”, the Host can admit
+the requesting administrator's own relevant task records automatically. The Agent
+should first read `memory guide --context <incoming-context> --input '{"topic":"recall"}'`.
+Its `recallAccess` reports the verified administrator, recognized request scope and
+current audience. Then use `search-page` with the supplied project name, or
+`navigate {}` for a recent-work overview, and `get`/`batch` for selected cards.
+No sharing phrase or repeated grant request is needed for records already admitted.
+
+The Host derives this role from effective `allow-user`, `deny-user` and `reset-user`
+management grants at the actual source, or configured memory-source administrator
+authority. It verifies adapter, account, tenant and user identity; a claimed role
+or platform group-admin title is insufficient. Disabled policy and explicit
+dispatch/send/management denials block this additional path. Memory-source
+administration does not confer authority to read another person's private data.
+
+This access is recomputed for each authenticated incoming request, creates no
+persistent grant and does not open the records to other group members. It covers
+exact-owner `fact`, `conversation` and `collaboration` records relevant to the
+supplied topic. Recent-work overview additionally requires a task/work keyword and
+an update within the last 30 days. Preferences, profiles, impressions, unrelated
+personal facts, expired records, other accounts and unconfirmed linked identities
+are excluded from this new path. Existing explicit own-topic and grant rules
+retain their separate behavior. A following unrelated request receives only its
+ordinary authorized scope.
+
+The request made in a group authorizes an answer about these selected task facts
+to that current audience, not disclosure of the private archive. Candidate matching
+and permission checks happen inside the Host before cards/content reach the model;
+no hidden record count, denied source title or other-person existence is returned.
+The model must answer only the requested task facts and preserve their dates and
+uncertainty. Quoted, negated, ambiguous or unsupported wording does not activate
+this path; the normal authorized scope still applies. A broad assistant work
+overview across all users/personas is not implemented. This does not merge persona
+spaces, create global knowledge or change group task admission.
 
 Local operator-only operations, rejected with Agent/Channel metadata:
 `memory-authority-set` (account user tuple,scopes,expectedRevision),
@@ -200,7 +260,8 @@ Configure `channel-feedback.json` beside the selected profile's
     "mode": "agent",
     "quietSeconds": 5,
     "repeatSeconds": 30,
-    "finishSeconds": 10
+    "finishSeconds": 10,
+    "ackTimeoutSeconds": 60
   }
 }
 ```
@@ -221,6 +282,61 @@ does not offer a separate system-message role. CLI progress sends should include
 the notice's `progressToken`; stale tokens reject and queued guarded sends are
 cancelled before transport if new input arrives or a reply was confirmed. Ordinary
 business sends retain their existing behavior. The token changes no permissions.
+
+### Short waits and cooperative input acknowledgment
+
+The scoped prompt asks the parent Agent to continue independent work while its
+delegates run, check new input between bounded waits, and send meaningful progress
+through Channel CLI. Where the installed tool schema permits, use explicit
+10–30 second waits, with no wait longer than 60 seconds unless the user needs it.
+A timeout is a status check; it must not restart a healthy delegate or cause tight
+polling or repeated unchanged updates.
+
+Codex CLI 0.149.1's original `wait_agent` has a fixed 30-second default and a
+one-hour maximum. Its timeout bounds are not configurable. That version also
+supports an opt-in v2 tool implementation with configurable bounds:
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 10000
+default_wait_timeout_ms = 30000
+max_wait_timeout_ms = 60000
+```
+
+These are native Codex settings in the selected Codex configuration, not Channel
+feedback fields. The Host does not silently enable v2 or rewrite existing native
+settings. Check the installed version and generated schema before using them;
+v2 settings do not affect the original implementation. In
+[the 0.149.1 implementation](https://github.com/openai/codex/blob/rust-v0.149.1/codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs),
+v2 waits subscribe to input-queue activity and can return early on steered input.
+This is native-source evidence, not a guarantee that every blocking tool returns
+or that the model has consumed the input.
+
+When it begins handling the latest input, the Agent can run:
+
+```sh
+cordisx channel input-ack --context <incoming-context> --input '{}'
+cordisx channel input-status --context <incoming-context> --input '{}'
+```
+
+Both require the live scoped caller and accept no target, actor or session override.
+`awaiting-agent` with `consumption:"unconfirmed"` means there is no cooperative
+acknowledgment; it does not prove the input was unconsumed. `agent-acknowledged`
+with `consumption:"acknowledged-by-caller"` confirms the caller's explicit receipt,
+not understanding or task completion. An older input cannot acknowledge the newer
+one. In Agent feedback mode, `wait.ackTimeoutSeconds` records
+`CHANNEL_INPUT_ACK_OVERDUE` once when queued/dispatching/active/uncertain work has
+not acknowledged the latest input. It accepts integer seconds 0–86400; 0 disables
+this diagnostic. New input resets it; confirmed reply, stopped work or process
+restart ends this process-local monitor. Disabled/fixed feedback is not monitored.
+
+The supported native protocol has `turn/steer` and whole-turn `turn/interrupt`,
+but no cancellation of only a blocking tool and no reliable semantic consumption
+notification. An overdue acknowledgment therefore never automatically interrupts,
+restarts or replays a turn. Existing progress reminders still use the exact active
+turn. Their acceptance alone does not prove timely consumption during a long tool
+wait; reliable tool-only interruption remains unavailable.
 
 Legacy `wait.delaySeconds`, `wait.text` and `wait.texts` select `mode:"fixed"` when
 no mode is explicitly set; this preserves existing deployments. To switch, add
@@ -887,10 +1003,22 @@ confirms that change; an unsupported switch is rejected. Catalog availability
 permits new conversations with the requested provider, not cross-provider replay
 of an existing conversation.
 
-Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
-response, final-message delivery reads the exact completed turn with
-`thread/read`. This compatibility path loads the complete thread and can hit
-transport limits for very long histories; other read errors do not trigger it.
+Some Codex 0.149.1 app-servers advertise `thread/items/list` but return method-not-found
+or “not supported yet”. On a first-page `-32601` only, final-message delivery uses
+`thread/turns/list` metadata pages (`itemsView:"notLoaded"`, descending, one turn
+per page) to locate the exact original turn, then requests that same page with
+`itemsView:"full"`. The returned ID and completed status must still match. It does
+not load the whole thread or forward another turn's answer. Scanning is limited
+to 64 metadata pages, with no further page scheduled after a 45-second scan budget
+(an in-flight RPC retains its transport timeout); repeated/invalid cursors and malformed responses fail
+closed. Other errors and a later-page `-32601` do not trigger this fallback.
+
+One native turn can still exceed the transport's 2 MiB line limit. A recognized
+oversize error reports `NATIVE_COMPLETION_PAGE_TOO_LARGE`; page/deadline exhaustion
+reports `NATIVE_COMPLETION_PAGE_LIMIT`. These are failures, not completion or
+delivery evidence. The fallback bounds loaded turn count, not native single-turn
+bytes, and does not change the transport cap. Final delivery retains its original
+stable outbox ID; unknown send receipts are not automatically replayed.
 
 ## Model-service continuation (experimental)
 

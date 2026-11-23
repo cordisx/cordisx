@@ -93,7 +93,7 @@ export class ChannelConversationConsumer {
   readonly memory
   readonly memoryAuthority
   readonly personas
-  private readonly feedback: ReturnType<typeof createChannelFeedback>
+  readonly feedback: ReturnType<typeof createChannelFeedback>
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
