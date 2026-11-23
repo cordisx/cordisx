@@ -273,6 +273,8 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
   const bundle = await encodeManagerRendererBundle(Buffer.from('export const ready = true'))
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
   let ownerCurrent = true
+  let interruptNextStatus = false
+  let interruptedStatuses = 0
   const authority = new ManagerRendererSessions({
     profileId: 'fixture',
     ownerGeneration: 'generation',
@@ -333,7 +335,19 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
     profileId: 'fixture',
     generation: 'generation',
     isCurrent: async () => ownerCurrent,
-    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+    request: async operation => {
+      if (
+        interruptNextStatus && operation.kind === 'manager-renderer' && operation.action === 'call'
+        && operation.channel === 'manager-bootstrap' && operation.payload !== null
+        && typeof operation.payload === 'object' && 'action' in operation.payload
+        && operation.payload.action === 'status'
+      ) {
+        interruptNextStatus = false
+        interruptedStatuses++
+        throw new Error('temporary owner RPC transport failure')
+      }
+      return await dispatchManagerRendererOperation(authority, operation)
+    },
   }, { rendererGateway: gateway })
   const origin = new URL(web.url).origin
   const post = async (route: string, data: unknown, token?: string) => {
@@ -381,6 +395,13 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
       .toBe('export const ready = true')
     expect(await (await fetchResource(first, firstGraph.entryUrl)).text()).toBe(fixture.source)
     expect((await fetchResource(second, firstGraph.entryUrl)).status).toBe(404)
+    interruptNextStatus = true
+    expect(await post('/api/renderer/session', {}, second)).toMatchObject({
+      status: 200,
+      body: { current: true },
+    })
+    expect(interruptedStatuses).toBe(1)
+    expect((await fetchResource(second, secondGraph.entryUrl)).status).toBe(200)
     expect((await fetch(`${origin}/api/renderer/bundle.js`)).status).toBe(401)
     expect(await post('/api/renderer/close', {}, first)).toMatchObject({ status: 200, body: { closed: true } })
     expect(await post('/api/renderer/close', {}, first)).toMatchObject({ status: 200, body: { closed: true } })

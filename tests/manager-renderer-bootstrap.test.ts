@@ -27,6 +27,72 @@ const invocation = {
   handle: { rendererId: '1'.repeat(64), ownerGeneration: 'generation', grant: '2'.repeat(64) },
 }
 
+it('retries one interrupted owner session read only after confirming the same owner', async () => {
+  let calls = 0
+  const request = vi.fn(async (_operation: unknown, _options?: { timeoutMs?: number; signal?: AbortSignal }) => {
+    if (++calls === 1) throw new Error('temporary RPC transport failure')
+    return { status: 'ok', value: { status: 'ok', current: true } }
+  })
+  const current = vi.fn(() => true)
+  const bootstrap = createManagerRendererBootstrap({
+    owner: { request },
+    invocation,
+    managerOrigin: origin,
+    projection: { projectInitial: () => [], close: vi.fn() },
+    isCurrent: current,
+    signal: new AbortController().signal,
+    forbiddenSecrets: ['x'.repeat(64)],
+  })
+  expect(await bootstrap.isSessionCurrent()).toBe(true)
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(request.mock.calls.every(([, options]) => options?.timeoutMs === 8_000)).toBe(true)
+  expect(current.mock.calls.length).toBeGreaterThanOrEqual(3)
+})
+
+it('does not treat a rejected, stale, or repeatedly unavailable owner session as current', async () => {
+  for (const scenario of ['rejected', 'stale', 'changed', 'aborted', 'unavailable'] as const) {
+    let current = true
+    const controller = new AbortController()
+    const request = vi.fn(async () => {
+      if (scenario === 'rejected') return { status: 'unavailable' }
+      if (scenario === 'stale') return { status: 'ok', value: { status: 'ok', current: false } }
+      if (scenario === 'changed') current = false
+      if (scenario === 'aborted') controller.abort()
+      throw new Error('temporary RPC transport failure')
+    })
+    const bootstrap = createManagerRendererBootstrap({
+      owner: { request },
+      invocation,
+      managerOrigin: origin,
+      projection: { projectInitial: () => [], close: vi.fn() },
+      isCurrent: () => current,
+      signal: controller.signal,
+      forbiddenSecrets: ['x'.repeat(64)],
+    })
+    expect(await bootstrap.isSessionCurrent()).toBe(false)
+    expect(request).toHaveBeenCalledTimes(scenario === 'unavailable' ? 2 : 1)
+  }
+})
+
+it('never retries a failed owner bootstrap request', async () => {
+  const request = vi.fn(async () => {
+    throw new Error('temporary RPC transport failure')
+  })
+  const projection = { projectInitial: () => [], close: vi.fn() }
+  const bootstrap = createManagerRendererBootstrap({
+    owner: { request },
+    invocation,
+    managerOrigin: origin,
+    projection,
+    isCurrent: () => true,
+    signal: new AbortController().signal,
+    forbiddenSecrets: ['x'.repeat(64)],
+  })
+  await expect(bootstrap.prepare()).rejects.toThrow('MANAGER_BOOTSTRAP_UNAVAILABLE')
+  expect(request).toHaveBeenCalledOnce()
+  expect(projection.close).toHaveBeenCalledOnce()
+})
+
 it('builds a bundle using only owner-issued graphs projected for this session', async () => {
   const envelope = await encodeManagerRendererBundle(Buffer.from('export const fixture = true'))
   const request = vi.fn(async operation => {

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererInvocation } from './manager-renderer-sessions.js'
@@ -8,6 +9,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown>
     : undefined
 }
+
+class ManagerOwnerStatusTransportError extends Error {}
 
 /** The graph projector is session-local and accepts descriptors from the authenticated owner only. */
 export interface ManagerRendererBootstrapProjection {
@@ -32,17 +35,24 @@ export function createManagerRendererBootstrap(input: {
   ) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
   let started = false
   const current = async () => !input.signal.aborted && await input.isCurrent() && !input.signal.aborted
-  const call = async (payload: unknown) => {
+  const call = async (payload: unknown, ownerStatus = false) => {
     if (!await current()) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
-    const result = record(
-      await input.owner.request({
+    let response: unknown
+    try {
+      response = await input.owner.request({
         kind: 'manager-renderer',
         action: 'call',
         channel: 'manager-bootstrap',
         ...input.invocation,
         payload,
-      }, { signal: input.signal }),
-    )
+      }, { signal: input.signal, ...(ownerStatus ? { timeoutMs: 8_000 } : {}) })
+    } catch (error) {
+      if (ownerStatus && !input.signal.aborted) {
+        throw new ManagerOwnerStatusTransportError('MANAGER_OWNER_STATUS_TRANSPORT', { cause: error })
+      }
+      throw error
+    }
+    const result = record(response)
     if (!await current() || result?.status !== 'ok') throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
     const value = record(result.value)
     if (value?.status !== 'ok') throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
@@ -50,11 +60,23 @@ export function createManagerRendererBootstrap(input: {
   }
   return {
     async isSessionCurrent(): Promise<boolean> {
-      try {
-        const value = await call({ action: 'status' })
+      const status = async () => {
+        const value = await call({ action: 'status' }, true)
         return value.current === true && await current()
-      } catch {
-        return false
+      }
+      try {
+        return await status()
+      } catch (error) {
+        // This is a read-only owner check, not an operation or lifecycle
+        // command. Reconfirm the owner before retrying a lost transport.
+        if (!(error instanceof ManagerOwnerStatusTransportError) || input.signal.aborted) return false
+        try {
+          if (!await current()) return false
+          await delay(100, undefined, { signal: input.signal })
+          return await status()
+        } catch {
+          return false
+        }
       }
     },
     async prepare(
