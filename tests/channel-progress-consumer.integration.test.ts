@@ -52,6 +52,7 @@ it('the production consumer steers Host reminders into one turn, while only a co
     profile: 'default',
   }
   const requests: any[] = [], contexts: string[] = []
+  const initialAcknowledgments: unknown[] = []
   const native = new ChannelNativeSessions({
     cli,
     cwd: root,
@@ -60,6 +61,9 @@ it('the production consumer steers Host reminders into one turn, while only a co
         call: async (_app: string, _op: string, request: any) => {
           contexts.push(/--context '([a-f0-9]{48})'/u.exec(request.prompt)![1]!)
           native.observedDispatch(request.operationId, session, 'turn')
+          if (contexts.length === 1) {
+            initialAcknowledgments.push(await acknowledgment('input-ack', contexts[0]!))
+          }
           return { status: 'started', sessionId: session, turnId: 'turn' }
         },
       }) as never,
@@ -161,6 +165,7 @@ it('the production consumer steers Host reminders into one turn, while only a co
   try {
     await consumer.policySet({ enabled: true, autoReply: false }, 0)
     await receive('om_first')
+    expect(initialAcknowledgments).toEqual([expect.objectContaining({ acknowledgment: 'agent-acknowledged' })])
     await receive('om_second')
     expect(await acknowledgment('input-status', contexts.at(-1)!)).toMatchObject({
       acknowledgment: 'awaiting-agent',

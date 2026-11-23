@@ -293,9 +293,14 @@ export class ChannelProgressReminders {
     }
   }
   inputStatus(source: ChannelEventRef, sessionId: string, acknowledge: boolean) {
-    const entry = this.entries.get(scopeKey(source)), job = entry && this.job(entry)
+    const entry = this.entries.get(scopeKey(source))
+    const jobs = entry
+      && Object.values(this.options.store.snapshot().jobs).filter(job => job.recordId === entry.recordId)
+    // The native caller may acknowledge before dispatch's promise has committed its running state.
+    const job = entry
+      && (this.job(entry) ?? (jobs?.length === 1 && jobs[0]?.state === 'dispatching' ? jobs[0] : undefined))
     if (
-      !entry || !this.current(entry) || job?.sessionId !== sessionId
+      !entry || !this.current(entry) || !job || job.sessionId !== undefined && job.sessionId !== sessionId
       || entry.source.messageId !== source.messageId || !sameChannelPrincipal(entry.source, source)
     ) {
       return { status: 'ok', acknowledgment: 'not-monitored', consumption: 'unconfirmed' }
