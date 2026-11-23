@@ -1,7 +1,7 @@
+import { channelDispatchAllowed } from './channel-group-access.js'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelContinuationManager, ContinuationReservation } from './channel-continuation-manager.js'
 import type { ContinuationConfiguration } from './channel-continuation-config.js'
-import { channelPolicyAllows } from './channel-conversation-policy.js'
 import {
   type ChannelConversationJob,
   type ChannelConversationState,
@@ -66,7 +66,7 @@ export function claimChannelDispatch(
   if (
     !current || current.state !== 'queued' || current.sessionId !== job.sessionId
     || current.bindingId !== job.bindingId || !state.policy.enabled
-    || !channelPolicyAllows(state.policy, 'dispatch', event)
+    || !channelDispatchAllowed(state, event)
     || current.sessionId && ChannelConversationStore.logicalSourceFenced(state, current.sessionId)
     || current.bindingId && (binding?.state !== 'active' || binding.sessionId !== current.sessionId)
   ) {

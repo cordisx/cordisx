@@ -24,6 +24,8 @@ import {
   createChannelManagerApi,
 } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
+import { ChannelOutboundRpc } from './channel-outbound-rpc.js'
+import { channelOutboundRuntimeOptions } from './channel-outbound-runtime-options.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
 import { ChannelConversationDisplayStore } from './channel-conversation-display-store.js'
@@ -37,6 +39,7 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly outbound: ChannelOutboundRpc
   generation: string
   readonly runtime: ChannelRuntime
   readonly host: LauncherChannelServiceHost
@@ -251,6 +254,7 @@ export function createLocalChannelService(input: {
   const caller = (generation: string) => ({ source: input.source, pluginId: 'channel', generation })
   const definitions = (configuration: ReturnType<typeof parseChannelServiceConfig>, current: ActiveRuntime) =>
     feishuDefinitionsForConfig(configuration, {
+      outboundMediaAuthority: current.outbound.authority,
       source: input.source,
       configurationRevision: sequence,
       identities: current.identities,
@@ -294,77 +298,90 @@ export function createLocalChannelService(input: {
     sequence += 1
     const generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     await mkdir(input.dataDir, { recursive: true })
-    const runtime = await ChannelRuntime.open({
-      permissions: localPermissions(),
-      // One profile-owned transport ledger survives service replacement and launcher restart.
-      storePath: path.join(input.dataDir, 'transport.json'),
-    })
-    const host = new LauncherChannelServiceHost(runtime)
-    const identities = new ChannelAccountIdentityStore()
-    const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
-    display.retainAccounts(configuration.connections.map(connection => connection.ref))
-    const senders = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'sender-display.json'))
-    senders.retainAccounts(configuration.connections.map(connection => connection.ref))
-    const directory = new ChannelLiveDirectory(display, senders)
-    sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
+    const outbound = new ChannelOutboundRpc()
     try {
-      const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
-      const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
-      const service = await host.activate({
-        packageIdentity: { pluginId: 'channel', version: 'development', integrity },
-        pluginIdentity: { source: input.source, pluginId: 'channel', generation },
-        serviceId: 'runtime',
-        serviceKind: 'channel-adapter',
-        configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
-        configurationRevision: sequence,
-        artifactDirectory,
-        runtimeEntry,
-      }, simulatorConfiguration(configuration))
-      // The official adapter is deliberately launcher-owned: it gets an
-      // opaque secret reference only, resolves it privately, and publishes
-      // only the redacted runtime snapshot. A bad/missing credential leaves
-      // that account unavailable without preventing the rest of CordisX from
-      // starting.
-      const current: ActiveRuntime = {
-        generation,
-        runtime,
-        host,
-        service,
-        identities,
-        directory,
-        dispose: async () => {
-          directory.clear()
-          await display.close()
-          await senders.close()
-          await identities.dispose()
-          await host.dispose()
-        },
+      const runtime: ChannelRuntime = await ChannelRuntime.open({
+        ...channelOutboundRuntimeOptions(
+          outbound,
+          async (target, caller) => (await runtime.outboundCapabilities(target, caller)).maxMediaBytes,
+        ),
+        permissions: localPermissions(),
+        // One profile-owned transport ledger survives service replacement and launcher restart.
+        storePath: path.join(input.dataDir, 'transport.json'),
+      })
+      const host = new LauncherChannelServiceHost(runtime)
+      const identities = new ChannelAccountIdentityStore()
+      const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
+      display.retainAccounts(configuration.connections.map(connection => connection.ref))
+      const senders = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'sender-display.json'))
+      senders.retainAccounts(configuration.connections.map(connection => connection.ref))
+      const directory = new ChannelLiveDirectory(display, senders)
+      sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
+      try {
+        const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
+        const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
+        const service = await host.activate({
+          packageIdentity: { pluginId: 'channel', version: 'development', integrity },
+          pluginIdentity: { source: input.source, pluginId: 'channel', generation },
+          serviceId: 'runtime',
+          serviceKind: 'channel-adapter',
+          configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
+          configurationRevision: sequence,
+          artifactDirectory,
+          runtimeEntry,
+        }, simulatorConfiguration(configuration))
+        // The official adapter is deliberately launcher-owned: it gets an
+        // opaque secret reference only, resolves it privately, and publishes
+        // only the redacted runtime snapshot. A bad/missing credential leaves
+        // that account unavailable without preventing the rest of CordisX from
+        // starting.
+        const current: ActiveRuntime = {
+          outbound,
+          generation,
+          runtime,
+          host,
+          service,
+          identities,
+          directory,
+          dispose: async () => {
+            outbound.dispose()
+            directory.clear()
+            await display.close()
+            await senders.close()
+            await identities.dispose()
+            await host.dispose()
+          },
+        }
+        for (const definition of definitions(configuration, current)) {
+          await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() =>
+            undefined
+          )
+        }
+        let cursor = 'channel-input:0:empty'
+        for (;;) {
+          if (!configuration.connections.length) break
+          const readback = await runtime.inputsSince(
+            caller(generation),
+            configuration.connections.map(connection => ({ account: connection.ref })),
+            cursor,
+            100,
+          )
+          for (const record of readback.messages) directory.observe(record.input)
+          if (readback.cursor === cursor || !readback.messages.length) break
+          cursor = readback.cursor
+        }
+        return current
+      } catch (error) {
+        outbound.dispose()
+        directory.clear()
+        await display.close()
+        await senders.close()
+        await identities.dispose()
+        await host.dispose().catch(() => undefined)
+        throw error
       }
-      for (const definition of definitions(configuration, current)) {
-        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() =>
-          undefined
-        )
-      }
-      let cursor = 'channel-input:0:empty'
-      for (;;) {
-        if (!configuration.connections.length) break
-        const readback = await runtime.inputsSince(
-          caller(generation),
-          configuration.connections.map(connection => ({ account: connection.ref })),
-          cursor,
-          100,
-        )
-        for (const record of readback.messages) directory.observe(record.input)
-        if (readback.cursor === cursor || !readback.messages.length) break
-        cursor = readback.cursor
-      }
-      return current
     } catch (error) {
-      directory.clear()
-      await display.close()
-      await senders.close()
-      await identities.dispose()
-      await host.dispose().catch(() => undefined)
+      outbound.dispose()
       throw error
     }
   }
@@ -631,6 +648,7 @@ export function createLocalChannelService(input: {
       return {
         generation: current.generation,
         runtime: current.runtime,
+        outbound: current.outbound,
         ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({

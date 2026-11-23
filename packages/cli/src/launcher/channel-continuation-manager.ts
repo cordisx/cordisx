@@ -1,3 +1,4 @@
+import { channelDispatchAllowed } from './channel-group-access.js'
 import { randomUUID } from 'node:crypto'
 import {
   continuationBrief,
@@ -14,7 +15,6 @@ import {
 import type { ContinuationConfiguration } from './channel-continuation-config.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelMessageContext } from './channel-message-context.js'
-import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { continuationDefaultsOperation } from './channel-continuation-defaults.js'
 import { livePolicyOperation } from './channel-live-policy.js'
 import { ChannelLiveNative } from './channel-live-native.js'
@@ -182,7 +182,7 @@ export class ChannelContinuationManager {
       )
         .sort((a, b) => state.inputs[b.recordId]!.sequence - state.inputs[a.recordId]!.sequence)[0]
       const record = prior && state.inputs[prior.recordId]
-      if (!prior || !record || !channelPolicyAllows(state.policy, 'dispatch', record.input.source.event)) continue
+      if (!prior || !record || !channelDispatchAllowed(state, record.input.source.event)) continue
       this.sessionClaims.add(source)
       let reservation: ContinuationReservation | undefined
       const jobId = `continuation:${randomUUID()}`

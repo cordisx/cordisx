@@ -1,5 +1,11 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
 import {
+  type ChannelGroupTaskAccess,
+  type ChannelGroupUserTaskAccess,
+  parseChannelGroupTaskAccess,
+  parseChannelGroupUserTaskAccess,
+} from './channel-group-access.js'
+import {
   type LogicalContinuationState,
   parseLogicalContinuationState,
   recoverLogicalContinuations,
@@ -137,6 +143,8 @@ export interface ChannelConversationState {
   revision: number
   policyRevision: number
   policy: ChannelConversationPolicy
+  groupTaskAccess?: readonly ChannelGroupTaskAccess[]
+  groupUserTaskAccess?: readonly ChannelGroupUserTaskAccess[]
   nextSequence: number
   inputCursor: string
   bindings: Record<string, ChannelChatBinding>
@@ -225,6 +233,8 @@ export class ChannelConversationStore {
         parsed.logicalContinuations = parseLogicalContinuationState(parsed.logicalContinuations)
       } else if (parsed.logicalContinuations !== undefined) throw new Error('INVALID_CONVERSATION_STORE')
       parsed.policy = parseChannelConversationPolicy(parsed.policy)
+      parsed.groupTaskAccess = parseChannelGroupTaskAccess(parsed.groupTaskAccess)
+      parsed.groupUserTaskAccess = parseChannelGroupUserTaskAccess(parsed.groupUserTaskAccess)
       parsed.taskConfig = parseChannelTaskConfig(parsed.taskConfig ?? CHANNEL_TASK_CONFIG_INITIAL)
       parsed.taskConfigRevision ??= 0
       parsed.taskSettings ??= {}

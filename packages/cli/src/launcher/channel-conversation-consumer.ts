@@ -1,4 +1,7 @@
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
+import { channelTaskPolicyChange } from './channel-task-policy-change.js'
+import { channelPermissionOperation } from './channel-permission-cli.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
 import { createChannelMemory } from './channel-memory-composition.js'
@@ -49,6 +52,7 @@ import { logicalContinuationManagement } from './logical-continuation-management
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
+  channelAutoReplyTarget,
   channelCommandReplyTarget,
   channelReplyDefaults,
   type ChannelReplyMode,
@@ -63,10 +67,8 @@ import {
   channelGlobalCommandAllowed,
   channelPolicyAllows,
   channelRecord,
-  channelSameScope,
   channelText,
   channelWakePrefix,
-  parseChannelConversationPolicy,
 } from './channel-conversation-policy.js'
 import type * as Conversation from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
@@ -148,6 +150,18 @@ export class ChannelConversationConsumer {
   }
   static async open(input: ChannelConversationConsumerInput & { readonly file: string }) {
     return new ChannelConversationConsumer(await ChannelConversationStore.open(input.file), input)
+  }
+  permissionOperation(operation: string, value: unknown, metadata: unknown) {
+    return channelPermissionOperation({
+      operation,
+      value,
+      metadata,
+      store: this.store,
+      agent: this.agentAccess,
+      users: this.commandUsers,
+      access: this.input.access,
+      signal: this.lifetime.signal,
+    })
   }
   profileLogicalOwner() {
     return this.logicalOwner
@@ -514,7 +528,7 @@ export class ChannelConversationConsumer {
         )
       }
       return
-    } else if (received && addressed && policy.enabled && channelPolicyAllows(policy, 'dispatch', event)) {
+    } else if (received && addressed && policy.enabled && channelDispatchAllowed(state, event)) {
       // Acknowledge receipt before a busy conversation is ready to create a job.
       void this.feedback.received(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
       const waiting = await this.store.mutate(state => {
@@ -695,25 +709,7 @@ export class ChannelConversationConsumer {
           !state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)
           || global && !channelGlobalCommandAllowed(state.policy, event, command)
         ) return false
-        const id = `command:${identity([scope, command.includes('user') ? userArgument : 'messages'])}`
-        const rules = state.policy.rules.filter(rule => rule.id !== id)
-        if (command === 'messages-off' || command === 'allow-user' || command === 'deny-user') {
-          rules.push({
-            id,
-            ...scope,
-            action: 'dispatch',
-            effect: command === 'allow-user' ? 'allow' : 'deny',
-            ...(command.includes('user') ? { userIds: [channelText(userArgument)] } : {}),
-          })
-        }
-        const wakePrefixes = command === 'wake'
-          ? [
-            ...state.policy.wakePrefixes.filter(item => !channelSameScope(item, scope)),
-            ...(userArgument === '--clear' ? [] : [{ ...scope, prefixes: [channelText(userArgument)] }]),
-          ]
-          : state.policy.wakePrefixes
-        state.policy = parseChannelConversationPolicy({ ...state.policy, rules, wakePrefixes })
-        state.policyRevision += 1
+        channelTaskPolicyChange(state, scope, command, userArgument)
         return true
       })
       if (!applied) return
@@ -730,7 +726,7 @@ export class ChannelConversationConsumer {
             mode: binding.mode,
           })),
           enabled: this.store.snapshot().policy.enabled,
-          messagesAllowed: channelPolicyAllows(this.store.snapshot().policy, 'dispatch', event),
+          messagesAllowed: channelDispatchAllowed(this.store.snapshot(), event),
         })
         : `/${command}: completed`,
     )
@@ -743,7 +739,7 @@ export class ChannelConversationConsumer {
       return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
-      if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)) return
+      if (!state.policy.enabled || !channelDispatchAllowed(state, event)) return
       if (job.sessionId && ChannelConversationStore.logicalSourceFenced(state, job.sessionId)) return
       if (job.bindingId && state.bindings[job.bindingId]?.state !== 'active') {
         await this.store.mutate(state => {
@@ -873,7 +869,7 @@ export class ChannelConversationConsumer {
     const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
     const includeFinal = job.finalDeliveryEnabled === true && state.policy.enabled && state.policy.autoReply
       && binding?.state === 'active' && binding.autoReply && mode !== 'none'
-      && channelPolicyAllows(state.policy, 'dispatch', event) && channelPolicyAllows(state.policy, 'send', event)
+      && channelDispatchAllowed(state, event) && channelPolicyAllows(state.policy, 'send', event)
     const completion = await native.completion(job.sessionId, job.turnId, includeFinal)
     if (completion.state === 'running') return
     if (completion.state === 'failed') {
@@ -903,14 +899,16 @@ export class ChannelConversationConsumer {
       const mode = current.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
       if (
         current.finalDeliveryEnabled !== true || !state.policy.enabled || !state.policy.autoReply
-        || !channelPolicyAllows(state.policy, 'dispatch', event)
+        || !channelDispatchAllowed(state, event)
         || binding?.state !== 'active' || !binding.autoReply || !completion.text || mode === 'none'
       ) {
         current.state = 'completed'
         return undefined
       }
       try {
-        current.replyTarget ??= existingTarget ?? channelReplyTarget(event, mode)
+        const replyTarget = existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
+        if (!replyTarget) throw new Error('INVALID_REPLY_MODE')
+        current.replyTarget ??= replyTarget
       } catch (error) {
         current.state = 'failed'
         current.code = error instanceof Error && error.message === 'REPLY_MESSAGE_REQUIRED'
@@ -949,7 +947,8 @@ export class ChannelConversationConsumer {
     const mode = defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode
     if (!reservedTarget && mode === 'none') return 'denied'
     const target = reservedTarget ?? access.runtime.deliverySnapshot(deliveryId, CALLER)?.target
-      ?? channelReplyTarget(event, mode as Exclude<ChannelReplyMode, 'none'>)
+      ?? channelAutoReplyTarget(event, defaults)
+    if (!target) return 'denied'
     await access.runtime.notifyOnce({ target, kind: 'reply', text }, CALLER, deliveryId)
     if (this.lifetime.signal.aborted) return 'queued'
     await access.drain(event)

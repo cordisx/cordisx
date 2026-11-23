@@ -19,12 +19,16 @@ import type {
   ChannelSendResult,
   ChannelTenantRef,
 } from '@cordisx/channel-runtime'
-import { channelInboxRecordId } from '@cordisx/channel-runtime'
+import { channelInboxRecordId, UncertainChannelSendError } from '@cordisx/channel-runtime'
 import type { ChannelServiceConfig, ChannelServiceConnectionConfigV2 } from '@cordisx/channel-runtime'
 import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
 import { ChannelInboundResources } from './channel-inbound-resources.js'
-import { feishuInboundContent } from './feishu-inbound-media.js'
-import { prepareFeishuOutboundMedia } from './feishu-outbound-media.js'
+import { feishuMessageContent } from './feishu-message-content.js'
+import {
+  type FeishuMediaAuthority,
+  prepareFeishuOutboundMedia,
+  renderFeishuTypedContent,
+} from './feishu-outbound-media.js'
 import { channelReactionInput, type KnownBotMessage } from './channel-reaction-input.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
 import { createFeishuDiagnostics } from './feishu-diagnostics.js'
@@ -51,6 +55,7 @@ export interface FeishuChannelFactoryOptions {
 }
 
 export interface FeishuAdapterOptions {
+  readonly outboundMediaAuthority?: FeishuMediaAuthority
   readonly resources?: ChannelInboundResources
   readonly connection: ChannelServiceConnectionConfigV2
   readonly configurationRevision: number
@@ -233,12 +238,10 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           return
         }
         const base = inboundEnvelope(message, input.connection)
-        const content = await feishuInboundContent(
-          message,
-          base.input.source.event,
-          resources,
-          channel.rawClient?.im.v1.messageResource,
-        )
+        const content = await feishuMessageContent(message, base.input.source.event, resources, {
+          messageClient: channel.rawClient?.im.v1.message,
+          resourceClient: channel.rawClient?.im.v1.messageResource,
+        })
         if (stopped) return
         const envelope = { input: { ...base.input, content } }
         const existingOriginal = originalInputs.get(envelope.input.source.event.threadId)
@@ -324,44 +327,72 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       }, 1_000)
       interval.unref()
       return {
+        outboundTypes: channel.rawClient
+          ? ['text', 'image', 'audio', 'file', 'video', 'richtext', 'card'] as const
+          : ['text'] as const,
         supportsOutboundMedia: channel.rawClient !== undefined,
         send: async (delivery: ChannelOutboundDelivery): Promise<ChannelSendResult> => {
           if (!sameTenant(delivery.target, input.connection.ref)) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
           if (stopped) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
           let messageId: string
           if (channel.rawClient) {
+            const rawClient = channel.rawClient
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
             const media = delivery.media
-              ? await prepareFeishuOutboundMedia(delivery.media, delivery.target, resources, {
-                image: async data => ({ code: 0, data: await channel.rawClient!.im.v1.image.create({ data }) ?? {} }),
-                file: async data => ({ code: 0, data: await channel.rawClient!.im.v1.file.create({ data }) ?? {} }),
-              })
+              ? await prepareFeishuOutboundMedia(
+                delivery.media,
+                delivery.target,
+                resources.ownsOutbound(delivery.media.handle)
+                  ? resources
+                  : input.outboundMediaAuthority ?? resources,
+                {
+                  image: async data => ({ code: 0, data: await rawClient.im.v1.image.create({ data }) ?? {} }),
+                  file: async data => ({ code: 0, data: await rawClient.im.v1.file.create({ data }) ?? {} }),
+                },
+              )
               : undefined
             const rendered = delivery.questionCard
               ? { msg_type: 'interactive' as const, content: channelQuestionCard(delivery.questionCard) }
+              : delivery.content && !media
+              ? renderFeishuTypedContent(delivery.content)
               : renderFeishuMarkdown(delivery.text)
             const content = media?.content ?? JSON.stringify(rendered.content)
             const msg_type = media?.msg_type ?? rendered.msg_type
-            const response = delivery.target.semantics !== 'conversation'
-              ? await channel.rawClient.im.v1.message.reply({
-                path: { message_id: delivery.target.threadId },
-                data: { msg_type, content, uuid, reply_in_thread: delivery.target.semantics === 'topic' },
-              })
-              : await channel.rawClient.im.v1.message.create({
-                params: { receive_id_type: delivery.target.conversationId.startsWith('ou_') ? 'open_id' : 'chat_id' },
-                data: { receive_id: delivery.target.conversationId, msg_type, content, uuid },
-              })
-            if (response.code !== 0 || !response.data?.message_id) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            const response = await (async () => {
+              try {
+                return delivery.target.semantics !== 'conversation'
+                  ? await rawClient.im.v1.message.reply({
+                    path: { message_id: delivery.target.threadId },
+                    data: { msg_type, content, uuid, reply_in_thread: delivery.target.semantics === 'topic' },
+                  })
+                  : await rawClient.im.v1.message.create({
+                    params: {
+                      receive_id_type: delivery.target.conversationId.startsWith('ou_') ? 'open_id' : 'chat_id',
+                    },
+                    data: { receive_id: delivery.target.conversationId, msg_type, content, uuid },
+                  })
+              } catch {
+                throw new UncertainChannelSendError()
+              }
+            })()
+            if (typeof response?.code !== 'number') throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')
+            if (response.code !== 0) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            if (!response.data?.message_id) throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')
             messageId = response.data.message_id
           } else {
-            if (delivery.questionCard || delivery.media) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            if (delivery.questionCard || delivery.media || (delivery.content && delivery.content.type !== 'text')) {
+              throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            }
             const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
               ...(delivery.target.semantics !== 'conversation'
                 ? { replyTo: delivery.target.threadId, replyInThread: delivery.target.semantics === 'topic' }
                 : {}),
+            }).catch(() => {
+              throw new UncertainChannelSendError()
             })
+            if (!result?.messageId) throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')
             messageId = result.messageId
           }
           knownBotMessages.set(messageId, {
@@ -396,6 +427,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
 export function feishuDefinitionsForConfig(
   configuration: ChannelServiceConfig,
   input: {
+    readonly outboundMediaAuthority?: FeishuMediaAuthority
     readonly source: string
     readonly configurationRevision: number
     readonly secretResolver?: LauncherSecretResolverOptions
@@ -416,6 +448,7 @@ export function feishuDefinitionsForConfig(
         connection,
         source: input.source,
         configurationRevision: input.configurationRevision,
+        ...(input.outboundMediaAuthority === undefined ? {} : { outboundMediaAuthority: input.outboundMediaAuthority }),
         ...(input.identities === undefined ? {} : { identities: input.identities }),
         ...(input.channelConnected === undefined ? {} : { channelConnected: input.channelConnected }),
         ...(input.onNormalizedInput === undefined ? {} : { onNormalizedInput: input.onNormalizedInput }),

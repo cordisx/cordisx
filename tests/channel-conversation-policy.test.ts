@@ -6,7 +6,11 @@ import {
   channelWakePrefix,
   parseChannelConversationPolicy,
 } from '../packages/cli/src/launcher/channel-conversation-policy.js'
-import { channelReplyDefaults, channelReplyTarget } from '../packages/cli/src/launcher/channel-reply-routing.js'
+import {
+  channelAutoReplyTarget,
+  channelReplyDefaults,
+  channelReplyTarget,
+} from '../packages/cli/src/launcher/channel-reply-routing.js'
 
 const event: ChannelEventRef = {
   adapterId: 'feishu',
@@ -19,6 +23,30 @@ const event: ChannelEventRef = {
   eventId: 'om_fixture',
   actor: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test', userId: 'alice' },
 }
+
+describe('automatic reply topic fallback', () => {
+  const defaults = { mode: 'agent', fallbackMode: 'conversation' } as const
+  const topic = { ...event, semantics: 'topic' as const, threadId: 'om_root', messageId: 'om_child' }
+  it('retains the original root rather than anchoring to the latest message', () => {
+    expect(channelAutoReplyTarget(topic, defaults)).toMatchObject({ semantics: 'topic', threadId: 'om_root' })
+    expect(channelAutoReplyTarget({ ...topic, messageId: undefined }, defaults))
+      .toMatchObject({ semantics: 'topic', threadId: 'om_root' })
+  })
+  it('preserves explicit selections, non-topic identities and other fallback modes', () => {
+    expect(channelAutoReplyTarget(topic, defaults, 'conversation'))
+      .toMatchObject({ semantics: 'conversation', threadId: 'oc_group' })
+    expect(channelAutoReplyTarget(topic, { ...defaults, mode: 'conversation' }))
+      .toMatchObject({ semantics: 'conversation', threadId: 'oc_group' })
+    for (const semantics of ['conversation', 'reply-chain'] as const) {
+      expect(channelAutoReplyTarget({ ...topic, semantics }, defaults))
+        .toMatchObject({ semantics: 'conversation', threadId: 'oc_group' })
+    }
+    expect(channelAutoReplyTarget(topic, { ...defaults, fallbackMode: 'reply' }))
+      .toMatchObject({ semantics: 'reply-chain', threadId: 'om_child' })
+    expect(channelAutoReplyTarget(topic, defaults, 'none')).toBeUndefined()
+    expect(channelAutoReplyTarget(topic, { ...defaults, fallbackMode: 'none' })).toBeUndefined()
+  })
+})
 
 describe('Channel policy intersection and addressing', () => {
   it('requires a global grant for global policy changes and rejects scoped group membership', () => {

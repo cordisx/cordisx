@@ -1,5 +1,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { ChannelRuntimeV1 } from '@cordisx/protocol/channel-runtime/v1'
+import type { ChannelAdapterDefinitionV2, ChannelRuntimeV2 } from '@cordisx/protocol/channel-runtime/v2'
+import type { ChannelMediaPrepareRequestV1, ChannelMessageSendV1 } from '@cordisx/protocol/channel-outbound/v1'
 import { ChannelRuntime } from './runtime.js'
 import type {
   ChannelAdapterDefinition,
@@ -10,6 +12,7 @@ import type {
   ChannelPluginIdentity,
   ChannelRuntimeAccountSnapshot,
   ChannelSubscriptionFilter,
+  ChannelThreadRef,
 } from './types.js'
 
 const CORDISX_NODE_PLUGIN_ID = Symbol('cordisx.nodePluginId')
@@ -31,12 +34,12 @@ export interface CordisXChannelMessages {
   subscribe(filter: ChannelSubscriptionFilter, listener: ChannelMessageListener): Promise<() => void>
 }
 
-export type CordisXChannel = ChannelRuntimeV1
+export type CordisXChannel = ChannelRuntimeV2
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Source- and generation-bound launcher-side Channel service. */
-    channel: CordisXChannel
+    channel: ChannelRuntimeV1
   }
 }
 
@@ -87,7 +90,7 @@ export function bindChannelPluginContext(
   ctx: Context,
   identity: ChannelPluginIdentity,
   configurationRevision: number,
-): Context {
+): Context & { readonly channel: CordisXChannel } {
   if (!Number.isInteger(configurationRevision) || configurationRevision < 1) {
     throw new Error('Channel service configuration revision is invalid')
   }
@@ -96,7 +99,7 @@ export function bindChannelPluginContext(
     [CORDISX_NODE_PLUGIN_SOURCE]: identity.source,
     [CORDISX_NODE_PLUGIN_GENERATION]: identity.generation,
     [CORDISX_NODE_CONFIGURATION_REVISION]: configurationRevision,
-  })
+  }) as Context & { readonly channel: CordisXChannel }
 }
 
 /**
@@ -140,6 +143,9 @@ export class CordisXChannelService extends Service implements CordisXChannel {
     return Object.freeze({
       send: async (notification: ChannelNotification) => {
         if (notification.media !== undefined) throw new Error('CHANNEL_MEDIA_PROTOCOL_UNAVAILABLE')
+        if (notification.content !== undefined || notification.fallback !== undefined) {
+          throw new Error('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+        }
         return await runtimeFor(this).notify(notification, identityFrom(this.ctx))
       },
       subscribe: async (filter: ChannelSubscriptionFilter, listener: ChannelMessageListener) => {
@@ -149,6 +155,40 @@ export class CordisXChannelService extends Service implements CordisXChannel {
           `channel.messages.subscribe(${JSON.stringify(filter.account.adapterId)})`,
         )
         return dispose
+      },
+    })
+  }
+
+  get outbound(): CordisXChannel['outbound'] {
+    return Object.freeze({
+      capabilities: async (target: ChannelThreadRef) => {
+        const caller = identityFrom(this.ctx)
+        return await runtimeFor(this).outboundCapabilities(target, caller)
+      },
+      prepare: async (request: ChannelMediaPrepareRequestV1) => {
+        const caller = identityFrom(this.ctx)
+        return await runtimeFor(this).prepareOutbound(request, caller)
+      },
+      send: async (request: ChannelMessageSendV1) => {
+        const caller = identityFrom(this.ctx)
+        return await runtimeFor(this).sendTyped(request, caller)
+      },
+    })
+  }
+
+  get adaptersV2(): CordisXChannel['adaptersV2'] {
+    return Object.freeze({
+      register: async (definition: ChannelAdapterDefinitionV2) => {
+        const caller = identityFrom(this.ctx)
+        if (definition.descriptor.configurationRevision !== configurationRevisionFrom(this.ctx)) {
+          throw new Error('Channel adapter configuration revision does not match the Host stamp')
+        }
+        const handle = await runtimeFor(this).activateV2(definition, caller)
+        this.ctx.effect(
+          () => async () => await handle.dispose(),
+          `channel.adaptersV2.register(${JSON.stringify(definition.descriptor.ref.adapterId)})`,
+        )
+        return handle
       },
     })
   }

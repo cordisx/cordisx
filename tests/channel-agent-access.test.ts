@@ -31,6 +31,18 @@ const argv = (op: string, input: unknown = {}, token?: string) => [
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 describe('configured Channel CLI routine approval', () => {
+  it('classifies chunked media preparation as a send effect, never a read', () => {
+    for (const action of ['begin', 'chunk', 'commit']) {
+      const command = argv('media-prepare', { action }, 'current')
+      expect(configuredChannelApprovalOperation(command, context)?.kind).toBe('send')
+      const subcommand = argv('media-prepare', {}, 'current')
+      subcommand.splice(6, 0, action)
+      expect(configuredChannelApprovalOperation(subcommand, context)?.input.action).toBe(action)
+      expect(configuredChannelApprovalOperation(argv('media-prepare', { action }), context)).toBeUndefined()
+    }
+    expect(configuredChannelApprovalOperation(argv('media-prepare', { action: 'open-path' }, 'current'), context))
+      .toBeUndefined()
+  })
   it('recognizes exact literal argv and nested shell quoting, but never expansions or a different runtime', () => {
     const command = argv('connections')
     expect(configuredChannelApprovalOperation(command, context)?.kind).toBe('read')
@@ -53,6 +65,12 @@ describe('configured Channel CLI routine approval', () => {
       configuredChannelApprovalOperation(command.map(value => value === context.profile ? 'default' : value), context),
     ).toBeUndefined()
     expect(configuredChannelApprovalOperation(argv('task-settings-set'), context)?.kind).toBe('write')
+    for (const operation of ['user-access', 'group-block']) {
+      expect(configuredChannelApprovalOperation(argv(operation), context)?.kind).toBe('read')
+    }
+    for (const operation of ['user-access-set', 'group-block-set']) {
+      expect(configuredChannelApprovalOperation(argv(operation), context)?.kind).toBe('write')
+    }
     expect(configuredChannelApprovalOperation(argv('task-approve'), context)).toBeUndefined()
   })
 
@@ -100,6 +118,10 @@ describe('configured Channel CLI routine approval', () => {
       ),
     ).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'chat' }), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('user-access', { user: 'ou_member' }, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('user-access', { user: 'ou_member' }, 'old'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('user-access-set', {}, 'current'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('group-block-set', {}, 'current'), 'chat', 'turn')).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'other' }), 'chat', 'turn')).toBe(false)
     const memory = (action: string, token?: string) => {
       const command = argv('memory', {}, token)

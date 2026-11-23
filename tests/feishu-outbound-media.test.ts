@@ -103,4 +103,88 @@ describe('bounded outbound media', () => {
     uploader.image.mockResolvedValue({ code: 1, data: { image_key: 'ignored' } })
     await expect(prepareFeishuOutboundMedia(media(), target, authority, uploader)).rejects.toThrow('UPLOAD_UNAVAILABLE')
   })
+  it.each([
+    {
+      type: 'file' as const,
+      format: 'pdf' as const,
+      filename: '报告.pdf',
+      bytes: Buffer.from('%PDF-1.7\n'),
+      fileType: 'pdf',
+      messageType: 'file',
+    },
+    {
+      type: 'file' as const,
+      format: 'binary' as const,
+      filename: 'archive.bin',
+      bytes: Buffer.from([0, 1, 2]),
+      fileType: 'stream',
+      messageType: 'file',
+    },
+    {
+      type: 'video' as const,
+      format: 'mp4' as const,
+      filename: 'clip.mp4',
+      bytes: Buffer.from('000000186674797069736f6d0000000069736f6d6d703432', 'hex'),
+      fileType: 'mp4',
+      messageType: 'media',
+    },
+  ])('uploads authorized $format bytes with filename', async fixture => {
+    const { authority, uploader } = dependencies(fixture.bytes)
+    const descriptor = {
+      ...media(fixture.bytes),
+      type: fixture.type,
+      format: fixture.format,
+      filename: fixture.filename,
+    }
+    expect(await prepareFeishuOutboundMedia(descriptor, target, authority, uploader)).toEqual({
+      msg_type: fixture.messageType,
+      content: '{"file_key":"synthetic-audio"}',
+    })
+    expect(uploader.file).toHaveBeenCalledWith({
+      file_type: fixture.fileType,
+      file_name: fixture.filename,
+      file: fixture.bytes,
+    })
+    expect(authority.resolve).toHaveBeenCalledWith(descriptor.handle, target, descriptor.size)
+    expect(uploader.image).not.toHaveBeenCalled()
+    uploader.file.mockResolvedValue({ code: 0, data: { file_key: '' } })
+    await expect(prepareFeishuOutboundMedia(descriptor, target, authority, uploader)).rejects.toThrow(
+      'UPLOAD_UNAVAILABLE',
+    )
+  })
+  it.each(['../x.pdf', 'dir/x.pdf', 'dir\\x.pdf', 'x\u0000.pdf', '', ' x.pdf', 'x.pdf.', 'x'.repeat(256)])(
+    'rejects unsafe filenames %j',
+    filename => {
+      expect(() => validateOutboundMedia({ ...media(), type: 'file', format: 'pdf', filename })).toThrow()
+    },
+  )
+  it.each([
+    { type: 'file', format: 'pdf', filename: 'x.bin' },
+    { type: 'file', format: 'binary' },
+    { type: 'file', format: 'binary', filename: 'x.bin', durationMs: 1 },
+    { type: 'video', format: 'mp4', filename: 'x.mp4', size: 30_000_001 },
+    { type: 'video', format: 'pdf', filename: 'x.pdf' },
+  ])('rejects unsupported file/video metadata %j', override => {
+    expect(() => validateOutboundMedia({ ...media(), ...override })).toThrow()
+  })
+  it.each(['pdf', 'mp4'] as const)('rejects false %s signatures before file upload', async format => {
+    const bytes = Buffer.alloc(24)
+    if (format === 'mp4') {
+      bytes.writeUInt32BE(32, 0)
+      bytes.write('ftypisom', 4)
+    }
+    const { authority, uploader } = dependencies(bytes)
+    await expect(prepareFeishuOutboundMedia(
+      {
+        ...media(bytes),
+        type: format === 'pdf' ? 'file' : 'video',
+        format,
+        filename: `x.${format}`,
+      },
+      target,
+      authority,
+      uploader,
+    )).rejects.toThrow('MEDIA_INVALID')
+    expect(uploader.file).not.toHaveBeenCalled()
+  })
 })

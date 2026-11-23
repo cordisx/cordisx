@@ -5,6 +5,103 @@ arguments, completion semantics, capability boundaries and unavailable media API
 
 ## Configured runtime
 
+### Let an administrator open the current group for tasks
+
+In a group, an administrator can mention the bot and say “给这个群开白，在这个群里都能和他说话”
+or “给本群开白吧”. To revoke it, say “本群取消开白”. The AI receives the current
+message's scoped CLI instructions and can run:
+
+```bash
+cordisx channel group-access --context <incoming-context> --input '{}'
+cordisx channel group-access-set --context <incoming-context> --input '{"enabled":true,"expectedRevision":<revision>}'
+```
+
+Use the revision returned by `group-access`; revocation uses `enabled:false`.
+Both operations require a live authenticated incoming context. The caller cannot
+provide another account, group or actor. Enabling requires the sender's existing
+`allow-user` command permission in this group; revocation requires `reset-user`.
+A Feishu group administrator title alone does not establish a CordisX command
+grant. Explicit command denials still win. The Host validates the original
+direct request, not an AI-provided paraphrase; an ambiguous or quoted request
+needs clarification.
+
+The grant bypasses positive task-dispatch allowlists only for future messages
+in this exact account, tenant and group that mention the bot. Explicit dispatch
+denials, disabled policy and configured receive selectors remain authoritative.
+It does not expand management commands, outgoing-message permissions, memory
+sharing, private-chat access or other groups. Current and future group members
+use the verified sender identity of their incoming message; no cached roster is
+used as authorization. Requests denied before the grant are not replayed.
+
+The Host persists this task-only grant separately from ordinary policy rules.
+Revocation removes only this grant and rechecks queued work before dispatch;
+it does not interrupt an already-running turn. Re-enabling starts a new message
+cutoff. Revision conflicts require a fresh read. An unknown RPC outcome is not
+success and must be read back before another write. General `policy-set` remains
+local-user-only for profile changes.
+
+### Let an administrator change personal task access or block a group
+
+An authorized user can ask “给 @用户 授权”, “禁止 @用户 发起任务” or
+“恢复 @用户 权限”. The AI must copy the original target into these operations:
+
+```bash
+cordisx channel user-access --context <incoming-context> --input '{"user":"@用户"}'
+cordisx channel user-access-set --context <incoming-context> --input '{"user":"@用户","effect":"allow","expectedRevision":<revision>}'
+```
+
+`effect` is `allow`, `deny` or `reset`, requiring the sender's corresponding
+`allow-user`, `deny-user` or `reset-user` command permission. In a group, `allow`
+creates a task-only grant for this exact account, tenant, group and user. It
+bypasses positive dispatch allowlists for that user's future messages mentioning
+the bot; earlier messages are not replayed. It does not open the group to other
+members or change private chats, other groups, send or management permissions.
+Explicit denies still win. Revocation rechecks queued work but does not interrupt
+an active turn. This grant does not require global command authority.
+
+Direct-chat rules and optional `scope:"account"` use ordinary policy rules:
+positive lists at applicable scopes intersect and explicit denies win. Account
+scope requires both an explicit “在本账号给 @用户 授权” (or corresponding
+deny/reset) request and the existing global command grant. It remains limited to
+the source account and tenant. A scoped command administrator cannot silently
+widen a change to the account. Arbitrary other accounts and unrestricted remote
+`policy-set` are not accepted.
+
+The Host resolves native mentions, explicit IDs or unique full names using the
+current source's addressing and directory. An ambiguous/incomplete name returns
+`choice-required` without changing the policy. Ask the user for a new explicit
+request using a native mention or ID; the AI must not select a person itself.
+The Host validates the target, scope and affirmative intent against the original
+message, not an AI-provided actor or paraphrase. For `user-access`,
+`dispatchAllowed` describes prospective task admission; a task-only grant still
+requires a new mentioned message at or after `fromSequence`.
+
+For current-group task blocking, ask “禁止本群任务”; to restore, ask
+“恢复本群任务”. The AI reads the revision and writes:
+
+```bash
+cordisx channel group-block --context <incoming-context> --input '{}'
+cordisx channel group-block-set --context <incoming-context> --input '{"blocked":true,"expectedRevision":<revision>}'
+```
+
+Blocking requires `messages-off`; restoration requires `messages-on` and uses
+`blocked:false`. The group accepts an explicitly mentioned, authorized
+“恢复本群任务” request even while its managed block is active, provided the
+other admission rules permit that sender. Other tasks remain blocked. If another
+deny or an allowlist also blocks the administrator, `/messages-on` is the
+authenticated management fallback, independently of task dispatch; a local
+administrator can also inspect and edit policy. No arbitrary remote group target
+is accepted. Disabling the whole consumer still requires local configuration.
+
+The message commands and CLI share managed rule IDs. Personal `reset` removes
+only the matching managed rule and precise user grant; group restoration removes
+only the matching managed group block. Neither deletes unrelated denies, opens
+management commands or promises admission when another rule still forbids it.
+Live caller, connection generation, command authority and revision are checked
+again at the durable effect. Re-read conflicts and uncertain RPC outcomes before
+any further write. Running tasks are not interrupted and denied history is not
+automatically replayed.
+
 ### Scoped memory (local implementation)
 
 Use `cordisx channel memory guide --context <incoming-context> --input '{}'`
@@ -330,6 +427,30 @@ destinations per request. Reuse the returned operation ID for reconciliation;
 `receipt` accepts `targetCount` for the original batch order. A partial result
 includes attempted count and completed receipts. An uncertain effect must not
 be blindly replayed. This budget does not limit bindings.
+
+The multi-type outbound candidate also accepts `content` instead of `text`:
+text, image, audio, file, video, richtext or a bounded title/body card. Media
+content contains a prepared `media:` handle, never a path, URL or base64.
+Optional `fallback: {mode:"text",text}` is used only when the requested type
+is unsupported; permission, integrity, upload and dispatch failures do not
+downgrade. Omit fallback or use `{mode:"reject"}` to reject unsupported types.
+
+Discover `help media-prepare` on the exact running Host. The candidate's
+begin/chunk/commit upload keeps each decoded chunk within 64 KiB and each RPC
+under the existing 256 KiB transport limit. Begin declares account, exact
+target, operation ID, media kind/format, size and SHA256; file/video require a
+safe filename. Commit returns a usable handle only after complete bytes,
+digest and format checks. Preparation and send both recheck send authority.
+Handles are caller-, target- and generation-scoped, expire after ten minutes,
+and are invalidated on disposal/restart. Queue acceptance does not extend their
+lifetime. For formats, limits and candidate/release boundaries, see
+[media availability](channel-media-reactions.md#media-availability).
+
+Protocol runtime v2 defines the separate public outbound surface; its inline
+bytes preparation is limited to 128 KiB and does not define the launcher-private
+chunk CLI. Public source tickets are unavailable without an authorized producer.
+These source changes do not establish release, installation or live platform
+verification; older running Hosts may not implement the operations.
 
 The Host owns the policy form and persistent policy revision. The Channel
 page’s “Messages and commands” action configures user groups, intersecting

@@ -228,6 +228,11 @@ export interface ChannelAdapterDescriptor {
 }
 
 export interface ChannelOutboundDelivery {
+  readonly idempotencyKey?: string
+  readonly content?: import('./outbound-content.js').ChannelOutboundContent
+  readonly fallback?: import('./outbound-content.js').ChannelOutboundFallback
+  readonly requestedType?: import('./outbound-content.js').ChannelOutboundType
+  readonly effectiveType?: import('./outbound-content.js').ChannelOutboundType
   readonly deliveryId: string
   readonly target: ChannelThreadRef
   readonly kind: 'completion' | 'approval' | 'failure' | 'reply'
@@ -244,6 +249,8 @@ export interface ChannelSendResult {
 }
 
 export interface ChannelAdapterConnection {
+  readonly maxMediaBytes?: number
+  readonly outboundTypes?: readonly import('./outbound-content.js').ChannelOutboundType[]
   readonly supportsOutboundMedia?: boolean
   send(delivery: ChannelOutboundDelivery): Promise<ChannelSendResult>
   stop(reason: 'replaced' | 'disposed' | 'failed'): Promise<void>
@@ -303,6 +310,7 @@ export type ChannelInboxStatus =
   | 'dead-letter'
 
 export type ChannelOutboxStatus =
+  | 'unknown'
   | 'queued'
   | 'processing'
   | 'retrying'
@@ -311,6 +319,9 @@ export type ChannelOutboxStatus =
   | 'dead-letter'
 
 export interface ChannelNotification {
+  readonly idempotencyKey?: string
+  readonly content?: import('./outbound-content.js').ChannelOutboundContent
+  readonly fallback?: import('./outbound-content.js').ChannelOutboundFallback
   readonly target: ChannelThreadRef
   readonly kind: ChannelOutboundDelivery['kind']
   readonly text: string
@@ -365,6 +376,20 @@ export interface ChannelClock {
 }
 
 export interface ChannelRuntimeOptions {
+  readonly prepareOutbound?: (
+    request: import('@cordisx/protocol/channel-outbound/v1').ChannelMediaPrepareRequestV1,
+    caller: ChannelPluginIdentity,
+  ) => Promise<import('@cordisx/protocol/channel-outbound/v1').ChannelPreparedMediaV1>
+  readonly resolveOutboundMedia?: (
+    handle: string,
+    target: ChannelThreadRef,
+    maximumBytes: number,
+  ) => Promise<Uint8Array>
+  readonly outboundMediaDescriptor?: (
+    caller: ChannelPluginIdentity,
+    handle: string,
+    target: ChannelThreadRef,
+  ) => Promise<import('./outbound-media.js').ChannelOutboundMedia>
   readonly permissions: ChannelPermissionBroker
   readonly storePath: string
   readonly clock?: ChannelClock
