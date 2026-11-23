@@ -27,6 +27,27 @@ configured identity. Memory tools resolve the task's persona directory. Style
 defaults/conversation overrides are explicit configured preference data used
 before generating final/manual user-visible text, never rewriting tool JSON.
 
+Every scoped native business prompt includes concise save/update/recall guidance,
+independently of whether an identity capsule is configured or repeated. Useful
+task milestones, verified progress, decisions and corrections should be retained
+selectively; search/get precedes revision-checked updates of the same assertion.
+Questions about other conversations first use authorized retrieval, with source
+time and uncertainty preserved. This does not import transcripts, infer person
+identities, configure a persona, or grant broader access. It guides the model's
+choice of tools; it does not guarantee that every useful fact is saved.
+
+Chinese own-topic questions extract the explicitly owned subject, stripping
+question/progress framing instead of treating the whole sentence as a keyword.
+Generic requests such as "my project progress" without a subject do not disclose
+all private records in a group. Existing owner, identity and scoped-grant checks
+continue to filter every result.
+
+The verified owner may read their own retained records in the same source
+conversation without an explicit recall phrase, so ordinary progress messages
+can find and update existing assertions. This does not open other members'
+records, another account's records, or cross-group retrieval without the existing
+topic or grant checks.
+
 Tests exercise actual native start/bridge prompt assembly and real command
 grant/revoke/new-member/challenge/confirmation flows. Real-model corrected
 own-topic, admin grant/new-member and cross-platform confirmation runs passed.
@@ -537,3 +558,15 @@ CLI and model prompts must not expose memory storage paths to other groups.
 The first implementation should not promise automatic knowledge of all groups,
 automatic cross-platform identity resolution, unlimited transcript access,
 speech understanding or cloud embeddings.
+
+## Memory directory troubleshooting
+
+A memory directory may live beneath a valid ancestor symlink. The Host resolves
+and pins its canonical directory while still rejecting a symlink at the memory
+directory itself, foreign ownership and group/world access. Retargeting an
+already prepared ancestor does not redirect subsequent memory operations.
+
+`MEMORY_UNSAFE_ROOT` remains a real validation failure for an unsafe leaf. A
+dispatch failure retains that safe diagnostic instead of losing it behind a
+generic uncertain-effect code. The task stays fenced for reconciliation; the
+Host does not automatically replay a dispatch whose outcome is unconfirmed.

@@ -4,6 +4,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import { continuationRoutine } from './channel-continuation-approval.js'
+import { sameChannelPrincipal } from './channel-source-principal.js'
 
 /** Resolve authority from a real dispatch, never from an Agent-supplied actor or name. */
 export class ChannelAgentAccess {
@@ -50,7 +51,13 @@ export class ChannelAgentAccess {
     if (providedThread !== undefined && providedThread !== entry?.threadId) return undefined
     if (providedTurn !== undefined && entry?.turnId !== undefined && providedTurn !== entry.turnId) return undefined
     if (!entry?.threadId) return undefined
-    const source = this.source(entry.threadId, entry.turnId)
+    // The token selects a message only after the turn still resolves to the same principal.
+    const verified = this.source(entry.threadId, entry.turnId)
+    const source = entry.source === undefined
+      ? verified
+      : verified && (verified === entry.source || sameChannelPrincipal(verified, entry.source))
+      ? entry.source
+      : undefined
     return source ? { source, threadId: entry.threadId, ...(entry.turnId ? { turnId: entry.turnId } : {}) } : undefined
   }
   requestText(metadata: unknown): string | undefined {
@@ -73,14 +80,18 @@ export class ChannelAgentAccess {
       this.native()?.isPreparing(threadId)
       && !['continuation-history', 'continuation-takeover-ready'].includes(operation.operation)
     ) return false
-    const source = this.source(threadId, turnId)
-    if (!source) return false
-    const continuation = continuationRoutine(operation, threadId, turnId, this.native())
-    if (continuation !== undefined) return continuation
+    let source = this.source(threadId, turnId)
     if (operation.context) {
       const entry = this.native()?.contextFor(operation.context)
       if (entry?.threadId !== threadId || entry.turnId !== undefined && entry.turnId !== turnId) return false
+      if (entry.source) {
+        if (!source || source !== entry.source && !sameChannelPrincipal(source, entry.source)) return false
+        source = entry.source
+      }
     }
+    if (!source) return false
+    const continuation = continuationRoutine(operation, threadId, turnId, this.native())
+    if (continuation !== undefined) return continuation
     if (operation.kind === 'read') {
       return operation.input.sessionId === undefined || operation.input.sessionId === threadId
     }

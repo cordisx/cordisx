@@ -33,6 +33,9 @@ type Options = {
 /** Best-effort feedback for accepted routed inputs; native work and transport replies never wait for it. */
 export class ChannelFeedback {
   private readonly pending = new Map<string, Entry>()
+  private readonly initializing = new Map<string, Promise<void>>()
+  private readonly fresh = new Set<string>()
+  private readonly receiptOwners = new Map<string, { generation: string; reactionId: string }>()
   private readonly subscriptions = new Map<object, () => void>()
   private readonly now: () => number
   private disposed = false
@@ -88,6 +91,64 @@ export class ChannelFeedback {
       if (!this.alive(entry) || !this.jobs(this.options.store.snapshot(), entry.recordId).length) this.finish(entry)
     }
   }
+  /** Acknowledge only accepted, addressed input; the external HTTP request never gates routing. */
+  async received(recordId: string): Promise<void> {
+    const pending = this.initializing.get(recordId)
+    if (pending) return pending
+    const initializing = this.initializeReceived(recordId)
+    this.initializing.set(recordId, initializing)
+    try {
+      await initializing
+    } finally {
+      if (this.initializing.get(recordId) === initializing) this.initializing.delete(recordId)
+    }
+  }
+  private async initializeReceived(recordId: string) {
+    const state = this.options.store.snapshot(),
+      record = state.inputs[recordId],
+      event = record?.input.source.event,
+      access = this.options.access()
+    if (
+      this.disposed || this.options.signal.aborted || !record?.accepted || !event || !access
+      || !['feishu', 'lark'].includes(event.adapterId) || !this.permitted(state, event)
+    ) return
+    const claimed = await this.options.store.mutate(current => {
+      const input = current.inputs[recordId]
+      if (!input || !input.accepted || input.feedback || !this.permitted(current, event)) return false
+      input.feedback = {
+        since: this.now(),
+        reactionAttempted: false,
+        receivedAttempted: true,
+        waitAttempted: false,
+        replyObserved: false,
+      }
+      return true
+    })
+    if (!claimed) return
+    this.fresh.add(recordId)
+    if (this.fresh.size > 1024) this.fresh.delete(this.fresh.values().next().value!)
+    const config = await this.options.settings()
+    if (
+      !(config.reaction.receivedEnabled ?? config.reaction.enabled) || this.disposed || this.options.signal.aborted
+      || this.options.access()?.generation !== access.generation
+    ) return
+    const request = access.feedbackReact?.(event, config.reaction.receivedEmojiType ?? 'Get')
+    if (!request) return
+    void request.then(async receipt => {
+      if (!receipt) return
+      if (this.options.access()?.generation === access.generation && !this.disposed) {
+        this.receiptOwners.set(recordId, { generation: access.generation, reactionId: receipt.reactionId })
+        if (this.receiptOwners.size > 1024) this.receiptOwners.delete(this.receiptOwners.keys().next().value!)
+      }
+      await this.options.store.mutate(current => {
+        const feedback = current.inputs[recordId]?.feedback
+        if (!feedback) return
+        feedback.receivedReaction = receipt
+        if (feedback.processingSharesReceived) feedback.reaction = receipt
+      })
+      await this.retireReceived(recordId)
+    }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED'))
+  }
   async routed(recordId: string) {
     if (this.disposed || this.options.signal.aborted || this.pending.has(recordId)) return
     this.sync()
@@ -101,42 +162,113 @@ export class ChannelFeedback {
     const entry: Entry = { recordId, event, since: this.now(), generation: access.generation, replied: false }
     this.pending.set(recordId, entry)
     try {
-      const fresh = await this.options.store.mutate(state => {
-        const input = state.inputs[recordId]
-        if (!input || input.feedback || !this.jobs(state, recordId).length || !this.permitted(state, event)) {
-          return false
-        }
-        input.feedback = { since: entry.since, reactionAttempted: true, waitAttempted: false, replyObserved: false }
-        return true
-      })
-      if (!fresh || !this.alive(entry)) {
+      await this.received(recordId)
+      const feedback = this.options.store.snapshot().inputs[recordId]?.feedback
+      const fresh = this.fresh.delete(recordId)
+      if (!fresh || !feedback || !this.alive(entry)) {
         this.finish(entry)
         return
       }
+      entry.since = feedback.since
       const config = await this.options.settings()
       if (!this.alive(entry) || !this.jobs(this.options.store.snapshot(), recordId).length) {
         this.finish(entry)
         return
       }
-      if (config.reaction.enabled) {
-        void this.options.access()?.feedbackReact?.(event, config.reaction.emojiType).then(async receipt => {
-          if (receipt) {
-            await this.options.store.mutate(state => {
-              const feedback = state.inputs[recordId]?.feedback
-              if (feedback) feedback.reaction = receipt
-            })
-          }
-        }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED'))
-      }
-      if (config.wait.enabled) this.arm(entry, entry.since + config.wait.delaySeconds * 1000 - this.now())
-      else this.finish(entry)
+      if (config.wait.enabled && !feedback.waitAttempted && !feedback.replyObserved) {
+        this.arm(entry, entry.since + config.wait.delaySeconds * 1000 - this.now())
+      } else this.finish(entry)
     } catch {
       this.diagnostic('CHANNEL_FEEDBACK_UNAVAILABLE')
       this.finish(entry)
     }
   }
-  jobUpdated(_recordId: string) {
+  jobUpdated(recordId: string) {
     this.sync()
+    void this.started(recordId).catch(() => this.diagnostic('CHANNEL_FEEDBACK_PROCESSING_FAILED'))
+  }
+  /** Change to processing only after a native turn has been acknowledged. */
+  async started(recordId: string) {
+    const snapshot = this.options.store.snapshot(),
+      record = snapshot.inputs[recordId],
+      event = record?.input.source.event,
+      access = this.options.access()
+    if (
+      this.disposed || this.options.signal.aborted || !event || !access || !record.feedback?.receivedAttempted
+      || record.feedback.reactionAttempted || !this.permitted(snapshot, event)
+      || !this.jobs(snapshot, recordId).some(job => job.state === 'running' && job.sessionId && job.turnId)
+    ) return
+    const config = await this.options.settings()
+    if (!(config.reaction.processingEnabled ?? config.reaction.enabled)) return
+    const shares = (config.reaction.receivedEnabled ?? config.reaction.enabled)
+      && (config.reaction.receivedEmojiType ?? 'Get') === config.reaction.emojiType
+    const claimed = await this.options.store.mutate(state => {
+      const feedback = state.inputs[recordId]?.feedback
+      if (
+        !feedback?.receivedAttempted || feedback.reactionAttempted || !this.permitted(state, event)
+        || !this.jobs(state, recordId).some(job => job.state === 'running' && job.sessionId && job.turnId)
+      ) return false
+      feedback.reactionAttempted = true
+      if (shares) {
+        feedback.processingSharesReceived = true
+        if (feedback.receivedReaction) feedback.reaction = feedback.receivedReaction
+      }
+      return true
+    })
+    if (
+      !claimed || shares || this.disposed || this.options.signal.aborted
+      || this.options.access()?.generation !== access.generation
+    ) return
+    const request = access.feedbackReact?.(event, config.reaction.emojiType)
+    if (!request) return
+    void request.then(async receipt => {
+      if (
+        !receipt || this.disposed || this.options.signal.aborted
+        || this.options.access()?.generation !== access.generation
+      ) return
+      await this.options.store.mutate(state => {
+        const feedback = state.inputs[recordId]?.feedback
+        if (feedback) feedback.reaction = receipt
+      })
+      await this.retireReceived(recordId)
+    }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_PROCESSING_FAILED'))
+  }
+  private async retireReceived(recordId: string) {
+    const state = this.options.store.snapshot(),
+      record = state.inputs[recordId],
+      feedback = record?.feedback,
+      access = this.options.access(),
+      owner = this.receiptOwners.get(recordId)
+    if (
+      this.disposed || this.options.signal.aborted || !record || !access || !owner || !feedback?.receivedReaction
+      || !feedback.reaction || feedback.receivedRemovalAttempted
+      || owner.generation !== access.generation || owner.reactionId !== feedback.receivedReaction.reactionId
+      || feedback.reaction.reactionId === feedback.receivedReaction.reactionId
+      || !this.permitted(state, record.input.source.event)
+    ) return
+    const claimed = await this.options.store.mutate(current => {
+      const row = current.inputs[recordId]?.feedback
+      if (
+        !row?.receivedReaction || !row.reaction || row.receivedRemovalAttempted
+        || row.receivedReaction.reactionId !== owner.reactionId || !this.permitted(current, record.input.source.event)
+      ) {
+        return false
+      }
+      row.receivedRemovalAttempted = true
+      return true
+    })
+    if (
+      !claimed || this.disposed || this.options.signal.aborted
+      || this.options.access()?.generation !== owner.generation
+    ) return
+    this.receiptOwners.delete(recordId)
+    const result = await access.feedbackRemove?.(record.input.source.event, owner.reactionId)
+    if (result?.removed) {
+      await this.options.store.mutate(current => {
+        const row = current.inputs[recordId]?.feedback
+        if (row?.receivedReaction?.reactionId === owner.reactionId) row.receivedReaction.removed = true
+      })
+    }
   }
   async catchup() {
     for (
@@ -272,5 +404,7 @@ export class ChannelFeedback {
     for (const entry of this.pending.values()) this.finish(entry)
     for (const remove of this.subscriptions.values()) remove()
     this.subscriptions.clear()
+    this.fresh.clear()
+    this.receiptOwners.clear()
   }
 }

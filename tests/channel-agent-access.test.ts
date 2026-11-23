@@ -101,6 +101,25 @@ describe('configured Channel CLI routine approval', () => {
     ).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'chat' }), 'chat', 'turn')).toBe(true)
     expect(access.routine(argv('history', { sessionId: 'other' }), 'chat', 'turn')).toBe(false)
+    const memory = (action: string, token?: string) => {
+      const command = argv('memory', {}, token)
+      command.splice(6, 0, action)
+      return command
+    }
+    for (const action of ['guide', 'navigate', 'search-page', 'search', 'get', 'batch', 'grant-list']) {
+      expect(access.routine(memory(action, 'current'), 'chat', 'turn')).toBe(true)
+      expect(access.routine(memory(action, 'old'), 'chat', 'turn')).toBe(false)
+      expect(access.routine(memory(action), 'chat', 'turn')).toBe(false)
+      expect(access.routine(argv('memory', { action }, 'current'), 'chat', 'turn')).toBe(true)
+    }
+    for (const action of ['remember', 'update', 'forget', 'index', 'grant', 'revoke', 'identity-confirm']) {
+      expect(access.routine(memory(action, 'current'), 'chat', 'turn')).toBe(false)
+    }
+    expect(access.routine(memory('unknown', 'current'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(help('memory', 'current'), 'chat', 'turn')).toBe(true)
+    const conflicting = memory('search', 'current')
+    conflicting[conflicting.indexOf('--input') + 1] = JSON.stringify({ action: 'remember' })
+    expect(access.routine(conflicting, 'chat', 'turn')).toBe(false)
     const send = {
       account: { adapterId: 'feishu', accountId: 'account', tenantId: 'tenant' },
       target: { id: 'oc_group', kind: 'group' },

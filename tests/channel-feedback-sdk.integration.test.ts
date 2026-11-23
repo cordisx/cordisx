@@ -23,7 +23,9 @@ test('real Feishu SDK sends the expected reaction and wait payloads to a local m
     if (url.pathname.includes('tenant_access_token')) {
       res.end(JSON.stringify({ code: 0, tenant_access_token: 'mock-token', expire: 7200 }))
     } else if (url.pathname.endsWith('/reactions')) {
-      res.end(JSON.stringify({ code: 0, data: { reaction_id: 'mock-reaction' } }))
+      res.end(JSON.stringify({ code: 0, data: { reaction_id: `mock-${value.reaction_type.emoji_type}` } }))
+    } else if (req.method === 'DELETE' && url.pathname.includes('/reactions/')) {
+      res.end(JSON.stringify({ code: 0 }))
     } else if (url.pathname.endsWith('/reply') || url.pathname.endsWith('/messages')) {
       res.end(JSON.stringify({ code: 0, data: { message_id: 'om_mock_result' } }))
     } else {
@@ -80,7 +82,13 @@ test('real Feishu SDK sends the expected reaction and wait payloads to a local m
       eventId: 'om_mock_input',
       messageId: 'om_mock_input',
     }
+    const received = await feedback.feedbackReact(event, 'Get')
     await feedback.feedbackReact(event, 'OnIt')
+    await assert.rejects(
+      feedback.feedbackRemove({ ...event, accountId: 'other-account' }, received.reactionId),
+      /NOT_OWNED/,
+    )
+    await feedback.feedbackRemove(event, received.reactionId)
     await feedback.feedbackWait(
       event,
       { ...event, threadId: 'om_mock_input', semantics: 'reply-chain' },
@@ -92,7 +100,15 @@ test('real Feishu SDK sends the expected reaction and wait payloads to a local m
     const reply = calls.find(call => call.pathname.endsWith('/reply'))
     const create = calls.find(call => call.pathname.endsWith('/messages'))
     assert.equal(reaction?.method, 'POST')
-    assert.equal(reaction?.body.reaction_type.emoji_type, 'OnIt')
+    assert.equal(reaction?.body.reaction_type.emoji_type, 'Get')
+    assert.deepEqual(
+      calls.filter(call => call.pathname.includes('/reactions')).map(call => [call.method, call.pathname]),
+      [
+        ['POST', '/open-apis/im/v1/messages/om_mock_input/reactions'],
+        ['POST', '/open-apis/im/v1/messages/om_mock_input/reactions'],
+        ['DELETE', '/open-apis/im/v1/messages/om_mock_input/reactions/mock-Get'],
+      ],
+    )
     assert.equal(reply?.body.msg_type, 'text')
     assert.equal(JSON.parse(reply.body.content).text, '请稍候')
     assert.equal(reply.body.uuid, create.body.uuid)
