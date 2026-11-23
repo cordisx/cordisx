@@ -1,6 +1,9 @@
 import type { ChannelManagerActionResult } from '../launcher/channel-manager-api.js'
 import { adoptStandaloneChannelControl } from './channel-manager-owner-update.js'
-import { channelConnectionControlAllowed } from './channel-manager-presentation-scope.js'
+import {
+  channelConnectionControlAllowed,
+  channelConnectionReconnectAllowed,
+} from './channel-manager-presentation-scope.js'
 import { stateFor } from './channel-manager-state.js'
 import { markChannelSnapshotUnavailable } from './channel-manager-unavailable.js'
 import type { CordisXChannelManagerService } from './channel-manager.js'
@@ -15,7 +18,12 @@ export async function runChannelManagerAction(
 ): Promise<ChannelManagerActionResult> {
   const state = stateFor(service)
   if (state.actions === undefined) throw new Error('channel-action-unavailable')
-  const controlled = (action === 'enable' || action === 'disable') && channelConnectionControlAllowed(service)
+  const coordinatedAction = action === 'reconnect'
+    ? channelConnectionReconnectAllowed(service) ? action : undefined
+    : (action === 'enable' || action === 'disable') && channelConnectionControlAllowed(service)
+    ? action
+    : undefined
+  const controlled = coordinatedAction !== undefined
   const expectedRevision = state.projection.service.revision
   const uncertain = () => {
     state.connectionControlUncertain = true
@@ -42,7 +50,7 @@ export async function runChannelManagerAction(
         result.channelProjection,
         expectedRevision,
         request.ref,
-        action === 'enable',
+        coordinatedAction!,
       )
     ) {
       uncertain()

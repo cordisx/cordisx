@@ -1,6 +1,5 @@
 import type { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
-import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import { isCurrentManagerOriginFence, type ManagerOriginFence } from './manager-origin-fence.js'
 import type { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
@@ -11,8 +10,13 @@ import type {
 } from './service-renderer-bootstrap-state.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 
-/** Hand an owner-committed Channel service generation to the current Manager cohort. */
-export async function mutateServiceRendererConfiguredChannel(
+/** The handoff needs a confirmed service generation, whether or not configuration changed. */
+export type ConfiguredChannelHandoffResult =
+  | { readonly status: 'applied'; readonly revision: number; readonly serviceGeneration: string }
+  | { readonly status: 'staged' | 'conflict' | 'rejected'; readonly revision: number }
+
+/** Hand an owner-confirmed Channel service generation to the current Manager cohort. */
+export async function mutateServiceRendererConfiguredChannel<Result extends ConfiguredChannelHandoffResult>(
   input: {
     readonly generation: string
     readonly channel: ServiceRendererConfiguredChannelInput | undefined
@@ -24,8 +28,8 @@ export async function mutateServiceRendererConfiguredChannel(
     readonly current: (rendererId: string, entry: ServiceRendererBootstrapEntry) => boolean
   },
   origin: ManagerOriginFence,
-  action: () => Promise<HostServiceConfigMutationResult>,
-): Promise<HostServiceConfigMutationResult> {
+  action: () => Promise<Result>,
+): Promise<Result> {
   const rendererId = origin.rendererId
   const channel = input.channel
   const pluginFence = input.pluginFence

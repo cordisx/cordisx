@@ -45,6 +45,7 @@ interface PublicChannelManagerInput {
   ) => Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }>
   readonly actionsAvailable: () => boolean
   readonly connectionControlAvailable?: () => boolean
+  readonly connectionReconnectAvailable?: () => boolean
   readonly logsAvailable?: () => boolean
   readonly runAction: (
     action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
@@ -227,7 +228,12 @@ export class PublicChannelManagerController {
           ? ['connection.enable'] as const
           : ['connection.disable', 'connection.reconnect'] as const)
         : this.input.connectionControlAvailable?.()
-        ? (connection.enabled ? ['connection.disable'] as const : ['connection.enable'] as const)
+        ? (connection.enabled
+          ? [
+            'connection.disable' as const,
+            ...(this.input.connectionReconnectAvailable?.() ? ['connection.reconnect' as const] : []),
+          ]
+          : ['connection.enable'] as const)
         : []
       const credentialOperations = this.input.credentials !== undefined && !connection.pendingTenant
           && ['feishu', 'lark'].includes(kind)

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -51,7 +51,13 @@ it.skipIf(
     ? 'renders the legacy configured Channel read-only through the actual service owner'
     : 'connects the configured Channel through the actual service-owner process and manager sidecar',
   async () => {
-    const root = await mkdtemp('/tmp/cx-production-channel-')
+    const root = await realpath(
+      process.env.CORDISX_PRODUCTION_CHANNEL_TEST_ROOT
+        ?? await mkdtemp('/tmp/cx-production-channel-'),
+    )
+    if (!/^\/(?:private\/)?tmp\/cx-production-channel-[A-Za-z0-9]+$/u.test(root) || (await readdir(root)).length) {
+      throw new Error('fixture root is invalid or not empty')
+    }
     const homeDir = path.join(root, 'h')
     const userHome = path.join(root, 'u')
     const codexHome = path.join(root, 'c')
@@ -336,12 +342,16 @@ it.skipIf(
       ).toBe(true)
       if (process.env.CORDISX_CHANNEL_CONTROL_FIXTURE === '1') {
         const selector = '[data-cordisx-page-header-action="connection-toggle"]'
+        const reconnectSelector = '[data-cordisx-page-header-action="connection-reconnect"]'
         const readyFor = (page: CdpClient, labels: readonly string[]) =>
           page.evaluate<boolean>(
             '(() => { const button = document.querySelector(' + JSON.stringify(selector) + ');'
               + ' return Boolean(button && !button.disabled && '
               + JSON.stringify(labels) + '.includes(button.getAttribute("aria-label"))); })()',
           )
+        const savedNotice = (page: CdpClient) =>
+          page.evaluate<boolean>(`[...document.querySelectorAll('.cxn-card[data-type="success"] .cxn-message strong')]
+            .some(node => ['Operation completed.', '操作已完成'].includes(node.textContent?.trim()))`)
         const channelState = async () => {
           const value = JSON.parse(await readFile(configPath, 'utf8'))
           const service = value.plugins[0].services.runtime.profiles.default
@@ -355,11 +365,58 @@ it.skipIf(
         await expect.poll(channelState, { timeout: 45_000 }).toEqual({ revision: 2, enabled: false })
         for (const page of [first, second]) {
           await expect.poll(() => readyFor(page, ['Enable', '启用']), { timeout: 30_000 }).toBe(true)
+          expect(
+            await page.evaluate(
+              'Boolean(document.querySelector(' + JSON.stringify(reconnectSelector) + ')?.disabled)',
+            ),
+          ).toBe(true)
         }
+        await expect.poll(() => savedNotice(first), { timeout: 20_000 }).toBe(true)
         expect(await second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'))
           .toBe('Second page draft')
         await trustedClick(second, selector)
         await expect.poll(channelState, { timeout: 45_000 }).toEqual({ revision: 3, enabled: true })
+        for (const page of [first, second]) {
+          await expect.poll(() => readyFor(page, ['Disable', '停用']), { timeout: 30_000 }).toBe(true)
+        }
+        await expect.poll(() => savedNotice(second), { timeout: 20_000 }).toBe(true)
+        expect(await second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'))
+          .toBe('Second page draft')
+        for (const page of [first, second]) {
+          await expect.poll(() =>
+            page.evaluate(
+              'Boolean(document.querySelector(' + JSON.stringify(reconnectSelector) + ')'
+                + ' && !document.querySelector(' + JSON.stringify(reconnectSelector) + ').disabled)',
+            ), { timeout: 20_000 }).toBe(true)
+        }
+        const generation = async () => {
+          const result = await requestPluginManagementRpc(paths, endpoint, {
+            kind: 'channel',
+            operation: 'connections',
+            input: {},
+          }) as { status: string; generation?: string }
+          return result.status === 'ok' ? result.generation : undefined
+        }
+        const beforeReconnect = await generation()
+        expect(beforeReconnect).toEqual(expect.any(String))
+        const dismissSelector = '.cxn-card button[aria-label="Dismiss notification"], '
+          + '.cxn-card button[aria-label="关闭通知"]'
+        await first.evaluate(
+          'document.querySelectorAll(' + JSON.stringify(dismissSelector) + ').forEach(button => button.click())',
+        )
+        await expect.poll(() => savedNotice(first)).toBe(false)
+        await trustedClick(first, reconnectSelector)
+        await expect.poll(async () => {
+          try {
+            const value = await generation()
+            return typeof value === 'string' && value !== beforeReconnect
+          } catch {
+            return false
+          }
+        }, { timeout: 45_000 }).toBe(true)
+        // The initiator reports success only after the other Manager adopts the new generation.
+        await expect.poll(() => savedNotice(first), { timeout: 30_000 }).toBe(true)
+        expect(await channelState()).toEqual({ revision: 3, enabled: true })
         for (const page of [first, second]) {
           await expect.poll(() => readyFor(page, ['Disable', '停用']), { timeout: 30_000 }).toBe(true)
         }

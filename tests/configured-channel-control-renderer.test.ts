@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it, vi } from 'vitest'
 import { CordisXChannelManagerPresentationService } from '../packages/cli/src/renderer/channel-manager-presentation.js'
+import { restrictChannelManagerActions } from '../packages/cli/src/renderer/channel-manager-actions.js'
 import { registerChannelServiceFacade, stateFor } from '../packages/cli/src/renderer/channel-manager-state.js'
 import {
   CORDISX_PLUGIN_GENERATION,
@@ -27,6 +28,7 @@ const initial = {
     lastGoodRevision: 7,
     writable: true,
     connectionControl: 'enable-disable' as const,
+    connectionReconnect: true as const,
   },
   connections: [connection],
   routes: [],
@@ -61,7 +63,7 @@ function setup(run: (action: string, input: Record<string, unknown>) => Promise<
     projection: initial,
     broker: { authorizeServiceOwner: () => true } as never,
     serviceConfig: {} as never,
-    actions: { snapshotOnly: true, connectionControl: 'enable-disable', run },
+    actions: { snapshotOnly: true, connectionControl: 'enable-disable', connectionReconnect: true, run },
   })
   const signal = new AbortController().signal
   const facade = Object.create(manager) as CordisXChannelManagerPresentationService
@@ -72,7 +74,10 @@ function setup(run: (action: string, input: Record<string, unknown>) => Promise<
   return { manager, facade, old }
 }
 
-function request(facade: CordisXChannelManagerPresentationService, operation: 'connection.disable') {
+function request<Operation extends 'connection.disable' | 'connection.reconnect'>(
+  facade: CordisXChannelManagerPresentationService,
+  operation: Operation,
+) {
   const snapshot = facade.snapshot()
   return {
     contract: 'cordisx.channel-manager-request/v2' as const,
@@ -86,13 +91,33 @@ function request(facade: CordisXChannelManagerPresentationService, operation: 'c
   }
 }
 
+it('requires an independent reconnect capability even when enable and disable are available', async () => {
+  const run = vi.fn(async () => ({ status: 'applied' as const }))
+  const actions = {
+    snapshotOnly: true as const,
+    connectionControl: 'enable-disable' as const,
+    connectionReconnect: true as const,
+    run,
+  }
+  const older = restrictChannelManagerActions(actions, true, true, false)!
+  expect(await older.run('reconnect', { ref, expectedRevision: 7 })).toMatchObject({ status: 'unavailable' })
+  expect(run).not.toHaveBeenCalled()
+  const current = restrictChannelManagerActions(actions, true, true, true)!
+  expect(await current.run('reconnect', { ref, expectedRevision: 7 })).toMatchObject({ status: 'applied' })
+  expect(run).toHaveBeenCalledOnce()
+})
+
 it('uses the owner revision and adopts the confirmed connection state without widening the old facade', async () => {
   const run = vi.fn(async () => ({ status: 'applied' as const, channelProjection: disabled }))
   const { manager, facade, old } = setup(run)
   facade.snapshot()
   stateFor(manager).publicController!.invalidate()
   expect(facade.configurationPresentationCapabilities().connectionControl).toBe('enable-disable')
-  expect(facade.snapshot().accounts[0]!.availableOperations).toEqual(['connection.disable', 'connection.update'])
+  expect(facade.snapshot().accounts[0]!.availableOperations).toEqual([
+    'connection.disable',
+    'connection.reconnect',
+    'connection.update',
+  ])
   expect(old.snapshot().accounts[0]!.availableOperations).toEqual([])
   const operation = request(facade, 'connection.disable')
   expect(operation.expectedRevision).not.toBe(initial.service.revision)
@@ -104,6 +129,19 @@ it('uses the owner revision and adopts the confirmed connection state without wi
     availableOperations: ['connection.enable', 'connection.update'],
   })
   expect(stateFor(manager).projection.service.revision).toBe(8)
+})
+
+it('adopts a confirmed reconnect without inventing a new configuration revision', async () => {
+  const reconnected = { ...initial, accounts: [{ ...initial.accounts[0]!, generation: 2 }] }
+  const run = vi.fn(async () => ({ status: 'applied' as const, channelProjection: reconnected }))
+  const { manager, facade, old } = setup(run)
+  expect(facade.configurationPresentationCapabilities().connectionReconnect).toBe(true)
+  const operation = request(facade, 'connection.reconnect')
+  expect(await old.execute(operation)).toMatchObject({ status: 'rejected', code: 'OPERATION_UNAVAILABLE' })
+  expect(await facade.execute(operation)).toMatchObject({ status: 'applied' })
+  expect(run).toHaveBeenCalledWith('reconnect', { ref, expectedRevision: 7 })
+  expect(stateFor(manager).projection.service.revision).toBe(7)
+  expect(stateFor(manager).projection.accounts[0]!.generation).toBe(2)
 })
 
 it.each(['lost', 'bad-readback'] as const)(

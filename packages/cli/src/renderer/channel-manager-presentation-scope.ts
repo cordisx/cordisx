@@ -14,12 +14,33 @@ export function channelConfigurationAllowed(service: object): boolean {
   return !state.snapshotOnly || state.configurationOnly && serviceOwnerFor(service)?.scope === 'configuration'
 }
 
-export function channelConnectionControlAllowed(service: object): boolean {
-  const state = stateFor(service)
+export function channelOwnerSupportsControl(state: ReturnType<typeof stateFor>): boolean {
   return state.configurationOnly && !state.connectionControlUncertain
-    && serviceOwnerFor(service)?.scope === 'configuration'
     && state.projection.service.writable && state.projection.service.connectionControl === 'enable-disable'
     && state.actions?.connectionControl === 'enable-disable'
+}
+
+export function channelOwnerSupportsReconnect(state: ReturnType<typeof stateFor>): boolean {
+  return channelOwnerSupportsControl(state) && state.projection.service.connectionReconnect === true
+    && state.actions?.connectionReconnect === true
+}
+
+export function channelConnectionControlAllowed(service: object): boolean {
+  return serviceOwnerFor(service)?.scope === 'configuration' && channelOwnerSupportsControl(stateFor(service))
+}
+
+export function channelConnectionReconnectAllowed(service: object): boolean {
+  return serviceOwnerFor(service)?.scope === 'configuration' && channelOwnerSupportsReconnect(stateFor(service))
+}
+
+export function channelSnapshotOperationAllowed(
+  service: object,
+  operation: ChannelManagerRequestV2['operation'],
+): boolean {
+  return !stateFor(service).snapshotOnly || operation === 'connection.update' && channelConfigurationAllowed(service)
+    || (operation === 'connection.enable' || operation === 'connection.disable')
+      && channelConnectionControlAllowed(service)
+    || operation === 'connection.reconnect' && channelConnectionReconnectAllowed(service)
 }
 
 export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 | ChannelManagerSnapshotV4>(
@@ -29,6 +50,7 @@ export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 |
   if (!stateFor(service).configurationOnly) return snapshot
   const configurationAllowed = channelConfigurationAllowed(service)
   const connectionControlAllowed = channelConnectionControlAllowed(service)
+  const connectionReconnectAllowed = channelConnectionReconnectAllowed(service)
   return Object.freeze({
     ...snapshot,
     accounts: Object.freeze(snapshot.accounts.map(account =>
@@ -39,6 +61,7 @@ export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 |
             operation !== 'target.credential.capture.rotate' && operation !== 'connection.rotate-credential'
             && (configurationAllowed || operation !== 'connection.update')
             && (connectionControlAllowed || operation !== 'connection.enable' && operation !== 'connection.disable')
+            && (connectionReconnectAllowed || operation !== 'connection.reconnect')
           ),
         ),
       })

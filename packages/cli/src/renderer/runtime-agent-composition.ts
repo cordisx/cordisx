@@ -559,6 +559,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
                     ...(runtimeScope.metadata()!.channelManager?.service.connectionControl === 'enable-disable'
                       ? { connectionControl: 'enable-disable' as const }
                       : {}),
+                    ...(runtimeScope.metadata()!.channelManager?.service.connectionReconnect === true
+                      ? { connectionReconnect: true as const }
+                      : {}),
                   }
                   : {}),
                 run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input),

@@ -1,7 +1,10 @@
 import type { ChannelManagerV14 } from '@cordisx/protocol/channel-manager/v14'
 import { CordisXChannelManagerService } from './channel-manager.js'
 import { serviceOwnerFor, stateFor } from './channel-manager-state.js'
-import { channelConnectionControlAllowed } from './channel-manager-presentation-scope.js'
+import {
+  channelConnectionControlAllowed,
+  channelConnectionReconnectAllowed,
+} from './channel-manager-presentation-scope.js'
 
 /** Experimental local implementation of the proposed owner-bound presentation contract. */
 export class CordisXChannelManagerPresentationService extends CordisXChannelManagerService {
@@ -25,6 +28,7 @@ export class CordisXChannelManagerPresentationService extends CordisXChannelMana
       schemaVersion: 1 as const,
       mode: 'configuration-only' as const,
       ...(channelConnectionControlAllowed(this) ? { connectionControl: 'enable-disable' as const } : {}),
+      ...(channelConnectionReconnectAllowed(this) ? { connectionReconnect: true as const } : {}),
     })
   }
 

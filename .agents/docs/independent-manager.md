@@ -207,7 +207,9 @@ account through owner-bound bridges. Credential values and private references
 are not returned to the plugin-facing facade or stored in browser storage.
 When the owner explicitly advertises coordinated connection control, a
 compatible Channel page also uses its existing header action to enable or
-disable a resolved connection. Reconnect remains unavailable on this path.
+disable a resolved connection. A separate advertised capability also permits
+reconnecting an enabled, resolved connection. The owner confirms the new service
+generation without changing the configuration revision.
 The owner retires private drafts with the renderer; an unconfirmed cleanup or
 write keeps subsequent mutation coordination closed. A two-page test exercises the
 compiled service owner, actual isolated Codex app-server, authenticated sidecar,
@@ -222,7 +224,7 @@ without an initial Channel stylesheet are unavailable, and permissions from
 another source are not reused.
 
 The originating Manager reserves the owner lifecycle and all admitted Manager
-sessions before a connection settings, enable/disable, or credential write. The owner drains
+sessions before a connection settings, enable/disable, reconnect, or credential write. The owner drains
 their old reads, verifies the new service generation and sends a redacted view
 to the other Managers. It reports success only after they confirm adoption.
 Those pages retain unsaved form values and require review when their underlying

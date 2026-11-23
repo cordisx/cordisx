@@ -77,6 +77,8 @@ export interface ChannelManagerProjectionV1 {
     readonly writable: boolean
     /** Present only when the service owner supplies coordinated connection control. */
     readonly connectionControl?: 'enable-disable'
+    /** Present only when the owner also supports coordinated reconnect. */
+    readonly connectionReconnect?: true
   }
   readonly connections: readonly ChannelManagerConnectionProjection[]
   readonly routes: readonly ChannelManagerRouteProjection[]
@@ -235,7 +237,15 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   const service = object(projection.service, 'Channel Manager projection.service')
   exactKeys(
     service,
-    ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable', 'connectionControl'],
+    [
+      'configurationKind',
+      'configApplies',
+      'revision',
+      'lastGoodRevision',
+      'writable',
+      'connectionControl',
+      'connectionReconnect',
+    ],
     'Channel Manager projection.service',
   )
   if (
@@ -243,6 +253,8 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
     || typeof service.writable !== 'boolean'
     || service.connectionControl !== undefined
       && (service.connectionControl !== 'enable-disable' || service.writable !== true)
+    || service.connectionReconnect !== undefined
+      && (service.connectionReconnect !== true || service.connectionControl !== 'enable-disable')
   ) {
     throw new TypeError('Channel Manager service projection is invalid')
   }
@@ -418,6 +430,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       lastGoodRevision: boundedInteger(service.lastGoodRevision, 'Channel Manager projection.service.lastGoodRevision'),
       writable: service.writable,
       ...(service.connectionControl === 'enable-disable' ? { connectionControl: 'enable-disable' as const } : {}),
+      ...(service.connectionReconnect === true ? { connectionReconnect: true as const } : {}),
     },
     connections,
     routes,

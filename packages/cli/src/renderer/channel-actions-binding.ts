@@ -50,7 +50,7 @@ export class BrowserChannelActionsBridge {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('channel-action-timeout'))
-      }, this.standalone && (action === 'enable' || action === 'disable') ? 75_000 : 5_000)
+      }, this.standalone && (action === 'enable' || action === 'disable' || action === 'reconnect') ? 75_000 : 5_000)
       this.pending.set(requestId, { resolve, reject, timer })
       try {
         binding(JSON.stringify({ version: 1, token: this.token, requestId, action, ...input }))

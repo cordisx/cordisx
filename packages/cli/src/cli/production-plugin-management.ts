@@ -231,6 +231,7 @@ export async function openProductionPluginManagementComposition(input: {
       generation: input.runtimeGeneration,
       configPath: input.configPath,
       readOnly: input.rendererReadonlyChannel,
+      allowReconnect: true,
       ...input.rendererConfiguredChannelService,
       participants: input.rendererParticipants!,
       lifecycle: input.rendererLifecycle!,

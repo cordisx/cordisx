@@ -33,7 +33,6 @@ import { ServiceRendererConfiguredChannel } from './service-renderer-configured-
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import { allowsManagementWrite, projectManagementRequest } from './service-renderer-management-projection.js'
 import { serviceRendererManagementEntry } from './service-renderer-management-entry.js'
-import type { HostServiceConfigMutationResult } from '../launcher/service-config.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 import { readOwnerProfileInputs } from './service-renderer-profile-inputs.js'
@@ -44,7 +43,10 @@ import type { DesktopConfigurationReservation } from '../launcher/desktop-config
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
-import { mutateServiceRendererConfiguredChannel } from './service-renderer-channel-handoff.js'
+import {
+  type ConfiguredChannelHandoffResult,
+  mutateServiceRendererConfiguredChannel,
+} from './service-renderer-channel-handoff.js'
 import {
   type DesktopConfigProjector,
   desktopPackageConfigBundleOptions,
@@ -102,6 +104,8 @@ export class ServiceRendererBootstrap {
       readonly experimentalChannelServiceConfig?: boolean
       /** The owner also supplied the coordinated connection-control bridge. */
       readonly experimentalChannelControl?: boolean
+      /** The coordinated Channel bridge also supports reconnect. */
+      readonly experimentalChannelReconnect?: boolean
       /** The owner also supplied the private, coordinated credential bridge. */
       readonly experimentalChannelCredentials?: boolean
       /** Owner-created verifier, enabled only with an independently coordinated policy channel. */
@@ -411,10 +415,10 @@ export class ServiceRendererBootstrap {
   }
 
   /** Owner-only Channel write handoff; callers must already reserve the originating Manager and lifecycle. */
-  async mutateConfiguredChannel(
+  async mutateConfiguredChannel<Result extends ConfiguredChannelHandoffResult>(
     origin: ManagerOriginFence,
-    action: () => Promise<HostServiceConfigMutationResult>,
-  ): Promise<HostServiceConfigMutationResult> {
+    action: () => Promise<Result>,
+  ): Promise<Result> {
     return await mutateServiceRendererConfiguredChannel(
       {
         generation: this.input.generation,
@@ -582,6 +586,7 @@ export class ServiceRendererBootstrap {
             bridge: channel.bridge,
             allowConfiguration: this.input.experimentalChannelServiceConfig === true,
             allowConnectionControl: this.input.experimentalChannelControl === true,
+            allowConnectionReconnect: this.input.experimentalChannelReconnect === true,
             server: await this.input.lifecycle.artifactServer(),
             current: () => this.current(rendererId, entry),
             unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),

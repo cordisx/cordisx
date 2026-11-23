@@ -154,7 +154,7 @@
     "@cordisx/schemastery-ui"
   ],
   "cordisxSources": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#6ec5c8bf2649f2092358ad5e8ebf39ccc9e83b2d",
+    "@cordisx/channel": "github:cordisx/plugin-channel#10b62a213a60c1ffd381af276dca3819d32401cd",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
   }
 }

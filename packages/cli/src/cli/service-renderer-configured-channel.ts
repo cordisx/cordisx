@@ -50,6 +50,7 @@ export class ServiceRendererConfiguredChannel {
       readonly bridge: ReadonlyChannelRendererBridge
       readonly allowConfiguration: boolean
       readonly allowConnectionControl: boolean
+      readonly allowConnectionReconnect: boolean
       readonly current: () => boolean
       readonly unchanged: () => Promise<boolean>
       readonly retire: () => void
@@ -69,6 +70,7 @@ export class ServiceRendererConfiguredChannel {
     readonly bridge: ReadonlyChannelRendererBridge
     readonly allowConfiguration: boolean
     readonly allowConnectionControl: boolean
+    readonly allowConnectionReconnect: boolean
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
     readonly unchanged: () => Promise<boolean>
@@ -202,6 +204,9 @@ export class ServiceRendererConfiguredChannel {
               ...view.initial.projection.service,
               writable: true,
               ...(this.input.allowConnectionControl ? { connectionControl: 'enable-disable' as const } : {}),
+              ...(this.input.allowConnectionControl && this.input.allowConnectionReconnect
+                ? { connectionReconnect: true as const }
+                : {}),
             },
           }
           : view.initial.projection,
@@ -316,6 +321,9 @@ export class ServiceRendererConfiguredChannel {
           ...projection.service,
           writable: true,
           ...(this.input.allowConnectionControl ? { connectionControl: 'enable-disable' as const } : {}),
+          ...(this.input.allowConnectionControl && this.input.allowConnectionReconnect
+            ? { connectionReconnect: true as const }
+            : {}),
         },
       }
       : projection

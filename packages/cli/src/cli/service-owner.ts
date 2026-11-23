@@ -299,6 +299,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           },
           experimentalChannelServiceConfig: configuredServiceOwner !== undefined,
           experimentalChannelControl: configuredServiceOwner !== undefined,
+          experimentalChannelReconnect: configuredServiceOwner !== undefined,
           experimentalChannelCredentials: configuredServiceOwner !== undefined && managerChannel !== undefined,
           ...(rendererReadonlyChannel === undefined || channelOwner === undefined ? {} : {
             experimentalConfiguredChannel: { ...channelOwner, bridge: rendererReadonlyChannel },

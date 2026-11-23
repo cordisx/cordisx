@@ -70,6 +70,7 @@ export async function fixture(
     channelOwnerMismatch?: boolean
     channelServiceConfig?: boolean
     channelControls?: boolean
+    channelReconnect?: boolean
     channelCredentials?: boolean
     channelCredentialValidate?: () => Promise<void>
     channelCredentialCleanupFails?: boolean
@@ -335,6 +336,7 @@ export async function fixture(
       : {}),
     experimentalChannelServiceConfig: options.channelServiceConfig === true,
     experimentalChannelControl: options.channelServiceConfig === true && options.channelControls === true,
+    experimentalChannelReconnect: options.channelServiceConfig === true && options.channelReconnect === true,
     experimentalChannelCredentials: options.channelCredentials === true,
     experimentalConfiguredPermissionPolicy: options.channelPermissionPolicy === true,
     ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
@@ -374,6 +376,7 @@ export async function fixture(
   const channelActions = options.channelControls && channelBridge && configuredChannel && configuredOwner
     ? createManagerRendererChannelControl({
       readOnly: channelBridge.channel,
+      allowReconnect: options.channelReconnect === true,
       profileId,
       generation,
       configPath,

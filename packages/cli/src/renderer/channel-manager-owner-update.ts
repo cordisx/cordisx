@@ -17,6 +17,7 @@ export function adoptStandaloneChannelProjection(
       || projection.service.revision !== revision || projection.service.lastGoodRevision !== revision
       || projection.service.writable !== state.projection.service.writable
       || projection.service.connectionControl !== state.projection.service.connectionControl
+      || projection.service.connectionReconnect !== state.projection.service.connectionReconnect
     ) return false
     // An older in-flight snapshot must not overwrite the newly confirmed view.
     state.refreshSequence += 1
@@ -53,7 +54,7 @@ export function adoptStandaloneChannelControl(
   value: unknown,
   expectedRevision: number,
   ref: unknown,
-  enabled: boolean,
+  action: 'enable' | 'disable' | 'reconnect',
 ): boolean {
   try {
     if (ref === null || typeof ref !== 'object' || Array.isArray(ref)) return false
@@ -64,9 +65,11 @@ export function adoptStandaloneChannelControl(
       && connection.ref.tenantId === target.tenantId
     )
     if (
-      !Number.isSafeInteger(expectedRevision) || projection.service.revision !== expectedRevision + 1
+      !Number.isSafeInteger(expectedRevision)
+      || projection.service.revision !== expectedRevision + (action === 'reconnect' ? 0 : 1)
       || projection.service.connectionControl !== 'enable-disable' || matches.length !== 1
-      || matches[0]!.pendingTenant || matches[0]!.enabled !== enabled
+      || action === 'reconnect' && projection.service.connectionReconnect !== true
+      || matches[0]!.pendingTenant || matches[0]!.enabled !== (action !== 'disable')
     ) return false
     return adoptStandaloneChannelProjection(service, projection, projection.service.revision)
   } catch {

@@ -234,6 +234,14 @@ try {
   ) {
     if (!files.includes(required)) throw new Error(`missing bundled runtime: ${required}`)
   }
+  for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
+    const bundledManifest = JSON.parse(
+      readFileSync(path.join(extractedRoot, 'package/dist/bundled-plugins', name, 'package.json'), 'utf8'),
+    )
+    if (bundledManifest.name !== name || bundledManifest.cordisxSource !== manifest.cordisxSources?.[name]) {
+      throw new Error(`bundled runtime does not match declared source: ${name}`)
+    }
+  }
   const leaked = files.filter(file => (
     !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
     && !bundledRoots.some(root => file.startsWith(root))

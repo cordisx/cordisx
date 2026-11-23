@@ -18,9 +18,10 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
-/** Add only owner-coordinated connection enablement to the existing read-only Channel bridge. */
+/** Add owner-coordinated connection controls to the existing read-only Channel bridge. */
 export function createManagerRendererChannelControl(input: {
   readonly readOnly: ManagerRendererChannel
+  readonly allowReconnect?: boolean
   readonly profileId: string
   readonly generation: string
   readonly configPath: string
@@ -50,7 +51,8 @@ export function createManagerRendererChannelControl(input: {
         )
         || request.version !== 1 || request.token !== 'renderer-binding-placeholder'
         || typeof request.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(request.requestId)
-        || request.action !== 'enable' && request.action !== 'disable'
+        || request.action !== 'enable' && request.action !== 'disable' && request.action !== 'reconnect'
+        || request.action === 'reconnect' && input.allowReconnect !== true
         || !Number.isSafeInteger(request.expectedRevision) || (request.expectedRevision as number) < 0
         || !ref || Object.keys(ref).length !== 3
         || Object.keys(ref).some(key => !['adapterId', 'accountId', 'tenantId'].includes(key))
@@ -61,6 +63,7 @@ export function createManagerRendererChannelControl(input: {
       ) throw new Error('CHANNEL_CONTROL_UNAVAILABLE')
       const requestId = request.requestId
       const expectedRevision = request.expectedRevision as number
+      const reconnect = request.action === 'reconnect'
       const desired = request.action === 'enable'
       const target = { adapterId: ref.adapterId, accountId: ref.accountId, tenantId: ref.tenantId }
       return {
@@ -125,7 +128,7 @@ export function createManagerRendererChannelControl(input: {
                 const selected = object(matches[0])
                 if (
                   matches.length !== 1 || !selected || typeof selected.enabled !== 'boolean'
-                  || selected.enabled === desired
+                  || (reconnect ? selected.enabled !== true : selected.enabled === desired)
                 ) {
                   return {
                     ...base,
@@ -135,6 +138,25 @@ export function createManagerRendererChannelControl(input: {
                 }
                 if (!origin.isCurrent() || input.service.generation() !== serviceGeneration) {
                   throw new Error('CHANNEL_CONTROL_UNAVAILABLE')
+                }
+                if (reconnect) {
+                  const result = await input.service.manager.connections.reconnect({
+                    ref: target,
+                    generation: serviceGeneration,
+                  })
+                  const after = await api!.descriptor()
+                  if (
+                    result.status !== 'applied' || !result.generation || result.generation === serviceGeneration
+                    || input.service.generation() !== result.generation || !origin.isCurrent()
+                    || after.revision !== descriptor.revision || !isDeepStrictEqual(after.identity, descriptor.identity)
+                    || !isDeepStrictEqual(after.scope, descriptor.scope)
+                    || !isDeepStrictEqual(after.configuration, descriptor.configuration)
+                  ) throw new Error('CHANNEL_CONTROL_RESULT_UNKNOWN')
+                  return {
+                    status: 'applied' as const,
+                    revision: descriptor.revision,
+                    serviceGeneration: result.generation,
+                  }
                 }
                 return await api!.mutate({
                   contract: 'cordisx.service-config-mutation/v1',

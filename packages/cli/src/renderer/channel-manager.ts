@@ -60,8 +60,10 @@ import { generationFromContext, ownerFromContext, sourceFromContext } from './ow
 import { PublicChannelManagerController } from './channel-manager-public.js'
 import {
   channelConfigurationAllowed,
-  channelConnectionControlAllowed,
+  channelOwnerSupportsControl,
+  channelOwnerSupportsReconnect,
   channelPresentationSnapshot,
+  channelSnapshotOperationAllowed,
   unavailableChannelOperation,
   unavailableChannelTarget,
 } from './channel-manager-presentation-scope.js'
@@ -141,6 +143,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       snapshotOnly,
       configurationOnly && wrapped.serviceConfig !== undefined && projection.service.writable
         && projection.service.connectionControl === 'enable-disable',
+      projection.service.connectionReconnect === true,
     )
     registerChannelManagerState(this, {
       projection,
@@ -194,10 +197,8 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
         && (!state.configurationOnly || !connection.pendingTenant),
       update: (ref, patch) => this.updateConfiguration(ref, patch),
       actionsAvailable: () => stateFor(this).actions !== undefined && stateFor(this).actions!.snapshotOnly !== true,
-      connectionControlAvailable: () =>
-        state.configurationOnly && !state.connectionControlUncertain
-        && state.projection.service.writable && state.projection.service.connectionControl === 'enable-disable'
-        && state.actions?.connectionControl === 'enable-disable',
+      connectionControlAvailable: () => channelOwnerSupportsControl(state),
+      connectionReconnectAvailable: () => channelOwnerSupportsReconnect(state),
       logsAvailable: () => !snapshotOnly,
       runAction: async (action, value) => await this.runAction(action, value),
     })
@@ -761,12 +762,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   }
 
   async execute(request: ChannelManagerRequestV2): Promise<ChannelManagerResultV2> {
-    if (
-      stateFor(this).snapshotOnly
-      && !(request.operation === 'connection.update' && channelConfigurationAllowed(this))
-      && !((request.operation === 'connection.enable' || request.operation === 'connection.disable')
-        && channelConnectionControlAllowed(this))
-    ) {
+    if (!channelSnapshotOperationAllowed(this, request.operation)) {
       return unavailableChannelOperation(request, stateFor(this).publicController!.currentRevision())
     }
     const credential = request.operation === 'credential.capture' || request.operation === 'connection.create'

@@ -19,6 +19,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       protectProfileInputs: true,
       channelServiceConfig: true,
       channelControls: true,
+      channelReconnect: true,
     })
     const browserSessionId = secret()
     const handle = (await f.sessions.open(f.gateway, browserSessionId))!
@@ -63,13 +64,23 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       const result = await changing
       expect(result).toMatchObject({ status: 'ok', value: { value: { status: 'applied' } } })
       expect(result).toMatchObject({
-        value: { value: { channelProjection: { service: { connectionControl: 'enable-disable', revision: 2 } } } },
+        value: {
+          value: {
+            channelProjection: {
+              service: { connectionControl: 'enable-disable', connectionReconnect: true, revision: 2 },
+            },
+          },
+        },
       })
       expect(JSON.stringify(result)).not.toContain('fixture-private-reference')
       const stale = await control('stale-enable', 'enable', descriptor.revision)
       expect(stale).toMatchObject({
         status: 'ok',
         value: { value: { status: 'unavailable', code: 'REVISION_CONFLICT' } },
+      })
+      expect(await control('disabled-reconnect', 'reconnect', 2)).toMatchObject({
+        status: 'ok',
+        value: { value: { status: 'unavailable', code: 'CONNECTION_CONFIGURATION_UNAVAILABLE' } },
       })
       const firstPolling = f.sessions.poll(f.invocation, 5_000)
       const enabling = f.sessions.call(
@@ -93,6 +104,21 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         }),
       ).toEqual({ status: 'ok', value: { accepted: true } })
       expect(await enabling).toMatchObject({ status: 'ok', value: { value: { status: 'applied' } } })
+      const beforeReconnect = f.configuredChannel!.service.generation()
+      const reconnectPolling = f.sessions.poll(second, 5_000)
+      const reconnecting = control('reconnect', 'reconnect', 3)
+      const reconnectCommand = (await reconnectPolling as any).value.command
+      expect(reconnectCommand).toMatchObject({ method: 'channel-configuration', payload: { revision: 3 } })
+      expect(
+        await f.sessions.acknowledge(second, {
+          id: reconnectCommand.id,
+          sequence: reconnectCommand.sequence,
+          ok: true,
+          value: { rendererId: handle.rendererId, ownerGeneration: f.generation, revision: 3, adopted: true },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      expect(await reconnecting).toMatchObject({ status: 'ok', value: { value: { status: 'applied' } } })
+      expect(f.configuredChannel!.service.generation()).not.toBe(beforeReconnect)
       const stored = await readServiceConfigState({
         profileId: f.profileId,
         pluginId: 'channel',
