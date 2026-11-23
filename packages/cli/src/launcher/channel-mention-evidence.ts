@@ -1,5 +1,23 @@
 import type { ChannelThreadRef } from '@cordisx/channel-runtime'
 
+export function verifiedFeishuSender(
+  message: { senderId: string; messageId: string; chatId: string; raw?: unknown },
+  tenantId: string,
+): string | undefined {
+  const object = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  const raw = object(message.raw)
+  const sender = object(raw?.sender)
+  const identity = object(sender?.sender_id)
+  const original = object(raw?.message)
+  if (
+    sender?.sender_type !== 'user' || sender.tenant_key !== tenantId
+    || identity?.open_id !== message.senderId || original?.message_id !== message.messageId
+    || original.chat_id !== message.chatId || !/^ou_[A-Za-z0-9_]+$/u.test(message.senderId)
+  ) return undefined
+  return message.senderId
+}
+
 export class ChannelMentionEvidence {
   private readonly senders = new Map<string, Map<string, number>>()
   private active = true

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ChannelMentionEvidence } from './channel-mention-evidence.js'
+import { ChannelMentionEvidence, verifiedFeishuSender } from './channel-mention-evidence.js'
 import type { ChannelThreadRef } from '@cordisx/channel-runtime'
 
 const target: ChannelThreadRef = {
@@ -13,6 +13,25 @@ const target: ChannelThreadRef = {
   eventId: 'event',
 }
 describe('generation-local accepted sender evidence', () => {
+  it('requires matching raw native sender, tenant and message provenance', () => {
+    const message = { senderId: 'ou_user', messageId: 'om_message', chatId: 'oc_group' }
+    const raw = {
+      sender: { sender_id: { open_id: 'ou_user' }, sender_type: 'user', tenant_key: 'tenant' },
+      message: { message_id: 'om_message', chat_id: 'oc_group' },
+    }
+    expect(verifiedFeishuSender({ ...message, raw }, 'tenant')).toBe('ou_user')
+    expect(verifiedFeishuSender(message, 'tenant')).toBeUndefined()
+    for (
+      const sender of [{ ...raw.sender, tenant_key: 'external' }, { ...raw.sender, sender_type: 'app' }, {
+        ...raw.sender,
+        sender_id: { open_id: 'ou_other' },
+      }]
+    ) {
+      expect(verifiedFeishuSender({ ...message, raw: { ...raw, sender } }, 'tenant')).toBeUndefined()
+    }
+    expect(verifiedFeishuSender({ ...message, messageId: 'om_other', raw }, 'tenant')).toBeUndefined()
+    expect(verifiedFeishuSender({ ...message, chatId: 'oc_other', raw }, 'tenant')).toBeUndefined()
+  })
   it('verifies only an observed exact user in the same account and conversation', async () => {
     const evidence = new ChannelMentionEvidence(target)
     await expect(evidence.verify(target, ['ou_user'])).rejects.toThrow('CHANNEL_MENTION_UNVERIFIED')

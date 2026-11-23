@@ -587,6 +587,10 @@ detected. After expiry, missing fresh sender evidence rejects. Users who have
 never sent a message are unsupported, including users merely named by an inbound
 mention; inbound mention metadata is not currently accepted as identity proof.
 Arbitrary contact-directory users and screenshot names cannot be mentioned.
+SDK raw sender evidence must explicitly match the application's tenant, native
+open_id, user sender type, message ID and chat ID. Missing raw metadata or an
+external-tenant sender does not issue evidence; normalized sender IDs alone
+are insufficient. Raw event bodies are not retained in the evidence cache.
 A reconnect/replacement requiring a new connection loses that evidence; missing
 evidence rejects with `CHANNEL_MENTION_UNVERIFIED`. This does not request contact
 or directory scopes and does not enable `@all`. A direct-chat ID is not evidence

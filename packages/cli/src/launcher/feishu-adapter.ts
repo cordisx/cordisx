@@ -31,7 +31,7 @@ import {
 } from './feishu-outbound-media.js'
 import { channelReactionInput, type KnownBotMessage } from './channel-reaction-input.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
-import { ChannelMentionEvidence } from './channel-mention-evidence.js'
+import { ChannelMentionEvidence, verifiedFeishuSender } from './channel-mention-evidence.js'
 import { createFeishuDiagnostics } from './feishu-diagnostics.js'
 import { FeishuCardActionQueue } from './feishu-card-action-queue.js'
 import { type ChannelCommandAddressing, channelCommandAddressing } from './channel-command-users.js'
@@ -269,7 +269,8 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           if (stopped) return
           const receipt = await host.receive(envelope)
           if (receipt.recordId === recordId && !receipt.duplicate && !stopped) {
-            mentions.observe(envelope.input.source.event, message.senderId)
+            const senderId = verifiedFeishuSender(message, input.connection.ref.tenantId)
+            if (senderId) mentions.observe(envelope.input.source.event, senderId)
           }
           observation.message('persisted', message.messageId, {
             verified: receipt.recordId === recordId,
