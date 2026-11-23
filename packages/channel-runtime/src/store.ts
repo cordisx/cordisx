@@ -42,6 +42,8 @@ export interface StoredInboxRecord {
 }
 
 export interface StoredOutboxRecord extends ChannelOutboundDelivery {
+  /** Launcher-owned volatile guard must be live; process restart never sends an old reminder. */
+  readonly guardedDelivery?: boolean
   readonly accountKey: string
   readonly generation: number
   readonly caller: ChannelPluginIdentity

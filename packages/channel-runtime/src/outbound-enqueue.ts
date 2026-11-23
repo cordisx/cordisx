@@ -8,7 +8,7 @@ import type {
   ChannelThreadRef,
 } from './types.js'
 import type { ChannelQuestionCard } from './question-card.js'
-import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord } from './store.js'
+import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord, StoredOutboxRecord } from './store.js'
 import { accountKey, canonical, ChannelIntegrityError, sanitizedThread } from './runtime-validation.js'
 import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
 import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
@@ -20,6 +20,7 @@ interface EnqueueContext {
   requirePermission(request: ChannelPermissionRequest): Promise<void>
   mediaDescriptor: ChannelRuntimeOptions['outboundMediaDescriptor']
   observers: ReadonlySet<(target: ChannelThreadRef) => void>
+  guarded?(id: string): boolean
   now(): string
   cancel(id: string): Promise<'cancelled' | 'irreversible' | 'not-found'>
   FencedError: new() => Error
@@ -138,6 +139,7 @@ export async function enqueueOutbound(
       createdAt: now,
       updatedAt: now,
       status: 'queued',
+      ...(context.guarded?.(deliveryId) ? { guardedDelivery: true } : {}),
       attempts: 0,
     }
     context.appendAudit(
@@ -187,4 +189,10 @@ export async function outboundCapabilitiesPublic(
       connection?.maxMediaBytes ?? (connection?.supportsOutboundMedia ? 30_000_000 : 0),
     ),
   }
+}
+
+export function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: number): boolean {
+  if (record.status === 'queued') return true
+  if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
+  return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now
 }

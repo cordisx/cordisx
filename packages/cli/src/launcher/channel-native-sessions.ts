@@ -3,7 +3,8 @@ import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime
 import { createHash, randomBytes } from 'node:crypto'
 import { channelAttachmentTicket } from './channel-inbound-resources.js'
 import { channelPrincipalSource, signalChannelSource, waitForChannelSource } from './channel-source-principal.js'
-import { type ChannelNativeSteer, channelNativeSteer, channelSteerObserved } from './channel-native-steer.js'
+import { channelSteerObserved } from './channel-native-steer.js'
+import { channelNativeContextOperations } from './channel-native-context-operations.js'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
@@ -746,22 +747,18 @@ export class ChannelNativeSessions {
       return false
     }
   }
-  steer: ChannelNativeSteer = (...args) =>
-    channelNativeSteer({
+  private contextOperations() {
+    return channelNativeContextOperations({
+      sources: this.sources,
       cli: this.input.cli,
       request: this.input.nativeRequest,
       sourceFor: (session, turn) => this.sourceFor(session, turn),
-      reserve: (id, source, threadId, turnId) => {
-        if (this.sources.has(id) || this.sources.size >= 128) return undefined
-        const token = randomBytes(24).toString('hex')
-        this.sources.set(id, { source, token, threadId, turnId })
-        return token
-      },
-      release: id => {
-        this.sources.delete(id)
-      },
-      observe: (id, session, turn) => this.observedDispatch(id, session, turn),
-    }, ...args)
+      observed: (id, session, turn) => this.observedDispatch(id, session, turn),
+    })
+  }
+  steer: import('./channel-native-steer.js').ChannelNativeSteer = (...args) => this.contextOperations().steer(...args)
+  progressReminder = (...args: Parameters<ReturnType<typeof channelNativeContextOperations>['progress']>) =>
+    this.contextOperations().progress(...args)
   steerObserved(operationId: string, sessionId: string, turnId: string) {
     return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
   }

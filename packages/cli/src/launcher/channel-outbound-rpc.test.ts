@@ -49,6 +49,7 @@ function fixture() {
     taskSettings: { isBound: () => false },
     commandAllowed,
     sendAllowed,
+    trackProgressDelivery: vi.fn(),
   }
   const receipts = new Map<string, { state: string }>()
   const notifyOnce = vi.fn(async (_notification: unknown, _caller: unknown, id: string) => {
