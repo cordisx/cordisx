@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { it as test } from 'vitest'
 import { channelFeedbackSdk } from '../packages/cli/src/launcher/channel-feedback-sdk.js'
+import { ChannelStoppedFeedback } from '../packages/cli/src/launcher/channel-feedback-stopped.js'
 
 test('real Feishu SDK sends the expected reaction and wait payloads to a local mock', async () => {
   const calls = []
@@ -83,7 +84,7 @@ test('real Feishu SDK sends the expected reaction and wait payloads to a local m
       messageId: 'om_mock_input',
     }
     const received = await feedback.feedbackReact(event, 'Get')
-    await feedback.feedbackReact(event, 'OnIt')
+    const processing = await feedback.feedbackReact(event, 'OnIt')
     await assert.rejects(
       feedback.feedbackRemove({ ...event, accountId: 'other-account' }, received.reactionId),
       /NOT_OWNED/,
@@ -114,6 +115,31 @@ test('real Feishu SDK sends the expected reaction and wait payloads to a local m
     assert.equal(reply.body.uuid, create.body.uuid)
     assert.equal(create?.query.get('receive_id_type'), 'chat_id')
     assert.equal(create?.body.receive_id, 'oc_mock')
+    const state = {
+      policy: { enabled: true, rules: [{ action: 'dispatch', effect: 'allow' }, { action: 'send', effect: 'allow' }] },
+      inputs: { record: { input: { source: { event } }, feedback: { reaction: processing } } },
+      jobs: { job: { id: 'job', recordId: 'record', state: 'completed', sessionId: 'session', turnId: 'turn' } },
+      liveTakeovers: {},
+      continuations: {},
+    }
+    const stopped = new ChannelStoppedFeedback({
+      store: { snapshot: () => structuredClone(state), mutate: async run => run(state) },
+      access: () => ({ ...feedback, generation: 'mock' }),
+      turnState: async () => 'completed',
+      signal: new AbortController().signal,
+    })
+    stopped.accepted('record', 'mock', 'DONE')
+    await stopped.check('record')
+    const reactionCalls = calls.filter(call => call.pathname.includes('/reactions'))
+    assert.deepEqual(reactionCalls.map(call => [call.method, call.body.reaction_type?.emoji_type ?? null]), [
+      ['POST', 'Get'],
+      ['POST', 'OnIt'],
+      ['DELETE', null],
+      ['POST', 'DONE'],
+      ['DELETE', null],
+    ])
+    assert.ok(reactionCalls[4].pathname.endsWith('/mock-OnIt'))
+    stopped.dispose()
   } finally {
     await new Promise(resolve => server.close(resolve))
   }

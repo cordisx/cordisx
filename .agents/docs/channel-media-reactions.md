@@ -68,12 +68,22 @@ receipt and must not be blindly retried. No general public `channel_reaction`
 plugin/native tool is advertised; use the configured CLI seam.
 
 Profile-local feedback configuration is read-only to agents. `reaction.emojiType`
-selects processing feedback (commonly `OnIt`). Optional
-`reaction.completionEmojiType` must be a valid platform emoji identifier; do not
-assume the literal string `done` or silently invent a default. Completion replaces
-the known processing reaction only after all correlated jobs really complete.
-Progress, reminders, failures, cancellations and unknown native outcomes are not
-successful completion. No completion mapping means no completion reaction.
+selects processing feedback (commonly `OnIt`). `reaction.stoppedEnabled` defaults
+to true and `reaction.stoppedEmojiType` to the platform identifier `DONE`, unless
+legacy completion configuration selects its earlier behavior. Stopped feedback
+means all correlated native turns are confirmed ended, including explicit failure
+or interruption; it does not assert the user's whole goal succeeded. Queued,
+active, unknown and uncertain handoff states do not qualify. It confirms the new
+reaction before removing only SDK-owned Get/OnIt receipts and handles late receipts
+without repeating uncertain effects. New inputs alone are eligible; enabling or
+restarting does not retroactively change historical messages.
+
+Optional `reaction.completionEmojiType` retains completed-only semantics. If it is
+configured without `stoppedEnabled`, default stopped feedback is disabled. Explicit
+`stoppedEnabled:true` selects stopped feedback instead, using `stoppedEmojiType`.
+All emoji values must be valid platform identifiers, not arbitrary labels such as
+lowercase `done`. See [task reception feedback](channel-cli.md#task-reception-feedback)
+for independent switches and compatibility behavior.
 
 Human add/remove events on bot messages known to the active adapter are dispatched
 as attributed user input with bot message text and available original input.
