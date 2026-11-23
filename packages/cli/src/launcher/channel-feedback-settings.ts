@@ -9,6 +9,8 @@ export interface ChannelFeedbackSettings {
     receivedEmojiType?: string
     processingEnabled?: boolean
     completionEmojiType?: string
+    stoppedEnabled?: boolean
+    stoppedEmojiType?: string
   }
   wait: { enabled: boolean; delaySeconds: number; text: string; texts?: readonly string[] }
 }
@@ -19,6 +21,8 @@ export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
     receivedEnabled: true,
     receivedEmojiType: 'Get',
     processingEnabled: true,
+    stoppedEnabled: true,
+    stoppedEmojiType: 'DONE',
   },
   wait: { enabled: true, delaySeconds: 30, text: '已收到，正在处理，请稍候。' },
 }
@@ -33,7 +37,16 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
   if (
     Object.keys(row).some(key => !['reaction', 'wait'].includes(key))
     || Object.keys(reaction).some(key =>
-      !['enabled', 'emojiType', 'completionEmojiType', 'receivedEnabled', 'receivedEmojiType', 'processingEnabled']
+      ![
+        'enabled',
+        'emojiType',
+        'completionEmojiType',
+        'receivedEnabled',
+        'receivedEmojiType',
+        'processingEnabled',
+        'stoppedEnabled',
+        'stoppedEmojiType',
+      ]
         .includes(key)
     )
     || Object.keys(wait).some(key => !['enabled', 'delaySeconds', 'text', 'texts'].includes(key))
@@ -48,6 +61,11 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
       processingEnabled: reaction.processingEnabled === undefined
         ? reaction.enabled ?? DEFAULT_CHANNEL_FEEDBACK.reaction.enabled
         : reaction.processingEnabled,
+      stoppedEnabled: reaction.stoppedEnabled === undefined
+        ? (reaction.completionEmojiType === undefined
+          ? reaction.enabled ?? DEFAULT_CHANNEL_FEEDBACK.reaction.stoppedEnabled
+          : false)
+        : reaction.stoppedEnabled,
     },
     wait: { ...DEFAULT_CHANNEL_FEEDBACK.wait, ...wait },
   }
@@ -57,6 +75,9 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
     || typeof result.reaction.receivedEnabled !== 'boolean' || typeof result.reaction.processingEnabled !== 'boolean'
     || typeof result.reaction.receivedEmojiType !== 'string'
     || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.receivedEmojiType)
+    || typeof result.reaction.stoppedEnabled !== 'boolean'
+    || typeof result.reaction.stoppedEmojiType !== 'string'
+    || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.stoppedEmojiType)
     || result.reaction.completionEmojiType !== undefined
       && (typeof result.reaction.completionEmojiType !== 'string'
         || !/^[A-Za-z0-9_]{1,64}$/u.test(result.reaction.completionEmojiType))

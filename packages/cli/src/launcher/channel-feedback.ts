@@ -6,6 +6,7 @@ import type { ChannelConversationState, ChannelConversationStore } from './chann
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { channelReplyDefaults, channelReplyTarget } from './channel-reply-routing.js'
 import { type ChannelFeedbackSettings } from './channel-feedback-settings.js'
+import { ChannelStoppedFeedback } from './channel-feedback-stopped.js'
 
 export interface ChannelReactionReceipt {
   reactionId: string
@@ -39,9 +40,11 @@ export class ChannelFeedback {
   private readonly receiptOwners = new Map<string, { generation: string; reactionId: string }>()
   private readonly subscriptions = new Map<object, () => void>()
   private readonly now: () => number
+  private readonly stopped: ChannelStoppedFeedback
   private disposed = false
   constructor(private readonly options: Options) {
     this.now = options.now ?? Date.now
+    this.stopped = new ChannelStoppedFeedback(options)
   }
   private diagnostic(code: string) {
     try {
@@ -130,6 +133,10 @@ export class ChannelFeedback {
     if (this.fresh.size > 1024) this.fresh.delete(this.fresh.values().next().value!)
     const config = await this.options.settings()
     if (
+      (config.reaction.stoppedEnabled ?? false) && !this.disposed && !this.options.signal.aborted
+      && this.options.access()?.generation === access.generation
+    ) this.stopped.accepted(recordId, access.generation, config.reaction.stoppedEmojiType ?? 'DONE')
+    if (
       !(config.reaction.receivedEnabled ?? config.reaction.enabled) || this.disposed || this.options.signal.aborted
       || this.options.access()?.generation !== access.generation
     ) return
@@ -147,7 +154,11 @@ export class ChannelFeedback {
         feedback.receivedReaction = receipt
         if (feedback.processingSharesReceived) feedback.reaction = receipt
       })
-      await this.retireReceived(recordId)
+      try {
+        await this.retireReceived(recordId)
+      } finally {
+        this.stopped.receiptUpdated(recordId)
+      }
     }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_REACTION_FAILED'))
   }
   async routed(recordId: string) {
@@ -187,6 +198,7 @@ export class ChannelFeedback {
   jobUpdated(recordId: string) {
     this.sync()
     void this.started(recordId).catch(() => this.diagnostic('CHANNEL_FEEDBACK_PROCESSING_FAILED'))
+    this.stopped.changed(recordId)
   }
   /** Change to processing only after a native turn has been acknowledged. */
   async started(recordId: string) {
@@ -231,7 +243,11 @@ export class ChannelFeedback {
         const feedback = state.inputs[recordId]?.feedback
         if (feedback) feedback.reaction = receipt
       })
-      await this.retireReceived(recordId)
+      try {
+        await this.retireReceived(recordId)
+      } finally {
+        this.stopped.receiptUpdated(recordId)
+      }
     }).catch(() => this.diagnostic('CHANNEL_FEEDBACK_PROCESSING_FAILED'))
   }
   private async retireReceived(recordId: string) {
@@ -272,6 +288,7 @@ export class ChannelFeedback {
     }
   }
   async catchup() {
+    this.stopped.catchup()
     for (
       const record of Object.values(this.options.store.snapshot().inputs).filter(record =>
         record.feedback?.reaction && !record.feedback.completionAttempted
@@ -281,6 +298,7 @@ export class ChannelFeedback {
     }
   }
   async completed(recordId: string) {
+    if (this.stopped.has(recordId)) return
     const state = this.options.store.snapshot(), record = state.inputs[recordId]
     const jobs = Object.values(state.jobs).filter(job => job.recordId === recordId)
     if (
@@ -288,7 +306,7 @@ export class ChannelFeedback {
       || jobs.some(job => job.state !== 'completed') || !this.permitted(state, record.input.source.event)
     ) return
     const config = await this.options.settings(), emoji = config.reaction.completionEmojiType
-    if (!config.reaction.enabled || !emoji) return
+    if (config.reaction.stoppedEnabled || !config.reaction.enabled || !emoji) return
     const reserved = await this.options.store.mutate(state => {
       const feedback = state.inputs[recordId]?.feedback
       if (!feedback || feedback.completionAttempted) return false
@@ -298,12 +316,14 @@ export class ChannelFeedback {
     if (!reserved) return
     const access = this.options.access(), event = record.input.source.event
     if (!access?.feedbackRemove || !access.feedbackReact) throw new Error('CHANNEL_FEEDBACK_UNAVAILABLE')
-    await access.feedbackRemove(event, record.feedback.reaction.reactionId)
     const receipt = await access.feedbackReact(event, emoji)
     await this.options.store.mutate(state => {
       const feedback = state.inputs[recordId]?.feedback
       if (feedback) feedback.completion = receipt
     })
+    if (receipt && receipt.reactionId !== record.feedback.reaction.reactionId) {
+      await access.feedbackRemove(event, record.feedback.reaction.reactionId)
+    }
   }
   private outbound(target: ChannelThreadRef) {
     for (const entry of this.pending.values()) {
@@ -402,6 +422,7 @@ export class ChannelFeedback {
   }
   dispose() {
     this.disposed = true
+    this.stopped.dispose()
     for (const entry of this.pending.values()) this.finish(entry)
     for (const remove of this.subscriptions.values()) remove()
     this.subscriptions.clear()

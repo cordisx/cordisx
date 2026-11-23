@@ -166,9 +166,11 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 ### Task reception feedback
 
 Feishu/Lark tasks accepted by the existing wake, binding and dispatch rules
-receive best-effort feedback. Default behavior attempts an `OnIt` reaction on
-the input message, then sends one waiting message after 30 seconds if the task
-has not replied or finished. Group chatter that does not wake the bot and
+receive best-effort feedback. Default behavior attempts `Get` on receipt,
+switches to `OnIt` after the native turn starts, and switches to `DONE` when
+that exact turn is confirmed stopped. DONE describes the end of this round,
+not successful completion of the user's whole goal. One waiting message is sent
+after 30 seconds if the task has not replied or finished. Group chatter that does not wake the bot and
 Host slash commands do not trigger task feedback. Reaction failure does not
 block native work. Feedback is separate from automatic final-response forwarding.
 
@@ -177,7 +179,15 @@ Configure `channel-feedback.json` beside the selected profile's
 
 ```json
 {
-  "reaction": { "enabled": true, "emojiType": "OnIt" },
+  "reaction": {
+    "enabled": true,
+    "receivedEnabled": true,
+    "receivedEmojiType": "Get",
+    "processingEnabled": true,
+    "emojiType": "OnIt",
+    "stoppedEnabled": true,
+    "stoppedEmojiType": "DONE"
+  },
   "wait": {
     "enabled": true,
     "delaySeconds": 30,
@@ -198,6 +208,24 @@ single `wait.text` remains supported; `texts` takes precedence. A file at
 file is absent. Settings are reread for new inputs and at the hint deadline;
 no App restart is needed. Invalid configuration disables feedback for that
 input and records a diagnostic, without blocking the task.
+
+`stoppedEnabled` and `stoppedEmojiType` configure the final running-status reaction
+independently. Normal completion, explicit native failure and interruption qualify;
+active, queued and unknown results do not. Every correlated job must refer to a
+confirmed stopped native turn. Multiple messages steered into one turn each change
+only when that shared turn stops. Uncertain handoffs or changed account generations
+remain unchanged. The Host confirms the new reaction before removing its own prior
+reaction receipts, including Get/OnIt receipts arriving late. Unknown API outcomes
+are not retried and never authorize deleting another user's reaction.
+
+The stopped configuration is captured only for newly accepted inputs in this Host
+lifecycle. Enabling it or restarting does not sweep historical messages; interrupted
+feedback requests are not replayed. With no explicit `stoppedEnabled`, an existing
+`completionEmojiType` keeps its legacy completed-only behavior and disables the
+default stopped mapping. To use stopped semantics instead, explicitly enable
+`stoppedEnabled` and set `stoppedEmojiType`; it takes precedence over the legacy
+completion mapping. `reaction.enabled:false` also disables stopped feedback unless
+`stoppedEnabled:true` is explicitly set. No feedback operation blocks native work.
 
 Feedback uses the existing account SDK connection and the configured reply
 route. Reserved attempts are not replayed after restart. An observed authorized
