@@ -6,6 +6,7 @@ import type {
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { richtextRequirements } from '@cordisx/channel-runtime'
+import { CHANNEL_MESSAGE_OPERATION_COMMANDS, messageOperationCallerScope } from './channel-message-operations-rpc.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
@@ -26,6 +27,11 @@ import { authorizeChannelForward } from './channel-forward-permissions.js'
 
 export interface ChannelConversationAccess {
   readonly forward?: ReturnType<typeof import('./channel-forward-service.js').createChannelForwardService>
+  messageOperations?(operation: string, input: Record<string, unknown>, context: {
+    source?: import('@cordisx/channel-runtime').ChannelEventRef | undefined
+    callerScope: string
+    authorize: (event: import('@cordisx/channel-runtime').ChannelEventRef, write: boolean) => void
+  }): Promise<unknown>
   readonly outbound?: ChannelOutboundRpc
   feedbackReact?(
     event: import('@cordisx/channel-runtime').ChannelEventRef,
@@ -545,6 +551,28 @@ export class ChannelConversationTools {
       }
       const current = this.access()
       if (!current) return { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
+      if (CHANNEL_MESSAGE_OPERATION_COMMANDS.includes(operation as typeof CHANNEL_MESSAGE_OPERATION_COMMANDS[number])) {
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        if (!current.messageOperations) return { status: 'unavailable', code: 'CHANNEL_OPERATION_UNAVAILABLE' }
+        return current.messageOperations(operation, input, {
+          source,
+          callerScope: messageOperationCallerScope(callerSession, source),
+          authorize: (event, write) => {
+            if (!current.accounts().some(item => sameAccount(item.ref, event) && item.state === 'ready')) {
+              throw new Error('CONNECTION_NOT_READY')
+            }
+            if (source && this.consumer && !this.consumer.commandAllowed(source, write ? 'send' : 'history')) {
+              throw new Error('CHANNEL_POLICY_DENIED')
+            }
+            if (write && this.consumer && !this.consumer.sendAllowed(event)) throw new Error('CHANNEL_POLICY_DENIED')
+            if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+              throw new Error('CHANNEL_GENERATION_CHANGED')
+            }
+          },
+        })
+      }
       if (operation === 'reply-mode') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
         const callerSession = scopedCaller?.threadId ?? callerThreadId(metadata)

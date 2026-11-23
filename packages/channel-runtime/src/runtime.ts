@@ -462,6 +462,15 @@ export class ChannelRuntime {
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
     return deliverySnapshot(this.#store.snapshot(), id, caller)
   }
+  ownsPlainCard(target: ChannelTenantRef & { readonly conversationId: string }, messageId: string): boolean {
+    this.#assertRuntimeActive()
+    return Object.values(this.#store.snapshot().outbox).some(record =>
+      record.status === 'sent'
+      && record.externalMessageId === messageId && record.content?.type === 'card' && !record.questionCard
+      && record.target.adapterId === target.adapterId && record.target.accountId === target.accountId
+      && record.target.tenantId === target.tenantId && record.target.conversationId === target.conversationId
+    )
+  }
   latestInputCursor(): string {
     return latestInputCursor(this.#store.snapshot())
   }

@@ -62,6 +62,26 @@ const HELP: Readonly<Record<string, string>> = {
     'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
+  'message-capabilities':
+    'Discover implemented operations, restrictions and permission alternatives, not permission success. Input: {account,conversationId,kind}.',
+  'message-operation-receipt':
+    'Read a durable operation without replay. Input: {account,conversationId,kind,operationId}. null is not proof of no effect; unknown writes must not be blindly repeated with new IDs.',
+  'message-edit':
+    'Edit an owned text/post message with the same type. Input: {account,conversationId,kind,messageId,operationId,content:{type:"text",text}|{type:"richtext",blocks:[{text,style}]}}. Stable operationId; platform edit window and count apply.',
+  'message-recall':
+    'Recall only this bot’s message, not local history deletion. Input: {account,conversationId,kind,messageId,operationId}. Platform recall window applies. Unknown effects are not replayed.',
+  'pin-add':
+    'Pin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Requires platform pin permission; preserve operationId.',
+  'pin-remove':
+    'Unpin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Preserve operationId; not message deletion.',
+  'pin-list':
+    'Read one group pin page. Input: {account,conversationId,kind:"group",pageSize?:1..50,pageToken?,startTime?,endTime?}. Times are decimal milliseconds; no automatic traversal.',
+  'read-users':
+    'Read one page for this bot’s own message, at most 7 days old. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?}. Reading is not approval or completion.',
+  'reaction-list':
+    'Read one reaction page; Channel callers may only inspect their incoming source message. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?,emojiType?}. Existing reaction add/remove remains separate.',
+  'card-update':
+    'Update an owned plain notice/status card, never an approval/question control card. Input: {account,conversationId,kind,messageId,operationId,card:{template:"notice"|"status",title,body,status?:"pending"|"running"|"completed"|"failed"}}. Status template requires status; no raw vendor JSON or generic card actions.',
   listen:
     'Wait for messages in multiple conversations. Input: {account,conversationIds:[string],afterCursor?:string,timeoutSeconds?:0..60}.',
   send:
