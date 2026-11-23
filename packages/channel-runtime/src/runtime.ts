@@ -1,3 +1,7 @@
+import { appendAudit, auditRecord } from './runtime-audit.js'
+import { isEligibleOutbox } from './outbound-enqueue.js'
+import { ChannelDeliveryObservers } from './delivery-observers.js'
+export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateOutboundMedia } from './outbound-media.js'
 import { validateOutboundContent } from './outbound-content.js'
@@ -42,7 +46,7 @@ import {
   sanitizedThread,
   validateInput,
 } from './runtime-validation.js'
-import type { ChannelStoreState, StoredAuditRecord, StoredInboxRecord, StoredOutboxRecord } from './store.js'
+import type { StoredInboxRecord, StoredOutboxRecord } from './store.js'
 import { JsonChannelStore } from './store.js'
 import type {
   ChannelAdapterDefinition,
@@ -69,7 +73,6 @@ export { ChannelIntegrityError } from './runtime-validation.js'
 const DEFAULT_MAX_ATTEMPTS = 5
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_RETRY_BASE_MS = 1_000
-const MAX_AUDIT_RECORDS = 2_000
 
 const SYSTEM_CLOCK: ChannelClock = Object.freeze({ now: () => new Date() })
 
@@ -78,35 +81,10 @@ interface ActiveConnection {
   readonly connection: Awaited<ReturnType<ChannelAdapterDefinition['start']>>
 }
 
-function appendAudit(state: ChannelStoreState, record: StoredAuditRecord): void {
-  state.audit = [...state.audit, record].slice(-MAX_AUDIT_RECORDS)
-}
-
-function auditRecord(
-  input:
-    & Omit<StoredAuditRecord, 'auditId' | 'source' | 'pluginId' | 'pluginGeneration'>
-    & { readonly caller: ChannelPluginIdentity },
-): StoredAuditRecord {
-  const { caller, ...record } = input
-  return {
-    ...record,
-    source: caller.source,
-    pluginId: caller.pluginId,
-    pluginGeneration: caller.generation,
-    auditId: `audit:${randomUUID()}`,
-  }
-}
-
 function isEligibleInbox(record: StoredInboxRecord, now: number): boolean {
   if (record.status === 'queued') return true
   if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
   return record.status === 'processing' && Date.parse(record.leaseExpiresAt ?? '') <= now
-}
-
-function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: number): boolean {
-  if (record.status === 'queued') return true
-  if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
-  return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now
 }
 
 export class ChannelRuntime {
@@ -126,13 +104,20 @@ export class ChannelRuntime {
     readonly listener: ChannelMessageListener
   }>()
   #disposed = false
-  readonly #outboundObservers = new Set<(target: ChannelThreadRef) => void>()
-
-  observeOutbound(listener: (target: ChannelThreadRef) => void): () => void {
-    this.#outboundObservers.add(listener)
-    return () => {
-      this.#outboundObservers.delete(listener)
+  readonly #deliveryObservers = new ChannelDeliveryObservers()
+  observeSentDelivery = this.#deliveryObservers.observeSent
+  observeOutbound = this.#deliveryObservers.observeEnqueued
+  async notifyGuardedOnce(
+    notification: ChannelNotification,
+    caller: ChannelPluginIdentity,
+    id: string,
+    guard: () => boolean,
+  ) {
+    if (this.#store.snapshot().outbox[id] && !this.#store.snapshot().outbox[id]?.guardedDelivery) {
+      throw new ChannelIntegrityError('Guarded delivery conflicts with unguarded operation')
     }
+    this.#deliveryObservers.guard(id, guard)
+    return this.notifyOnce(notification, caller, id)
   }
 
   private constructor(options: ChannelRuntimeOptions, store: JsonChannelStore) {
@@ -412,7 +397,8 @@ export class ChannelRuntime {
         connections: this.#connections,
         requirePermission: request => this.#requirePermission(request),
         mediaDescriptor: this.#outboundMediaDescriptor,
-        observers: this.#outboundObservers,
+        observers: this.#deliveryObservers.enqueued,
+        guarded: id => this.#deliveryObservers.guarded(id),
         now: () => this.#now(),
         cancel: id => this.#cancelDelivery(id),
         FencedError: ChannelGenerationFencedError,
@@ -557,7 +543,7 @@ export class ChannelRuntime {
   async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
-    this.#outboundObservers.clear()
+    this.#deliveryObservers.dispose()
     this.#subscriptions.clear()
     const active = [...this.#connections.entries()]
     this.#connections.clear()
@@ -807,6 +793,11 @@ export class ChannelRuntime {
         return structuredClone(record)
       })
       if (claimed === undefined) continue
+      if (claimed.guardedDelivery && !this.#deliveryObservers.permitted(claimed.deliveryId)) {
+        await this.#store.transaction(state => this.#deliveryObservers.cancelStale(state, claimed, this.#now()))
+        processed += 1
+        continue
+      }
 
       try {
         if (claimed.content && !(active.connection.outboundTypes ?? ['text']).includes(claimed.effectiveType!)) {
@@ -839,7 +830,7 @@ export class ChannelRuntime {
         if (!result || typeof result.externalMessageId !== 'string' || result.externalMessageId.length === 0) {
           throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')
         }
-        await this.#store.transaction(state => {
+        const sent = await this.#store.transaction(state => {
           const current = state.outbox[claimed.deliveryId]
           if (current?.generation !== generation || current.status !== 'processing') return
           if (state.adapters[current.accountKey]?.generation !== generation) return
@@ -862,7 +853,17 @@ export class ChannelRuntime {
               outcome: result.recallHandle === undefined ? 'sent-irreversible' : 'sent-recallable',
             }),
           )
+          return true
         })
+        if (sent) {
+          this.#deliveryObservers.confirmed({
+            target: claimed.target,
+            caller: claimed.caller,
+            deliveryId: claimed.deliveryId,
+            createdAt: claimed.createdAt,
+            sentAt: completedAt,
+          })
+        }
       } catch (error) {
         const failedAt = this.#clock.now()
         await this.#store.transaction(state => {

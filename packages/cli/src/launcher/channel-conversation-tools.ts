@@ -16,6 +16,8 @@ import type { ChannelCommandUserReadback } from './channel-command-users.js'
 import { type ChannelReplyCapabilities } from './channel-reply-routing.js'
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
 import type { ChannelAdminPairing } from './channel-admin-pairing.js'
+import { questionDeliveryId } from './channel-questions.js'
+import { channelProgressTarget } from './channel-progress-reminders.js'
 import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
 
@@ -595,6 +597,14 @@ export class ChannelConversationTools {
       }
       if (operation === 'ask' || operation === 'question-cancel') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        if (operation === 'ask') {
+          this.consumer.trackProgressDelivery(
+            questionDeliveryId(caller, ref, text(input.operationId, 128)),
+            source,
+            callerSession,
+            outboundCaller.turnId,
+          )
+        }
         return operation === 'ask'
           ? await this.consumer.questions.ask(input, ref, caller, source)
           : await this.consumer.questions.cancel(input, ref, caller)
@@ -689,12 +699,19 @@ export class ChannelConversationTools {
       }
       if (operation === 'send' || operation === 'send-many' || operation === 'receipt') {
         const allowed = operation === 'send'
-          ? ['account', 'target', 'text', 'operationId', 'payload', 'content', 'fallback']
+          ? ['account', 'target', 'text', 'operationId', 'payload', 'content', 'fallback', 'progressToken']
           : operation === 'send-many'
           ? ['account', 'targets', 'text', 'operationId', 'payload', 'content', 'fallback']
           : ['account', 'operationId', 'targetCount']
         if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('INVALID_REQUEST')
         const operationId = text(input.operationId, 128)
+        const progressGuard = () => {
+          if (input.progressToken !== undefined) {
+            if (!this.consumer) throw new Error('CHANNEL_PROGRESS_NOTICE_STALE')
+            this.consumer.assertProgressNotice(input.progressToken, source, callerSession)
+          }
+        }
+        progressGuard()
         const targets = operation === 'send-many' ? input.targets : [input.target]
         if (operation === 'send-many' && (!Array.isArray(targets) || !targets.length || targets.length > 1000)) {
           throw new Error('INVALID_TARGET')
@@ -704,6 +721,9 @@ export class ChannelConversationTools {
         // Validate the entire batch before enqueueing its first effect.
         const parsed = operation === 'receipt' ? [] : (targets as unknown[]).map(value => {
           const target = parseOutboundTarget(value, ref, operationId)
+          if (input.progressToken !== undefined && (!source || !channelProgressTarget(source, target))) {
+            throw new Error('CHANNEL_PROGRESS_TARGET_MISMATCH')
+          }
           authorizeOutbound(target)
           return target
         })
@@ -763,17 +783,35 @@ export class ChannelConversationTools {
             }
             const deliveryId = deliveryIdFor(index)
             if (operation !== 'receipt') {
+              progressGuard()
+              this.consumer?.trackProgressDelivery(deliveryId, source, callerSession, outboundCaller.turnId)
               attempted += 1
-              await current.runtime.notifyOnce(
-                {
-                  target: parsed[index]!,
-                  kind: 'reply',
-                  text: sendText ?? '',
-                  ...(contents ? contents[index]! : {}),
-                },
-                caller,
-                deliveryId,
-              )
+              const notification = {
+                target: parsed[index]!,
+                kind: 'reply' as const,
+                text: sendText ?? '',
+                ...(contents ? contents[index]! : {}),
+              }
+              if (input.progressToken !== undefined) {
+                if (!current.runtime.notifyGuardedOnce) throw new Error('CHANNEL_PROGRESS_GUARD_UNAVAILABLE')
+                await current.runtime.notifyGuardedOnce(notification, caller, deliveryId, () => {
+                  try {
+                    progressGuard()
+                    return this.access()?.generation === current.generation
+                  } catch {
+                    return false
+                  }
+                })
+              } else {await current.runtime.notifyOnce(
+                  {
+                    target: parsed[index]!,
+                    kind: 'reply',
+                    text: sendText ?? '',
+                    ...(contents ? contents[index]! : {}),
+                  },
+                  caller,
+                  deliveryId,
+                )}
               if (!this.lifetime.signal.aborted) await current.drain(ref)
             }
             // Missing is explicit. JSON.stringify must never silently erase a missing receipt.
