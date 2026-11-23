@@ -6,8 +6,8 @@ import { type FeishuForwardClient, feishuForwardedContent } from './feishu-forwa
 
 export interface FeishuMessageContentOptions {
   rawContent?: string
-  messageClient?: FeishuForwardClient
-  resourceClient?: FeishuMessageResourceClient
+  messageClient?: FeishuForwardClient | undefined
+  resourceClient?: FeishuMessageResourceClient | undefined
 }
 
 export async function feishuMessageContent(
