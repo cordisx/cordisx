@@ -6,7 +6,8 @@ import type {
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { richtextRequirements } from '@cordisx/channel-runtime'
-import { CHANNEL_MESSAGE_OPERATION_COMMANDS, messageOperationCallerScope } from './channel-message-operations-rpc.js'
+import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations-rpc.js'
+import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
@@ -552,25 +553,13 @@ export class ChannelConversationTools {
       const current = this.access()
       if (!current) return { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
       if (CHANNEL_MESSAGE_OPERATION_COMMANDS.includes(operation as typeof CHANNEL_MESSAGE_OPERATION_COMMANDS[number])) {
-        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
-          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
-        }
-        if (!current.messageOperations) return { status: 'unavailable', code: 'CHANNEL_OPERATION_UNAVAILABLE' }
-        return current.messageOperations(operation, input, {
+        return authorizedChannelMessageOperation(operation, input, {
+          current,
+          consumer: this.consumer,
           source,
-          callerScope: messageOperationCallerScope(callerSession, source),
-          authorize: (event, write) => {
-            if (!current.accounts().some(item => sameAccount(item.ref, event) && item.state === 'ready')) {
-              throw new Error('CONNECTION_NOT_READY')
-            }
-            if (source && this.consumer && !this.consumer.commandAllowed(source, write ? 'send' : 'history')) {
-              throw new Error('CHANNEL_POLICY_DENIED')
-            }
-            if (write && this.consumer && !this.consumer.sendAllowed(event)) throw new Error('CHANNEL_POLICY_DENIED')
-            if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
-              throw new Error('CHANNEL_GENERATION_CHANGED')
-            }
-          },
+          nativeCaller,
+          callerSession,
+          active: () => !this.lifetime.signal.aborted && this.access()?.generation === current.generation,
         })
       }
       if (operation === 'reply-mode') {
