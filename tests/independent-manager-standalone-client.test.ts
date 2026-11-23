@@ -36,6 +36,8 @@ function deferred<T>() {
 
 function fixture(input: {
   readonly invalidSessionAt?: number
+  readonly sessionTransportFailuresAt?: readonly number[]
+  readonly unauthorizedSessionAt?: number
   readonly bundlePath?: string
   readonly graphs?: readonly unknown[]
   readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
@@ -132,6 +134,12 @@ function fixture(input: {
     }
     if (path === '/api/renderer/session') {
       checks++
+      if (input.sessionTransportFailuresAt?.includes(checks)) {
+        return Promise.reject(new TypeError('temporary network failure'))
+      }
+      if (checks === input.unauthorizedSessionAt) {
+        return Promise.resolve(new Response('{}', { status: 401 }))
+      }
       return Promise.resolve(
         response({ current: sessionCurrent && checks !== input.invalidSessionAt, rendererId, generation: 'owner-1' }),
       )
@@ -731,6 +739,59 @@ it('recovers a worker binding only while the owner session remains current', asy
     expect(test.auth.recover).toHaveBeenCalledOnce()
     expect(test.runtime.dispose).not.toHaveBeenCalled()
     expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')).toHaveLength(1)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('keeps a live renderer after one interrupted read-only session check', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ sessionTransportFailuresAt: [4] })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_200)
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/session')).toHaveLength(5)
+    expect(test.unavailable).not.toHaveBeenCalled()
+    expect(test.runtime.dispose).not.toHaveBeenCalled()
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')).toHaveLength(1)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retires the renderer when the retried session check is still unavailable or no longer current', async () => {
+  vi.useFakeTimers()
+  for (
+    const options of [
+      { sessionTransportFailuresAt: [4, 5] },
+      { sessionTransportFailuresAt: [4], invalidSessionAt: 5 },
+    ]
+  ) {
+    const test = fixture(options)
+    try {
+      expect(await test.manager.ready).toBe(true)
+      await vi.advanceTimersByTimeAsync(15_200)
+      expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/session')).toHaveLength(5)
+      expect(test.unavailable).toHaveBeenCalledOnce()
+      expect(test.runtime.dispose).toHaveBeenCalledOnce()
+    } finally {
+      await test.manager.close()
+      test.dom.window.close()
+    }
+  }
+})
+
+it('does not retry an explicit unauthorized session response', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ unauthorizedSessionAt: 4 })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_200)
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/session')).toHaveLength(4)
+    expect(test.unavailable).toHaveBeenCalledOnce()
+    expect(test.runtime.dispose).toHaveBeenCalledOnce()
   } finally {
     await test.manager.close()
     test.dom.window.close()

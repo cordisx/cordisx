@@ -26,6 +26,8 @@ const resumeStorageKey = 'cordisx-manager-resume-id'
 const resumeAttemptStorageKey = 'cordisx-manager-resume-attempt'
 const entryStorageKey = 'cordisx-manager-entry-attempt'
 
+class ManagerSessionTransportError extends Error {}
+
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
 type Composition = {
@@ -170,6 +172,12 @@ export function startStandaloneManager(input: {
     const deadline = path === '/api/renderer/bootstrap' ? bootMilliseconds : requestMilliseconds
     const timer = setTimeout(() => timeout.abort(), deadline)
     try {
+      const transportFailure = (error: unknown): never => {
+        if (path === '/api/renderer/session' && !closed && !lifetime.signal.aborted) {
+          throw new ManagerSessionTransportError('manager-session-transport', { cause: error })
+        }
+        throw error
+      }
       const response = await browser.fetch(path, {
         method: 'POST',
         headers: {
@@ -182,11 +190,11 @@ export function startStandaloneManager(input: {
         redirect: 'error',
         referrerPolicy: 'no-referrer',
         signal: AbortSignal.any([lifetime.signal, timeout.signal]),
-      })
+      }).catch(transportFailure)
       if ((!response.ok && !(allowPending && response.status === 409)) || closed || timeout.signal.aborted) {
         throw new Error('manager-session-unavailable')
       }
-      const text = await response.text()
+      const text = await response.text().catch(transportFailure)
       if (text.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('manager-response-invalid')
       const value: unknown = JSON.parse(text)
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('manager-response-invalid')
@@ -427,13 +435,27 @@ export function startStandaloneManager(input: {
       const scope = { rendererId: opened.rendererId, generation: opened.generation, profileId: opened.profileId }
       const token = sessionToken
       const isSessionCurrent = async (): Promise<boolean> => {
-        try {
-          const state = record(await post('/api/renderer/session', {}, token), ['current', 'rendererId', 'generation'])
-          return state.current === true && state.rendererId === scope.rendererId
-            && state.generation === scope.generation
-        } catch {
-          return false
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const state = record(await post('/api/renderer/session', {}, token), [
+              'current',
+              'rendererId',
+              'generation',
+            ])
+            return state.current === true && state.rendererId === scope.rendererId
+              && state.generation === scope.generation
+          } catch (error) {
+            // Only this read-only check may be retried. An explicit rejection,
+            // invalid response, or mismatched owner remains immediately fatal.
+            if (!(error instanceof ManagerSessionTransportError) || attempt !== 0 || closed) return false
+            try {
+              await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
+            } catch {
+              return false
+            }
+          }
         }
+        return false
       }
       const verifyReviewSession = async (): Promise<boolean> => {
         if (!await rendererAdmission || closed || !resourceAuth || lifecycle?.canResume() !== true) return false

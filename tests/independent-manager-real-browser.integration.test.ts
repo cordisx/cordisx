@@ -193,6 +193,37 @@ it.skipIf(chrome === undefined)(
       }, { timeout: 15_000 })
       const migratedBeforeReload = await migrationComplete()
       expect(migratedBeforeReload).toBe(true)
+      // A lost read-only heartbeat must not retire an otherwise live owner
+      // session. Exercise the browser transport against the real service;
+      // no lifecycle command or configuration write is replayed.
+      await first.evaluate(`(() => {
+        const previous = window.fetch
+        const state = globalThis.__fixtureSessionTransport = { failed: 0, succeeded: 0 }
+        window.fetch = function(request, options) {
+          if (request === '/api/renderer/session') {
+            if (state.failed === 0) {
+              state.failed++
+              return Promise.reject(new TypeError('controlled temporary network failure'))
+            }
+            return previous.call(this, request, options).then(response => {
+              if (response.ok) state.succeeded++
+              return response
+            })
+          }
+          return previous.call(this, request, options)
+        }
+        globalThis.__fixtureRestoreSessionFetch = () => { window.fetch = previous }
+      })()`)
+      await vi.waitFor(async () => {
+        const state = await first!.evaluate<{ failed: number; succeeded: number; available: boolean }>(`({
+          ...globalThis.__fixtureSessionTransport,
+          available: document.querySelector('p[role=status]')?.hidden === true
+        })`)
+        expect(state.failed).toBe(1)
+        expect(state.succeeded).toBeGreaterThanOrEqual(1)
+        expect(state.available).toBe(true)
+      }, { timeout: 25_000 })
+      await first.evaluate('globalThis.__fixtureRestoreSessionFetch()')
       // Browsers may drop an unload keepalive. The authenticated replacement
       // must still retire the old owner session before joining.
       await first.evaluate("sessionStorage.setItem('fixture-drop-close', '1')")
