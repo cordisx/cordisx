@@ -1,6 +1,9 @@
 import { validateMemoryRecord } from './channel-memory-record-validation.js'
 import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { MemoryFiles } from './channel-memory-files.js'
+import type { UserMemoryAssertion } from './channel-user-memory-model.js'
+import { userMemoryMatches } from './channel-user-memory-request.js'
 import {
   type MemoryAccount,
   type MemoryAuthority,
@@ -29,6 +32,8 @@ export interface MemoryRecord extends MemoryInput {
   createdAt: string
   updatedAt: string
   provenance: { messageId: string; actor: string; conversation: string }
+  /** Host-extracted explicit self-information, separate from management authority. */
+  userMemory?: { key: string; category: UserMemoryAssertion['category']; sequence: number }
 }
 interface MemoryState {
   schemaVersion: 1
@@ -37,6 +42,7 @@ interface MemoryState {
   grants: MemoryGrant[]
   bindings: Record<string, string>
   catalog: Record<string, Omit<MemoryRecord, 'summary'> & { keywords: string }>
+  userSequences?: Record<string, number>
   challenges?: Record<
     string,
     { initiator: MemoryAccount; target: MemoryAccount; expiresAt: string; consumedAt?: string }
@@ -87,6 +93,7 @@ export class ChannelMemoryStore {
     limit?: number
     maxBytes?: number
     navigation?: boolean
+    userOnly?: boolean
   }): Promise<unknown> {
     const limit = options.limit ?? 8, maxBytes = options.maxBytes ?? 4096
     if (
@@ -106,6 +113,9 @@ export class ChannelMemoryStore {
     const words = (options.query ?? '').toLocaleLowerCase().trim().split(/\s+/u).filter(Boolean).slice(0, 16)
     const entries = Object.values(state.catalog).filter(record =>
       memoryReadable(record, authority, state.grants, state.bindings, this.clock())
+      && (!options.userOnly
+        || record.owner === memoryKey(authority.actor) && !!authority.userRecall
+          && userMemoryMatches(record, authority.userRecall))
       && (!options.entity || record.entityRefs.includes(options.entity) || record.tags.includes(options.entity))
       && words.every(word => record.keywords.includes(word))
     )
@@ -171,6 +181,11 @@ export class ChannelMemoryStore {
     if (record.schemaVersion !== 1 || record.id !== recordId || record.revision !== state.records[recordId]) {
       throw new Error('MEMORY_INVALID_RECORD')
     }
+    if (
+      record.userMemory && (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(record.userMemory.key)
+        || !['name', 'relationship', 'preference', 'fact'].includes(record.userMemory.category)
+        || !Number.isSafeInteger(record.userMemory.sequence) || record.userMemory.sequence < 1)
+    ) throw new Error('MEMORY_INVALID_RECORD')
     return record
   }
   async remember(authority: MemoryAuthority, input: MemoryInput, messageId: string): Promise<MemoryRecord> {
@@ -207,6 +222,75 @@ export class ChannelMemoryStore {
     const record = await this.record(recordId, state)
     return record
   }
+  async rememberUser(
+    authority: MemoryAuthority,
+    assertions: readonly UserMemoryAssertion[],
+    source: { messageId: string; sequence: number },
+    current: () => boolean,
+  ): Promise<MemoryRecord[]> {
+    if (
+      !source.messageId || source.messageId.length > 512 || !Number.isSafeInteger(source.sequence)
+      || source.sequence < 1
+    ) throw new Error('MEMORY_INVALID_PROVENANCE')
+    return this.files.locked(async () => {
+      const state = await this.state(),
+        now = this.clock(),
+        owner = memoryKey(authority.actor),
+        scopeId = memoryKey(authority.conversation)
+      const records: MemoryRecord[] = []
+      let changed = false
+      for (const assertion of assertions) {
+        if (!current()) return []
+        const sequenceKey = createHash('sha256').update(JSON.stringify([owner, assertion.key])).digest('hex')
+        const watermark = state.userSequences?.[sequenceKey] ?? 0
+        if (watermark > source.sequence) continue
+        const candidates = Object.values(state.catalog).filter(row =>
+          row.owner === owner && row.userMemory?.key === assertion.key
+        )
+        if (candidates.length > 1) throw new Error('MEMORY_USER_RECORD_CONFLICT')
+        const prior = candidates[0] ? await this.record(candidates[0].id, state) : undefined
+        // A forgotten assertion leaves its sequence fence, so queued older introductions cannot restore it.
+        if (!prior && watermark >= source.sequence) continue
+        if (prior && prior.userMemory!.sequence > source.sequence) continue
+        if (prior && prior.userMemory!.sequence === source.sequence) {
+          if (prior.provenance.messageId === source.messageId) records.push(prior)
+          continue
+        }
+        const input: MemoryInput = {
+          kind: assertion.category === 'preference' ? 'preference' : assertion.category === 'fact' ? 'fact' : 'person',
+          title: assertion.title,
+          summary: assertion.evidence,
+          tags: [assertion.key],
+          entityRefs: [],
+          evidenceType: 'user-declared',
+          confidence: 1,
+        }
+        validateInput(input)
+        const record: MemoryRecord = {
+          ...input,
+          schemaVersion: 1,
+          id: prior?.id ?? randomUUID(),
+          revision: (prior?.revision ?? 0) + 1,
+          owner,
+          scopeId,
+          createdAt: prior?.createdAt ?? now,
+          updatedAt: now,
+          provenance: { actor: owner, conversation: scopeId, messageId: source.messageId },
+          userMemory: { key: assertion.key, category: assertion.category, sequence: source.sequence },
+        }
+        await this.files.write(`${record.id}-${record.revision}.json`, record)
+        state.records[record.id] = record.revision
+        state.catalog[record.id] = this.catalog(record)
+        state.userSequences ??= {}
+        state.userSequences[sequenceKey] = source.sequence
+        changed = true
+        records.push(record)
+      }
+      if (!current()) return []
+      if (changed) await this.save(state)
+      return current() ? records : []
+    })
+  }
   async change(
     authority: MemoryAuthority,
     recordId: string,
@@ -235,6 +319,7 @@ export class ChannelMemoryStore {
       }
       const updated: MemoryRecord = {
         ...input,
+        ...(record.userMemory ? { userMemory: record.userMemory } : {}),
         schemaVersion: 1,
         id: record.id,
         scopeId: record.scopeId,

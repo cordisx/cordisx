@@ -7,6 +7,20 @@ export interface ChannelMessageContext {
   readonly sender: { readonly userId?: string; readonly name?: string }
   readonly mentions: readonly { readonly key: string; readonly userId: string; readonly name?: string }[]
   readonly referencedMessage?: import('./channel-message-read.js').ChannelMessageReadResult
+  readonly userMemory?: {
+    readonly action: 'remember' | 'recall'
+    readonly status: 'saved' | 'found' | 'not-found' | 'unavailable'
+    readonly records: readonly {
+      id: string
+      revision: number
+      title: string
+      summary: string
+      updatedAt: string
+      evidenceType: string
+    }[]
+    readonly grantsPermissions: false
+    readonly audience: 'current-group' | 'requesting-user'
+  }
 }
 export function channelParticipantName(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined

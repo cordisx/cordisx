@@ -133,6 +133,11 @@ export async function steerChannelQueued(
     signal: AbortSignal
     claims: Set<string>
     ready(sessionId: string): boolean
+    memoryContext?(
+      record: ChannelConversationInput,
+      sessionId: string,
+      context: ReturnType<typeof channelMessageContext>,
+    ): Promise<ReturnType<typeof channelMessageContext>>
   },
   job: ChannelConversationJob,
   record: ChannelConversationInput,
@@ -143,10 +148,11 @@ export async function steerChannelQueued(
   owner.claims.add(sessionId)
   try {
     const message = record.input, event = message.source.event
-    const context = await owner.access()?.messageContext?.(message, record.addressing)
+    const baseContext = await owner.access()?.messageContext?.(message, record.addressing)
       .catch(() => undefined) ?? channelMessageContext(message, record.addressing)
     const parent = await owner.store.mutate(state => claimChannelSteer(state, job.id))
     if (!parent?.turnId) return
+    const context = await owner.memoryContext?.(record, sessionId, baseContext) ?? baseContext
     const targetTurn = parent.turnId
     const captured = owner.store.snapshot(), binding = job.bindingId ? captured.bindings[job.bindingId] : undefined
     const defaults = channelReplyDefaults(captured.policy, event, binding)

@@ -1,4 +1,7 @@
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
+import { channelCommandReply, channelConsumerReply } from './channel-command-reply.js'
+import { channelUserMemoryComposition } from './channel-user-memory-context.js'
+import { channelUserMemoryDispatch } from './channel-user-memory-dispatch.js'
 import { channelDispatchAllowed } from './channel-group-access.js'
 import { channelTaskPolicyChange } from './channel-task-policy-change.js'
 import { channelPermissionOperation } from './channel-permission-cli.js'
@@ -81,6 +84,7 @@ export class ChannelConversationConsumer {
   private readonly logicalOwner: ProfileLogicalConversationOwner
   private readonly sourceFence: ProfileLogicalConversationOwner['fence']
   private readonly commandUsers = new ChannelCommandUsers()
+  readonly userMemory: ReturnType<typeof channelUserMemoryComposition>
   private extraNative: (() => ChannelNativeSessions | undefined) | undefined
   private readonly sessionCommands: ChannelSessionCommands
   private readonly approvals: ChannelNativeApprovals
@@ -110,6 +114,7 @@ export class ChannelConversationConsumer {
       })
     }
     ;[this.memory, this.memoryAuthority, this.personas] = createChannelMemory(input.file)
+    this.userMemory = channelUserMemoryComposition(store, this.lifetime.signal, this, input)
     this.feedback = createChannelFeedback(store, input, this.lifetime.signal)
     this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
@@ -775,6 +780,7 @@ export class ChannelConversationConsumer {
             signal: this.lifetime.signal,
             claims: this.sessionClaims,
             ready: sessionId => this.taskSettings.ready(sessionId),
+            memoryContext: channelUserMemoryDispatch(this.userMemory.context, native, job.id),
           },
           job,
           record,
@@ -814,10 +820,15 @@ export class ChannelConversationConsumer {
             }],
           }
           : record.input
-        const context = await this.input.access()?.messageContext?.(message, record.addressing)
+        const baseContext = await this.input.access()?.messageContext?.(message, record.addressing)
           .catch(() => undefined) ?? channelMessageContext(message, record.addressing)
         const logicalHistory = !continuation && channelLogicalHistoryAvailable(captured, event, job.sessionId)
         if (!await ensureChannelLogicalPersona(this.personas, this.store, job.id, event, this.input)) return
+        const context = await channelUserMemoryDispatch(this.userMemory.context, native, job.id)(
+          record,
+          continuation ? undefined : job.sessionId,
+          baseContext,
+        )
         const handoff = await channelDispatchHandoff(this.store, job.id, event)
         if (handoff === false) return
         const result = await native.start(
@@ -952,35 +963,21 @@ export class ChannelConversationConsumer {
     text: string,
     reservedTarget?: ChannelThreadRef,
   ): Promise<string> {
-    const access = this.input.access()
-    if (!access || this.lifetime.signal.aborted || !channelPolicyAllows(this.store.snapshot().policy, 'send', event)) {
-      return 'denied'
-    }
-    const deliveryId = `delivery:${identity([operation, event])}`
-    const defaults = channelReplyDefaults(this.store.snapshot().policy, event)
-    const mode = defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode
-    if (!reservedTarget && mode === 'none') return 'denied'
-    const target = reservedTarget ?? access.runtime.deliverySnapshot(deliveryId, CALLER)?.target
-      ?? channelAutoReplyTarget(event, defaults)
-    if (!target) return 'denied'
-    await access.runtime.notifyOnce({ target, kind: 'reply', text }, CALLER, deliveryId)
-    if (this.lifetime.signal.aborted) return 'queued'
-    await access.drain(event)
-    return access.runtime.deliverySnapshot(deliveryId, CALLER)?.state ?? 'unavailable'
+    return channelConsumerReply(
+      { access: this.input.access(), signal: this.lifetime.signal, policy: this.store.snapshot().policy },
+      operation,
+      event,
+      text,
+      reservedTarget,
+    )
   }
   private async commandReply(operation: string, event: ChannelEventRef, text: string): Promise<string> {
-    try {
-      return await this.reply(
-        operation,
-        event,
-        text,
-        channelCommandReplyTarget(event, this.input.access()?.replyCapabilities?.(event)),
-      )
-    } catch {
-      // A second error reply could duplicate an outbound effect whose result is unknown.
-      this.input.report?.('CHANNEL_COMMAND_REPLY_RESULT_UNKNOWN')
-      return 'unknown'
-    }
+    return channelCommandReply(
+      { access: this.input.access(), reply: this.reply.bind(this), report: this.input.report },
+      operation,
+      event,
+      text,
+    )
   }
   async dispose(): Promise<void> {
     this.lifetime.abort()

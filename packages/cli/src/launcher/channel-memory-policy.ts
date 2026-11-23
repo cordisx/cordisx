@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { type OwnMemoryRecall, ownRecallMatches } from './channel-memory-recall.js'
+import { userMemoryMatches, type UserMemoryRecall } from './channel-user-memory-request.js'
 
 export interface MemoryAccount {
   adapterId: string
@@ -21,6 +22,7 @@ export interface MemoryAuthority {
   ownTopic?: readonly string[]
   administer?: readonly string[]
   ownRecall?: OwnMemoryRecall
+  userRecall?: UserMemoryRecall
 }
 export interface MemoryGrant {
   id: string
@@ -53,6 +55,7 @@ export function memoryReadable(
     keywords?: string
     kind?: string
     updatedAt?: string
+    userMemory?: { key: string; category: string }
   },
   authority: MemoryAuthority,
   grants: readonly MemoryGrant[],
@@ -70,6 +73,7 @@ export function memoryReadable(
   ) return true
   // This request-local permission requires exact ownership; linked identities and source admins are not substitutes.
   if (record.owner === actor && authority.ownRecall && ownRecallMatches(record, authority.ownRecall, now)) return true
+  if (record.owner === actor && authority.userRecall && userMemoryMatches(record, authority.userRecall)) return true
   return grants.some(grant =>
     grant.source === record.scopeId && !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now)
     && (!grant.recordIds || grant.recordIds.includes(record.id))
