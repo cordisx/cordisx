@@ -1,3 +1,4 @@
+import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
 import { createChannelMemory } from './channel-memory-composition.js'
@@ -17,6 +18,7 @@ import { channelExecutionDispatch } from './channel-execution-dispatch.js'
 import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
+import { channelJobBlocks, reconcileChannelJob, steerChannelQueued } from './channel-conversation-steer.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
@@ -47,6 +49,7 @@ import { logicalContinuationManagement } from './logical-continuation-management
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
+  channelAutoReplyTarget,
   channelCommandReplyTarget,
   channelReplyDefaults,
   type ChannelReplyMode,
@@ -457,14 +460,8 @@ export class ChannelConversationConsumer {
           await this.feedback.completed(job.recordId).catch(() =>
             this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
           )
-        } catch {
-          await this.store.mutate(state => {
-            const current = state.jobs[job.id]
-            if (current?.state === 'dispatching') {
-              current.state = 'reconciliation-required'
-              current.code = 'NATIVE_EFFECT_UNCERTAIN'
-            } else if (current?.state === 'running') current.code = 'NATIVE_READBACK_UNAVAILABLE'
-          })
+        } catch (error) {
+          await recordChannelDispatchFailure(this.store, job.id, error, this.input.report)
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
@@ -519,6 +516,8 @@ export class ChannelConversationConsumer {
       }
       return
     } else if (received && addressed && policy.enabled && channelPolicyAllows(policy, 'dispatch', event)) {
+      // Acknowledge receipt before a busy conversation is ready to create a job.
+      void this.feedback.received(record.recordId).catch(() => this.input.report?.('CHANNEL_FEEDBACK_UNAVAILABLE'))
       const waiting = await this.store.mutate(state => {
         const bindings = Object.values(state.bindings).filter(binding =>
           binding.state === 'active'
@@ -742,28 +741,7 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
-      if (
-        job.code === 'CONTINUATION_EFFECT_UNCERTAIN' || job.code === 'CONTINUATION_BUSINESS_TURN_PENDING'
-        || job.sessionId && state.continuations[job.sessionId]?.intent?.state === 'unknown'
-      ) return
-      if (job.turnId && job.sessionId) {
-        await this.store.mutate(state => {
-          state.jobs[job.id]!.state = 'running'
-        })
-      } else if (job.code !== 'NATIVE_OPERATION_UNAVAILABLE_AFTER_RESTART') {
-        const recovered = await native.reconcile(job.id)
-        await this.store.mutate(state => {
-          const current = state.jobs[job.id]!
-          current.state = recovered.state
-          if (recovered.sessionId) current.sessionId = recovered.sessionId
-          if (recovered.turnId) current.turnId = recovered.turnId
-          if (recovered.code) current.code = recovered.code
-          if (job.autoCreate && recovered.sessionId) {
-            attachCreatedChannelBinding(state, current, record, recovered.sessionId, this.input.profileId)
-          }
-        })
-      }
-      return
+      return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
       if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)) return
@@ -778,9 +756,23 @@ export class ChannelConversationConsumer {
         job.sessionId
         && Object.values(state.jobs).some(other =>
           other.id !== job.id && other.sessionId === job.sessionId
-          && ['dispatching', 'running', 'replying', 'reconciliation-required'].includes(other.state)
+          && channelJobBlocks(state, other)
         )
-      ) return
+      ) {
+        await steerChannelQueued(
+          {
+            store: this.store,
+            access: this.input.access,
+            signal: this.lifetime.signal,
+            claims: this.sessionClaims,
+            ready: sessionId => this.taskSettings.ready(sessionId),
+          },
+          job,
+          record,
+          native,
+        )
+        return
+      }
       if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
       if (
         job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')
@@ -919,7 +911,7 @@ export class ChannelConversationConsumer {
         return undefined
       }
       try {
-        current.replyTarget ??= existingTarget ?? channelReplyTarget(event, mode)
+        current.replyTarget ??= existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
       } catch (error) {
         current.state = 'failed'
         current.code = error instanceof Error && error.message === 'REPLY_MESSAGE_REQUIRED'
@@ -958,7 +950,8 @@ export class ChannelConversationConsumer {
     const mode = defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode
     if (!reservedTarget && mode === 'none') return 'denied'
     const target = reservedTarget ?? access.runtime.deliverySnapshot(deliveryId, CALLER)?.target
-      ?? channelReplyTarget(event, mode as Exclude<ChannelReplyMode, 'none'>)
+      ?? channelAutoReplyTarget(event, defaults)
+    if (!target) return 'denied'
     await access.runtime.notifyOnce({ target, kind: 'reply', text }, CALLER, deliveryId)
     if (this.lifetime.signal.aborted) return 'queued'
     await access.drain(event)
