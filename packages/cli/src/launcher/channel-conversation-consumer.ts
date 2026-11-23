@@ -18,6 +18,7 @@ import { channelExecutionDispatch } from './channel-execution-dispatch.js'
 import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
+import { channelJobBlocks, reconcileChannelJob, steerChannelQueued } from './channel-conversation-steer.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
@@ -739,28 +740,7 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
-      if (
-        job.code === 'CONTINUATION_EFFECT_UNCERTAIN' || job.code === 'CONTINUATION_BUSINESS_TURN_PENDING'
-        || job.sessionId && state.continuations[job.sessionId]?.intent?.state === 'unknown'
-      ) return
-      if (job.turnId && job.sessionId) {
-        await this.store.mutate(state => {
-          state.jobs[job.id]!.state = 'running'
-        })
-      } else if (job.code !== 'NATIVE_OPERATION_UNAVAILABLE_AFTER_RESTART') {
-        const recovered = await native.reconcile(job.id)
-        await this.store.mutate(state => {
-          const current = state.jobs[job.id]!
-          current.state = recovered.state
-          if (recovered.sessionId) current.sessionId = recovered.sessionId
-          if (recovered.turnId) current.turnId = recovered.turnId
-          if (recovered.code) current.code = recovered.code
-          if (job.autoCreate && recovered.sessionId) {
-            attachCreatedChannelBinding(state, current, record, recovered.sessionId, this.input.profileId)
-          }
-        })
-      }
-      return
+      return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
       if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'dispatch', event)) return
@@ -775,9 +755,23 @@ export class ChannelConversationConsumer {
         job.sessionId
         && Object.values(state.jobs).some(other =>
           other.id !== job.id && other.sessionId === job.sessionId
-          && ['dispatching', 'running', 'replying', 'reconciliation-required'].includes(other.state)
+          && channelJobBlocks(state, other)
         )
-      ) return
+      ) {
+        await steerChannelQueued(
+          {
+            store: this.store,
+            access: this.input.access,
+            signal: this.lifetime.signal,
+            claims: this.sessionClaims,
+            ready: sessionId => this.taskSettings.ready(sessionId),
+          },
+          job,
+          record,
+          native,
+        )
+        return
+      }
       if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
       if (
         job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')

@@ -34,6 +34,7 @@ export type NativeBridgeMethod =
   | 'thread/name/set'
   | 'thread/metadata/update'
   | 'turn/start'
+  | 'turn/steer'
   | 'turn/interrupt'
   | 'threadSection/list'
   | 'threadSection/create'
