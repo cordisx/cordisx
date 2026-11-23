@@ -201,6 +201,10 @@ describe('configured Channel CLI production endpoint', () => {
           deliveryState: 'sent',
         })
         expect(await command('send', send, contextToken)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
+        expect(await command('receipt', { account: ref, operationId: send.operationId }, contextToken)).toMatchObject({
+          deliveryState: 'sent',
+          receipt: { state: 'sent', externalMessageId: 'om_explicit_result' },
+        })
         return { status: 'started', sessionId, turnId: 'fixture-turn' }
       },
     )
@@ -259,7 +263,8 @@ describe('configured Channel CLI production endpoint', () => {
       })
       expect(await command('receipt', { account: ref, operationId: send.operationId })).toMatchObject({
         status: 'ok',
-        receipt: { state: 'sent', externalMessageId: 'om_explicit_result' },
+        deliveryState: 'not-found',
+        receipt: null,
       })
       await expect(command('send', { ...send, operationId: 'expired-context' }, contextToken)).rejects.toThrow()
       expect(runtime.notifyOnce).toHaveBeenCalledOnce()
@@ -273,6 +278,7 @@ describe('configured Channel CLI production endpoint', () => {
         'ask',
         'receipt',
         'send',
+        'receipt',
         'receipt',
         'send',
       ])
