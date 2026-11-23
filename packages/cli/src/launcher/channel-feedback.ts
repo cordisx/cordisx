@@ -1,3 +1,4 @@
+import { channelDispatchAllowed } from './channel-group-access.js'
 import { randomInt } from 'node:crypto'
 import type { ChannelEventRef, ChannelThreadRef } from '@cordisx/channel-runtime'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
@@ -54,7 +55,7 @@ export class ChannelFeedback {
     )
   }
   private permitted(state: ChannelConversationState, event: ChannelEventRef) {
-    return state.policy.enabled && channelPolicyAllows(state.policy, 'dispatch', event)
+    return state.policy.enabled && channelDispatchAllowed(state, event)
       && channelPolicyAllows(state.policy, 'send', event)
   }
   private alive(entry: Entry) {
