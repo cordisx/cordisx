@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -29,6 +31,22 @@ async function fixture() {
   return { filename, store: new ChannelForwardStore(filename) }
 }
 describe('independent forward ledger', () => {
+  it('excludes a second process while the first owns the file lock', async () => {
+    const { filename, store } = await fixture()
+    const source = `import { mkdir } from 'node:fs/promises'; await mkdir(${
+      JSON.stringify(`${filename}.lock`)
+    }); console.log('locked'); process.stdin.resume();`
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], { stdio: ['pipe', 'pipe', 'pipe'] })
+    try {
+      await once(child.stdout, 'data')
+      const perform = vi.fn(async () => sent)
+      await expect(store.run('caller', request, perform)).rejects.toThrow('LEDGER_LOCKED')
+      expect(perform).not.toHaveBeenCalled()
+    } finally {
+      child.stdin.end()
+      await once(child, 'exit')
+    }
+  })
   it('fails closed on malformed persisted success without any effect', async () => {
     const { filename, store } = await fixture()
     const perform = vi.fn(async () => sent)
