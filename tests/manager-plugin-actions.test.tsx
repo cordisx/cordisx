@@ -77,6 +77,36 @@ function enablePlan(source: string) {
 }
 
 describe('React Manager plugin actions', () => {
+  it('does not offer lifecycle actions for an unprojected configured plugin in standalone mode', async () => {
+    const fixture = reactManagerFixture()
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const { StandalonePluginLifecycleContext } = await import(
+      '../packages/cli/src/renderer/manager/model/standalone-plugin-lifecycle.js'
+    )
+    const disabled = { ...plugin(), status: 'configured-disabled' as const }
+    const state = managerSnapshot({
+      plugins: [disabled],
+      pluginLifecycle: { profileId: 'test', revision: 1, runtimeGeneration: 'runtime', operationsAvailable: true },
+    })
+    const request = vi.fn()
+    try {
+      await fixture.render(
+        <StandalonePluginLifecycleContext.Provider value={{ binding: {} as any, snapshot: undefined }}>
+          <PluginsPage
+            model={managerModel(state, { requestPluginLifecycle: request })}
+            snapshot={state}
+            router={managerRouter()}
+          />
+        </StandalonePluginLifecycleContext.Provider>,
+      )
+      expect(fixture.element('[aria-label="Enable plugin"]').classList.contains('t-is-disabled')).toBe(true)
+      await fixture.click('[aria-label="Enable plugin"]')
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
   it.each([undefined, 'service' as const])(
     'uses a scoped standalone owner plan in mode %s only for the exact supported plugin',
     async mode => {

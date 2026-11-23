@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { type HomeConfigProfile, loadHomeConfig } from '../config/home-config.js'
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
@@ -507,16 +508,17 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
-        // Configured plugins stay closed unless the owner explicitly supplies
-        // the constrained read-only Channel composition.
+        // Only the owner-selected Channel may run in this projection. Other
+        // configured plugins can be represented when they are disabled.
+        const activeConfigured = config.plugins.filter(plugin => plugin.enabled)
         if (
           plugins.some(plugin => !emptyPluginConfig(plugin.config))
             && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
-          || config.plugins.length !== 0 && (
-              !this.input.protectProfileInputs || !this.configuredChannel
-              || config.plugins.length !== 1
-              || config.plugins[0]?.id !== 'channel' || plugins.some(plugin => plugin.id === 'channel')
-            )
+          || config.plugins.length > MAX_INITIAL_GRAPHS
+          || config.plugins.length > 0 && !this.input.protectProfileInputs
+          || config.plugins.some(plugin => plugins.some(installed => installed.id === plugin.id))
+          || activeConfigured.length > 1 || activeConfigured.some(plugin => plugin.id !== 'channel')
+          || (activeConfigured.length === 1) !== (this.configuredChannel !== undefined)
         ) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
@@ -574,13 +576,13 @@ export class ServiceRendererBootstrap {
             if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
           }
         }
-        if (config.plugins.length === 1) {
+        if (activeConfigured.length === 1) {
           const channel = this.configuredChannel!
           const configured = await ServiceRendererConfiguredChannel.prepare({
             homeDir: this.input.homeDir,
             configPath: this.input.configPath,
             profileId: this.input.profileId,
-            plugin: config.plugins[0]!,
+            plugin: activeConfigured[0]!,
             selectedPlugin: channel.plugin,
             service: channel.service,
             bridge: channel.bridge,
@@ -696,7 +698,9 @@ export class ServiceRendererBootstrap {
           : undefined
         const snapshot = entry.snapshot
         let projectedSnapshot: Snapshot | undefined
-        let projectedPolicies = entry.policies
+        const disabledConfigured = entry.config.plugins.filter(plugin => !plugin.enabled)
+        const disabledIds = new Set(disabledConfigured.map(plugin => plugin.id))
+        let projectedPolicies = entry.policies.filter(policy => !disabledIds.has(policy.key.identity.pluginId))
         let projectedPlugins = entry.plugins.map(plugin => {
           if (emptyPluginConfig(plugin.config)) return plugin
           if (!entry.projectedConfigs?.has(plugin.id)) throw new Error('renderer-bootstrap-plugin-unsupported')
@@ -749,6 +753,16 @@ export class ServiceRendererBootstrap {
               if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
               return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }
             }),
+            ...disabledConfigured.map(plugin => ({
+              id: plugin.id,
+              entry: path.join('/', '__cordisx_disabled__', plugin.id),
+              source: `https://renderer.cordisx.invalid/unavailable/${randomBytes(32).toString('hex')}`,
+              enabled: false,
+              config: {},
+              readme: '',
+              readmes: {},
+              documents: [],
+            })),
             ...(configured === undefined ? [] : [configured.plugin]),
           ],
         }

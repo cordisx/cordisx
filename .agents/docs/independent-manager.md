@@ -96,10 +96,12 @@ an initial stylesheet are not admitted. A compatible service owner and Channel
 version can also expose the existing connection form for a resolved account's display
 name and reception selectors, and can rotate a Feishu/Lark credential within
 that Host-owned form. The eligible Desktop owner remains read-only. Connection
-creation, connection controls, Channel policies, logs and sessions are not available
-through this restricted page. Other configured plugins, adapters and recovery
-after an uncertain result are not yet supported. The isolated browser tests do
-not constitute real Codex App validation.
+creation, Channel policies, logs and sessions are not available through this
+restricted page. Disabled configured plugins can coexist with the Channel and
+appear by ID with no configuration or lifecycle actions; their source and
+credentials stay with the owner. Other enabled configured plugins, adapters
+and recovery after an uncertain result are not yet supported. The isolated
+browser tests do not constitute real Codex App validation.
 
 The experimental Host page in service mode and the eligible Desktop mode can
 read and save shared model-service declarations through the

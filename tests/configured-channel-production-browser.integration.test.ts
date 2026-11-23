@@ -24,6 +24,7 @@ const exec = promisify(execFile)
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 const managerPackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
 const legacyReadOnly = process.env.CORDISX_LEGACY_CHANNEL_READONLY === '1'
+const disabledConfigured = process.env.CORDISX_DISABLED_CONFIGURED_FIXTURE === '1'
 const executable = (candidate: string | undefined): candidate is string => {
   if (!candidate || !path.isAbsolute(candidate)) return false
   try {
@@ -63,6 +64,7 @@ it.skipIf(
     const codexHome = path.join(root, 'c')
     const browserProfile = path.join(root, 'browser')
     const configPath = path.join(homeDir, 'config.json')
+    const disabledEntry = path.join(root, 'disabled-plugin.mjs')
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
       HOME: process.env.CORDISX_TEST_INHERIT_HOME === '1' ? process.env.HOME : userHome,
@@ -169,6 +171,7 @@ it.skipIf(
         await copyFile(process.env.CORDISX_TEST_CODEX_AUTH_FILE, auth, constants.COPYFILE_EXCL)
         await chmod(auth, 0o600)
       }
+      if (disabledConfigured) await writeFile(disabledEntry, 'throw new Error("disabled plugin must not load")')
       await writeFile(
         configPath,
         JSON.stringify({
@@ -183,33 +186,43 @@ it.skipIf(
             models: { codex: ['fixture-model'] },
           }],
           environmentVariables: [{ name: 'FIXTURE_MODEL_KEY', value: 'fixture-model-secret', enabled: true }],
-          plugins: [{
-            id: 'channel',
-            entry: archive,
-            services: {
-              runtime: {
-                profiles: {
-                  default: {
-                    revision: 1,
-                    lastGoodRevision: 1,
-                    config: {
-                      ...SIMULATOR_CHANNEL_SERVICE_CONFIG,
-                      connections: [
-                        ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
-                        {
-                          ref: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture-tenant' },
-                          adapterKind: 'feishu',
-                          enabled: false,
-                          transport: { mode: 'websocket' },
-                          secretRef: 'host-secret:env/FIXTURE_CHANNEL_KEY',
-                        },
-                      ],
+          plugins: [
+            {
+              id: 'channel',
+              entry: archive,
+              services: {
+                runtime: {
+                  profiles: {
+                    default: {
+                      revision: 1,
+                      lastGoodRevision: 1,
+                      config: {
+                        ...SIMULATOR_CHANNEL_SERVICE_CONFIG,
+                        connections: [
+                          ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+                          {
+                            ref: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture-tenant' },
+                            adapterKind: 'feishu',
+                            enabled: false,
+                            transport: { mode: 'websocket' },
+                            secretRef: 'host-secret:env/FIXTURE_CHANNEL_KEY',
+                          },
+                        ],
+                      },
                     },
                   },
                 },
               },
             },
-          }],
+            ...(disabledConfigured
+              ? [{
+                id: 'disabled-fixture',
+                entry: disabledEntry,
+                enabled: false,
+                config: { token: 'fixture-disabled-secret' },
+              }]
+              : []),
+          ],
         }),
         { mode: 0o600 },
       )
@@ -253,6 +266,24 @@ it.skipIf(
       await first.send('Network.enable')
       await first.send('Page.enable')
       await first.send('Page.navigate', { url: firstUrl })
+      if (disabledConfigured) {
+        await expect.poll(() =>
+          first.evaluate(`(() => {
+          const button = document.querySelector('[data-plugin-id="disabled-fixture"]');
+          const row = button?.closest('[role=listitem]');
+          return {
+            present: Boolean(button),
+            status: row?.querySelector('[data-plugin-status-badge]')?.getAttribute('data-plugin-status-badge'),
+            disabled: row?.querySelector('.cxr-plugin-actions button')?.disabled,
+          };
+        })()`), { timeout: 70_000 }).toEqual({ present: true, status: 'configured-disabled', disabled: true })
+        expect(
+          await first.evaluate(`(() => {
+          const plugin = globalThis.__cordisxRuntime?.snapshot().plugins.find(item => item.id === 'disabled-fixture');
+          return JSON.stringify(plugin).includes('fixture-disabled-secret');
+        })()`),
+        ).toBe(false)
+      }
       await showChannel(first)
 
       const openRow = (labels: string[]) =>

@@ -59,6 +59,7 @@ export function usePluginLifecycleActions(
   const operationsAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
     && model.requestPluginLifecycle !== undefined
   const canRun = (plugin: ManagerPluginSnapshot, operation: 'enable' | 'disable' | 'uninstall'): boolean => {
+    if (standalone && !plugin.package) return false
     if (operationsAvailable) return true
     const management = standalone?.snapshot
     const item = management?.plugins.find(value => value.id === plugin.id)
