@@ -2,6 +2,7 @@ import type { ChannelNativeCliContext } from './channel-cli-context.js'
 
 export type ChannelCliOperationKind = 'read' | 'send' | 'write' | 'checkpoint'
 const READS = new Set([
+  'forward-receipt',
   'connections',
   'conversations',
   'bind-status',
@@ -26,6 +27,8 @@ const READS = new Set([
   'continuation-history',
 ])
 const WRITES = new Set([
+  'forward',
+  'merge-forward',
   'bind',
   'unbind',
   'reply-mode',

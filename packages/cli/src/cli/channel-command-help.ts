@@ -1,4 +1,7 @@
+import { CHANNEL_FORWARD_HELP } from './channel-forward-help.js'
+
 const HELP: Readonly<Record<string, string>> = {
+  ...CHANNEL_FORWARD_HELP,
   'media-prepare':
     'Candidate three-step Host upload; installed support is not implied. Use media-prepare begin|chunk|commit [--profile <id>] [--context <incoming-context>] --input <JSON>. begin: {account,target,operationId,type:"image"|"audio"|"file"|"video",format,filename?,mediaType?,durationMs?,size,sha256}. Formats: image png/jpeg, audio opus, file pdf/binary, video mp4. filename required for file/video; optional mediaType must match format, name is a consistent filename alias. chunk: {uploadId,offset,bytesBase64}; offset is a byte offset, each decoded chunk is 1..65536 bytes, canonical base64 only. commit: {uploadId}. Returned Host result is printed unchanged; preserve its uploadId and committed media handle. Host binds caller/context/target, verifies size/hash, and judges platform capability. No Host path reads, CLI file reads, SDK sends, caller-claimed grants or automatic retries. Each complete RPC must be under 256 KiB. Use media: handle in send payload; inspect uncertain outcomes before retrying.',
   'user-access':
