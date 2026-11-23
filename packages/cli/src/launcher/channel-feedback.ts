@@ -70,6 +70,10 @@ export class ChannelFeedback {
     if (!this.options.progress) throw new Error('CHANNEL_PROGRESS_NOTICE_STALE')
     this.options.progress.assertCurrent(token, source, sessionId)
   }
+  inputStatus(source: ChannelEventRef, sessionId: string, acknowledge: boolean) {
+    return this.options.progress?.inputStatus(source, sessionId, acknowledge)
+      ?? { status: 'ok', acknowledgment: 'not-monitored', consumption: 'unconfirmed' }
+  }
   trackDelivery(
     id: string,
     source: ChannelEventRef | undefined,

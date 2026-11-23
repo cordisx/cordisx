@@ -126,6 +126,28 @@ takes `query` and optional `entity`; update takes `id`, `revision`, `record`;
 forget takes `id`, `revision`; index takes `{}` and rebuilds only the caller's
 current-conversation records. Read `cordisx channel help memory` for details.
 
+For a verified task milestone or decision, `kind` is `fact`; `task` and `decision`
+are not supported kind values. `confidence` is a JSON number from 0 to 1, not
+`"high"` or a numeric string. Keep all record fields inside the `record` wrapper:
+
+```sh
+cordisx channel memory remember --context <incoming-context> --input '{"record":{"kind":"fact","title":"Cedar progress","summary":"Deployment verified; validation remains","tags":["Cedar"],"entityRefs":[],"evidenceType":"verified","confidence":1}}'
+```
+
+Accepted kinds are `fact`, `preference`, `person`, `conversation`, `collaboration`
+and `impression`; an impression also requires `observedAt` in UTC ISO format with
+milliseconds. `memory guide --input '{"topic":"write"}'` returns a complete example.
+Invalid record fields return `MEMORY_INVALID_RECORD`, field-level `issues`, and
+`retrySafe:true` only when validation rejected the request before writing.
+The Agent should correct those fields and retry once in the same authenticated turn,
+without inventing missing evidence. If still rejected, read the write guide and
+report unresolved failure rather than looping. Confirm `status:"ok"` before saying it saved
+anything. Revision conflicts require a fresh `get` and reconsideration; storage
+or transport failures do not authorize blind retries. Search/get first when the
+effect is unknown. Corrupt stored data does not receive the retry-safe flag.
+Successful retrieval proves authorized readback, not that a model used the fact
+in its answer; relevant answers should refer to the returned dated evidence.
+
 This is selective model-driven maintenance, not automatic transcript ingestion
 or platform history access. It never configures a persona or widens sharing.
 Direct-chat own
@@ -195,7 +217,8 @@ Configure `channel-feedback.json` beside the selected profile's
     "mode": "agent",
     "quietSeconds": 5,
     "repeatSeconds": 30,
-    "finishSeconds": 10
+    "finishSeconds": 10,
+    "ackTimeoutSeconds": 60
   }
 }
 ```
@@ -216,6 +239,61 @@ does not offer a separate system-message role. CLI progress sends should include
 the notice's `progressToken`; stale tokens reject and queued guarded sends are
 cancelled before transport if new input arrives or a reply was confirmed. Ordinary
 business sends retain their existing behavior. The token changes no permissions.
+
+### Short waits and cooperative input acknowledgment
+
+The scoped prompt asks the parent Agent to continue independent work while its
+delegates run, check new input between bounded waits, and send meaningful progress
+through Channel CLI. Where the installed tool schema permits, use explicit
+10–30 second waits, with no wait longer than 60 seconds unless the user needs it.
+A timeout is a status check; it must not restart a healthy delegate or cause tight
+polling or repeated unchanged updates.
+
+Codex CLI 0.149.1's original `wait_agent` has a fixed 30-second default and a
+one-hour maximum. Its timeout bounds are not configurable. That version also
+supports an opt-in v2 tool implementation with configurable bounds:
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 10000
+default_wait_timeout_ms = 30000
+max_wait_timeout_ms = 60000
+```
+
+These are native Codex settings in the selected Codex configuration, not Channel
+feedback fields. The Host does not silently enable v2 or rewrite existing native
+settings. Check the installed version and generated schema before using them;
+v2 settings do not affect the original implementation. In
+[the 0.149.1 implementation](https://github.com/openai/codex/blob/rust-v0.149.1/codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs),
+v2 waits subscribe to input-queue activity and can return early on steered input.
+This is native-source evidence, not a guarantee that every blocking tool returns
+or that the model has consumed the input.
+
+When it begins handling the latest input, the Agent can run:
+
+```sh
+cordisx channel input-ack --context <incoming-context> --input '{}'
+cordisx channel input-status --context <incoming-context> --input '{}'
+```
+
+Both require the live scoped caller and accept no target, actor or session override.
+`awaiting-agent` with `consumption:"unconfirmed"` means there is no cooperative
+acknowledgment; it does not prove the input was unconsumed. `agent-acknowledged`
+with `consumption:"acknowledged-by-caller"` confirms the caller's explicit receipt,
+not understanding or task completion. An older input cannot acknowledge the newer
+one. In Agent feedback mode, `wait.ackTimeoutSeconds` records
+`CHANNEL_INPUT_ACK_OVERDUE` once when queued/dispatching/active/uncertain work has
+not acknowledged the latest input. It accepts integer seconds 0–86400; 0 disables
+this diagnostic. New input resets it; confirmed reply, stopped work or process
+restart ends this process-local monitor. Disabled/fixed feedback is not monitored.
+
+The supported native protocol has `turn/steer` and whole-turn `turn/interrupt`,
+but no cancellation of only a blocking tool and no reliable semantic consumption
+notification. An overdue acknowledgment therefore never automatically interrupts,
+restarts or replays a turn. Existing progress reminders still use the exact active
+turn. Their acceptance alone does not prove timely consumption during a long tool
+wait; reliable tool-only interruption remains unavailable.
 
 Legacy `wait.delaySeconds`, `wait.text` and `wait.texts` select `mode:"fixed"` when
 no mode is explicitly set; this preserves existing deployments. To switch, add

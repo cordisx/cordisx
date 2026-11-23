@@ -6,6 +6,7 @@ import { ChannelAgentAccess } from '../packages/cli/src/launcher/channel-agent-a
 import { channelMemoryCommand } from '../packages/cli/src/launcher/channel-memory-command.js'
 import { type MemoryAuthority, memoryKey } from '../packages/cli/src/launcher/channel-memory-policy.js'
 import { ChannelMemoryStore, type MemoryInput } from '../packages/cli/src/launcher/channel-memory-store.js'
+import { MemoryRecordValidationError } from '../packages/cli/src/launcher/channel-memory-record-validation.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -35,6 +36,29 @@ async function setup(clock?: () => string) {
   return new ChannelMemoryStore(root, clock)
 }
 describe('Channel memory synthetic authorization and storage', () => {
+  it('rejects malformed records before persistence, but does not label corrupt stored data retry-safe', async () => {
+    const store = await setup(), authority = context()
+    for (
+      const record of [
+        { ...input, kind: 'task', confidence: 'high' },
+        { ...input, confidence: Infinity, tags: 'project' },
+        { ...input, kind: 'impression', observedAt: 'yesterday' },
+        { ...input, summary: 'bad\0text', owner: 'forged' },
+        null,
+      ]
+    ) {
+      const error = await store.remember(authority, record as MemoryInput, 'invalid').catch(error => error)
+      expect(error).toBeInstanceOf(MemoryRecordValidationError)
+      expect(error.response()).toMatchObject({ code: 'MEMORY_INVALID_RECORD', retrySafe: true })
+      expect(error.issues.length).toBeGreaterThan(0)
+    }
+    expect(await store.search(authority, 'Synthetic')).toHaveLength(0)
+    const saved = await store.remember(authority, input, 'valid')
+    await writeFile(path.join(store.files.root, `${saved.id}-1.json`), JSON.stringify({ ...saved, confidence: 'high' }))
+    const error = await store.get(authority, saved.id).catch(error => error)
+    expect(error.message).toBe('MEMORY_INVALID_RECORD')
+    expect(error).not.toBeInstanceOf(MemoryRecordValidationError)
+  })
   it('progressive cards paginate, route aliases and invalidate after correction', async () => {
     const store = await setup(), authority = context()
     for (let index = 0; index < 18; index++) {

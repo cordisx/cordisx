@@ -1,3 +1,4 @@
+import { validateMemoryRecord } from './channel-memory-record-validation.js'
 import { randomUUID } from 'node:crypto'
 import { MemoryFiles } from './channel-memory-files.js'
 import {
@@ -45,41 +46,14 @@ const date = (value: string): boolean => !Number.isNaN(Date.parse(value)) && new
 const id = (value: string): void => {
   if (!/^[a-f0-9-]{36}$/u.test(value)) throw new Error('MEMORY_INVALID_ID')
 }
-function validate(input: MemoryInput): void {
-  if (
-    !input
-    || !['fact', 'preference', 'person', 'conversation', 'collaboration', 'impression'].includes(input.kind)
-    || typeof input.title !== 'string' || !input.title.trim() || input.title.length > 256
-    || typeof input.summary !== 'string' || !input.summary.trim() || Buffer.byteLength(input.summary) > 16384
-    || /\0/u.test(input.summary) || typeof input.evidenceType !== 'string' || input.evidenceType.length > 128
-    || !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1
-    || ![input.tags, input.entityRefs].every(values =>
-      Array.isArray(values) && values.length <= 32
-      && values.every(value => typeof value === 'string' && value.length <= 128)
-    )
-    || input.expiresAt !== undefined && !date(input.expiresAt)
-    || input.observedAt !== undefined && !date(input.observedAt)
-    || input.kind === 'impression' && !input.observedAt
-  ) throw new Error('MEMORY_INVALID_RECORD')
+const validate = (input: MemoryInput) => {
+  try {
+    validateMemoryRecord(input, false)
+  } catch {
+    throw new Error('MEMORY_INVALID_RECORD')
+  }
 }
-function validateInput(input: MemoryInput): void {
-  validate(input)
-  if (
-    Object.keys(input).some(key =>
-      ![
-        'kind',
-        'title',
-        'summary',
-        'tags',
-        'entityRefs',
-        'evidenceType',
-        'confidence',
-        'expiresAt',
-        'observedAt',
-      ].includes(key)
-    )
-  ) throw new Error('MEMORY_INVALID_RECORD')
-}
+const validateInput = (input: MemoryInput) => validateMemoryRecord(input)
 export class ChannelMemoryStore {
   readonly files: MemoryFiles
   constructor(root: string, private readonly clock: () => string = () => new Date().toISOString()) {
