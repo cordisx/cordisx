@@ -116,6 +116,33 @@ it.skipIf(chrome === undefined)(
       page = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
       await page.send('Runtime.enable')
       await page.send('Page.enable')
+      // The owner completes the idempotent startup migration, but the page
+      // never receives its response before the user refreshes.
+      await page.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: [
+          '(() => {',
+          '  const send = window.fetch.bind(window)',
+          '  window.fetch = (resource, options) => {',
+          '    if (resource === "/api/renderer/binding" && !sessionStorage.getItem("fixture-migration-lost")) {',
+          '      try {',
+          '        const envelope = JSON.parse(options.body)',
+          '        const operation = JSON.parse(envelope.payload).operation',
+          '        if (envelope.channel === "plugin-management" && operation.kind === "migrate-legacy-sources") {',
+          '          const count = Number(sessionStorage.getItem("fixture-migration-count") || "0")',
+          '          sessionStorage.setItem("fixture-migration-count", String(count + 1))',
+          '          return send(resource, options).then(response => {',
+          '            if (!response.ok) return response',
+          '            sessionStorage.setItem("fixture-migration-lost", "1")',
+          '            return new Promise((_, reject) => { window.__fixtureRejectMigration = reject })',
+          '          })',
+          '        }',
+          '      } catch {}',
+          '    }',
+          '    return send(resource, options)',
+          '  }',
+          '})()',
+        ].join('\n'),
+      })
       await page.send('Page.navigate', { url: link.href })
       const ready = async () =>
         await vi.waitFor(async () => {
@@ -152,9 +179,16 @@ it.skipIf(chrome === undefined)(
       await vi.waitFor(async () => {
         const home = JSON.parse(await readFile(configPath, 'utf8'))
         expect(home.apps?.codex?.profiles?.default?.management?.migrations?.legacyBrowserSourcesV2).toBe(true)
+        expect(await page!.evaluate("sessionStorage.getItem('fixture-migration-lost')")).toBe('1')
       }, { timeout: 20_000 })
       const previousResume = await page.evaluate<string | null>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(previousResume).toMatch(/^[a-f0-9]{64}$/u)
+      await page.evaluate([
+        "window.addEventListener('beforeunload', () => {",
+        "  sessionStorage.setItem('fixture-migration-aborted', '1')",
+        "  window.__fixtureRejectMigration?.(new Error('simulated interrupted response'))",
+        '}, { once: true })',
+      ].join('\n'))
       await page.send('Page.reload')
       try {
         await vi.waitFor(async () => {
@@ -174,6 +208,8 @@ it.skipIf(chrome === undefined)(
         { id: 'broken-demo', status: 'failed' },
       ]))
       await openFixturePage()
+      expect(await page.evaluate("sessionStorage.getItem('fixture-migration-count')")).toBe('1')
+      expect(await page.evaluate("sessionStorage.getItem('fixture-migration-aborted')")).toBe('1')
     } finally {
       await page?.close().catch(() => undefined)
       if (browser) await stopChrome(browser)

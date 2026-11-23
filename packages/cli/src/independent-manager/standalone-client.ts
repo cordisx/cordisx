@@ -510,6 +510,7 @@ export function startStandaloneManager(input: {
         sessionToken: token,
         channels: opened.channels as IndependentHostChannel[],
         rendererAdmission,
+        isNavigating: () => navigating,
         onSessionLost: fail,
       })
       const importBundle = input.importBundle ?? (async (path: string) => await import(/* @vite-ignore */ path))

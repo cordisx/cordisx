@@ -276,6 +276,58 @@ it('permits refresh with an owner-declared read pending but not with a write pen
   }
 })
 
+it('allows an owner-confirmed resume attempt after a lost startup migration response', async () => {
+  const target = {
+    fetch: vi.fn(() => new Promise(() => {})),
+    __cordisxPluginManagementReceiveV1: vi.fn(),
+  } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['plugin-management'],
+    rendererAdmission: Promise.resolve(true),
+  })
+  try {
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledOnce())
+    expect(dispose.canResume()).toBe(true)
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({ requestId: 'write', operation: { kind: 'execute' } }))
+    await vi.waitFor(() => expect(target.fetch).toHaveBeenCalledTimes(2))
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+  }
+})
+
+it('still reports an uncertain migration failure when no navigation is in progress', async () => {
+  const lost = vi.fn()
+  const target = {
+    fetch: vi.fn(async () => new Response('{}', { status: 503 })),
+    __cordisxPluginManagementReceiveV1: vi.fn(),
+  } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['plugin-management'],
+    rendererAdmission: Promise.resolve(true),
+    isNavigating: () => false,
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith('result-unknown'))
+    expect(dispose.canResume()).toBe(false)
+  } finally {
+    dispose()
+  }
+})
+
 it('waits for admission and preserves refresh only for Channel configuration reads', async () => {
   let admit!: (value: boolean) => void
   const admission = new Promise<boolean>(resolve => admit = resolve)

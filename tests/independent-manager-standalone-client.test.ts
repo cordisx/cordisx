@@ -50,6 +50,7 @@ function fixture(input: {
   readonly issueResume?: boolean
   readonly controlledPoll?: boolean
   readonly holdBindings?: boolean
+  readonly pluginManagement?: boolean
   readonly modelServices?: boolean
   readonly admissionGate?: Promise<void>
   readonly credentialFailure?: boolean
@@ -92,6 +93,7 @@ function fixture(input: {
   let resumes = 0
   let rejectPoll: ((error: Error) => void) | undefined
   let resolvePoll: ((response: Response) => void) | undefined
+  let rejectBinding: ((error: Error) => void) | undefined
   let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
     if (path === '/api/session') {
@@ -121,6 +123,7 @@ function fixture(input: {
         profileId: 'work',
         channels: [
           'config',
+          ...(input.pluginManagement ? ['plugin-management'] : []),
           ...(input.modelServices ? ['model-services'] : []),
           ...(input.credentialFailure ? ['channel-credentials'] : []),
         ],
@@ -178,7 +181,12 @@ function fixture(input: {
     if (path === '/api/renderer/binding' && input.credentialFailure) {
       return Promise.resolve(new Response('{}', { status: 503 }))
     }
-    if (path === '/api/renderer/binding' && input.holdBindings) return abortResponse(options.signal!)
+    if (path === '/api/renderer/binding' && input.holdBindings) {
+      return Promise.race([
+        abortResponse(options.signal!),
+        new Promise<Response>((_, reject) => rejectBinding = reject),
+      ])
+    }
     throw new Error(`Unexpected request ${path}`)
   })
   Object.defineProperty(win, 'fetch', { value: fetch })
@@ -222,6 +230,7 @@ function fixture(input: {
     beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
     pageHide: () => pageHide?.({ isTrusted: true } as PageTransitionEvent),
     failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
+    failBinding: () => rejectBinding?.(new Error('navigation interrupted the binding')),
     deliverPoll: (value: unknown) => resolvePoll?.(response({ command: value })),
     pollStarted: () => rejectPoll !== undefined,
     revokeSession: () => {
@@ -412,6 +421,60 @@ it('preserves refresh authority if navigation aborts an idle poll before pagehid
     await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
     test.beforeUnload()
     test.failPoll()
+    await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
+    await test.manager.close()
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retains a recovery attempt for an unanswered startup migration without replaying it', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, pluginManagement: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPluginManagementReceiveV1 = vi.fn()
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.beforeUnload()
+    test.failPoll()
+    await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
+    await test.manager.close()
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/binding')).toHaveLength(1)
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('retains migration recovery when navigation interrupts its response before pagehide', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, pluginManagement: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPluginManagementReceiveV1 = vi.fn()
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.beforeUnload()
+    test.failBinding()
+    await vi.waitFor(() => expect(target.__cordisxPluginManagementReceiveV1).toHaveBeenCalledOnce())
+    test.pageHide()
     await vi.waitFor(() => expect(test.auth.revokeLocal).toHaveBeenCalledOnce())
     await test.manager.close()
     const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!

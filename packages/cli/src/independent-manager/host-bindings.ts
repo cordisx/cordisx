@@ -26,6 +26,7 @@ interface Pending {
   readonly receiver: Binding
   readonly controller: AbortController
   readonly readOnly: boolean
+  readonly resumeAfterOwnerRetirement: boolean
   dispatched: boolean
 }
 const MAX_IN_FLIGHT = 64
@@ -95,6 +96,8 @@ export function installIndependentHostBindings(input: {
   readonly channels: readonly IndependentHostChannel[]
   /** Owner channels that require a lifecycle participant wait for admission. */
   readonly rendererAdmission?: Promise<boolean>
+  /** True only while a trusted navigation is leaving this document. */
+  readonly isNavigating?: () => boolean
   readonly onSessionLost?: (reason?: 'result-unknown') => void
 }): (() => void) & { canResume(): boolean } {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
@@ -124,7 +127,9 @@ export function installIndependentHostBindings(input: {
   const failure = (key: string, reason: 'INDEPENDENT_HOST_RESULT_UNKNOWN' | 'INDEPENDENT_HOST_SESSION_REVOKED') => {
     const request = pending.get(key)
     if (request !== undefined) {
+      const migrationDuringNavigation = request.resumeAfterOwnerRetirement && input.isNavigating?.() === true
       const uncertain = reason === 'INDEPENDENT_HOST_RESULT_UNKNOWN' && request.dispatched && !request.readOnly
+        && !migrationDuringNavigation
       deliver(key, JSON.stringify({ requestId: request.requestId, ok: false, error: reason, code: reason }))
       if (uncertain && !closed) {
         dispose()
@@ -167,6 +172,12 @@ export function installIndependentHostBindings(input: {
         receiverName,
         receiver: receiver as Binding,
         controller,
+        // This one-time initialization is reconciled from owner state. A
+        // replacement may only join after the owner confirms retirement; the
+        // client never replays the dispatched request.
+        resumeAfterOwnerRetirement: channel === 'plugin-management' && operation !== null
+          && typeof operation === 'object' && !Array.isArray(operation)
+          && (operation as { kind?: unknown }).kind === 'migrate-legacy-sources',
         readOnly: (() => {
           const envelope = JSON.parse(payload) as { operation?: unknown }
           if (channel === 'model-services') return envelope.operation === 'read'
@@ -262,9 +273,11 @@ export function installIndependentHostBindings(input: {
     host[name] = binding
     installed.set(name, binding)
   }
-  // A queued request has not crossed the transport boundary and dispose()
-  // cancels it synchronously; only a dispatched write can have an unknown result.
+  // Queued requests are canceled locally. A dispatched startup migration may
+  // request recovery, but the owner must still confirm its retirement.
   return Object.assign(dispose, {
-    canResume: () => !closed && [...pending.values()].every(item => item.readOnly || !item.dispatched),
+    canResume: () =>
+      !closed
+      && [...pending.values()].every(item => item.readOnly || !item.dispatched || item.resumeAfterOwnerRetirement),
   })
 }

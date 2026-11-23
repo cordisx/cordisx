@@ -99,9 +99,16 @@ that Host-owned form. The eligible Desktop owner remains read-only. Connection
 creation, Channel policies, logs and sessions are not available through this
 restricted page. Disabled configured plugins can coexist with the Channel and
 appear by ID with no configuration or lifecycle actions; their source and
-credentials stay with the owner. Other enabled configured plugins, adapters
-and recovery after an uncertain result are not yet supported. The isolated
-browser tests do not constitute real Codex App validation.
+credentials stay with the owner. An eligible service-free configured archive
+with empty configuration and no declared capabilities, durable documents or
+entity templates can also contribute Manager pages through its verified browser
+graph. Existing matching permissions are projected
+to a session-local identity; a new review is limited to the current tab. Its
+configuration, credentials, persistent permission changes and lifecycle
+operations remain unavailable. A plugin whose activation fails is shown as
+failed without disconnecting the Manager. Real adapter startup and recovery
+after an uncertain result are not yet supported. The isolated browser tests do
+not constitute real Codex App validation.
 
 The experimental Host page in service mode and the eligible Desktop mode can
 read and save shared model-service declarations through the
@@ -144,6 +151,10 @@ entry for an independent tab.
 This includes a hard reload, where the fixed resource worker reclaims the page
 before the new authenticated session binds. Requests still queued before owner
 admission are cancelled rather than treated as dispatched writes.
+If the response to the one-time Marketplace startup migration is lost while a
+tab is leaving, that tab may request recovery without replaying the migration.
+The owner must still confirm that the previous renderer and any write have
+retired; an unconfirmed write continues to block recovery.
 The Host page also restores supported navigation destinations within that tab.
 Route parameters and unsaved form inputs are not stored; a transient edit page
 returns to a main section after refresh. Changed shared model-service and Channel
