@@ -17,7 +17,11 @@ function connection(input: {
   readonly origin?: string
   readonly apiPath?: `/${string}`
   readonly defaultAlias: string
-  readonly aliases: readonly { readonly alias: string; readonly gatewayModelId: string }[]
+  readonly aliases: readonly {
+    readonly alias: string
+    readonly gatewayModelId: string
+    readonly contextWindow?: number
+  }[]
 }): { readonly providerId: string; readonly connection: NativeManagedGatewayConnection } {
   return {
     providerId: input.providerId,
@@ -90,6 +94,26 @@ afterEach(async () => {
 })
 
 describe('native managed Desktop configuration', () => {
+  it('projects known windows conservatively for shared IDs and leaves unknown windows absent', () => {
+    const make = (providerId: string, contextWindow?: number) =>
+      connection({
+        providerId,
+        defaultAlias: 'model',
+        aliases: [{
+          alias: 'model',
+          gatewayModelId: 'shared-model',
+          ...(contextWindow === undefined ? {} : { contextWindow }),
+        }],
+      })
+    const model = (providers: ReturnType<typeof connection>[]) =>
+      JSON.parse(nativeManagedDesktopFiles(providers, '/tmp/models.json').catalogJson).models[0]
+    expect(model([make('first', 128_000), make('second', 64_000)]))
+      .toMatchObject({ context_window: 64_000, max_context_window: 64_000 })
+    expect(model([make('first', 128_000), make('second')])).not.toHaveProperty('context_window')
+    expect(model([make('first')])).not.toHaveProperty('max_context_window')
+    expect(model([make('first', 0)])).not.toHaveProperty('context_window')
+  })
+
   it('builds a logged-out isolated configuration with no provider defaults', () => {
     const files = nativeManagedDesktopFiles([], '/private/cordisx/models.json', {
       credentialMode: 'private-config',

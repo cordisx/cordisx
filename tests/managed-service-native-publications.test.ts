@@ -53,6 +53,67 @@ function malformed(value: unknown): ManagedNativeProviderPublicationInputV1 {
 }
 
 describe('managed native provider publications', () => {
+  it('validates context windows, fences changes by digest, and keeps missing windows unknown', async () => {
+    const base = catalog()
+    const make = (window: unknown, includeReasoning = false) => {
+      const reasoningCapabilities = { efforts: ['low', 'high'] as const }
+      const routes = base.routes.map((route, index) =>
+        index === 0
+          ? { ...route, contextWindow: window, ...(includeReasoning ? { reasoningCapabilities } : {}) }
+          : route
+      )
+      const sorted = [...routes].sort((a, b) =>
+        Buffer.compare(
+          Buffer.from(JSON.stringify([a.alias, a.gatewayModelId])),
+          Buffer.from(JSON.stringify([b.alias, b.gatewayModelId])),
+        )
+      )
+      const digest = `sha256:${
+        createHash('sha256').update(JSON.stringify([
+          base.generation,
+          base.defaultAlias,
+          sorted.map(route => [
+            route.alias,
+            route.gatewayModelId,
+            ...('contextWindow' in route
+              ? ['reasoningCapabilities' in route ? route.reasoningCapabilities : null, route.contextWindow]
+              : []),
+          ]),
+        ])).digest('hex')
+      }`
+      return { providerId: 'synthetic', compositionOrigin: 'api', catalog: { ...base, routes, digest } }
+    }
+    for (const input of [make(64_000), make(64_000, true)]) {
+      const result = new ManagedNativeProviderPublications().publish(record(), malformed(input))
+      expect(result.status).toBe('accepted')
+      if (result.status !== 'accepted') throw new Error('publication rejected')
+      expect(result.publication.publication.catalog.routes[0]).toMatchObject({ contextWindow: 64_000 })
+      expect(result.publication.publication.catalog.routes[1]).not.toHaveProperty('contextWindow')
+      expect(new ManagedNativeProviderPublications().publish(
+        record(),
+        malformed({
+          ...input,
+          catalog: { ...input.catalog, digest: base.digest },
+        }),
+      )).toMatchObject({ status: 'rejected', diagnostic: { code: 'invalid-catalog' } })
+    }
+    for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, '64000']) {
+      expect(new ManagedNativeProviderPublications().publish(record(), malformed(make(value))))
+        .toMatchObject({ status: 'rejected', diagnostic: { code: 'invalid-catalog' } })
+    }
+    const publications = new ManagedNativeProviderPublications()
+    const changes: number[] = []
+    publications.subscribe(() => changes.push(publications.revision))
+    const original = publications.publish(record(), malformed(make(64_000)))
+    if (original.status !== 'accepted') throw new Error('publication rejected')
+    await original.publication.dispose()
+    const updated = publications.publish(record(), malformed(make(32_000)))
+    expect(updated.status).toBe('accepted')
+    expect(publications.resolve('synthetic')?.projection.catalog.routes[0]?.contextWindow).toBe(32_000)
+    expect(changes).toHaveLength(3)
+    expect(new Set(changes).size).toBe(3)
+  })
+
   it('publishes an exact frozen projection while preserving opaque model ids', () => {
     const publications = new ManagedNativeProviderPublications()
     const input = {
