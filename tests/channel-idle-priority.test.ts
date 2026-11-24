@@ -488,19 +488,16 @@ it('dispatches a new Channel input exactly once on the committed destination', a
   const native = { ...base.native, contextObservations: () => undefined }
   c.consumer.setNativeExtras(() => native as never)
   const input = consumerMessage('synthetic-message', 'synthetic task')
-  const sendCommand = (argument: string) =>
-    channelLogicalCommand({
-      store,
-      native: native as never,
-      fence: owner.fence,
-      claims: new Set(),
-      appId: 'codex',
-      profileId: 'fixture',
-      event: input.source.event,
-      recordId: 'synthetic-authorization',
-      argument,
-      idlePriorityOffers: owner.idlePriorityOffers,
-    })
+  let commandSequence = 0
+  const sendCommand = async (argument: string) => {
+    const before = c.runtime.notifyOnce.mock.calls.length
+    const id = `synthetic-command-${++commandSequence}`
+    await c.consumer.receive(id, consumerMessage(id, `/continue-provider ${argument}`))
+    await settle(c.consumer)
+    const replies = c.runtime.notifyOnce.mock.calls.slice(before)
+    expect(replies).toHaveLength(1)
+    return String(replies[0]![0].text)
+  }
   const disclosure = await sendCommand('auto-suggest old one new two')
   const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
   expect(token).toBeDefined()
