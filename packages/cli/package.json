@@ -91,7 +91,7 @@
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#398c6df543d5555fc6299adb401be6e57de52eef",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6b6c85234cac20a1bdb8f01a7f7f34737b50f7a4",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -155,6 +155,6 @@
   ],
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#9ba6e842a5c82314335ad12b005b61c10fd434f7",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#cb6ad688587e4eedf5fa69d269363d9a52646b66"
   }
 }
