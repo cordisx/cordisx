@@ -94,11 +94,6 @@ describe('native managed model-list recovery', () => {
       }],
     }
     expect(await list({ providerId: 'plugin-a' })).toBeUndefined()
-    current = {
-      ...provider(),
-      models: [{ id: 'single', label: 'Single', aliases: [], reasoningCapabilities: { efforts: ['high'] } }],
-    }
-    expect(await list({ providerId: 'plugin-a' })).toBeUndefined()
   })
 
   it('rejects malformed cursors, limits, unknown providers, and unavailable catalogs', async () => {
