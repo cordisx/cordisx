@@ -8,6 +8,7 @@ import { dispatchManagerRendererOperation } from '../packages/cli/src/cli/manage
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
+import { clickDialogAction, findDialogAction } from './helpers/manager-dialog.js'
 
 // Use the real owner and browser with a synthetic adapter that cannot send.
 vi.mock('../packages/cli/src/launcher/feishu-adapter.js', async importOriginal => {
@@ -53,48 +54,6 @@ const chrome = [
     return false
   }
 })
-
-interface BrowserNode {
-  readonly backendNodeId: number
-  readonly nodeName: string
-  readonly attributes?: string[]
-  readonly children?: BrowserNode[]
-  readonly shadowRoots?: BrowserNode[]
-}
-
-// The Host dialog intentionally uses a closed shadow root; the browser can still
-// deliver a real user click to its footer through the DevTools DOM protocol.
-async function findDialogAction(page: CdpClient, action: string): Promise<BrowserNode | undefined> {
-  const tree = await page.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: BrowserNode }
-  const visit = (node: BrowserNode): BrowserNode | undefined => {
-    const attributes = node.attributes ?? []
-    const index = attributes.indexOf('data-action')
-    if (node.nodeName === 'BUTTON' && index >= 0 && attributes[index + 1] === action) return node
-    for (const child of [...node.children ?? [], ...node.shadowRoots ?? []]) {
-      const found = visit(child)
-      if (found) return found
-    }
-    return undefined
-  }
-  return visit(tree.root)
-}
-
-async function clickDialogAction(page: CdpClient, node: BrowserNode): Promise<void> {
-  await page.send('Page.bringToFront')
-  await page.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: node.backendNodeId })
-  const result = await page.send('DOM.getBoxModel', { backendNodeId: node.backendNodeId }) as {
-    model: { content: number[] }
-  }
-  const quad = result.model.content
-  const point = { x: (quad[0]! + quad[2]!) / 2, y: (quad[1]! + quad[5]!) / 2 }
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-    await page.send('Input.dispatchMouseEvent', {
-      type,
-      ...point,
-      ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }),
-    })
-  }
-}
 
 it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux')(
   'creates a credentialed Channel through the existing Manager page and Host form',

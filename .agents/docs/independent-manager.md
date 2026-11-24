@@ -94,14 +94,16 @@ version cannot negotiate the configuration facade. Other legacy graphs without
 an initial stylesheet are not admitted. A compatible service owner and Channel
 version can also expose the existing connection form for a resolved account's display
 name and reception selectors, and can rotate a Feishu/Lark credential within
-that Host-owned form. The eligible Desktop owner remains read-only. Connection
-creation, Channel policies, logs and sessions are not available through this
-restricted page. Disabled configured plugins can coexist with the Channel and
-appear by ID with no configuration or lifecycle actions; their source and
-credentials stay with the owner. An eligible service-free configured archive
-with empty configuration and no declared capabilities, durable documents or
-entity templates can also contribute Manager pages through its verified browser
-graph. Existing matching permissions are projected
+that Host-owned form. When the Host advertises credentialed creation and the
+Channel plugin supports it, the page can also create a Feishu/Lark connection
+with a resolved tenant. The eligible Desktop owner remains read-only. Channel
+policies, logs and sessions
+are not available through this restricted page. Disabled configured plugins can
+coexist with the Channel and appear by ID with no configuration or lifecycle
+actions; their source and credentials stay with the owner. An eligible service-free
+configured archive with empty configuration and no declared capabilities, durable
+documents or entity templates can also contribute Manager pages through its verified
+browser graph. Existing matching permissions are projected
 to a session-local identity. In service mode, an explicit user decision can
 persist, deny, or reset the selected configured archive’s two Manager UI
 permissions. The owner verifies each page’s source and archive and waits for
@@ -148,7 +150,13 @@ described above. The separate, explicitly coordinated configured-Channel
 service update retains its existing owner and receipt checks.
 
 The sidecar listens only on loopback and communicates with the owner through its
-private management socket. Each browser opening obtains a 60-second bootstrap
+private management socket. Managed console origins are also loopback-only. Each
+Manager page permits its owner-issued console origins in `frame-src`; the gateway
+retains the service's `frame-ancestors` and `X-Frame-Options` restrictions. CORS
+and iframe embedding are separate browser policies. Remote proxy and cross-device
+access have not been implemented or validated.
+
+Each browser opening obtains a 60-second bootstrap
 in the URL fragment; it is exchanged for a separate session token and removed
 from the address bar. If that exchange is interrupted, the same tab may retry
 its temporary attempt until the session first makes an authenticated request;
@@ -218,16 +226,16 @@ without reading them back into the page. The configured archive path has been
 exercised with a real isolated Channel service and a simulator; separate
 synthetic credentials exercise the write and recovery transactions. Real
 Feishu/Lark credentials have not been used in validation. This API is separate
-from the restricted Channel page, which offers only the existing-account
-credential rotation described below.
+from the owner-bound operations exposed by the restricted Channel page below.
 Unverified direct entries, other adapters, connection deletion, and remaining
 Channel management features are unavailable.
 
 The experimental service-owner composition projects an exact configured
 Channel archive and its already-running service into renderer sessions. It
 forwards only matching existing Manager UI policies. The connection form may
-save ordinary settings and rotate a credential for a resolved Feishu/Lark
-account through owner-bound bridges. Credential values and private references
+save ordinary settings, rotate a credential for a resolved Feishu/Lark account,
+and create a connection when credentialed creation is advertised. These use
+owner-bound bridges. Credential values and private references
 are not returned to the plugin-facing facade or stored in browser storage.
 When the owner explicitly advertises coordinated connection control, a
 compatible Channel page also uses its existing header action to enable or
