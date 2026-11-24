@@ -973,7 +973,8 @@ Read the current revision first; an empty list disables the policy. The sender
 must have the existing exact provider and model grants for each eligible choice.
 Scoped provider/model defaults take precedence, and existing chats are unchanged.
 Before a new task starts, the Host checks each permitted candidate in order using
-a dry run that verifies its catalog entry and declared key. Where a direct
+a dry run that verifies its catalog entry and declared key. Catalog validation
+and local dry runs each have a five-second timeout. Where a direct
 Responses connection is available, it also sends a synthetic request with a
 15-second timeout per candidate
 without user messages or tools; this may incur model usage. Probe HTTP 401/403,

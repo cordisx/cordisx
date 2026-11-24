@@ -1,7 +1,20 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-conversation-tools.js'
 import { parseChannelModelPriority } from '../packages/cli/src/launcher/channel-model-priority.js'
+import { boundedChannelSelectionValidation } from '../packages/cli/src/launcher/channel-model-priority-dispatch.js'
 import { fixture } from './helpers/channel-conversation-fixture.js'
+
+it('bounds a stalled model catalog read before any probe', async () => {
+  vi.useFakeTimers()
+  try {
+    const result = boundedChannelSelectionValidation(() => new Promise(() => {}))
+    const expected = expect(result).rejects.toThrow('MODEL_PRIORITY_CATALOG_TIMEOUT')
+    await vi.advanceTimersByTimeAsync(5000)
+    await expected
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 it('bounds the ordered priority and rejects duplicate or sensitive fields', () => {
   const candidate = { providerId: 'provider', model: 'model' }

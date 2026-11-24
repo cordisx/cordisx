@@ -11,6 +11,24 @@ import type { ChannelConversationState, ChannelConversationStore } from './chann
 import type { ChannelTaskSettings } from './channel-task-settings.js'
 import type { ChannelModelCandidate } from './channel-model-priority.js'
 
+/** A stalled catalog read cannot hold an incoming Channel job indefinitely. */
+export async function boundedChannelSelectionValidation(
+  validate: () => Promise<unknown>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      validate(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('MODEL_PRIORITY_CATALOG_TIMEOUT')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export function channelPriorityFenceCurrent(
   store: ChannelConversationStore,
   fence: { priority: number; taskConfig: number; policy: number },
@@ -61,7 +79,7 @@ export async function selectChannelCreationModel(input: {
         || !channelTaskChangeAllowed(captured.taskConfig, captured.policy, event, candidate, selection)
       ) continue
       try {
-        await tasks.validate(selection)
+        await boundedChannelSelectionValidation(() => tasks.validate(selection))
       } catch (error) {
         if (
           error instanceof Error
