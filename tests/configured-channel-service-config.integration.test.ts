@@ -173,13 +173,18 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
             mutation,
           }),
         )
-      const polling = f.sessions.poll(second, 3_000)
+      let command: any
+      const polling = expect.poll(async () => {
+        const response = await f.sessions.poll(second, 3_000) as any
+        command = response.value.command
+        return command !== null && command !== undefined
+      }, { timeout: 15_000 }).toBe(true)
       let settled = false
       const saving = save('save').then(value => {
         settled = true
         return value
       })
-      const command = (await polling as any).value.command
+      await polling
       expect(command).toMatchObject({
         method: 'channel-configuration',
         payload: {

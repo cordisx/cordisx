@@ -64,5 +64,12 @@ export async function verifyInstalledChannel(input) {
       !== '8a989a7a2c83d66d4b10381e77bf596222f8301980518a86b4fbbcad006c1e0d'
   ) throw new Error('installed Channel must carry the selected brand artwork from its pinned source')
   await verifyBundledChannelBrowserGraph(packageRoot)
+  const archiveRoot = path.dirname(packageRoot)
+  const archive = await readFile(path.join(archiveRoot, 'channel.archive'))
+  const archiveMetadata = JSON.parse(await readFile(path.join(archiveRoot, 'channel-archive.json'), 'utf8'))
+  if (
+    archiveMetadata.source !== CHANNEL_DEPENDENCY
+    || archiveMetadata.integrity !== `sha256:${createHash('sha256').update(archive).digest('hex')}`
+  ) throw new Error('installed Channel archive failed source or integrity readback')
   return config
 }

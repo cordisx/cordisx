@@ -42,6 +42,7 @@ import type {
 import { bundledPluginEntry } from './bundled-plugin.js'
 import { configuredPluginManifest } from './configured-plugin-manifest.js'
 import { configuredPluginArchive } from './configured-plugin-archive.js'
+import { configuredBundledChannelArchive } from './configured-bundled-channel.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -58,6 +59,8 @@ export interface CordisXConfigPlugin {
   readonly configuredArchiveDigest?: `sha256:${string}`
   /** Host-private immutable service entry for a configured archive. */
   readonly configuredServiceEntry?: './services/runtime.mjs'
+  /** Owner-private proof that the staged archive represents the built-in Channel alias. */
+  readonly configuredBundledChannel?: true
   readonly manifest?:
     | CordisXPluginManifestV1
     | CordisXPluginManifestV4
@@ -104,6 +107,8 @@ export interface LoadConfigOptions {
   readonly profileId?: string
   /** Explicit business-project root. Project discovery supplies this value. */
   readonly projectRoot?: string
+  /** Resolve the built-in Channel to its verified archive only for its service owner. */
+  readonly serviceOwnerBundledChannel?: boolean
 }
 
 export interface CordisXConfig {
@@ -362,8 +367,16 @@ export function parseConfigDocument(
 /** Read and validate the version-1 local composition file. */
 export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
   const absolutePath = path.resolve(configPath)
-  const config = parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
+  const raw = JSON.parse(await readFile(absolutePath, 'utf8')) as { plugins: { id: string; entry: unknown }[] }
+  const config = parseConfigDocument(raw, absolutePath, options)
   const plugins = await Promise.all(config.plugins.map(async plugin => {
+    if (
+      options.serviceOwnerBundledChannel === true && plugin.enabled && plugin.id === 'channel'
+      && raw.plugins.find(item => item.id === plugin.id)?.entry === 'cordisx:channel'
+    ) {
+      const bundled = await configuredBundledChannelArchive(plugin, config.configRoot!)
+      if (bundled) return bundled
+    }
     if (plugin.enabled && /\.(?:tgz|tar\.gz)$/u.test(plugin.entry)) {
       return configuredPluginArchive(plugin, config.configRoot!)
     }

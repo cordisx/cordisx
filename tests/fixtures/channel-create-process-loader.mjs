@@ -15,6 +15,7 @@ const pkg = realpathSync(process.env.CORDISX_CHANNEL_CREATE_PACKAGE ?? '')
 const moduleUrl = file => pathToFileURL(path.join(pkg, 'dist', 'src', file)).href
 const composition = moduleUrl('cli/manager-channel-credentials-composition.js')
 const adapter = moduleUrl('launcher/feishu-adapter.js')
+const bundledChannel = moduleUrl('launcher/configured-bundled-channel.js')
 const transport = new URL('./channel-create-process-transport.mjs', import.meta.url).href
 
 function replaceOnce(source, before, after) {
@@ -25,9 +26,18 @@ function replaceOnce(source, before, after) {
 registerHooks({
   load(url, context, nextLoad) {
     const loaded = nextLoad(url, context)
-    if (url !== composition && url !== adapter) return loaded
+    if (
+      url !== composition && url !== adapter
+      && !(url === bundledChannel && process.env.CORDISX_CHANNEL_CREATE_MISSING_BUNDLE === '1')
+    ) return loaded
     let source = Buffer.from(loaded.source).toString('utf8')
-    if (url === composition) {
+    if (url === bundledChannel) {
+      source = replaceOnce(
+        source,
+        "readFile(path.join(parent, 'channel-archive.json'))",
+        'Promise.reject(new Error("synthetic missing Channel archive"))',
+      )
+    } else if (url === composition) {
       source = replaceOnce(
         source,
         'new LauncherSecretStore({ homeDir })',

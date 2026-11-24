@@ -229,6 +229,8 @@ try {
       'dist/bundled-plugins/@cordisx/channel/dist/channel.js',
       'dist/bundled-plugins/@cordisx/channel/dist/channel.d.ts',
       'dist/bundled-plugins/@cordisx/channel/dist/service.mjs',
+      'dist/bundled-plugins/@cordisx/channel.archive',
+      'dist/bundled-plugins/@cordisx/channel-archive.json',
       'dist/bundled-plugins/@cordisx/plugin-cli-proxy-api/dist/runtime/module.js',
     ]
   ) {
@@ -242,6 +244,13 @@ try {
       throw new Error(`bundled runtime does not match declared source: ${name}`)
     }
   }
+  const archiveRoot = path.join(extractedRoot, 'package/dist/bundled-plugins/@cordisx')
+  const channelArchive = readFileSync(path.join(archiveRoot, 'channel.archive'))
+  const channelArchiveMetadata = JSON.parse(readFileSync(path.join(archiveRoot, 'channel-archive.json'), 'utf8'))
+  if (
+    channelArchiveMetadata.source !== manifest.cordisxSources?.['@cordisx/channel']
+    || channelArchiveMetadata.integrity !== `sha256:${createHash('sha256').update(channelArchive).digest('hex')}`
+  ) throw new Error('bundled Channel archive does not match its source and integrity record')
   const leaked = files.filter(file => (
     !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
     && !bundledRoots.some(root => file.startsWith(root))

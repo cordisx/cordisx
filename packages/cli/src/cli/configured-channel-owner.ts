@@ -6,6 +6,7 @@ import { type HomeConfigPlugin, loadHomeConfig } from '../config/home-config.js'
 import { guardedHomeServiceConfigPersistence } from '../config/service-config.js'
 import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
+import { bundledChannelArchive } from '../launcher/bundled-plugin.js'
 import { loadStagedPluginPackage, stagedPluginModulePath } from '../launcher/plugin-package.js'
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -32,10 +33,12 @@ export function createConfiguredChannelOwner(input: {
   const digest = plugin.configuredArchiveDigest
   const distribution = plugin.distributionArtifact
   const archive = plugin.manifestFiles?.[0]
+  const bundled = plugin.configuredBundledChannel === true
   const serviceOwner = input.service.managementOwner()
   if (
     plugin.id !== 'channel' || !plugin.enabled || plugin.package !== undefined || plugin.development !== undefined
     || !digest || !distribution || !archive || plugin.manifestFiles?.length !== 1 || !path.isAbsolute(archive)
+    || bundled && archive !== bundledChannelArchive()
     || plugin.entry !== stagedPluginModulePath(input.homeDir, digest) || !plugin.source || !plugin.manifest
     || plugin.configuredServiceEntry !== './services/runtime.mjs' || !serviceOwner
   ) return undefined
@@ -56,7 +59,9 @@ export function createConfiguredChannelOwner(input: {
     const owner = input.service.managementOwner()
     if (
       closed || !input.ownerCurrent() || configured.id !== 'channel' || configured.enabled === false
-      || path.resolve(path.dirname(input.configPath), configured.entry) !== expected.entry
+      || (bundled
+        ? configured.entry !== 'cordisx:channel'
+        : path.resolve(path.dirname(input.configPath), configured.entry) !== expected.entry)
       || scoped?.candidate !== undefined || (scoped?.revision ?? 0) !== expected.revision
       || !sameJson(current, expected.config) || !input.service.generation()
       || !owner || owner !== serviceOwner || owner.source !== expected.source || owner.pluginId !== 'channel'

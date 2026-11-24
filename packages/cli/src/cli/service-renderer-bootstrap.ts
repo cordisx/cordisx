@@ -4,7 +4,8 @@ import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { StandaloneRuntimeBundleCache } from '../launcher/standalone-runtime-bundle.js'
-import { type CordisXConfig, loadConfig } from '../launcher/config.js'
+import type { CordisXConfig } from '../launcher/config.js'
+import { loadServiceRendererConfig } from './service-renderer-config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
@@ -28,11 +29,10 @@ import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
-import { ServiceRendererConfiguredChannel } from './service-renderer-configured-channel.js'
+import { prepareServiceRendererConfiguredGraphs } from './service-renderer-configured-graphs.js'
 import {
   assertConfiguredSourcesHidden,
   disabledConfiguredPlugin,
-  prepareConfiguredPlugins,
   projectConfiguredPlugins,
   unavailableConfiguredPlugin,
 } from './service-renderer-configured-plugin.js'
@@ -111,6 +111,8 @@ export class ServiceRendererBootstrap {
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
       /** Fence cooperative Home policy and configured-plugin writers while snapshots are active. */
       readonly protectProfileInputs?: boolean
+      /** Service owner may resolve its own bundled Channel archive. */
+      readonly serviceOwnerBundledChannel?: boolean
       /** Owner-selected experimental, read-only configured Channel composition. */
       readonly experimentalConfiguredChannel?: ConfiguredChannel
       /** The production owner also supplied the coordinated Channel configuration bridge. */
@@ -190,6 +192,7 @@ export class ServiceRendererBootstrap {
       ...(input.reserveDesktopConfig === undefined ? {} : { reserveDesktopConfig: input.reserveDesktopConfig }),
       readLifetimes: this.readLifetimes,
       configuredChannel: () => this.configuredChannel,
+      serviceOwnerBundledChannel: input.serviceOwnerBundledChannel === true,
       snapshot: () => input.lifecycle.snapshot(),
       policies: async () => await this.policies(),
       profileInputs: async snapshot => await this.profileInputs(snapshot),
@@ -259,7 +262,7 @@ export class ServiceRendererBootstrap {
         ) return false
         const snapshot = this.input.lifecycle.snapshot()
         const [configRead, policiesRead, inputsRead] = await Promise.allSettled([
-          loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+          loadServiceRendererConfig(this.input),
           this.policies(),
           this.profileInputs(snapshot),
         ])
@@ -297,7 +300,7 @@ export class ServiceRendererBootstrap {
         if (entry.managedContext) this.managedServiceUI?.projectInitial(entry.managedContext)
         if (!attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)) return false
         const [configRead, pluginsRead, policiesRead, inputsRead] = await Promise.allSettled([
-          loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+          loadServiceRendererConfig(this.input),
           loadPluginComposition(this.input.store, entry.snapshot.active),
           this.policies(),
           this.profileInputs(entry.snapshot),
@@ -511,7 +514,7 @@ export class ServiceRendererBootstrap {
         }
         const snapshot = this.input.lifecycle.snapshot()
         const [configRead, pluginsRead, policiesRead, inputsRead] = await Promise.allSettled([
-          loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+          loadServiceRendererConfig(this.input),
           loadPluginComposition(this.input.store, snapshot.active),
           this.policies(),
           this.profileInputs(snapshot),
@@ -534,7 +537,7 @@ export class ServiceRendererBootstrap {
           || config.plugins.length > MAX_INITIAL_GRAPHS
           || config.plugins.length > 0 && !this.input.protectProfileInputs
           || config.plugins.some(plugin => plugins.some(installed => installed.id === plugin.id))
-          || (channelPlugin !== undefined) !== (this.configuredChannel !== undefined)
+          || this.configuredChannel !== undefined && channelPlugin === undefined
         ) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
@@ -592,39 +595,27 @@ export class ServiceRendererBootstrap {
             if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
           }
         }
-        if (configuredPlugins.length > 0) {
-          entry.configuredPlugins = []
-          entry.unavailableConfiguredPlugins = await prepareConfiguredPlugins({
-            homeDir: this.input.homeDir,
-            plugins: configuredPlugins,
-            server: await this.input.lifecycle.artifactServer(),
-            configured: entry.configuredPlugins,
-            leases: entry.leases,
-            current: () => this.current(rendererId, entry),
-          })
-        }
-        if (channelPlugin !== undefined) {
-          const channel = this.configuredChannel!
-          const configured = await ServiceRendererConfiguredChannel.prepare({
-            homeDir: this.input.homeDir,
-            configPath: this.input.configPath,
-            profileId: this.input.profileId,
-            plugin: channelPlugin,
-            selectedPlugin: channel.plugin,
-            service: channel.service,
-            bridge: channel.bridge,
-            allowConfiguration: this.input.experimentalChannelServiceConfig === true,
-            allowConnectionControl: this.input.experimentalChannelControl === true,
-            allowConnectionReconnect: this.input.experimentalChannelReconnect === true,
-            server: await this.input.lifecycle.artifactServer(),
-            current: () => this.current(rendererId, entry),
-            unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),
-            retire: () => entry.peer.close(),
-          })
-          entry.configuredChannel = configured
-          entry.leases.push(configured.lease)
-          if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
-        }
+        entry.configuredPlugins = []
+        entry.unavailableConfiguredPlugins = []
+        await prepareServiceRendererConfiguredGraphs({
+          homeDir: this.input.homeDir,
+          configPath: this.input.configPath,
+          profileId: this.input.profileId,
+          plugins: configuredPlugins,
+          ...(channelPlugin === undefined ? {} : { channel: channelPlugin }),
+          ...(this.configuredChannel === undefined ? {} : { channelOwner: this.configuredChannel }),
+          configured: entry.configuredPlugins,
+          unavailable: entry.unavailableConfiguredPlugins,
+          leases: entry.leases,
+          setChannel: channel => entry.configuredChannel = channel,
+          server: async () => await this.input.lifecycle.artifactServer(),
+          allowConfiguration: this.input.experimentalChannelServiceConfig === true,
+          allowConnectionControl: this.input.experimentalChannelControl === true,
+          allowConnectionReconnect: this.input.experimentalChannelReconnect === true,
+          current: () => this.current(rendererId, entry),
+          unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),
+          retire: () => entry.peer.close(),
+        })
         entry.snapshot = snapshot
         entry.config = config
         entry.plugins = plugins

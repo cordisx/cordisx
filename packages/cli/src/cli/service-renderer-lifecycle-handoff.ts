@@ -1,4 +1,5 @@
-import { type CordisXConfig, type CordisXConfigPlugin, loadConfig } from '../launcher/config.js'
+import type { CordisXConfig, CordisXConfigPlugin } from '../launcher/config.js'
+import { loadServiceRendererConfig } from './service-renderer-config.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import type { PluginActivationStore } from '../launcher/plugin-activation.js'
 import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
@@ -70,6 +71,7 @@ export class ServiceRendererLifecycleHandoff {
       ) => Promise<DesktopConfigurationReservation>
       readonly readLifetimes: ManagerRendererReadLifetimes
       readonly configuredChannel: () => ServiceRendererConfiguredChannelInput | undefined
+      readonly serviceOwnerBundledChannel?: boolean
       readonly snapshot: () => ServiceRendererSnapshot
       readonly policies: () => Promise<readonly CordisXPersistedPermissionPolicyRecord[]>
       readonly profileInputs: (snapshot: ServiceRendererSnapshot) => Promise<Map<string, string>>
@@ -91,7 +93,7 @@ export class ServiceRendererLifecycleHandoff {
     readonly inputs: Map<string, string>
   }> {
     const [config, plugins, policies, inputs] = await Promise.all([
-      loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
+      loadServiceRendererConfig(this.input),
       loadPluginComposition(this.input.store, snapshot.active),
       this.input.policies(),
       this.input.profileInputs(snapshot),

@@ -40,9 +40,13 @@ const codex = (process.env.PATH ?? '').split(path.delimiter).map(directory => pa
 
 it.skipIf(
   !archive || !managerPackage || !chrome || !codex || process.platform !== 'darwin' && process.platform !== 'linux',
-)(
-  'creates a Channel through the packaged service owner and both Manager pages',
-  async () => {
+).each([
+  { label: 'archive', channelEntry: archive!, missingBundle: false },
+  { label: 'bundled alias', channelEntry: 'cordisx:channel', missingBundle: false },
+  { label: 'missing bundled archive', channelEntry: 'cordisx:channel', missingBundle: true },
+])(
+  'keeps the packaged service and Manager usable with $label',
+  async ({ channelEntry, missingBundle }) => {
     const root = await realpath(await mkdtemp('/tmp/cx-production-channel-'))
     const homeDir = path.join(root, 'h')
     const userHome = path.join(root, 'u')
@@ -59,6 +63,7 @@ it.skipIf(
       CORDISX_MODEL_API_PORT: '0',
       CORDISX_CHANNEL_CREATE_FIXTURE_ROOT: root,
       CORDISX_CHANNEL_CREATE_PACKAGE: packagePath,
+      CORDISX_CHANNEL_CREATE_MISSING_BUNDLE: missingBundle ? '1' : '0',
       NODE_OPTIONS: `--import=${loader}`,
       TMPDIR: root,
       LANG: 'en_US.UTF-8',
@@ -79,13 +84,16 @@ it.skipIf(
     }
     const exists = (page: CdpClient, selector: string) =>
       page.evaluate<boolean>('Boolean(document.querySelector(' + JSON.stringify(selector) + '))')
-    const showChannel = async (page: CdpClient) => {
+    const showManager = async (page: CdpClient) => {
       await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 70_000 })
         .toBe('true')
       await expect.poll(
         () => page.evaluate('document.querySelector("[data-cordisx-react-manager]")?.hidden === false'),
         { timeout: 60_000 },
       ).toBe(true)
+    }
+    const showChannel = async (page: CdpClient) => {
+      await showManager(page)
       await expect.poll(() => exists(page, '[data-settings-navigation-item^=channel]'), { timeout: 15_000 })
         .toBe(true)
       await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
@@ -118,7 +126,7 @@ it.skipIf(
           ...createDefaultHomeConfig(),
           plugins: [{
             id: 'channel',
-            entry: archive,
+            entry: channelEntry,
             services: {
               runtime: {
                 profiles: {
@@ -135,14 +143,21 @@ it.skipIf(
         { mode: 0o600 },
       )
       const plugin = (await loadConfig(configPath, { profileId: 'default', projectRoot: homeDir })).plugins[0]!
-      expect(plugin.source).toBeDefined()
+      const bundledDescriptor = JSON.parse(
+        await readFile(
+          path.join(packagePath, 'dist/bundled-plugins/@cordisx/channel/cordisx-package.json'),
+          'utf8',
+        ),
+      ) as { canonicalSource?: string }
+      const source = plugin.source ?? bundledDescriptor.canonicalSource
+      expect(source).toBeDefined()
       const policies = exactDomPermissionPolicies('default', [{
         id: 'channel',
         entry: plugin.entry,
         pointIds: ['manager.settings.navigation-items', 'manager.content'],
       }]).map(policy => ({
         ...policy,
-        key: { ...policy.key, identity: { ...policy.key.identity, source: plugin.source! } },
+        key: { ...policy.key, identity: { ...policy.key.identity, source: source! } },
       }))
       await persistPermissionPolicies({ configPath }, policies)
       await symlink(packagePath, path.join(root, 'package'), 'dir')
@@ -159,6 +174,20 @@ it.skipIf(
       await first.send('Runtime.enable')
       await first.send('Page.enable')
       await first.send('Page.navigate', { url: firstUrl })
+      if (missingBundle) {
+        await showManager(first)
+        expect(await exists(first, '[data-settings-navigation-item^=channel]')).toBe(false)
+        const connections = JSON.parse((await run('channel', 'connections', '--profile', 'default')).stdout)
+        expect(JSON.stringify(connections)).toContain('simulator')
+        await first.evaluate('globalThis.__beforeChannelReload = true')
+        await first.send('Page.reload')
+        await expect.poll(
+          () => first.evaluate('globalThis.__beforeChannelReload === undefined').catch(() => false),
+          { timeout: 15_000 },
+        ).toBe(true)
+        await showManager(first)
+        return
+      }
       await showChannel(first)
       const secondUrl = await open()
       const debugOrigin = 'http://' + new URL(socket).host

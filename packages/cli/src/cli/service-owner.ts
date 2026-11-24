@@ -203,6 +203,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         })
         lifetime.signal.removeEventListener('abort', stopServices)
         lifetime.signal.throwIfAborted()
+        const protectProfileInputs = process.platform === 'darwin' || process.platform === 'linux'
+        const serviceOwnerBundledChannel = protectProfileInputs && releaseRuntimeOwner !== undefined
         if (appId === 'codex') {
           const userHome = environment.HOME || os.homedir()
           channel = await startHeadlessService({
@@ -212,6 +214,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             profileId,
             generation,
             profileOwnerVerified: releaseRuntimeOwner !== undefined,
+            serviceOwnerBundledChannel,
             userHome,
             codexHome: environment.CODEX_HOME || path.join(userHome, '.codex'),
             codexExecutable: 'codex',
@@ -230,7 +233,6 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           generation,
           ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
         }, releaseRuntimeOwner !== undefined)
-        const protectProfileInputs = process.platform === 'darwin' || process.platform === 'linux'
         const channelOwner = channel?.managerChannelOwner
         if (
           protectProfileInputs && releaseRuntimeOwner !== undefined && channelOwner
@@ -285,6 +287,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           store,
           managedServiceUI: rendererManagedServiceUI,
           protectProfileInputs,
+          serviceOwnerBundledChannel,
           experimentalInstalledPermissionPolicy: rendererPermissionProof !== undefined
             && rendererPermissionConsumers !== undefined,
           experimentalConfiguredPluginPermissionPolicy: rendererPermissionProof !== undefined

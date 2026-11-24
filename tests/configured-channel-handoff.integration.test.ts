@@ -9,6 +9,27 @@ import { bootConfiguredChannelManager } from './helpers/configured-channel-manag
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 
 it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'retires a configured Channel graph when its page closes during preparation',
+  async () => {
+    const f = await fixture({ channelArchive: archive, protectProfileInputs: true, delayLease: true })
+    try {
+      const preparing = f.call({ action: 'prepare' })
+      const lease = await f.leaseReady.promise
+      expect((await fetch(lease.entryUrl)).status).toBe(200)
+      const closing = f.sessions.close(f.invocation)
+      f.releaseLease.resolve()
+      expect(await preparing).toEqual({ status: 'unavailable' })
+      expect(await closing).toBe(true)
+      expect((await fetch(lease.entryUrl)).status).toBe(404)
+    } finally {
+      f.releaseLease.resolve()
+      await f.close()
+    }
+  },
+  30_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
   'hands an originating Manager from the old Channel view to a committed service generation',
   async () => {
     let f!: Awaited<ReturnType<typeof fixture>>

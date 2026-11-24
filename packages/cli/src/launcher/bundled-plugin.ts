@@ -18,3 +18,8 @@ export function bundledPluginEntry(name: CordisXBundledPlugin): string {
     name === 'channel' ? 'dist/channel.js' : 'dist/runtime/module.js',
   )
 }
+
+/** The packaged Channel archive and its build-time integrity record. */
+export function bundledChannelArchive(): string {
+  return path.join(path.dirname(bundledPluginRoot('channel')), 'channel.archive')
+}

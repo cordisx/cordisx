@@ -69,6 +69,7 @@ export async function startHeadlessService(input: {
   readonly environment: NodeJS.ProcessEnv
   readonly generation: string
   readonly profileOwnerVerified?: boolean
+  readonly serviceOwnerBundledChannel?: boolean
   readonly report: (code: string) => void
 }) {
   const cleanup: (() => Promise<void>)[] = []
@@ -86,7 +87,11 @@ export async function startHeadlessService(input: {
       if (errors.length) throw new AggregateError(errors, 'Headless service cleanup failed')
     })()
   try {
-    const configured = await loadConfig(input.configPath, { profileId: input.profileId, projectRoot: input.homeDir })
+    const configured = await loadConfig(input.configPath, {
+      profileId: input.profileId,
+      projectRoot: input.homeDir,
+      serviceOwnerBundledChannel: input.serviceOwnerBundledChannel === true,
+    })
     const store = new PluginActivationStore(input.homeDir, input.profileId, input.generation)
     const activated = await loadPluginComposition(store, await store.loadActive())
     const configuredIds = new Set(configured.plugins.map(plugin => plugin.id))

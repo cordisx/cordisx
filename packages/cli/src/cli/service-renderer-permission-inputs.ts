@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { parseConfigDocument } from '../launcher/config.js'
+import { bundledChannelArchive, bundledPluginEntry } from '../launcher/bundled-plugin.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap-state.js'
 
@@ -17,18 +18,33 @@ export async function serviceRendererPermissionInputsCurrent(input: {
     const config = input.entry.config
     if (!config?.configPath || !config.projectRoot || input.signal.aborted || !input.isCurrent()) return false
     const raw = await readFile(config.configPath)
-    const parsed = parseConfigDocument(JSON.parse(raw.toString('utf8')), config.configPath, {
+    const document = JSON.parse(raw.toString('utf8')) as { plugins: { id: string; entry: unknown }[] }
+    const parsed = parseConfigDocument(document, config.configPath, {
       profileId: input.profileId,
       projectRoot: config.projectRoot,
     })
     const { plugins: loaded, ...expectedConfig } = config
     const { plugins: configured, ...actualConfig } = parsed
+    if (
+      loaded.some(plugin =>
+        plugin.configuredBundledChannel === true
+        && document.plugins.find(candidate => candidate.id === plugin.id)?.entry !== 'cordisx:channel'
+      )
+    ) return false
     const expectedPlugins = loaded.map(plugin => {
       const archive = plugin.configuredArchiveDigest !== undefined
       if (archive && plugin.manifestFiles?.length !== 1) throw new Error('configured archive is unavailable')
+      if (
+        plugin.configuredBundledChannel === true
+        && (plugin.id !== 'channel' || !archive || plugin.manifestFiles?.[0] !== bundledChannelArchive())
+      ) throw new Error('configured bundled Channel is unavailable')
       return {
         id: plugin.id,
-        entry: archive ? plugin.manifestFiles![0]! : plugin.entry,
+        entry: plugin.configuredBundledChannel === true
+          ? bundledPluginEntry('channel')
+          : archive
+          ? plugin.manifestFiles![0]!
+          : plugin.entry,
         ...(plugin.developmentIdentityEntry === undefined ? {} : {
           developmentIdentityEntry: plugin.developmentIdentityEntry,
         }),

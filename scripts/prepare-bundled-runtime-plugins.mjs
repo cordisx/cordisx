@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,6 +41,14 @@ try {
     await verifyPackage(destination, true)
     const packageFile = path.join(destination, 'package.json')
     await save(packageFile, { ...JSON.parse(await readFile(packageFile, 'utf8')), cordisxSource: spec })
+    if (name === '@cordisx/channel') {
+      const archive = path.join(targetRoot, '@cordisx/channel.archive')
+      await copyFile(tarball, archive)
+      await save(path.join(targetRoot, '@cordisx/channel-archive.json'), {
+        source: spec,
+        integrity: `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}`,
+      })
+    }
   }
 } finally {
   await rm(temporary, { recursive: true, force: true })
