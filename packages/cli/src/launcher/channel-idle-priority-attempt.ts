@@ -47,7 +47,7 @@ export async function attemptChannelIdlePriority(input: {
     !grant || grant.source.appId !== appId || grant.source.profileId !== profileId
     || !channelIdleGrantCurrent(store.snapshot(), grant, event, job.id)
   ) return false
-  if (claims.has(job.sessionId)) return true
+  if (claims.has(job.sessionId) || input.fence.isMigrating(job.sessionId)) return true
   const source = job.sessionId
   claims.add(source)
   let ownsClaim = true

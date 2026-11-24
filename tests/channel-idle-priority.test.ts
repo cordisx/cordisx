@@ -149,7 +149,7 @@ async function fixture() {
       job: store.snapshot().jobs.j!,
       signal: new AbortController().signal,
     })
-  return { store, native, command, run, selection, root, idlePriorityOffers }
+  return { store, native, command, run, selection, root, idlePriorityOffers, fence }
 }
 async function enable(f: Awaited<ReturnType<typeof fixture>>) {
   const disclosure = await f.command('auto-suggest old one new two')
@@ -254,6 +254,11 @@ it('does not transfer an unapproved sender, revoked configuration or unsupported
 it('does not probe an active native session or migrate when another sender has queued work', async () => {
   const f = await fixture()
   await enable(f)
+  const release = f.fence.beginMigration('source')
+  expect(release).toBeDefined()
+  expect(await f.run()).toBe(true)
+  expect(f.native.priorityEvidence).not.toHaveBeenCalled()
+  release!()
   f.native.idle.mockResolvedValueOnce(false)
   expect(await f.run()).toBe(true)
   expect(f.native.priorityEvidence).not.toHaveBeenCalled()

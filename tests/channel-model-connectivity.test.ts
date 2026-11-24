@@ -157,3 +157,16 @@ it('does not treat an incomplete connection setup or a failed authority check as
   expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 1000, denied)).toBe('inconclusive')
   expect(fetch).not.toHaveBeenCalled()
 })
+
+it('bounds a stalled authorization recheck without sending a probe or declaring service failure', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose: () => {},
+  })
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 20, () => new Promise(() => {})))
+    .toBe('inconclusive')
+  expect(fetch).not.toHaveBeenCalled()
+})
