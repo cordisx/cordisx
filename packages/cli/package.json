@@ -1,6 +1,6 @@
 {
   "name": "cordisx",
-  "version": "0.1.0-beta.78",
+  "version": "0.1.0-beta.79",
   "description": "An experimental Cordis-powered UI plugin host for Codex Desktop",
   "type": "module",
   "files": [
@@ -155,6 +155,6 @@
   ],
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#53b9958c0c1573096aaaf8e7f7074a291a7bee04",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#cb6ad688587e4eedf5fa69d269363d9a52646b66"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#25ff53db12e51e66b304f9f2139c706af0b0c761"
   }
 }

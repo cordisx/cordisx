@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.78",
+  "version": "0.1.0-beta.79",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -95,7 +95,7 @@
     "test:integration": "vitest run --project integration",
     "test:browser": "vitest run --project browser",
     "test:all": "vitest run",
-    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-ci-dynamic-bundle-tests.mjs scripts/test-ci-filter-dynamic-bundle-tests.mjs scripts/test-test-projects.mjs scripts/test-ci-release-candidate.mjs scripts/test-native-helper-artifact.mjs scripts/test-install-git-hooks.mjs scripts/test-pre-commit-format.mjs",
+    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-ci-dynamic-bundle-tests.mjs scripts/test-ci-filter-dynamic-bundle-tests.mjs scripts/test-test-projects.mjs scripts/test-ci-release-candidate.mjs scripts/test-native-helper-artifact.mjs scripts/test-check-installed-cli-proxy.mjs scripts/test-install-git-hooks.mjs scripts/test-pre-commit-format.mjs",
     "test:release": "npm run check:release:entry && vitest run tests/release-version.test.ts tests/npm-pack-report.test.ts tests/release-manifest.test.ts tests/registry-release-propagation.test.ts tests/release-publication.test.ts tests/release-recovery-state.test.ts",
     "validate:marketplace-artifact": "tsx packages/cli/scripts/validate-marketplace-artifact.ts"
   },
@@ -150,7 +150,7 @@
   },
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#53b9958c0c1573096aaaf8e7f7074a291a7bee04",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#cb6ad688587e4eedf5fa69d269363d9a52646b66"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#25ff53db12e51e66b304f9f2139c706af0b0c761"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",

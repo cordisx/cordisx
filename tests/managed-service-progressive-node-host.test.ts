@@ -214,6 +214,7 @@ export async function apply(ctx, input) {
 }
 apply.inject = ['managedServices']
 export async function prepare(ctx, input) {
+  if (input.registration.nativeProviderCapabilities?.contextWindow !== true) throw new Error('window capability absent')
   fixture.configurations.push(input.configuration)
   const id = input.capability.id
   fixture.observations.push('prepare:' + id)
@@ -223,8 +224,8 @@ export async function prepare(ctx, input) {
   const generation = id + '-catalog'
   const catalog = { state: 'known', generation, modelIds: ['model'], digest: 'sha256:' + createHash('sha256').update(JSON.stringify([generation,['model']])).digest('hex') }
   await input.startup.reportCatalog({ contract: 'cordisx.startup-catalog-report/v1', target: { pluginId: 'example', capabilityId: id }, generation: input.generation, sequence: attempt, catalog })
-  const routes = [{ alias: 'model', gatewayModelId: 'gateway-model' }]
-  const digest = 'sha256:' + createHash('sha256').update(JSON.stringify([generation, 'model', [['model','gateway-model']]])).digest('hex')
+  const routes = [{ alias: 'model', gatewayModelId: 'gateway-model', contextWindow: 32000 }]
+  const digest = 'sha256:' + createHash('sha256').update(JSON.stringify([generation, 'model', [['model','gateway-model', null, 32000]]])).digest('hex')
   const result = await input.registration.publishNativeProvider({ providerId: id, compositionOrigin: 'api', catalog: { generation, digest, defaultAlias: 'model', routes } })
   fixture.observations.push('publication:' + id + ':' + result.status)
   if (id === 'slow' && attempt === 1) { fixture.entered(); await fixture.release; throw new Error('old attempt returned late') }
@@ -249,6 +250,9 @@ export async function prepare(ctx, input) {
       expect(authority.availability({ pluginId: 'example', capabilityId: 'slow' })).toMatchObject({ available: false })
       expect(activation.nativeProviderIds).not.toContain('slow')
       await expect(authority.wait({ pluginId: 'example', capabilityId: 'fast' })).resolves.toEqual({ available: true })
+      const connection = activation.prepareNativeConnection('fast')
+      expect(connection.value.models.aliases).toMatchObject([{ contextWindow: 32_000 }])
+      connection.dispose()
       await expect(authority.wait({ pluginId: 'example', capabilityId: 'dependent' })).resolves.toEqual({
         available: true,
       })

@@ -53,6 +53,7 @@ export function createManagedServiceRegistrationHandle(
       return record.binding
     },
     revision: record.revision,
+    nativeProviderCapabilities: Object.freeze({ contextWindow: true as const }),
     inspect: operations.inspect,
     authenticate: async (action, options) => await operations.authenticate(action, options?.signal),
     ensureReady: async options => await operations.ensureReady(options),

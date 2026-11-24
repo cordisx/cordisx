@@ -13,8 +13,8 @@ interface NativeManagedModelCatalogEntry {
   readonly slug: string
   readonly display_name: string
   readonly description: string
-  readonly context_window: number
-  readonly max_context_window: number
+  readonly context_window?: number
+  readonly max_context_window?: number
   readonly input_modalities: readonly ['text']
   readonly supported_in_api: true
   readonly visibility: 'list'
@@ -123,8 +123,6 @@ function modelEntry(providerId: string, alias: string, gatewayModelId: string, p
     slug: gatewayModelId,
     display_name: `${providerId}: ${alias}`,
     description: `CordisX managed ${providerId} model`,
-    context_window: 128_000,
-    max_context_window: 128_000,
     input_modalities: Object.freeze(['text'] as const),
     supported_in_api: true as const,
     visibility: 'list' as const,
@@ -150,6 +148,9 @@ function buildNativeManagedDesktopFiles(
 ): NativeManagedDesktopFiles {
   const first = connections[0]
   const models: NativeManagedModelCatalogEntry[] = []
+  // Codex keys this catalog by model ID rather than provider. A shared ID
+  // must use the most conservative known window across every route.
+  const modelWindows = new Map<string, (number | undefined)[]>()
   const modelIds = new Set<string>()
   const providerIds = new Set<string>()
   const environment: Record<string, string> = {}
@@ -187,6 +188,9 @@ function buildNativeManagedDesktopFiles(
     defaultModelId ??= providerDefault
     const providerModels = new Map<string, { label: string; aliases: string[] }>()
     for (const alias of item.connection.models.aliases) {
+      const windows = modelWindows.get(alias.gatewayModelId) ?? []
+      windows.push(alias.contextWindow)
+      modelWindows.set(alias.gatewayModelId, windows)
       const providerModel = providerModels.get(alias.gatewayModelId)
       if (providerModel === undefined) {
         providerModels.set(alias.gatewayModelId, { label: alias.alias, aliases: [alias.alias] })
@@ -240,7 +244,16 @@ function buildNativeManagedDesktopFiles(
       'analytics.enabled = false',
       '',
     ].join('\n'),
-    catalogJson: `${JSON.stringify({ models })}\n`,
+    catalogJson: `${
+      JSON.stringify({
+        models: models.map(model => {
+          const windows = modelWindows.get(model.slug) ?? []
+          if (windows.length === 0 || windows.some(value => !Number.isSafeInteger(value) || value! < 1)) return model
+          const window = (windows as number[]).reduce((smallest, value) => Math.min(smallest, value))
+          return { ...model, context_window: window, max_context_window: window }
+        }),
+      })
+    }\n`,
     environment: Object.freeze({ ...environment }),
     providers: Object.freeze(providers),
     ...(first === undefined ? {} : { defaultProviderId: first.providerId }),

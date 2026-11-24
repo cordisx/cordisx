@@ -115,6 +115,70 @@ describe('native model provider catalog projection', () => {
     expect(dispose).toHaveBeenCalledTimes(1)
   })
 
+  it('projects conservative windows and reasoning per exact provider and model on every snapshot', async () => {
+    const dispose = vi.fn()
+    let secondWindow: number | undefined = 32_000
+    const activation = {
+      nativeProviderIds: ['alpha', 'beta'],
+      prepareNativeConnection(providerId: string) {
+        const result = connection(providerId, dispose)
+        const aliases = providerId === 'alpha'
+          ? [
+            {
+              alias: 'shared',
+              gatewayModelId: 'shared-model',
+              contextWindow: 64_000,
+              reasoningCapabilities: { efforts: ['low', 'medium', 'high'], defaultEffort: 'high' },
+            },
+            {
+              alias: 'shared-alias',
+              gatewayModelId: 'shared-model',
+              ...(secondWindow === undefined ? {} : { contextWindow: secondWindow }),
+              reasoningCapabilities: { efforts: ['medium', 'high'], defaultEffort: 'medium' },
+            },
+          ]
+          : [{ alias: 'shared', gatewayModelId: 'shared-model', contextWindow: 100_000 }]
+        return { ...result, value: { ...result.value, models: { ...result.value.models, aliases } } }
+      },
+    } as unknown as ManagedServiceNodeActivation
+    const read = nativeModelProviderCatalog(activation)
+    const first = await read()
+    expect(first[0]?.models[0]).toMatchObject({
+      contextWindow: 32_000,
+      reasoningCapabilities: { efforts: ['medium', 'high'] },
+    })
+    expect(first[0]?.models[0]?.reasoningCapabilities).not.toHaveProperty('defaultEffort')
+    expect(first[1]?.models[0]?.contextWindow).toBe(100_000)
+
+    secondWindow = undefined
+    const unknown = await read()
+    expect(unknown[0]?.models[0]).not.toHaveProperty('contextWindow')
+    expect(unknown[1]?.models[0]?.contextWindow).toBe(100_000)
+    secondWindow = -1
+    expect((await read())[0]?.models[0]).not.toHaveProperty('contextWindow')
+    secondWindow = 16_000
+    expect((await read())[0]?.models[0]?.contextWindow).toBe(16_000)
+    expect(dispose).toHaveBeenCalledTimes(8)
+  })
+
+  it('keeps reasoning capabilities unknown if any alias is unknown', async () => {
+    const result = connection('alpha', vi.fn())
+    const aliases = [
+      { alias: 'shared', gatewayModelId: 'shared-model', reasoningCapabilities: { efforts: ['high'] } },
+      { alias: 'other', gatewayModelId: 'shared-model' },
+    ]
+    const activation = {
+      nativeProviderIds: ['alpha'],
+      prepareNativeConnection: () => ({
+        ...result,
+        value: { ...result.value, models: { ...result.value.models, aliases } },
+      }),
+    } as unknown as ManagedServiceNodeActivation
+    expect((await nativeModelProviderCatalog(activation)())[0]?.models[0]).not.toHaveProperty(
+      'reasoningCapabilities',
+    )
+  })
+
   it('omits unavailable or malformed providers without retaining their sessions', async () => {
     const dispose = vi.fn()
     const activation = {
