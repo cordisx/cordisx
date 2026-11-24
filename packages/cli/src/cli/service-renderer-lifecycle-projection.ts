@@ -1,4 +1,4 @@
-import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { ManagerRendererCommandMethod, OwnerCommandProjection } from './manager-renderer-peer.js'
@@ -64,7 +64,11 @@ export class ServiceRendererLifecycleProjection {
       readonly renderer: Snapshot
       readonly rendererId: string
       readonly current: () => boolean
-      readonly resolve: (alias: string, pluginId: string) => { readonly source: string; readonly digest: string }
+      readonly resolve: (
+        alias: string,
+        pluginId: string,
+        snapshotItem?: CordisXPluginActivationItemV1,
+      ) => { readonly source: string; readonly digest: string }
     },
   ) {
     this.owner = structuredClone(input.owner)
@@ -91,14 +95,17 @@ export class ServiceRendererLifecycleProjection {
       || new Set(original.map(item => item.id)).size !== original.length
     ) throw new Error('renderer-identity-lifecycle-unavailable')
     for (let index = 0; index < original.length; index++) {
-      const { canonicalSource: source, ...item } = original[index]!
+      const snapshotItem = original[index]!
+      const { canonicalSource: source, ...item } = snapshotItem
       const { canonicalSource: alias, ...other } = projected[index]!
       if (!attachmentEqual(item, other)) throw new Error('renderer-identity-lifecycle-unavailable')
       if (source === undefined) {
         if (alias !== undefined) throw new Error('renderer-identity-lifecycle-unavailable')
       } else {
         if (!alias || !aliasPattern.test(alias)) throw new Error('renderer-identity-lifecycle-unavailable')
-        const resolved = this.input.resolve(alias, item.id)
+        // The owner supplies the complete snapshot item only for pair
+        // verification. Mutation targets are resolved without it.
+        const resolved = this.input.resolve(alias, item.id, snapshotItem)
         if (resolved.source !== source || resolved.digest !== item.digest) {
           throw new Error('renderer-identity-lifecycle-unavailable')
         }

@@ -264,10 +264,18 @@ export class ServiceRendererIdentityProjection {
     }
   }
 
-  /** The lifecycle may validate a provisional alias; ordinary reads cannot resolve it. */
-  resolveLifecycle(context: ManagerRendererChannelContext, alias: string, pluginId: string) {
+  /** Pair an unavailable alias only with its exact owner snapshot; mutation targets remain unavailable. */
+  resolveLifecycle(
+    context: ManagerRendererChannelContext,
+    alias: string,
+    pluginId: string,
+    snapshotItem?: CordisXPluginActivationItemV1,
+  ) {
     const value = this.current(context) ? this.candidate?.bindings.get(alias) ?? this.aliases.get(alias) : undefined
-    if (!value || value.unavailable || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
+    if (
+      !value || value.pluginId !== pluginId
+      || value.unavailable && (!snapshotItem || !value.activation || !attachmentEqual(value.activation, snapshotItem))
+    ) throw new Error('renderer-identity-unavailable')
     return { pluginId: value.pluginId, source: value.source, digest: value.digest }
   }
 

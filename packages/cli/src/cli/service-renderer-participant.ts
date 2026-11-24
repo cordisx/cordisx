@@ -8,7 +8,7 @@ import {
   type RendererAttachmentScope,
 } from '../launcher/renderer-lifecycle-peer.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
-import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { ServiceRendererLifecycleProjection } from './service-renderer-lifecycle-projection.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
@@ -101,7 +101,11 @@ export class ServiceRendererParticipants {
     rendererId: string,
     snapshot: Snapshot,
     projected?: Snapshot,
-    resolve?: (alias: string, pluginId: string) => { readonly source: string; readonly digest: string },
+    resolve?: (
+      alias: string,
+      pluginId: string,
+      snapshotItem?: CordisXPluginActivationItemV1,
+    ) => { readonly source: string; readonly digest: string },
   ): void {
     const entry = this.entries.get(rendererId)
     if (

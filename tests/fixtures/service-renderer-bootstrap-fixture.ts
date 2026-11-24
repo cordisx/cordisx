@@ -526,8 +526,9 @@ export async function fixture(
     requiredCapability = false,
     code?: string,
     dependencies?: readonly { id: string; version: string }[],
+    canonicalSource?: string,
   ) {
-    const sourceDirectory = await localPackage({ root, id, requiredCapability, code, dependencies })
+    const sourceDirectory = await localPackage({ root, id, requiredCapability, code, dependencies, canonicalSource })
     const plan = await coordinator.handle({
       ...request({ kind: 'inspect-local', sourceDirectory }, revision, generation),
       profileId,

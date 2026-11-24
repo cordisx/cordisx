@@ -244,6 +244,7 @@ export async function localPackage(input: {
   code?: string
   dependencies?: readonly { id: string; version: string }[]
   requiredCapability?: boolean
+  canonicalSource?: string
 }): Promise<string> {
   const source = path.join(input.root, `${input.id}-${Math.random().toString(36).slice(2)}`)
   await mkdir(path.join(source, 'src'), { recursive: true })
@@ -265,6 +266,7 @@ export async function localPackage(input: {
             schemaVersion: 1,
             id: input.id,
             version: input.version ?? '1.0.0',
+            ...(input.canonicalSource === undefined ? {} : { canonicalSource: input.canonicalSource }),
             entry: './src/index.ts',
             compatibility: { runtimeAbi: 1, protocol: 1 },
             dependencies: input.dependencies ?? [],

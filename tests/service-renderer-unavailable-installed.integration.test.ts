@@ -35,6 +35,8 @@ it('keeps a supported installed plugin available without loading an unsupported 
         1,
         true,
         'export const unavailableMarker = "private-unsupported-plugin-code"; export function apply() {}',
+        undefined,
+        'https://example.test/fixtures',
       ),
     ).toMatchObject({ outcome: 'applied' })
     const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
@@ -58,6 +60,7 @@ it('keeps a supported installed plugin available without loading an unsupported 
       expect(bundle).toMatch(/standaloneUnavailable\s*:\s*(?:true|!0)/u)
       expect(bundle).not.toContain('private-unsupported-plugin-code')
       expect(bundle).not.toContain(privateConfig)
+      expect(bundle).not.toContain('https://example.test/fixtures')
       expect(bundle).not.toContain(f.homeDir)
     } finally {
       bytes.fill(0)
@@ -100,13 +103,20 @@ it('keeps a supported installed plugin available without loading an unsupported 
       }
       const item = active.plugins.find(plugin => plugin.id === 'unsupported-plugin')!
       const alias = aliases.get(item.id)!
+      const source = plugins.find(plugin => plugin.id === item.id)!.source!
       identity.assertInstalledProjection(context, alias, item)
       expect(identity.projectActivation(context, active).plugins).toHaveLength(active.plugins.length)
       expect(() => identity.resolve(context, alias, item.id)).toThrow('renderer-identity-unavailable')
       expect(() => identity.resolveLifecycle(context, alias, item.id)).toThrow('renderer-identity-unavailable')
+      expect(identity.resolveLifecycle(context, alias, item.id, item)).toEqual({
+        pluginId: item.id,
+        source,
+        digest: item.digest,
+      })
+      expect(() => identity.resolveLifecycle(context, alias, item.id, { ...item, version: '2.0.0' }))
+        .toThrow('renderer-identity-unavailable')
       expect(() => identity.projectManagerPolicies(context, alias, item.id, []))
         .toThrow('renderer-identity-unavailable')
-      const source = plugins.find(plugin => plugin.id === item.id)!.source!
       const catalog = await projectManagementRequest({
         context,
         operation: { kind: 'query-catalog' },
@@ -160,7 +170,8 @@ it('isolates dependent graphs in both pages while preserving unrelated managemen
   const handle = (await f.sessions.open(f.gateway, secondId))!
   const second = { gateway: f.gateway, browserSessionId: secondId, handle }
   try {
-    expect(await f.install('unsupported-plugin', 0, true)).toMatchObject({ outcome: 'applied' })
+    expect(await f.install('unsupported-plugin', 0, true, undefined, undefined, 'https://example.test/fixtures'))
+      .toMatchObject({ outcome: 'applied' })
     expect(
       await f.install('dependent-plugin', 1, false, undefined, [
         { id: 'unsupported-plugin', version: '1.0.0' },

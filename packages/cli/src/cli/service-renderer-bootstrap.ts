@@ -850,7 +850,8 @@ export class ServiceRendererBootstrap {
           projectedSnapshot,
           entry.identity === undefined
             ? undefined
-            : (alias, pluginId) => entry.identity!.resolveLifecycle(context, alias, pluginId),
+            : (alias, pluginId, snapshotItem) =>
+              entry.identity!.resolveLifecycle(context, alias, pluginId, snapshotItem),
         )
         entry.bootstrapConfirmed = true
         this.input.permissionProof?.register(context, permissionPublicKey)

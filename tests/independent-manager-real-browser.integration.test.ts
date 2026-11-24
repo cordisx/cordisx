@@ -421,6 +421,7 @@ it.skipIf(chrome === undefined)(
           id,
           dependencies,
           requiredCapability: unsupported,
+          ...(unsupported ? { canonicalSource: 'https://example.test/unavailable-source' } : {}),
           code: `export function apply() { globalThis.__${id.replaceAll('-', '_')} = true }`,
         })
         if (unsupported) {
