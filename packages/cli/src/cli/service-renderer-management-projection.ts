@@ -114,7 +114,7 @@ function projectSnapshot(
         || plugin.moduleGeneration !== original.moduleGeneration || plugin.enabled !== original.enabled
         || plugin.canonicalSource !== original.canonicalSource
       ) throw new Error('renderer-management-projection-unavailable')
-      if (identity) identity.resolve(context, alias!, plugin.id)
+      if (identity) identity.assertInstalledProjection(context, alias!, original)
       return {
         ...plugin,
         availableOperations: plugin.availableOperations.filter(
@@ -286,11 +286,12 @@ export async function projectManagementRequest(input: {
   const aliases = entry.aliases
   const projectCatalog = <T extends PluginManagementCatalogSummary>(plugin: T): T => {
     const alias = aliases.get(plugin.identity.pluginId)
-    const source = alias === undefined ? undefined : identity.resolve(context, alias, plugin.identity.pluginId).source
+    const matches = alias !== undefined
+      && identity.matchesSource(context, alias, plugin.identity.pluginId, plugin.canonicalSource)
     return {
       ...plugin,
       installable: false,
-      ...(alias !== undefined && plugin.canonicalSource === source ? { canonicalSource: alias } : {}),
+      ...(matches ? { canonicalSource: alias } : {}),
     }
   }
   const result = await dispatch()

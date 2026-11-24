@@ -91,6 +91,31 @@ it('accepts only owner-issued graph values matching the active package and manag
   expect(composition.source).toContain(descriptor.entryUrl)
   expect(composition.source).not.toContain('cordisx-plugin-artifacts')
   expect(owner.isCurrent).toHaveBeenCalledTimes(2)
+  const { runtimeGraph: _runtimeGraph, ...metadata } = plugin
+  void _runtimeGraph
+  const unavailable = {
+    ...metadata,
+    entry: path.resolve('tests/fixtures/not-loaded.ts'),
+    standaloneUnavailable: true as const,
+    readme: '',
+    readmes: {},
+    documents: [],
+  }
+  const degraded = await buildRendererCompositionSource({ ...config, plugins: [unavailable] }, options)
+  expect(degraded.source).toContain('standaloneUnavailable: true')
+  expect(degraded.source).not.toContain(descriptor.entryUrl)
+  await expect(buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...unavailable, config: { private: 'value' } }],
+  }, options)).rejects.toThrow('unavailable plugin projection is invalid')
+  await expect(buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...unavailable, runtimeGraph: graph }],
+  }, options)).rejects.toThrow('unavailable plugin projection is invalid')
+  await expect(buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...unavailable, enabled: false }],
+  }, options)).rejects.toThrow('activation projection is stale')
   await expect(buildRendererCompositionSource({
     ...config,
     plugins: [{ ...plugin, runtimeGraph: { ...graph } }],

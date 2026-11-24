@@ -384,6 +384,7 @@ export class ServiceRendererLifecycleHandoff {
               snapshot,
               inputs.plugins,
               new Set(entry.desktopLifecycleConfigPlugins),
+              entry.unavailableInstalledPlugins,
             )
             : undefined
           if (!reservation.current() || !attachmentEqual(this.input.snapshot(), snapshot)) {

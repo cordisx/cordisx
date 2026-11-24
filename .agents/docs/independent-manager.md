@@ -121,6 +121,13 @@ invalid or stale owner identities still prevent admission. Real adapter startup 
 after an uncertain result are not yet supported. The isolated browser tests do
 not constitute real Codex App validation.
 
+A verified, service-free installed package that the standalone Manager cannot
+project is shown as unavailable. Its service-free dependents are also
+unavailable. Their activation records remain intact, but their browser graphs,
+configuration, and permissions are not projected. An unsupported or dependent
+package with services, durable documents, or entity templates still prevents
+admission.
+
 The experimental Host page in service mode and the eligible Desktop mode can
 read and save shared model-service declarations through the
 existing Manager form when the owner advertises the safe-write contract. The

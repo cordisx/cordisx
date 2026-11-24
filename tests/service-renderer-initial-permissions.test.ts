@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
+  inspectServiceRendererInitialPackage,
   loadServiceRendererInitialPackage,
   loadServiceRendererPackage,
 } from '../packages/cli/src/cli/service-renderer-projection.js'
@@ -49,6 +50,30 @@ it('admits the narrow initial managed slice while retaining the dynamic lifecycl
   vi.mocked(loadStagedPluginPackage).mockResolvedValue(value as never)
   expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(value)
   await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+})
+
+it('classifies only owner-matched service-free packages as safe to omit', async () => {
+  const safe = staged()
+  safe.manifest.runtimeManifest.services = []
+  safe.manifest.runtimeManifest.capabilities.push({ name: 'models.read', required: true, scope: {} })
+  safe.serviceModules = []
+  safe.managedServiceResources = []
+  vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce(safe as never)
+  expect(await inspectServiceRendererInitialPackage('/fixture', item)).toMatchObject({
+    supported: false,
+    safeToOmit: true,
+  })
+  const service = staged()
+  service.manifest.runtimeManifest.capabilities.push({ name: 'models.read', required: true, scope: {} })
+  vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce(service as never)
+  expect(await inspectServiceRendererInitialPackage('/fixture', item)).toMatchObject({
+    supported: false,
+    safeToOmit: false,
+  })
+  safe.manifest.id = 'other-plugin'
+  vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce(safe as never)
+  await expect(inspectServiceRendererInitialPackage('/fixture', item))
+    .rejects.toThrow('renderer-projection-plugin-unsupported')
 })
 
 it('admits mixed Host services with optional Platform declarations only for the initial projection', async () => {

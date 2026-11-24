@@ -13,8 +13,8 @@ import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import {
+  inspectServiceRendererInitialPackage,
   loadServiceConfiguredArchive,
-  loadServiceRendererInitialPackage,
   loadServiceRendererPackage,
 } from './service-renderer-projection.js'
 
@@ -23,6 +23,7 @@ type IdentityBinding = {
   source: string
   digest: string
   activation?: CordisXPluginActivationItemV1
+  unavailable?: true
 }
 type CandidateIdentity = {
   readonly transactionId: string
@@ -92,14 +93,17 @@ export class ServiceRendererIdentityProjection {
     context: ManagerRendererChannelContext,
     plugin: CordisXConfigPlugin,
     item: CordisXPluginActivationItemV1,
+    options: { readonly unavailable?: true } = {},
   ): Promise<string> {
     if (!this.current(context) || this.aliases.size >= 256 || this.plugins.has(item.id)) {
       throw new Error('renderer-identity-unavailable')
     }
     const captured = structuredClone(item)
-    const staged = await loadServiceRendererInitialPackage(this.input.homeDir, captured)
+    const inspected = await inspectServiceRendererInitialPackage(this.input.homeDir, captured)
+    const staged = inspected.staged
     if (
       !this.current(context) || this.plugins.has(captured.id) || this.aliases.size >= 256
+      || (options.unavailable ? !inspected.safeToOmit : !inspected.supported)
       || plugin.id !== captured.id || plugin.enabled !== captured.enabled || !plugin.package
       || plugin.entry !== stagedPluginModulePath(this.input.homeDir, captured.digest)
       || plugin.source !== staged.identitySource || !attachmentEqual(plugin.manifest, staged.manifest.runtimeManifest)
@@ -116,6 +120,7 @@ export class ServiceRendererIdentityProjection {
       source: staged.identitySource,
       digest: staged.digest,
       activation: captured,
+      ...(options.unavailable ? { unavailable: true } : {}),
     })
     this.plugins.set(captured.id, alias)
     return alias
@@ -140,6 +145,25 @@ export class ServiceRendererIdentityProjection {
     })
     if (!this.current(context)) throw new Error('renderer-identity-unavailable')
     return { ...active, plugins }
+  }
+
+  /** Verify metadata membership without granting access to the owner's source identity. */
+  assertInstalledProjection(
+    context: ManagerRendererChannelContext,
+    alias: string,
+    item: CordisXPluginActivationItemV1,
+  ): void {
+    const value = this.current(context) ? this.aliases.get(alias) : undefined
+    if (!value?.activation || value.pluginId !== item.id || !attachmentEqual(value.activation, item)) {
+      throw new Error('renderer-identity-unavailable')
+    }
+  }
+
+  /** Compare a catalog source without returning the private owner identity. */
+  matchesSource(context: ManagerRendererChannelContext, alias: string, pluginId: string, source: string): boolean {
+    const value = this.current(context) ? this.aliases.get(alias) : undefined
+    if (!value || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
+    return value.source === source
   }
 
   /**
@@ -179,6 +203,12 @@ export class ServiceRendererIdentityProjection {
       || new Set(captured.affectedPluginIds).size !== changed.length || !changed.includes(captured.targetId)
       || changed.some(id => !captured.affectedPluginIds.includes(id))
     ) throw new Error('renderer-identity-unavailable')
+    const unavailable = new Set(
+      [...this.plugins].flatMap(([id, alias]) => this.aliases.get(alias)?.unavailable ? [id] : []),
+    )
+    if (changed.some(id => after.get(id)?.dependencies.some(dependency => unavailable.has(dependency.id)))) {
+      throw new Error('renderer-identity-unavailable')
+    }
     const reservation = Symbol('renderer-candidate-identity')
     this.preparing = reservation
     try {
@@ -237,7 +267,7 @@ export class ServiceRendererIdentityProjection {
   /** The lifecycle may validate a provisional alias; ordinary reads cannot resolve it. */
   resolveLifecycle(context: ManagerRendererChannelContext, alias: string, pluginId: string) {
     const value = this.current(context) ? this.candidate?.bindings.get(alias) ?? this.aliases.get(alias) : undefined
-    if (!value || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
+    if (!value || value.unavailable || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
     return { pluginId: value.pluginId, source: value.source, digest: value.digest }
   }
 
@@ -295,7 +325,7 @@ export class ServiceRendererIdentityProjection {
   /** Resolve only inside the owner after authenticating this exact renderer session. */
   resolve(context: ManagerRendererChannelContext, alias: string, pluginId: string) {
     const value = this.current(context) ? this.aliases.get(alias) : undefined
-    if (!value || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
+    if (!value || value.unavailable || value.pluginId !== pluginId) throw new Error('renderer-identity-unavailable')
     return { pluginId: value.pluginId, source: value.source, digest: value.digest }
   }
 

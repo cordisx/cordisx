@@ -143,13 +143,33 @@ export async function loadServiceRendererInitialPackage(
   return await loadAllowedRendererPackage(homeDir, item, true)
 }
 
+/** Classify an exact owner package without granting its renderer capabilities. */
+export async function inspectServiceRendererInitialPackage(homeDir: string, item: CordisXPluginActivationItemV1) {
+  return await inspectRendererPackage(homeDir, item, true)
+}
+
 async function loadAllowedRendererPackage(
   homeDir: string,
   item: CordisXPluginActivationItemV1,
   allowReadOnlyManaged: boolean,
 ): Promise<Awaited<ReturnType<typeof loadStagedPluginPackage>>> {
+  const inspected = await inspectRendererPackage(homeDir, item, allowReadOnlyManaged)
+  if (!inspected.supported) throw new Error('renderer-projection-plugin-unsupported')
+  return inspected.staged
+}
+
+async function inspectRendererPackage(
+  homeDir: string,
+  item: CordisXPluginActivationItemV1,
+  allowReadOnlyManaged: boolean,
+) {
   const staged = await loadStagedPluginPackage(homeDir, item.digest)
   const manifest = staged.manifest.runtimeManifest
+  if (
+    staged.manifest.id !== item.id || staged.manifest.version !== item.version
+    || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
+    || staged.manifest.canonicalSource !== item.canonicalSource
+  ) throw new Error('renderer-projection-plugin-unsupported')
   const legacy = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && manifest.schemaVersion === 1
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
@@ -163,21 +183,19 @@ async function loadAllowedRendererPackage(
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
     )
-  if (
-    staged.manifest.id !== item.id || staged.manifest.version !== item.version
-    || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
-    || staged.manifest.canonicalSource !== item.canonicalSource
-    || (!legacy && !managed)
-    || (legacy
+  const supported = (legacy || managed)
+    && !(legacy
       ? manifest.capabilities.length !== 0
       : manifest.capabilities.some(capability =>
         capability.name !== 'ui.extension-points.render'
         && (capability.required !== false || !unavailablePlatformCapabilities.has(capability.name))
       ))
-    || staged.entityTemplates.length !== 0
-    || (staged.documents?.length ?? 0) !== 0 || staged.browserArtifact === undefined
-  ) throw new Error('renderer-projection-plugin-unsupported')
-  return staged
+    && staged.entityTemplates.length === 0 && (staged.documents?.length ?? 0) === 0
+    && staged.browserArtifact !== undefined
+  const safeToOmit = (!('services' in manifest) || manifest.services.length === 0)
+    && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
+    && staged.entityTemplates.length === 0 && (staged.documents?.length ?? 0) === 0
+  return { staged, supported, safeToOmit }
 }
 
 /**

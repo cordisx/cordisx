@@ -33,7 +33,9 @@ export async function readOwnerProfileInputs(
     generation: input.generation,
     ownerStartupConfig,
     pluginIds: snapshot.active.plugins.map(plugin => plugin.id),
-    allowNonEmptyPluginConfig: input.protectProfileInputs === true && input.projectPluginConfig !== undefined,
+    // The owner still decides which values can be projected. Under its fence,
+    // unavailable packages may have private values that are only hashed.
+    allowNonEmptyPluginConfig: input.protectProfileInputs === true,
   })
 }
 

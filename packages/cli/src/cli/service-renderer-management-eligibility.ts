@@ -10,10 +10,12 @@ export async function restrictedLifecycleIds(
   snapshot: ServiceRendererSnapshot,
   plugins: readonly CordisXConfigPlugin[],
   configured: ReadonlySet<string> = new Set(),
+  unavailable: ReadonlySet<string> = new Set(),
 ): Promise<ReadonlySet<string>> {
   const allowed = new Set<string>()
   const byId = new Map(plugins.map(plugin => [plugin.id, plugin]))
   for (const item of snapshot.active.plugins) {
+    if (unavailable.has(item.id)) continue
     const plugin = byId.get(item.id)
     const config = plugin?.config
     const manifest = plugin?.manifest

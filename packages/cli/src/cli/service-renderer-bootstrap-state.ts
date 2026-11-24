@@ -42,6 +42,7 @@ export type ServiceRendererBootstrapEntry = {
   packageInputs?: Map<string, string>
   policies?: readonly CordisXPersistedPermissionPolicyRecord[]
   managedOwners?: ReadonlyMap<string, string>
+  unavailableInstalledPlugins?: ReadonlySet<string>
   managedContext?: ManagerRendererChannelContext
   identity?: ServiceRendererIdentityProjection
   identityContext?: ManagerRendererChannelContext

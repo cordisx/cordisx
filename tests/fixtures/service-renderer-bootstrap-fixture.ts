@@ -520,8 +520,14 @@ export async function fixture(
   async function call(payload: unknown) {
     return await sessions.call(invocation, 'manager-bootstrap', payload)
   }
-  async function install(id: string, revision = 0, requiredCapability = false, code?: string) {
-    const sourceDirectory = await localPackage({ root, id, requiredCapability, code })
+  async function install(
+    id: string,
+    revision = 0,
+    requiredCapability = false,
+    code?: string,
+    dependencies?: readonly { id: string; version: string }[],
+  ) {
+    const sourceDirectory = await localPackage({ root, id, requiredCapability, code, dependencies })
     const plan = await coordinator.handle({
       ...request({ kind: 'inspect-local', sourceDirectory }, revision, generation),
       profileId,

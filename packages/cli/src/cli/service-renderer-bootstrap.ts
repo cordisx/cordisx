@@ -8,11 +8,6 @@ import type { CordisXConfig } from '../launcher/config.js'
 import { loadServiceRendererConfig } from './service-renderer-config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
-import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
-import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
-} from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
@@ -31,6 +26,10 @@ import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetime
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
 import { prepareServiceRendererConfiguredGraphs } from './service-renderer-configured-graphs.js'
 import {
+  prepareServiceRendererInstalledGraphs,
+  unavailableInstalledPlugin,
+} from './service-renderer-installed-graphs.js'
+import {
   assertConfiguredSourcesHidden,
   disabledConfiguredPlugin,
   projectConfiguredPlugins,
@@ -41,7 +40,6 @@ import { allowsManagementWrite, projectManagementRequest } from './service-rende
 import { serviceRendererManagementEntry } from './service-renderer-management-entry.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import {
-  loadServiceRendererInitialPackage,
   retireFinalizedServiceRendererGraphs,
   serviceRendererPrivateGraph,
   validateServiceRendererGraphs,
@@ -532,34 +530,30 @@ export class ServiceRendererBootstrap {
         const channelPlugin = activeConfigured.find(plugin => plugin.id === 'channel')
         const configuredPlugins = activeConfigured.filter(plugin => plugin.id !== 'channel')
         if (
-          plugins.some(plugin => !emptyPluginConfig(plugin.config))
-            && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
-          || config.plugins.length > MAX_INITIAL_GRAPHS
+          config.plugins.length > MAX_INITIAL_GRAPHS
           || config.plugins.length > 0 && !this.input.protectProfileInputs
           || config.plugins.some(plugin => plugins.some(installed => installed.id === plugin.id))
           || this.configuredChannel !== undefined && channelPlugin === undefined
         ) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
-        // Disabled packages are also serialized as Manager metadata.
-        const packages = new Map<string, Awaited<ReturnType<typeof loadServiceRendererInitialPackage>>>()
-        const managedOwners = new Map<string, string>()
-        let needsIdentityProjection = false
-        for (const item of snapshot.active.plugins) {
-          const staged = await loadServiceRendererInitialPackage(this.input.homeDir, item)
-          packages.set(item.id, staged)
-          const manifest = staged.manifest.runtimeManifest
-          if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.capabilities.length > 0) {
-            needsIdentityProjection = true
-          }
-          if (
-            manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
-            || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15
-          ) {
-            if (!this.managedServiceUI) throw new Error('renderer-bootstrap-plugin-unsupported')
-            if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
-          }
-        }
+        const active = snapshot.active.plugins.filter(plugin => plugin.enabled)
+        if (active.length + activeConfigured.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
+        const installed = await prepareServiceRendererInstalledGraphs({
+          homeDir: this.input.homeDir,
+          plugins: snapshot.active.plugins,
+          managedServiceUIAvailable: this.managedServiceUI !== undefined,
+          leases,
+          server: async () => await this.input.lifecycle.artifactServer(),
+          current: () => this.current(rendererId, entry),
+        })
+        const { unavailable, managedOwners } = installed
+        let needsIdentityProjection = installed.needsIdentityProjection
+        const availablePlugins = plugins.filter(plugin => !unavailable.has(plugin.id))
+        if (
+          availablePlugins.some(plugin => !emptyPluginConfig(plugin.config))
+          && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
+        ) throw new Error('renderer-bootstrap-plugin-unsupported')
         const {
           projectedConfigs,
           writablePlugins: desktopPackageConfigPlugins,
@@ -567,33 +561,13 @@ export class ServiceRendererBootstrap {
         } = await prepareDesktopManagerConfigs(
           this.input,
           snapshot,
-          plugins,
+          availablePlugins,
           managedOwners,
           () => this.current(rendererId, entry),
         )
         if (projectedConfigs.size > 0 || desktopPackageConfigPlugins.length > 0) needsIdentityProjection = true
         if (needsIdentityProjection && !this.input.protectProfileInputs) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
-        }
-        const active = snapshot.active.plugins.filter(plugin => plugin.enabled)
-        if (active.length + activeConfigured.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
-        if (active.length > 0) {
-          const server = await this.input.lifecycle.artifactServer()
-          for (const item of active) {
-            const staged = packages.get(item.id)!
-            if (!staged.browserArtifact) throw new Error('renderer-bootstrap-plugin-unsupported')
-            const lease = await server.lease(
-              {
-                packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },
-                artifactDirectory: stagedPluginBrowserArtifactDirectory(this.input.homeDir, item.digest),
-                runtimeEntry: staged.browserArtifact.manifest.entry,
-              },
-              item.moduleGeneration,
-              staged.browserArtifact.manifest,
-            )
-            leases.push(lease)
-            if (!this.current(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
-          }
         }
         entry.configuredPlugins = []
         entry.unavailableConfiguredPlugins = []
@@ -625,6 +599,7 @@ export class ServiceRendererBootstrap {
         entry.policies = policies
         entry.packageInputs = inputsRead.value
         entry.managedOwners = managedOwners
+        entry.unavailableInstalledPlugins = unavailable
         entry.needsIdentityProjection = needsIdentityProjection
         if (entry.managementPlans) {
           entry.restrictedLifecycleIds = await restrictedLifecycleIds(
@@ -632,6 +607,7 @@ export class ServiceRendererBootstrap {
             snapshot,
             plugins,
             new Set(entry.desktopLifecycleConfigPlugins),
+            unavailable,
           )
         }
         if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
@@ -700,6 +676,7 @@ export class ServiceRendererBootstrap {
           policies: entry.policies,
         })
         const snapshot = entry.snapshot
+        const unavailableInstalled = entry.unavailableInstalledPlugins ?? new Set<string>()
         let projectedSnapshot: Snapshot | undefined
         const disabledConfigured = entry.config.plugins.filter(plugin => !plugin.enabled)
         const disabledIds = new Set(disabledConfigured.map(plugin => plugin.id))
@@ -712,6 +689,7 @@ export class ServiceRendererBootstrap {
           !disabledIds.has(policy.key.identity.pluginId) && !configuredIds.has(policy.key.identity.pluginId)
         )
         let projectedPlugins = entry.plugins.map(plugin => {
+          if (unavailableInstalled.has(plugin.id)) return plugin
           if (emptyPluginConfig(plugin.config)) return plugin
           if (!entry.projectedConfigs?.has(plugin.id)) throw new Error('renderer-bootstrap-plugin-unsupported')
           return { ...plugin, config: entry.projectedConfigs.get(plugin.id) }
@@ -728,7 +706,15 @@ export class ServiceRendererBootstrap {
           for (const plugin of entry.plugins) {
             const item = snapshot.active.plugins.find(value => value.id === plugin.id)
             if (!item) throw new Error('renderer-bootstrap-plugin-unsupported')
-            aliases.set(plugin.id, await identity.issueInstalled(context, plugin, item))
+            aliases.set(
+              plugin.id,
+              await identity.issueInstalled(
+                context,
+                plugin,
+                item,
+                unavailableInstalled.has(plugin.id) ? { unavailable: true } : {},
+              ),
+            )
           }
           entry.identityAliases = aliases
           projectedSnapshot = {
@@ -736,10 +722,13 @@ export class ServiceRendererBootstrap {
             registryEpoch: snapshot.registryEpoch,
           }
           projectedPolicies = entry.plugins.flatMap(plugin =>
-            identity.projectManagerPolicies(context, aliases.get(plugin.id)!, plugin.id, entry.policies!)
+            unavailableInstalled.has(plugin.id)
+              ? []
+              : identity.projectManagerPolicies(context, aliases.get(plugin.id)!, plugin.id, entry.policies!)
           )
           projectedPlugins = projectedPlugins.map(plugin => {
             const alias = aliases.get(plugin.id)!
+            if (unavailableInstalled.has(plugin.id)) return unavailableInstalledPlugin(plugin, alias)
             if (!plugin.package) throw new Error('renderer-bootstrap-plugin-unsupported')
             return {
               ...plugin,
@@ -758,7 +747,7 @@ export class ServiceRendererBootstrap {
           ...entry.config,
           plugins: [
             ...projectedPlugins.map(plugin => {
-              if (!plugin.enabled) return plugin
+              if (!plugin.enabled || plugin.standaloneUnavailable) return plugin
               const graph = byPlugin.get(plugin.id)
               if (!graph) throw new Error('renderer-bootstrap-graphs-invalid')
               return { ...plugin, runtimeGraph: createStandaloneRuntimeGraph(graph, managerOrigin) }

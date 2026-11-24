@@ -176,9 +176,13 @@ async function assertStandaloneOwner(
   for (const plugin of config.plugins) {
     if (
       plugin.standaloneUnavailable === true
-      && (plugin.enabled || plugin.package !== undefined || plugin.runtimeGraph !== undefined)
+      && (plugin.runtimeGraph !== undefined || plugin.enabled && plugin.package === undefined
+        || plugin.config === null || typeof plugin.config !== 'object' || Array.isArray(plugin.config)
+        || Object.keys(plugin.config).length !== 0 || plugin.manifest !== undefined
+        || plugin.moduleFactorySource !== undefined || plugin.development !== undefined
+        || plugin.distributionArtifact !== undefined)
     ) throw new Error('Standalone Manager unavailable plugin projection is invalid')
-    if (plugin.enabled && usesIsolatedWorker(plugin)) {
+    if (plugin.enabled && plugin.standaloneUnavailable !== true && usesIsolatedWorker(plugin)) {
       throw new Error('Standalone Manager isolated worker projection is unavailable')
     }
     if (
@@ -218,7 +222,7 @@ async function assertStandaloneOwner(
       || plugin.package.canonicalSource !== item.canonicalSource
     ) throw new Error('Standalone Manager activation projection is stale')
     if (
-      plugin.enabled && !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
+      plugin.enabled && plugin.standaloneUnavailable !== true && !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
         origin: owner.managerOrigin,
         pluginId: plugin.id,
         generation: plugin.package.moduleGeneration,
@@ -340,7 +344,9 @@ export async function buildRendererCompositionSource(
   if (config.codex.agentLoopBackend === 'mock' && options.playground !== true) {
     throw new Error('config.codex.agentLoopBackend mock is available only in the explicit UI Playground')
   }
-  const enabled = config.plugins.filter(plugin => plugin.enabled)
+  const enabled = config.plugins.filter(plugin =>
+    plugin.enabled && !(attachedStandalone && plugin.standaloneUnavailable)
+  )
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, documentSets, pluginBundles] = await Promise.all([
     resolveOwningPackageVersion(import.meta.url, 'cordisx'),

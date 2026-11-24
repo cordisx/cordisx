@@ -411,13 +411,24 @@ it.skipIf(chrome === undefined)(
       expect(await snapshot(first)).toEqual(await snapshot(second))
       const rpcPaths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
       const endpoint = (await readPluginManagementRpcEndpoint(rpcPaths))!
-      const install = async (id: string, dependencies: readonly { id: string; version: string }[] = []) => {
+      const install = async (
+        id: string,
+        dependencies: readonly { id: string; version: string }[] = [],
+        unsupported = false,
+      ) => {
         const sourceDirectory = await localPackage({
           root,
           id,
           dependencies,
+          requiredCapability: unsupported,
           code: `export function apply() { globalThis.__${id.replaceAll('-', '_')} = true }`,
         })
+        if (unsupported) {
+          const manifestPath = path.join(sourceDirectory, 'cordisx.plugin.json')
+          const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+          manifest.runtimeManifest.capabilities[0].required = false
+          await writeFile(manifestPath, JSON.stringify(manifest))
+        }
         const planned = await requestPluginManagementRpc(rpcPaths, endpoint, {
           kind: 'plan',
           request: { kind: 'plugin-plan-local', sourceDirectory },
@@ -535,8 +546,10 @@ it.skipIf(chrome === undefined)(
         expect(planned.activationRevision).toBe(6)
       }, { timeout: 10_000 })
       await install('headless-after-browser')
+      await install('unsupported-browser-plugin', [], true)
+      await install('unavailable-dependent-plugin', [{ id: 'unsupported-browser-plugin', version: '1.0.0' }])
       const final = await requestPluginManagementRpc(rpcPaths, endpoint, { kind: 'query' }) as any
-      expect(final.activationRevision).toBe(7)
+      expect(final.activationRevision).toBe(9)
       // A new renderer must cold-boot all currently active package graphs,
       // not just packages installed after it joins.
       third = await CdpClient.connect(await socketFor(spare.targetId))
@@ -550,6 +563,8 @@ it.skipIf(chrome === undefined)(
           'first-browser-plugin',
           'headless-after-browser',
           'second-browser-plugin',
+          'unavailable-dependent-plugin',
+          'unsupported-browser-plugin',
         ])
       for (
         const marker of [
@@ -561,6 +576,41 @@ it.skipIf(chrome === undefined)(
       ) {
         expect(await third.evaluate(`globalThis.__${marker} === true`)).toBe(true)
       }
+      const unavailable = ['unsupported-browser-plugin', 'unavailable-dependent-plugin']
+      const verifyUnavailable = async (page: CdpClient) => {
+        const plugins = await page.evaluate<Array<{ id: string; status: string }>>(
+          'globalThis.__cordisxRuntime.snapshot().plugins',
+        )
+        for (const id of unavailable) {
+          expect(plugins.find(plugin => plugin.id === id)).toMatchObject({ status: 'failed' })
+          expect(await page.evaluate(`globalThis.__${id.replaceAll('-', '_')} === undefined`)).toBe(true)
+        }
+      }
+      await verifyUnavailable(third)
+      await third.send('Page.reload')
+      await ready(third)
+      await verifyUnavailable(third)
+      const peerTarget = await third.send('Target.createTarget', { url: await open() }) as { targetId: string }
+      second = await CdpClient.connect(await socketFor(peerTarget.targetId))
+      await second.send('Runtime.enable')
+      await ready(second)
+      await verifyUnavailable(second)
+      expect(await second.evaluate('globalThis.__first_browser_plugin === true')).toBe(true)
+      await change('plugin-disable', 'headless-after-browser')
+      await vi.waitFor(async () => {
+        for (const page of [third!, second!]) {
+          const active = (await snapshot(page)).active.plugins as Array<{ id: string; enabled: boolean }>
+          expect(active.find(item => item.id === 'headless-after-browser')?.enabled).toBe(false)
+          await verifyUnavailable(page)
+        }
+      }, { timeout: 20_000 })
+      await change('plugin-enable', 'headless-after-browser')
+      await vi.waitFor(async () => {
+        for (const page of [third!, second!]) {
+          const active = (await snapshot(page)).active.plugins as Array<{ id: string; enabled: boolean }>
+          expect(active.find(item => item.id === 'headless-after-browser')?.enabled).toBe(true)
+        }
+      }, { timeout: 20_000 })
     } finally {
       await first?.close().catch(() => undefined)
       await second?.close().catch(() => undefined)
