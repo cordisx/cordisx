@@ -53,7 +53,7 @@ function malformed(value: unknown): ManagedNativeProviderPublicationInputV1 {
 }
 
 describe('managed native provider publications', () => {
-  it('validates context windows, fences changes by digest, and keeps missing windows unknown', () => {
+  it('validates context windows, fences changes by digest, and keeps missing windows unknown', async () => {
     const base = catalog()
     const make = (window: unknown, includeReasoning = false) => {
       const reasoningCapabilities = { efforts: ['low', 'high'] as const }
@@ -101,6 +101,17 @@ describe('managed native provider publications', () => {
       expect(new ManagedNativeProviderPublications().publish(record(), malformed(make(value))))
         .toMatchObject({ status: 'rejected', diagnostic: { code: 'invalid-catalog' } })
     }
+    const publications = new ManagedNativeProviderPublications()
+    const changes: number[] = []
+    publications.subscribe(() => changes.push(publications.revision))
+    const original = publications.publish(record(), malformed(make(64_000)))
+    if (original.status !== 'accepted') throw new Error('publication rejected')
+    await original.publication.dispose()
+    const updated = publications.publish(record(), malformed(make(32_000)))
+    expect(updated.status).toBe('accepted')
+    expect(publications.resolve('synthetic')?.projection.catalog.routes[0]?.contextWindow).toBe(32_000)
+    expect(changes).toHaveLength(3)
+    expect(new Set(changes).size).toBe(3)
   })
 
   it('publishes an exact frozen projection while preserving opaque model ids', () => {
