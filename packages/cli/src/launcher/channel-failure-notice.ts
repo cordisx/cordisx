@@ -8,6 +8,10 @@ import { channelAutoReplyTarget, channelCommandReplyTarget, channelReplyDefaults
 
 /** Only these fixed codes have a safe, unambiguous public description. */
 const FAILURE_TEXT = new Map([
+  ['NATIVE_MODEL_AUTH_FAILED', '模型服务认证或访问被拒绝，请联系管理员。'],
+  ['NATIVE_MODEL_RATE_LIMITED', '模型服务限流或额度不足，请联系管理员。'],
+  ['NATIVE_MODEL_CONNECTION_FAILED', '模型服务连接失败，请联系管理员。'],
+  ['NATIVE_MODEL_SERVICE_UNAVAILABLE', '模型服务暂不可用，请联系管理员。'],
   ['MODEL_PRIORITY_UNAVAILABLE', '模型选择暂不可用，请联系管理员。'],
   ['NATIVE_BACKEND_UNAVAILABLE', '任务服务暂不可用，请联系管理员。'],
   ['CONTINUATION_PERSONA_UNAVAILABLE', '任务上下文暂不可用，请联系管理员。'],

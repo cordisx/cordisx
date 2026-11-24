@@ -1,3 +1,4 @@
+import { channelNativeFailureCode } from './channel-native-failure.js'
 import { channelNativeExists, channelNativeLabel } from './channel-native-metadata.js'
 import type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
 export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
@@ -990,7 +991,7 @@ export class ChannelNativeSessions {
     for (const [id, entry] of this.sources) {
       if (entry.threadId === sessionId && entry.turnId === turnId) this.sources.delete(id)
     }
-    if (turn.status !== 'completed') return { state: 'failed', code: 'NATIVE_TURN_FAILED' }
+    if (turn.status !== 'completed') return { state: 'failed', code: channelNativeFailureCode(turn) }
     if (!includeFinal) return { state: 'completed' }
     return readChannelCompletion(this.input.nativeRequest, sessionId, turnId)
   }
