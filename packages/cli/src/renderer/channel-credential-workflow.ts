@@ -20,6 +20,7 @@ interface Draft {
   readonly purpose: 'create' | 'rotate'
   readonly adapterKind: 'feishu' | 'lark'
   readonly revision: number
+  readonly serviceRevision?: number
   readonly expiresAt: number
   readonly connectionToken?: string
   readonly account?: ChannelCredentialRef
@@ -27,6 +28,8 @@ interface Draft {
 }
 export interface ChannelCredentialWorkflowInput {
   readonly revision: () => number
+  /** Capture the owner configuration revision when opening a creation flow. */
+  readonly serviceRevision?: () => number
   readonly advance: () => void
   readonly target: (token: string) => ChannelCredentialRef | undefined
   readonly connectionToken: (ref: ChannelCredentialRef) => string
@@ -139,12 +142,17 @@ export class ChannelCredentialWorkflow {
     let value: Draft
     if (request.operation === 'target.credential.capture.create') {
       if (!['feishu', 'lark'].includes(request.adapterKind)) return this.fail('ADAPTER_UNAVAILABLE', 'unavailable')
+      const serviceRevision = this.input.serviceRevision?.()
+      if (serviceRevision !== undefined && (!Number.isSafeInteger(serviceRevision) || serviceRevision < 0)) {
+        return this.fail('STALE_GENERATION', 'unavailable')
+      }
       value = {
         kind: 'capture',
         owner,
         purpose: 'create',
         adapterKind: request.adapterKind as 'feishu' | 'lark',
         revision: request.expectedRevision,
+        ...(serviceRevision === undefined ? {} : { serviceRevision }),
         expiresAt: this.now() + 10 * 60_000,
       }
     } else if (request.operation === 'target.credential.capture.rotate') {
@@ -217,7 +225,11 @@ export class ChannelCredentialWorkflow {
               purpose: draft.purpose,
               account,
               secret,
-              ...(configuration === undefined ? {} : { expectedRevision: configuration.expectedServiceRevision }),
+              ...(configuration !== undefined
+                ? { expectedRevision: configuration.expectedServiceRevision }
+                : draft.serviceRevision === undefined
+                ? {}
+                : { expectedRevision: draft.serviceRevision }),
             })
             if (result.status !== 'applied' || !result.draftId || !result.ref) {
               reportFailure?.(result.code)

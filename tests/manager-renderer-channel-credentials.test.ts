@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { createManagerRendererChannelCredentials } from '../packages/cli/src/cli/manager-renderer-channel-credentials.js'
 
-it('admits only bounded, owner-scoped existing-account credential operations', () => {
+it('admits only bounded, owner-scoped credential operations', () => {
   const handle = vi.fn()
   const channel = createManagerRendererChannelCredentials({
     profileId: 'profile',
@@ -35,9 +35,18 @@ it('admits only bounded, owner-scoped existing-account credential operations', (
     expectedRevision: 1,
   }
   expect(channel.prepare(JSON.stringify(request), context).mode).toBe('write')
+  expect(
+    channel.prepare(
+      JSON.stringify({
+        ...request,
+        purpose: 'create',
+        account: { ...request.account, tenantId: '' },
+      }),
+      context,
+    ).mode,
+  ).toBe('write')
   for (
     const value of [
-      { ...request, purpose: 'create' },
       { ...request, account: { ...request.account, tenantId: '' } },
       { ...request, token: 'wrong' },
       { ...request, extra: true },

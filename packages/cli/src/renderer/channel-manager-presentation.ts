@@ -4,6 +4,7 @@ import { serviceOwnerFor, stateFor } from './channel-manager-state.js'
 import {
   channelConnectionControlAllowed,
   channelConnectionReconnectAllowed,
+  channelCredentialCreationAllowed,
 } from './channel-manager-presentation-scope.js'
 
 /** Experimental local implementation of the proposed owner-bound presentation contract. */
@@ -27,6 +28,7 @@ export class CordisXChannelManagerPresentationService extends CordisXChannelMana
       contract: 'cordisx.channel-manager-configuration-presentation-capabilities/v1' as const,
       schemaVersion: 1 as const,
       mode: 'configuration-only' as const,
+      ...(channelCredentialCreationAllowed(this) ? { connectionCreate: 'credentialed' as const } : {}),
       ...(channelConnectionControlAllowed(this) ? { connectionControl: 'enable-disable' as const } : {}),
       ...(channelConnectionReconnectAllowed(this) ? { connectionReconnect: true as const } : {}),
     })

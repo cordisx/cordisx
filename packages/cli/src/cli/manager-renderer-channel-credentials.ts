@@ -83,7 +83,7 @@ function parse(payload: unknown, context: ManagerRendererChannelContext): {
   })
   if (
     parsed.action !== 'capture' && parsed.action !== 'commit' && parsed.action !== 'discard'
-    || parsed.action === 'capture' && (parsed.purpose !== 'rotate' || !parsed.account.tenantId)
+    || parsed.action === 'capture' && parsed.purpose === 'rotate' && !parsed.account.tenantId
   ) throw new Error('CHANNEL_CREDENTIAL_UNAVAILABLE')
   return { requestId: value.requestId, operation: parsed }
 }
@@ -104,13 +104,15 @@ function project(value: unknown, operation: SupportedOperation): CredentialResul
       || !/^[A-Za-z0-9_-]{43}$/u.test(result.draftId) || typeof result.expiresAt !== 'string'
       || !Number.isFinite(Date.parse(result.expiresAt)) || !ref
       || ref.adapterId !== operation.account.adapterId || ref.accountId !== operation.account.accountId
-      || ref.tenantId !== operation.account.tenantId
+      || typeof ref.tenantId !== 'string' || ref.tenantId.length > 512 || /[\u0000-\u001f]/u.test(ref.tenantId)
+      || operation.account.tenantId !== '' && ref.tenantId !== operation.account.tenantId
+      || operation.purpose === 'rotate' && ref.tenantId !== operation.account.tenantId
     ) throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
     return {
       status,
       code: result.code,
       draftId: result.draftId,
-      ref: { ...operation.account },
+      ref: { ...operation.account, tenantId: ref.tenantId },
       expiresAt: new Date(result.expiresAt).toISOString(),
     }
   }
@@ -185,7 +187,26 @@ export function createManagerRendererChannelCredentials(input: {
             const dispatched = operation.action === 'capture'
               ? { ...operation, serviceGeneration: generation }
               : operation
-            const result = project(await input.handle(dispatched), operation)
+            let result = project(await input.handle(dispatched), operation)
+            // This facade cannot yet repair a pending tenant. Require a resolved
+            // identity and retire its private draft before asking the user to
+            // enter the tenant manually.
+            if (
+              operation.action === 'capture' && operation.purpose === 'create'
+              && result.status === 'applied' && result.ref?.tenantId === ''
+            ) {
+              const discard: SupportedOperation = {
+                kind: 'manager-channel-credentials',
+                action: 'discard',
+                sessionId: context.rendererId,
+                draftId: result.draftId!,
+              }
+              const retired = project(await input.handle(discard), discard)
+              if (retired.status !== 'applied' || retired.code !== 'DISCARDED') {
+                throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
+              }
+              result = { status: 'rejected', code: 'TENANT_DISCOVERY_FAILED' }
+            }
             if (operation.action === 'discard' && result.code === 'CREDENTIAL_CLEANUP_UNAVAILABLE') {
               throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
             }

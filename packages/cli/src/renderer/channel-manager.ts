@@ -60,6 +60,7 @@ import { generationFromContext, ownerFromContext, sourceFromContext } from './ow
 import { PublicChannelManagerController } from './channel-manager-public.js'
 import {
   channelConfigurationAllowed,
+  channelCredentialCreationAllowed,
   channelOwnerSupportsControl,
   channelOwnerSupportsReconnect,
   channelPresentationSnapshot,
@@ -171,6 +172,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       state.credentials = new ChannelCredentialWorkflow({
         available: () => !state.disposed && state.isCurrent() && state.projection.service.writable,
         revision: () => state.publicController!.currentRevision(),
+        ...(configurationOnly ? { serviceRevision: () => state.projection.service.revision } : {}),
         advance: () => {
           state.publicController!.invalidate()
           this.notifyListeners()
@@ -740,7 +742,11 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   }
 
   async issue(request: ChannelManagerTargetRequestV1): Promise<ChannelManagerTargetResultV1> {
-    if (stateFor(this).snapshotOnly) {
+    if (
+      stateFor(this).snapshotOnly
+      && !(channelCredentialCreationAllowed(this)
+        && ['target.credential.capture.create', 'target.connection.create'].includes(request.operation))
+    ) {
       return unavailableChannelTarget(request, stateFor(this).publicController!.currentRevision())
     }
     const allowed = request.operation === 'target.connection.create'

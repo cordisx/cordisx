@@ -73,6 +73,7 @@ export async function fixture(
     channelReconnect?: boolean
     channelCredentials?: boolean
     channelCredentialValidate?: () => Promise<void>
+    channelCredentialDiscoverTenant?: () => Promise<string>
     channelCredentialCleanupFails?: boolean
     channelCredentialCommitUnknown?: boolean
     permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
@@ -427,6 +428,9 @@ export async function fixture(
         }),
       store: credentialStore,
       validateCredentials: options.channelCredentialValidate ?? (async () => {}),
+      ...(options.channelCredentialDiscoverTenant === undefined
+        ? {}
+        : { discoverTenant: options.channelCredentialDiscoverTenant }),
     })
     : undefined
   const credentialsChannel = credentialManager && configuredChannel && configuredOwner

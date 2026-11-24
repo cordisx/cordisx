@@ -33,11 +33,20 @@ export function channelConnectionReconnectAllowed(service: object): boolean {
   return serviceOwnerFor(service)?.scope === 'configuration' && channelOwnerSupportsReconnect(stateFor(service))
 }
 
+/** Credential creation requires the owner-bound configuration facade and private bridge. */
+export function channelCredentialCreationAllowed(service: object): boolean {
+  const state = stateFor(service)
+  return state.configurationOnly && channelConfigurationAllowed(service)
+    && state.projection.service.writable && state.credentials !== undefined
+}
+
 export function channelSnapshotOperationAllowed(
   service: object,
   operation: ChannelManagerRequestV2['operation'],
 ): boolean {
   return !stateFor(service).snapshotOnly || operation === 'connection.update' && channelConfigurationAllowed(service)
+    || (operation === 'credential.capture' || operation === 'connection.create')
+      && channelCredentialCreationAllowed(service)
     || (operation === 'connection.enable' || operation === 'connection.disable')
       && channelConnectionControlAllowed(service)
     || operation === 'connection.reconnect' && channelConnectionReconnectAllowed(service)
@@ -49,10 +58,19 @@ export function channelPresentationSnapshot<T extends ChannelManagerSnapshotV3 |
 ): T {
   if (!stateFor(service).configurationOnly) return snapshot
   const configurationAllowed = channelConfigurationAllowed(service)
+  const creationAllowed = channelCredentialCreationAllowed(service)
   const connectionControlAllowed = channelConnectionControlAllowed(service)
   const connectionReconnectAllowed = channelConnectionReconnectAllowed(service)
   return Object.freeze({
     ...snapshot,
+    availableOperations: Object.freeze(snapshot.availableOperations.filter(operation =>
+      creationAllowed && [
+        'target.credential.capture.create',
+        'credential.capture',
+        'target.connection.create',
+        'connection.create',
+      ].includes(operation)
+    )),
     accounts: Object.freeze(snapshot.accounts.map(account =>
       Object.freeze({
         ...account,

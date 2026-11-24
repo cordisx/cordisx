@@ -3,6 +3,50 @@ import { ChannelCredentialWorkflow } from '../packages/cli/src/renderer/channel-
 
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test' }
 describe('Host credential entry authorization timing', () => {
+  it('captures the service revision when a connection creation starts', async () => {
+    let serviceRevision = 7
+    const request = vi.fn(async (input: Record<string, unknown>) =>
+      input.operation === 'capture'
+        ? {
+          status: 'applied' as const,
+          code: 'CAPTURED',
+          draftId: 'private-draft',
+          ref: account,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }
+        : { status: 'applied' as const, code: 'DISCARDED' }
+    )
+    const flow = new ChannelCredentialWorkflow({
+      revision: () => 1,
+      serviceRevision: () => serviceRevision,
+      advance: () => {},
+      target: () => undefined,
+      connectionToken: () => 'unused',
+      available: () => true,
+      prompt: async input => await input.submit(account, 'fixture-secret', input.signal),
+      request,
+      adopt: () => {},
+    })
+    try {
+      const issued = await flow.issue({
+        operation: 'target.credential.capture.create',
+        adapterKind: 'feishu',
+        purpose: 'create',
+        target: { kind: 'root' },
+        expectedRevision: 1,
+      } as never, 'owner')
+      serviceRevision = 8
+      await expect(flow.execute(
+        { operation: 'credential.capture', target: issued.target } as never,
+        'owner',
+        () => true,
+        async () => true,
+      )).resolves.toMatchObject({ status: 'applied' })
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ operation: 'capture', expectedRevision: 7 }))
+    } finally {
+      flow.dispose()
+    }
+  })
   it('reuses the opaque connection target when a pending account is resolved', async () => {
     const pending = { ...account, tenantId: '' }, order: string[] = []
     const request = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED', ref: account, projection: {} }))

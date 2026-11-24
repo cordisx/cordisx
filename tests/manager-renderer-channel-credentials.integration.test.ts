@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { readServiceConfigState } from '../packages/cli/src/config/service-config.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 import { bootConfiguredChannelManager } from './helpers/configured-channel-manager.js'
@@ -9,6 +9,36 @@ const token = 'renderer-binding-placeholder'
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture-tenant' }
 const envelope = (requestId: string, operation: string, fields: Record<string, unknown> = {}) =>
   JSON.stringify({ version: 2, token, requestId, operation, owner: 'fixture-form', ...fields })
+
+// Keep the real owner and configuration lifecycle while replacing the external
+// transport, so synthetic credentials cannot reach Keychain or a live account.
+vi.mock('../packages/cli/src/launcher/feishu-adapter.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../packages/cli/src/launcher/feishu-adapter.js')>()
+  return {
+    ...original,
+    feishuDefinitionsForConfig: (
+      configuration: Parameters<typeof original.feishuDefinitionsForConfig>[0],
+      input: Parameters<typeof original.feishuDefinitionsForConfig>[1],
+    ) =>
+      configuration.connections
+        .filter(connection => connection.enabled && ['feishu', 'lark'].includes(connection.adapterKind))
+        .map(connection => ({
+          descriptor: {
+            ref: connection.ref,
+            kind: connection.adapterKind,
+            implementationStatus: 'implemented' as const,
+            configurationRevision: input.configurationRevision,
+            secretState: 'ready' as const,
+          },
+          start: async () => ({
+            send: async () => {
+              throw new Error('synthetic transport cannot send')
+            },
+            stop: async () => {},
+          }),
+        })),
+  }
+})
 const options = {
   channelArchive: archive,
   channelUiGrant: true,
@@ -16,6 +46,107 @@ const options = {
   channelServiceConfig: true,
   channelCredentials: true,
 }
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'creates an owner-bound connection and waits for the other Manager to adopt it',
+  async () => {
+    const f = await fixture({
+      ...options,
+      channelCredentialDiscoverTenant: async () => 'resolved-tenant',
+    })
+    const secondId = randomBytes(32).toString('hex')
+    const second = {
+      gateway: f.gateway,
+      browserSessionId: secondId,
+      handle: (await f.sessions.open(f.gateway, secondId))!,
+    }
+    const newAccount = { adapterId: 'feishu', accountId: 'cli_created_fixture', tenantId: '' }
+    try {
+      await bootConfiguredChannelManager(f)
+      await bootConfiguredChannelManager(f, second)
+      const call = (requestId: string, operation: string, fields: Record<string, unknown> = {}) =>
+        f.sessions.call(f.invocation, 'channel-credentials', envelope(requestId, operation, fields))
+      const captured = await call('create-capture', 'capture', {
+        purpose: 'create',
+        account: newAccount,
+        secret: 'synthetic-create-secret',
+        expectedRevision: 1,
+      }) as any
+      expect(captured).toMatchObject({
+        status: 'ok',
+        value: { value: { status: 'applied', code: 'CAPTURED', ref: { ...newAccount, tenantId: 'resolved-tenant' } } },
+      })
+      expect(JSON.stringify(captured)).not.toMatch(/synthetic-create-secret|secretRef|fixture-private-reference/)
+      const polling = f.sessions.poll(second, 10_000)
+      const pending = call('create-commit', 'commit', {
+        draftId: captured.value.value.draftId,
+        draft: { displayName: 'Created fixture', selectors: ['direct'] },
+      })
+      const command = (await polling as any).value.command
+      expect(command).toMatchObject({ method: 'channel-configuration', payload: { revision: 2 } })
+      expect(JSON.stringify(command)).not.toMatch(/synthetic-create-secret|secretRef|fixture-private-reference/)
+      expect(
+        await f.sessions.acknowledge(second, {
+          id: command.id,
+          sequence: command.sequence,
+          ok: true,
+          value: { rendererId: second.handle.rendererId, ownerGeneration: f.generation, revision: 2, adopted: true },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      const committed = await pending as any
+      expect(committed).toMatchObject({ status: 'ok', value: { value: { status: 'applied', code: 'APPLIED' } } })
+      expect(JSON.stringify(committed)).not.toMatch(/synthetic-create-secret|secretRef|fixture-private-reference/)
+      const stored = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath) as any
+      expect(stored.config.connections).toContainEqual(expect.objectContaining({
+        ref: { ...newAccount, tenantId: 'resolved-tenant' },
+        displayName: 'Created fixture',
+        selectors: ['direct'],
+      }))
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'retires an unresolved creation draft and asks for a tenant instead of creating a broken connection',
+  async () => {
+    const f = await fixture({
+      ...options,
+      channelCredentialDiscoverTenant: async () => {
+        throw new Error('synthetic tenant failure')
+      },
+    })
+    try {
+      await bootConfiguredChannelManager(f)
+      const captured = await f.sessions.call(
+        f.invocation,
+        'channel-credentials',
+        envelope('missing-tenant', 'capture', {
+          purpose: 'create',
+          account: { adapterId: 'feishu', accountId: 'cli_created_fixture', tenantId: '' },
+          secret: 'synthetic-create-secret',
+          expectedRevision: 1,
+        }),
+      )
+      expect(captured).toMatchObject({
+        status: 'ok',
+        value: { value: { status: 'rejected', code: 'TENANT_DISCOVERY_FAILED' } },
+      })
+      expect(f.credentialValues.size).toBe(0)
+      expect(f.sessions.mutationAvailability()).toBe('available')
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
 
 it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
   'keeps a credential draft private and coordinates its commit with the originating Manager',

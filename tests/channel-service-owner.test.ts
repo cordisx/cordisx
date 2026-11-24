@@ -19,6 +19,7 @@ import type { ChannelManagerV6 } from '@cordisx/protocol/channel-manager/v6'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/channel-conversation-policy.js'
 import * as credentialPrompt from '../packages/cli/src/renderer/channel-credential-prompt.js'
+import { CordisXChannelManagerPresentationService } from '../packages/cli/src/renderer/channel-manager-presentation.js'
 
 const identity = { id: 'channel', source: 'file:///channel-owner-package' }
 const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test' }
@@ -139,6 +140,93 @@ function unbind(manager: ChannelManagerV4) {
 }
 
 describe('Channel owned management service', () => {
+  it('offers only credentialed creation on the owner-bound configuration facade', async () => {
+    const f = await fixture()
+    await f.fiber.dispose()
+    const request = vi.fn(async (input: Record<string, unknown>) =>
+      input.operation === 'capture'
+        ? {
+          status: 'applied' as const,
+          code: 'CAPTURED',
+          ref,
+          draftId: 'private-fixture',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }
+        : { status: 'applied' as const, code: 'APPLIED' }
+    )
+    const prompt = vi.spyOn(credentialPrompt, 'captureChannelCredential')
+      .mockImplementation(async input => input.submit(ref, 'fixture-secret', input.signal))
+    const fiber = f.root.plugin(CordisXChannelManagerPresentationService, {
+      presentationMode: 'configuration-only',
+      projection: projection(),
+      profileId: 'test',
+      hostGeneration: 'runtime',
+      serviceConfig: {},
+      broker: f.broker,
+      document: {} as Document,
+      credentialRequest: request,
+    })
+    await fiber
+    try {
+      const service = f.ctx.channelManager as unknown as CordisXChannelManagerPresentationService
+      const manager = service.forOwnConfigurationPresentationService()!
+      expect(manager.configurationPresentationCapabilities()).toMatchObject({ connectionCreate: 'credentialed' })
+      expect(manager.snapshot().availableOperations).toContain('target.credential.capture.create')
+      expect(manager.snapshot().availableOperations).not.toContain('target.connection.create.simulator')
+      const fence = () => ({
+        requestId: 'credential-owner',
+        profileId: 'test',
+        hostGeneration: 'runtime',
+        expectedRevision: manager.snapshot().revision,
+      })
+      const issued = await manager.issue({
+        ...fence(),
+        contract: 'cordisx.channel-manager-target-request/v1',
+        schemaVersion: 1,
+        operation: 'target.credential.capture.create',
+        purpose: 'create',
+        adapterKind: 'feishu',
+        target: { kind: 'root' },
+      })
+      expect(issued.status).toBe('applied')
+      if (issued.status !== 'applied') throw new Error('Fixture target missing')
+      const captured = await manager.execute({
+        ...fence(),
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        operation: 'credential.capture',
+        target: issued.target as { kind: 'credential-capture'; captureToken: string },
+      })
+      expect(captured.status).toBe('applied')
+      expect(JSON.stringify(captured)).not.toContain('fixture-secret')
+      if (captured.status !== 'applied' || captured.operation !== 'credential.capture') {
+        throw new Error('Fixture capture missing')
+      }
+      const created = await manager.issue({
+        ...fence(),
+        contract: 'cordisx.channel-manager-target-request/v1',
+        schemaVersion: 1,
+        operation: 'target.connection.create',
+        target: { kind: 'credential-draft', credentialDraftToken: captured.credentialDraftToken },
+      })
+      expect(created.status).toBe('applied')
+      if (created.status !== 'applied') throw new Error('Fixture draft missing')
+      await expect(manager.execute({
+        ...fence(),
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        operation: 'connection.create',
+        target: created.target as { kind: 'connection-draft'; connectionDraftToken: string },
+        draft: { displayName: 'Fixture', selectors: ['direct'] },
+      })).resolves.toMatchObject({ status: 'applied' })
+      expect(request.mock.calls[0]![0]).toMatchObject({ operation: 'capture', purpose: 'create', expectedRevision: 1 })
+      expect(f.prompt).not.toHaveBeenCalled()
+    } finally {
+      prompt.mockRestore()
+      await fiber.dispose()
+      await f.cleanup()
+    }
+  })
   it('reads actual own-service activity through traced callers and rejects a borrowed or retired facade', async () => {
     const f = await fixture([{
       ...owner,
