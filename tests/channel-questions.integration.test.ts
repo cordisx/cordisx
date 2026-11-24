@@ -9,6 +9,8 @@ import {
   SIMULATOR_ADAPTER_IDENTITY,
 } from '../packages/channel-runtime/src/simulator.js'
 import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channel-conversation-consumer.js'
+import { channelSteerParent } from '../packages/cli/src/launcher/channel-conversation-steer.js'
+import type { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
 import {
   type ChannelConversationAccess,
   ChannelConversationTools,
@@ -22,7 +24,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
-async function fixture(adapterId = 'feishu') {
+async function fixture(adapterId = 'feishu', bindingCount = 2, kind: 'direct' | 'group' = 'group') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'channel-questions-'))
   roots.push(root)
   const ref = { adapterId, accountId: 'account', tenantId: 'tenant' }
@@ -73,17 +75,19 @@ async function fixture(adapterId = 'feishu') {
   const channel = {
     ...ref,
     conversationId: adapterId === 'simulator' ? 'sim-conversation' : 'oc_group',
-    kind: 'group' as const,
+    kind,
     threadId: adapterId === 'simulator' ? 'sim-conversation' : 'oc_group',
     semantics: 'conversation' as const,
   }
   await consumer.policySet({ enabled: true, groupReception: 'all' }, 0)
-  for (const id of ['01a10000-0000-7000-8000-000000000001', '01a10000-0000-7000-8000-000000000002']) {
+  for (
+    const id of ['01a10000-0000-7000-8000-000000000001', '01a10000-0000-7000-8000-000000000002'].slice(0, bindingCount)
+  ) {
     await consumer.bind({ channel, mode: 'deliver', autoReply: false }, id)
   }
   const question = {
     account: ref,
-    target: { id: channel.conversationId, kind: 'group' },
+    target: { id: channel.conversationId, kind },
     question: 'Which?',
     options: [{ label: 'One', value: '/unbind' }, { label: 'Two', value: 'Second value' }],
     operationId: 'question-1',
@@ -92,6 +96,135 @@ async function fixture(adapterId = 'feishu') {
 }
 
 describe('Channel question delivery and real consumer routing', () => {
+  it.each(
+    [
+      { name: 'group option', answer: 'option', kind: 'group', route: 'thread' },
+      { name: 'group form', answer: 'form', kind: 'group', route: 'thread' },
+      { name: 'group reply', answer: 'option', kind: 'group', route: 'reply' },
+      { name: 'direct reply', answer: 'option', kind: 'direct', route: 'reply' },
+    ] as const,
+  )(
+    'preserves the source for a $name card answer',
+    async ({ answer, kind, route }) => {
+      const f = await fixture('feishu', 1, kind)
+      const steer = vi.fn(async (..._args: unknown[]) => ({ state: 'accepted' as const }))
+      Object.assign(f.native, { steer })
+      await f.tools.call('ask', {
+        ...f.question,
+        target: { ...f.question.target, replyMode: route, replyTo: 'om_topic' },
+      })
+      const token = f.adapter.sent[0]!.questionCard!.token
+      const action = answer === 'option'
+        ? { tag: 'button', value: { channelQuestion: token, option: 0 } }
+        : { tag: 'button', name: 'channel_question_submit', value: {} }
+      const click = {
+        chatId: 'oc_group',
+        messageId: 'sim-message-1',
+        operator: { openId: 'ou_alice' },
+        action,
+        ...(answer === 'form' ? { questionText: 'My answer' } : {}),
+      } as never
+      await f.consumer.cardAction(f.ref, click)
+      await f.consumer.cardAction(f.ref, click)
+      await vi.waitFor(() => expect(f.native.start).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(f.consumer.status().jobs.some(job => job.state === 'running')).toBe(true))
+      expect(f.native.start.mock.calls[0]![1]).toMatchObject({
+        source: {
+          event: {
+            threadId: 'om_topic',
+            semantics: route === 'reply' ? 'reply-chain' : 'topic',
+            actor: { userId: 'ou_alice' },
+          },
+        },
+      })
+      const followup = {
+        contract: 'cordisx.channel-user-input/v1' as const,
+        schemaVersion: 1 as const,
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: 'Continue here' }],
+        source: {
+          kind: 'channel' as const,
+          event: {
+            ...f.channel,
+            threadId: kind === 'direct' ? f.channel.conversationId : 'om_topic',
+            semantics: kind === 'direct'
+              ? 'conversation' as const
+              : route === 'reply'
+              ? 'reply-chain' as const
+              : 'topic' as const,
+            eventId: 'om_followup',
+            messageId: 'om_followup',
+            actor: { ...f.ref, userId: 'ou_alice' },
+          },
+        },
+        receivedAt: new Date().toISOString(),
+      }
+      await f.consumer.receive('inbox:followup', followup, true)
+      await f.consumer.receive('inbox:followup', followup, true)
+      await f.consumer.pump()
+      await f.consumer.pump()
+      await vi.waitFor(() => expect(steer).toHaveBeenCalledTimes(1))
+      expect(steer).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ content: [{ type: 'text', text: 'Continue here' }] }),
+        '01a10000-0000-7000-8000-000000000001',
+        'turn',
+        expect.any(AbortSignal),
+        expect.any(Object),
+        expect.any(Object),
+      )
+    },
+  )
+
+  it.each([
+    { name: 'a different topic', threadId: 'om_other', userId: 'ou_alice' },
+    { name: 'a different sender', threadId: 'om_topic', userId: 'ou_bob' },
+  ])('does not steer a card answer with $name', async ({ threadId, userId }) => {
+    const f = await fixture('feishu', 1)
+    const steer = vi.fn(async (..._args: unknown[]) => ({ state: 'accepted' as const }))
+    Object.assign(f.native, { steer })
+    await f.tools.call('ask', {
+      ...f.question,
+      target: { ...f.question.target, replyMode: 'thread', replyTo: 'om_topic' },
+    })
+    await f.consumer.cardAction(f.ref, {
+      chatId: 'oc_group',
+      messageId: 'sim-message-1',
+      operator: { openId: 'ou_alice' },
+      action: { tag: 'button', value: { channelQuestion: f.adapter.sent[0]!.questionCard!.token, option: 0 } },
+    })
+    await vi.waitFor(() => expect(f.native.start).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(f.consumer.status().jobs.some(job => job.state === 'running')).toBe(true))
+    await f.consumer.receive('inbox:other', {
+      contract: 'cordisx.channel-user-input/v1',
+      schemaVersion: 1,
+      role: 'user',
+      content: [{ type: 'text', text: 'Other source' }],
+      source: {
+        kind: 'channel',
+        event: {
+          ...f.channel,
+          threadId,
+          semantics: 'topic',
+          eventId: 'om_other_msg',
+          messageId: 'om_other_msg',
+          actor: { ...f.ref, userId },
+        },
+      },
+      receivedAt: new Date().toISOString(),
+    }, true)
+    await f.consumer.pump()
+    await f.consumer.pump()
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await vi.waitFor(() => {
+      const snapshot = store.snapshot()
+      const job = Object.values(snapshot.jobs).find(item => item.recordId === 'inbox:other')
+      expect(job?.state).toBe('queued')
+      expect(channelSteerParent(snapshot, job!.id)).toBeUndefined()
+    })
+    expect(steer).not.toHaveBeenCalled()
+  })
+
   it('keeps an already-sent card routable after a bound task moves to a fresh continuation', async () => {
     const f = await fixture()
     const source = '01a10000-0000-7000-8000-000000000001'

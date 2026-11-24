@@ -80,7 +80,11 @@ export async function channelLogicalCommand(input: {
   idlePriorityOffers?: Map<string, { grant: ChannelIdlePriorityGrant; expiresAt: number }>
 }) {
   const parts = input.argument.trim().split(/\s+/u)
-  if (['group-auto-suggest', 'group-auto', 'group-auto-off'].includes(parts[0] ?? '')) {
+  if (
+    ['group-auto-suggest', 'group-auto', 'group-auto-off', 'group-linked-suggest', 'group-linked'].includes(
+      parts[0] ?? '',
+    )
+  ) {
     return channelGroupPriorityCommand({ ...input, parts })
   }
   if (['auto', 'auto-off', 'auto-suggest', 'auto-list', 'auto-suggest-list'].includes(parts[0] ?? '')) {

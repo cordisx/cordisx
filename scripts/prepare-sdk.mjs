@@ -110,7 +110,7 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-if (protocolSpec !== 'github:cordisx/cordisx-protocol#555368f6b7cf51a69185af053eeed82599e587f8') {
+if (protocolSpec !== 'github:cordisx/cordisx-protocol#398c6df543d5555fc6299adb401be6e57de52eef') {
   throw new Error('Host SDK must pin the merged Protocol source')
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')

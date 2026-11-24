@@ -61,10 +61,11 @@ export function bindChannelLogicalContinuation(
   source: string,
   destination: string,
   target: { readonly providerId: string; readonly model: string },
+  groupAuthorized = false,
 ): boolean {
   if (
     !channelLogicalDestinationAvailable(state, source, destination)
-    || !channelLogicalBindingAdmitted(state, event, profileId, source)
+    || !groupAuthorized && !channelLogicalBindingAdmitted(state, event, profileId, source)
   ) return false
   const binding = Object.values(state.bindings).find(value => value.sessionId === source && value.state === 'active')!
   const queued = Object.values(state.jobs).filter(job => job.sessionId === source && job.state === 'queued')

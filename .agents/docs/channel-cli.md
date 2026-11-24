@@ -1031,6 +1031,21 @@ selection blocks the input for administrator reconciliation. This rule does not
 transfer history to another provider and stops at a cross-provider candidate.
 See [Group Channel idle model priority v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/group-idle-priority-v2.md).
 
+For an explicitly authorized cross-provider group continuation, an eligible
+administrator can request `/continue-provider group-linked-suggest first one`.
+The disclosure lists the exact eligible later candidates and provides a
+one-time confirmation command. It explains that the destination can read only
+text inputs from at most 16 recent previously dispatched, accepted group tasks and matching
+confirmed final replies, each capped at 4,096 characters. Unrecorded history,
+unconfirmed replies, agent-initiated messages, attachments, tools and reasoning
+are omitted; this is not the native conversation's full history. The rule
+expires after 24 hours and `/continue-provider group-auto-off` revokes both the
+rule and its group-history access. The source native history is never read for
+this projection. The external group and authorized queued inputs retain their
+binding when a confirmed linked destination replaces the local session. If
+creation is uncertain, the input remains fenced for reconciliation. See
+[Group-scoped linked priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/group-linked-priority-v1.md).
+
 To authorize one idle continuation across several later candidates in their
 configured order, request a disclosure instead with:
 
