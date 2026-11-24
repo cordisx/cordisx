@@ -6,6 +6,7 @@ import { HostThemeProjection } from '../host-theme.js'
 import { ManagerApp } from './ManagerApp.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
+import { standaloneStartupFor } from './standalone-startup-contract.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
 import standaloneStyle from './manager-standalone.css?inline'
 
@@ -23,6 +24,11 @@ export function installStandaloneManager(document: Document, model: ManagerModel
   rootSeat.className = 'cxr-root'
   rootSeat.dataset.cordisxReactManager = 'true'
   rootSeat.dataset.managerSurface = 'standalone'
+  const startup = options.standaloneStyleHref === undefined ? undefined : standaloneStartupFor(document)
+  if (startup !== undefined && options.navigationController === undefined) {
+    throw new Error('Standalone Manager navigation is unavailable')
+  }
+  rootSeat.hidden = startup !== undefined
   const triggerSeat = document.createElement('span')
   const style = options.standaloneStyleHref === undefined
     ? document.createElement('style')
@@ -39,9 +45,11 @@ export function installStandaloneManager(document: Document, model: ManagerModel
   const marketplace = createManagerMarketplaceStore(document, options.pluginManagement)
   const root = createRoot(rootSeat)
   let disposed = false
+  let unstage: (() => void) | undefined
   const dispose = () => {
     if (disposed) return
     disposed = true
+    unstage?.()
     root.unmount()
     marketplace.dispose()
     detachTheme()
@@ -64,6 +72,15 @@ export function installStandaloneManager(document: Document, model: ManagerModel
         />,
       )
     )
+    if (startup !== undefined) {
+      const navigation = options.navigationController!
+      unstage = startup.stage(route => {
+        const focusWasInStartup = Boolean(document.activeElement?.closest('[data-cordisx-manager-startup]'))
+        flushSync(() => navigation.openRoute(route))
+        rootSeat.hidden = false
+        if (focusWasInStartup) rootSeat.querySelector<HTMLElement>('.cxr-nav-destination[aria-current=page]')?.focus()
+      })
+    }
   } catch (error) {
     dispose()
     throw error

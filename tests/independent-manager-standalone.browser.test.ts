@@ -39,6 +39,13 @@ const bundle = `
 export async function startStandaloneManagerComposition(signal) {
   signal.throwIfAborted();
   const active = ${JSON.stringify(active)};
+  let view;
+  const unstage = globalThis.__cordisxManagerStartupV1.stage(route => {
+    globalThis.__fixtureActivatedRoute = route;
+    view = document.createElement('main');
+    view.dataset.fixtureManager = 'ready';
+    document.body.append(view);
+  });
   globalThis.__cordisxPluginGenerationResourcesV1 = {
     stage() {}, publish() {}, retire() {}, dispose() { globalThis.__fixtureRegistryDisposed = true; }
   };
@@ -46,7 +53,9 @@ export async function startStandaloneManagerComposition(signal) {
     activePluginGeneration() { return active }, pluginRegistryEpoch() { return 3 },
     async settleRegistryProjection() {}, async adoptRecoveredActivation() {}, async stagePluginMutation() {},
     async publishPluginMutation() {}, async completePluginMutation() {}, async finalizePluginMutation() {},
-    async rollbackPluginMutation() {}, async dispose() { globalThis.__fixtureDisposed = true; }
+    async rollbackPluginMutation() {}, async dispose() {
+      unstage(); view?.remove(); globalThis.__fixtureDisposed = true;
+    }
   };
   globalThis.__cordisxRuntime = runtime;
   return runtime;
@@ -62,6 +71,11 @@ it.skipIf(chrome === undefined)(
       platform: 'browser',
       format: 'iife',
       target: ['chrome120'],
+      jsx: 'automatic',
+      preserveSymlinks: true,
+      loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
+      define: { 'process.env.NODE_ENV': '"production"' },
+      minify: true,
       logLevel: 'silent',
     })
     const script = result.outputFiles[0]!.contents
@@ -73,6 +87,7 @@ it.skipIf(chrome === undefined)(
     >()
     const events: Array<{ path: string; label: string; body: string }> = []
     let origin = ''
+    let releaseFirstEntry: (() => void) | undefined
     const server = createServer((request, response) => {
       void (async () => {
         const url = new URL(request.url ?? '/', origin)
@@ -82,13 +97,19 @@ it.skipIf(chrome === undefined)(
           response.setHeader('content-type', 'text/html')
           response.setHeader(
             'content-security-policy',
-            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; base-uri 'none'; frame-ancestors 'none'",
           )
-          return response.end('<!doctype html><body><script defer src="/manager-standalone.js"></script></body>')
+          return response.end(
+            '<!doctype html><html lang="zh-CN"><body><script defer src="/manager-standalone.js"></script></body></html>',
+          )
         }
         if (url.pathname === '/manager-standalone.js' || url.pathname === '/manager-resource-worker.js') {
           response.setHeader('content-type', 'text/javascript')
           return response.end(url.pathname === '/manager-standalone.js' ? script : worker)
+        }
+        if (url.pathname === '/manager-host.css') {
+          response.setHeader('content-type', 'text/css')
+          return response.end('')
         }
         let data = ''
         for await (const chunk of request) data += String(chunk)
@@ -110,6 +131,11 @@ it.skipIf(chrome === undefined)(
           if (!exchanged) {
             response.statusCode = 401
             return response.end()
+          }
+          if (entry.token === 'a'.repeat(64)) {
+            await new Promise<void>(resolve => {
+              releaseFirstEntry = resolve
+            })
           }
           entries.delete(entry.token!)
           sessions.set(exchanged, {
@@ -199,18 +225,36 @@ it.skipIf(chrome === undefined)(
       clients.push(first)
       await first.send('Page.enable')
       await first.send('Page.navigate', { url: `${origin}/#${'a'.repeat(64)}` })
-      await expect.poll(() => first.evaluate("document.querySelector('[role=status]')?.hidden === true"), {
+      await expect.poll(() => first.evaluate("Boolean(document.querySelector('[data-manager-starting]'))"), {
         timeout: 15_000,
       }).toBe(true)
+      await expect.poll(() => releaseFirstEntry !== undefined).toBe(true)
+      expect(await first.evaluate("document.body.textContent.includes('正在连接 CordisX')")).toBe(false)
+      await first.evaluate("document.querySelector('[data-cordisx-manager-startup] [data-tab=model-services]').click()")
+      await expect.poll(() => first.evaluate("document.querySelector('.cxr-heading')?.textContent"))
+        .toBe('模型服务')
+      expect(events.some(event => event.path === '/api/renderer/open')).toBe(false)
+      releaseFirstEntry!()
+      await expect.poll(
+        () => first.evaluate("document.querySelector('[data-fixture-manager]')?.dataset.fixtureManager"),
+        {
+          timeout: 15_000,
+        },
+      ).toBe('ready')
+      expect(await first.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBe('true')
+      expect(await first.evaluate('globalThis.__fixtureActivatedRoute.page')).toBe('model-services')
       const debugOrigin = `http://${new URL(socketUrl).host}`
       const secondUrl = `${origin}/?host=1#${'b'.repeat(64)}`
       const tabResponse = await fetch(`${debugOrigin}/json/new?${encodeURIComponent(secondUrl)}`, { method: 'PUT' })
       const tab = await tabResponse.json() as { webSocketDebuggerUrl: string }
       const second = await CdpClient.connect(tab.webSocketDebuggerUrl)
       clients.push(second)
-      await expect.poll(() => second.evaluate("document.querySelector('[role=status]')?.hidden === true"), {
-        timeout: 15_000,
-      }).toBe(true)
+      await expect.poll(
+        () => second.evaluate("document.querySelector('[data-fixture-manager]')?.dataset.fixtureManager"),
+        {
+          timeout: 15_000,
+        },
+      ).toBe('ready')
       expect(await first.evaluate('location.hash')).toBe('')
       expect(await second.evaluate('location.hash')).toBe('')
       expect(events.filter(event => event.path === '/api/renderer/bundle.js').map(event => event.label).sort()).toEqual(
@@ -237,6 +281,15 @@ it.skipIf(chrome === undefined)(
       await expect.poll(() => sessions.get('d'.repeat(64))?.closed === true, { timeout: 10_000 }).toBe(true)
       expect(await second.evaluate('globalThis.__fixtureDisposed === true')).toBe(true)
       expect(await second.evaluate('globalThis.__fixtureRegistryDisposed === true')).toBe(true)
+      expect(await second.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBeUndefined()
+      expect(
+        await second.evaluate("Boolean(document.querySelector('[data-cordisx-manager-startup] [data-tab=plugins]'))"),
+      )
+        .toBe(true)
+      expect(
+        await second.evaluate("document.querySelector('[data-cordisx-manager-startup] p[role=status]')?.textContent"),
+      )
+        .toMatch(/连接不可用|结果未确认/u)
       expect(await second.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)")).toBe(403)
       const quiescence = events.filter(event => event.label === 'second' && event.path === '/api/renderer/acknowledge')
       expect(quiescence.some(event => JSON.parse(event.body).receipt?.value?.quiesced === true)).toBe(true)
@@ -244,6 +297,7 @@ it.skipIf(chrome === undefined)(
         true,
       )
     } finally {
+      releaseFirstEntry?.()
       await Promise.allSettled(clients.map(async client => await client.close()))
       if (browser) await stopChrome(browser)
       server.closeAllConnections()

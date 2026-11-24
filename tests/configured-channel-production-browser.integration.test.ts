@@ -149,7 +149,7 @@ it.skipIf(
         const state = await page.evaluate(`({
           text: document.body.innerText.slice(0, 600),
           ready: document.documentElement.dataset.cordisxReady,
-          statusHidden: document.querySelector('p[role=status]')?.hidden,
+          managerReady: document.documentElement.dataset.cordisxManagerReady,
           content: Boolean(document.querySelector('[data-manager-content-page]')),
           navigation: document.querySelector('[data-settings-navigation-item^=channel]')?.textContent,
         })`)
@@ -349,7 +349,7 @@ it.skipIf(
       }
       for (const page of [first, second]) {
         await expect.poll(
-          () => page.evaluate('document.querySelector("p[role=status]")?.hidden === true'),
+          () => page.evaluate("document.documentElement.dataset.cordisxManagerReady === 'true'"),
           { timeout: 20_000 },
         ).toBe(true)
       }

@@ -177,7 +177,7 @@ it.skipIf(chrome === undefined)(
         await vi.waitFor(async () => {
           expect(
             await page!.evaluate(
-              "document.documentElement.dataset.cordisxReady === 'true' && document.querySelector('p[role=status]')?.hidden === true",
+              "document.documentElement.dataset.cordisxReady === 'true' && document.documentElement.dataset.cordisxManagerReady === 'true'",
             ),
           ).toBe(true)
         }, { timeout: 45_000 })
@@ -251,7 +251,7 @@ it.skipIf(chrome === undefined)(
         await vi.waitFor(async () => {
           expect(
             await peer!.evaluate(
-              "document.documentElement.dataset.cordisxReady === 'true' && document.querySelector('p[role=status]')?.hidden === true",
+              "document.documentElement.dataset.cordisxReady === 'true' && document.documentElement.dataset.cordisxManagerReady === 'true'",
             ),
           ).toBe(true)
         }, { timeout: 45_000 })

@@ -295,7 +295,7 @@ it.skipIf(chrome === undefined)(
         await vi.waitFor(async () => {
           const state = await page.evaluate<{ ready: boolean; status: string }>(`({
           ready: document.documentElement.dataset.cordisxReady === 'true' && !!globalThis.__cordisxRuntime
-            && document.querySelector('p[role=status]')?.hidden === true,
+            && document.documentElement.dataset.cordisxManagerReady === 'true',
           status: document.querySelector('p[role=status]')?.textContent ?? ''
         })`)
           expect(state.ready, state.status).toBe(true)

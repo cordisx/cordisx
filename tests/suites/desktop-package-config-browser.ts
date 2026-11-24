@@ -283,7 +283,7 @@ export async function expectDesktopConfigApplied(
   let last: unknown
   while (Date.now() < deadline) {
     const alive = await page.evaluate(`Boolean(globalThis.__cordisxRuntime)
-      || document.querySelector('p[role=status]')?.hidden === true`)
+      || document.documentElement.dataset.cordisxManagerReady === 'true'`)
     if (!alive) throw new Error('Manager session retired during configuration')
     try {
       expect(await store.loadStable(pluginId)).toEqual({ revision, config: expected })

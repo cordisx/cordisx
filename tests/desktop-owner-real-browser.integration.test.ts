@@ -430,7 +430,7 @@ async function exerciseDesktopOwner(
         while (Date.now() < deadline) {
           const state = await page.evaluate<{ ready: boolean; status: string }>(`({
           ready: document.documentElement?.dataset.cordisxReady === 'true' && !!globalThis.__cordisxRuntime
-            && document.querySelector('p[role=status]')?.hidden === true,
+            && document.documentElement.dataset.cordisxManagerReady === 'true',
           status: document.querySelector('p[role=status]')?.textContent ?? ''
         })`)
           if (state.ready) return

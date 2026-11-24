@@ -102,7 +102,7 @@ it.skipIf(chrome === undefined)(
             path: location.pathname + location.search,
             ready: document.documentElement.dataset.cordisxReady ?? null,
             status: document.querySelector('p[role=status]')?.textContent ?? null,
-            statusHidden: document.querySelector('p[role=status]')?.hidden ?? null,
+            managerReady: document.documentElement.dataset.cordisxManagerReady ?? null,
             managed: globalThis.__fixtureManagedStatus ?? null,
             hasRuntime: !!globalThis.__cordisxRuntime,
             workerControlled: !!navigator.serviceWorker?.controller,

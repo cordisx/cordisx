@@ -9,5 +9,9 @@ await build({
   format: 'iife',
   platform: 'browser',
   target: ['chrome120'],
+  jsx: 'automatic',
+  preserveSymlinks: true,
+  loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
+  minify: true,
   define: { 'process.env.NODE_ENV': '"production"' },
 })
