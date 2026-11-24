@@ -159,6 +159,183 @@ async function enable(f: Awaited<ReturnType<typeof fixture>>) {
   return f.command(`auto old one new two --history=user,assistant --no-checkpoint --confirm=${token}`)
 }
 
+async function enableList(f: Awaited<ReturnType<typeof fixture>>) {
+  const disclosure = await f.command('auto-suggest-list old one')
+  const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(token).toBeDefined()
+  expect(disclosure).toContain('new / two、third / three')
+  expect(await f.command(`auto-list old one --history=user,assistant --no-checkpoint --confirm=${token}`))
+    .toContain('已授权一次')
+}
+
+async function addThird(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.store.mutate(state => {
+    state.modelPriority = {
+      ...state.modelPriority,
+      candidates: [
+        ...state.modelPriority.candidates,
+        { providerId: 'third', model: 'three' },
+      ],
+    }
+  })
+  f.native.modelOperation.mockResolvedValue({
+    providers: [
+      { providerId: 'new', models: [{ id: 'two', reasoningCapabilities: { efforts: ['low'] } }] },
+      { providerId: 'third', models: [{ id: 'three', reasoningCapabilities: { efforts: ['low'] } }] },
+    ],
+  })
+}
+
+it('discloses authorized candidates and skips an unavailable target before dispatch', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.providerId === 'third' ? 'healthy' : 'unavailable'
+  )
+  expect(await f.run()).toBe(true)
+  expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual([
+    'old',
+    'new',
+    'third',
+  ])
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+  expect(f.native.createLogicalDestination.mock.calls[0]![0]).toMatchObject({
+    target: { providerId: 'third', model: 'three' },
+    mode: 'linked',
+  })
+  expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'queued', sessionId: 'destination' })
+})
+
+it('does not migrate after the disclosed list or authorization changes', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockImplementation(async candidate => {
+    if (candidate.providerId === 'new') await f.command('auto-off')
+    return 'unavailable'
+  })
+  expect(await f.run()).toBe(true)
+  expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+  expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old', 'new'])
+  expect(f.store.snapshot().jobs.j!.state).toBe('queued')
+})
+
+it('stops immediately when a candidate probe is cancelled', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockResolvedValueOnce('unavailable').mockResolvedValueOnce('cancelled' as never)
+  expect(await f.run()).toBe(true)
+  expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old', 'new'])
+  expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+  expect(f.store.snapshot().jobs.j!.state).toBe('queued')
+})
+
+it.each(['healthy', 'inconclusive'] as const)(
+  'keeps a non-first current model when its probe is %s',
+  async evidence => {
+    const f = await fixture()
+    await addThird(f)
+    await f.store.mutate(state => {
+      state.modelPriority = {
+        ...state.modelPriority,
+        candidates: [
+          { providerId: 'earlier', model: 'zero' },
+          ...state.modelPriority.candidates,
+        ],
+      }
+    })
+    await enableList(f)
+    f.native.priorityEvidence.mockResolvedValueOnce(evidence as never)
+    expect(await f.run()).toBe(false)
+    expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old'])
+    expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+    expect(f.store.snapshot().bindings.b!.sessionId).toBe('source')
+    expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'queued', sessionId: 'source' })
+  },
+)
+
+it('does not probe or create another target after a fallback creation result is unknown', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.providerId === 'third' ? 'healthy' : 'unavailable'
+  )
+  f.native.createLogicalDestination.mockRejectedValueOnce(new Error('synthetic lost receipt'))
+  expect(await f.run()).toBe(true)
+  expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'reconciliation-required' })
+  await f.run()
+  expect(f.native.priorityEvidence).toHaveBeenCalledTimes(3)
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+})
+
+it('discloses and selects only permitted candidates, preserving their configured order', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await f.store.mutate(state => {
+    state.taskConfig = parseChannelTaskConfig({
+      permissions: [
+        { id: 'allow', effect: 'allow', userIds: ['user'], fields: ['providerId', 'model'] },
+        { id: 'deny', effect: 'deny', userIds: ['user'], fields: ['providerId', 'model'], providerIds: ['new'] },
+      ],
+    })
+  })
+  const disclosure = await f.command('auto-suggest-list old one')
+  expect(disclosure).not.toContain('new / two')
+  expect(disclosure).toContain('third / three')
+  const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(token).toBeDefined()
+  expect(await f.command(`auto-list old one --history=user,assistant --no-checkpoint --confirm=${token}`))
+    .toContain('已授权一次')
+  await f.run()
+  expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old', 'third'])
+  expect(f.native.createLogicalDestination.mock.calls[0]![0]).toMatchObject({
+    target: { providerId: 'third', model: 'three' },
+  })
+})
+
+it('rejects a confirmation if candidate eligibility changes after disclosure', async () => {
+  const f = await fixture()
+  await addThird(f)
+  const disclosure = await f.command('auto-suggest-list old one')
+  const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(token).toBeDefined()
+  f.native.validateTaskConfiguration.mockImplementation(async candidate => {
+    if (candidate.providerId === 'third') throw new Error('synthetic unavailable catalog')
+  })
+  expect(await f.command(`auto-list old one --history=user,assistant --no-checkpoint --confirm=${token}`))
+    .toContain('配置已变化')
+  expect(f.store.snapshot().logicalContinuations?.idlePriorityGrants).toBeUndefined()
+})
+
+it('preserves an ordered grant across restart', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  await f.store.close()
+  stores.splice(stores.indexOf(f.store), 1)
+  const reopened = await ChannelConversationStore.open(path.join(f.root, 'state.json'))
+  stores.push(reopened)
+  expect(reopened.snapshot().logicalContinuations?.idlePriorityGrants?.b).toMatchObject({
+    target: { providerId: 'new', model: 'two' },
+    fallbackTargets: [{ providerId: 'third', model: 'three' }],
+  })
+})
+
+it('skips unsupported targets and fails safely when no disclosed target is healthy', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.providerId === 'old' ? 'unavailable' : 'inconclusive'
+  )
+  expect(await f.run()).toBe(true)
+  expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+  expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'failed', code: 'MODEL_PRIORITY_UNAVAILABLE' })
+})
+
 it('requires a live single-use confirmation of the disclosed history scope', async () => {
   const f = await fixture()
   const disclosure = await f.command('auto-suggest old one new two')
@@ -295,16 +472,19 @@ it('serializes simultaneous attempts for the same source', async () => {
   expect(f.store.snapshot().jobs.j!.sessionId).toBe('destination')
 })
 
-it('uses real-probe evidence without sending the queued message or tools to either provider', async () => {
+it('uses real-probe evidence without sending the queued message or tools to any provider', async () => {
   const f = await fixture()
+  await addThird(f)
   await f.store.mutate(state => {
     state.inputs.r!.input = { ...state.inputs.r!.input, content: [{ type: 'text', text: 'synthetic task' }] }
   })
-  await enable(f)
+  await enableList(f)
   const fetch = vi.fn(async (url: string) =>
     url.includes('old.example.test')
       ? new Response(null, { status: 401 })
-      : new Response(JSON.stringify({ status: 'completed', model: 'two' }))
+      : url.includes('new.example.test')
+      ? new Response(null, { status: 503 })
+      : new Response(JSON.stringify({ status: 'completed', model: 'three' }))
   )
   vi.stubGlobal('fetch', fetch)
   const connect = async (providerId: string) => ({
@@ -317,7 +497,7 @@ it('uses real-probe evidence without sending the queued message or tools to eith
       channelModelConnectivityEvidence(connect, candidate, signal, 1_000, guard)) as never,
   )
   expect(await f.run()).toBe(true)
-  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(fetch).toHaveBeenCalledTimes(3)
   for (const [, request] of fetch.mock.calls as unknown as [string, RequestInit][]) {
     const body = JSON.parse(String(request.body))
     expect(body).toMatchObject({ tools: [], tool_choice: 'none', store: false })
@@ -450,6 +630,7 @@ it('recovers an interrupted destination creation as uncertain without dispatchin
 
 it('dispatches a new Channel input exactly once on the committed destination', async () => {
   const base = await fixture(), c = await consumerFixture()
+  await addThird(base)
   const owner = c.consumer.profileLogicalOwner(), store = owner.store
   await store.bindCommitBarrier(async () => {})
   await store.mutate(state => {
@@ -470,6 +651,7 @@ it('dispatches a new Channel input exactly once on the committed destination', a
       candidates: [
         { providerId: 'old', model: 'one' },
         { providerId: 'new', model: 'two' },
+        { providerId: 'third', model: 'three' },
       ],
     }
     state.bindings.b = {
@@ -512,10 +694,14 @@ it('dispatches a new Channel input exactly once on the committed destination', a
   await c.consumer.bindingAction('archive', 'b')
   await c.consumer.bindingAction('restore', 'b')
   expect(store.snapshot().logicalContinuations?.idlePriorityGrants).toBeUndefined()
-  const last = await sendCommand('auto-suggest old one new two')
+  const last = await sendCommand('auto-suggest-list old one')
   const lastToken = last.match(/--confirm=([a-f0-9]{32})/u)?.[1]
-  expect(await sendCommand(`auto old one new two --history=user,assistant --no-checkpoint --confirm=${lastToken}`))
+  expect(last).toContain('new / two、third / three')
+  expect(await sendCommand(`auto-list old one --history=user,assistant --no-checkpoint --confirm=${lastToken}`))
     .toContain('已授权一次')
+  native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.providerId === 'third' ? 'healthy' : 'unavailable'
+  )
   await c.consumer.receive('synthetic-record', input)
   await settle(c.consumer)
   await settle(c.consumer)
@@ -524,5 +710,8 @@ it('dispatches a new Channel input exactly once on the committed destination', a
   expect(c.native.start.mock.calls[0]![2]).toBe('destination')
   expect(c.native.start.mock.calls[0]![9]).toBe(true)
   expect(native.createLogicalDestination).toHaveBeenCalledOnce()
+  expect(native.createLogicalDestination.mock.calls[0]![0]).toMatchObject({
+    target: { providerId: 'third', model: 'three' },
+  })
   expect(store.snapshot().bindings.b!.sessionId).toBe('destination')
 })

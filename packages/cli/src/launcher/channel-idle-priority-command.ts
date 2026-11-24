@@ -56,10 +56,13 @@ export async function channelIdlePriorityCommand(input: {
   const suggest = parts.length === 5 && parts[0] === 'auto-suggest'
   const confirm = parts.length === 8 && parts[0] === 'auto' && parts[5] === '--history=user,assistant'
     && parts[6] === '--no-checkpoint' && /^--confirm=[a-f0-9]{32}$/u.test(parts[7]!)
-  if (!idlePriorityOffers || !suggest && !confirm) {
-    return '用法：/continue-provider auto-suggest <当前服务商> <当前模型> <后续服务商> <后续模型>。确认前会说明历史共享范围。使用 auto-off 撤销。'
+  const suggestList = parts.length === 3 && parts[0] === 'auto-suggest-list'
+  const confirmList = parts.length === 6 && parts[0] === 'auto-list' && parts[3] === '--history=user,assistant'
+    && parts[4] === '--no-checkpoint' && /^--confirm=[a-f0-9]{32}$/u.test(parts[5]!)
+  if (!idlePriorityOffers || !suggest && !confirm && !suggestList && !confirmList) {
+    return '用法：/continue-provider auto-suggest-list <当前服务商> <当前模型>。确认前会说明历史共享范围和候选模型。使用 auto-off 撤销。'
   }
-  const target = { providerId: parts[3]!, model: parts[4]! }, state = store.snapshot()
+  const state = store.snapshot()
   if (
     !channelLogicalBindingAdmitted(state, event, profileId, source.sessionId)
     || !channelPolicyAllows(state.policy, 'command', event, 'continue-provider')
@@ -73,22 +76,36 @@ export async function channelIdlePriorityCommand(input: {
     ) {
       return '当前模型或执行设置无法确认，未授权。'
     }
-    await boundedChannelSelectionValidation(async () => {
-      validateChannelTaskSelection(channelTaskCatalog(await native.modelOperation('list', {})), {
-        ...selection,
-        ...target,
-      })
-      await native.validateTaskConfiguration({ ...selection, ...target }, source.sessionId)
-    })
   } catch {
-    return '无法确认目标模型支持当前设置，未授权。'
+    return '无法确认当前模型和执行设置，未授权。'
   }
-  if (
-    channelTaskFields(target).some(command => channelCommandDenied(state.policy, event, command))
-    || !channelTaskChangeAllowed(state.taskConfig, state.policy, event, target, { ...selection, ...target })
-  ) {
-    return '当前用户没有目标模型的授权。'
+  const candidates = state.modelPriority.candidates
+  const index = candidates.findIndex(row => row.providerId === selection.providerId && row.model === selection.model)
+  if (index < 0) return '当前模型不在优先级配置中，未授权。'
+  const listMode = suggestList || confirmList
+  const requested = listMode ? candidates.slice(index + 1) : [{ providerId: parts[3]!, model: parts[4]! }]
+  if (!listMode && !isDeepStrictEqual(candidates[index + 1], requested[0])) {
+    return '目标不是当前配置中的下一模型，未授权。'
   }
+  const allowed: typeof requested = []
+  for (const candidate of requested) {
+    if (
+      channelTaskFields(candidate).some(command => channelCommandDenied(state.policy, event, command))
+      || !channelTaskChangeAllowed(state.taskConfig, state.policy, event, candidate, { ...selection, ...candidate })
+    ) continue
+    try {
+      await boundedChannelSelectionValidation(async () => {
+        validateChannelTaskSelection(channelTaskCatalog(await native.modelOperation('list', {})), {
+          ...selection,
+          ...candidate,
+        })
+        await native.validateTaskConfiguration({ ...selection, ...candidate }, source.sessionId)
+      })
+      allowed.push(candidate)
+    } catch { /* A candidate without confirmed compatible settings is not authorized. */ }
+  }
+  const target = allowed[0]
+  if (!target) return '没有可确认设置及权限的后续模型，未授权。'
   const logicalId = logicalConversationIdentity(state.logicalContinuations, source)
   if (!logicalId) return '无法确认对话关系，未授权。'
   const grant: ChannelIdlePriorityGrant = {
@@ -101,12 +118,10 @@ export async function channelIdlePriorityCommand(input: {
     policyRevision: state.policyRevision,
     selection,
     target,
+    ...(listMode ? { fallbackTargets: allowed.slice(1) } : {}),
     expiresAt: Date.now() + lifetimeMs,
   }
-  const candidates = state.modelPriority.candidates
-  const index = candidates.findIndex(row => row.providerId === selection.providerId && row.model === selection.model)
-  if (index < 0 || !isDeepStrictEqual(candidates[index + 1], target)) return '目标不是当前配置中的下一模型，未授权。'
-  if (suggest) {
+  if (suggest || suggestList) {
     const current = store.snapshot()
     if (
       current.modelPriority.revision !== grant.priorityRevision || current.policyRevision !== grant.policyRevision
@@ -117,9 +132,13 @@ export async function channelIdlePriorityCommand(input: {
     if (idlePriorityOffers.size >= 128) return '待确认的授权过多，请稍后再试。'
     const token = randomBytes(16).toString('hex')
     idlePriorityOffers.set(token, { grant, expiresAt: Date.now() + 10 * 60_000 })
-    return `自动接续将从 ${selection.providerId} / ${selection.model} 切换到 ${target.providerId} / ${target.model}；目标服务可按需读取获准的用户和助手文本，不共享检查点。探测可能产生模型费用。若同意一次授权，请在 10 分钟内发送 /continue-provider auto ${selection.providerId} ${selection.model} ${target.providerId} ${target.model} --history=user,assistant --no-checkpoint --confirm=${token}。`
+    const names = allowed.map(row => `${row.providerId} / ${row.model}`).join('、')
+    const command = listMode
+      ? `auto-list ${selection.providerId} ${selection.model}`
+      : `auto ${selection.providerId} ${selection.model} ${target.providerId} ${target.model}`
+    return `自动接续将从 ${selection.providerId} / ${selection.model} 按顺序尝试 ${names}；目标服务可按需读取获准的用户和助手文本，不共享检查点。探测可能产生模型费用。若同意一次授权，请在 10 分钟内发送 /continue-provider ${command} --history=user,assistant --no-checkpoint --confirm=${token}。`
   }
-  const token = parts[7]!.slice('--confirm='.length), offer = idlePriorityOffers.get(token)
+  const token = parts[listMode ? 5 : 7]!.slice('--confirm='.length), offer = idlePriorityOffers.get(token)
   if (
     !offer || offer.expiresAt <= Date.now()
     || !isDeepStrictEqual(offer.grant, { ...grant, expiresAt: offer.grant.expiresAt })
@@ -148,6 +167,8 @@ export async function channelIdlePriorityCommand(input: {
       return '目标不是当前配置中的下一模型，未授权。'
     }
     idlePriorityOffers.delete(token)
-    return `已授权一次自动接续至 ${target.providerId} / ${target.model}，24 小时内有效；目标可按需读取获准的用户和助手文本，不共享检查点。`
+    return `已授权一次按顺序自动接续至 ${
+      allowed.map(row => `${row.providerId} / ${row.model}`).join('、')
+    }，24 小时内有效；目标可按需读取获准的用户和助手文本，不共享检查点。`
   })
 }
