@@ -23,6 +23,7 @@ import { channelDesktopAuthorization } from './channel-desktop-authorization.js'
 import type { DesktopChannelGrants } from './desktop-channel-grants.js'
 import { jointHistorySourceAllowed } from './channel-joint-history.js'
 import { channelIdlePriorityCommand } from './channel-idle-priority-command.js'
+import { channelGroupPriorityCommand } from './channel-group-priority.js'
 import type { ChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
 
 function conversationScope(state: ChannelConversationState, appId: string, profileId: string, event: ChannelEventRef) {
@@ -79,6 +80,9 @@ export async function channelLogicalCommand(input: {
   idlePriorityOffers?: Map<string, { grant: ChannelIdlePriorityGrant; expiresAt: number }>
 }) {
   const parts = input.argument.trim().split(/\s+/u)
+  if (['group-auto-suggest', 'group-auto', 'group-auto-off'].includes(parts[0] ?? '')) {
+    return channelGroupPriorityCommand({ ...input, parts })
+  }
   if (['auto', 'auto-off', 'auto-suggest', 'auto-list', 'auto-suggest-list'].includes(parts[0] ?? '')) {
     return channelIdlePriorityCommand({ ...input, parts })
   }

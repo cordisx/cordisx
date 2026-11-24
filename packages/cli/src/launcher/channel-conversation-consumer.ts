@@ -58,6 +58,7 @@ import {
 import { attachCreatedChannelBinding, channelBindingAction } from './channel-binding-action.js'
 import { channelLogicalCommand } from './channel-logical-command.js'
 import { attemptChannelIdlePriority } from './channel-idle-priority-attempt.js'
+import { attemptChannelGroupPriority } from './channel-group-priority-attempt.js'
 import { recoverChannelIdlePriorityJob } from './channel-idle-priority-status.js'
 import { clearChannelIdlePriorityOffers, removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 import { logicalContinuationManagement } from './logical-continuation-management.js'
@@ -616,7 +617,8 @@ export class ChannelConversationConsumer {
         native: this.input.logicalRuntime || desktopGrant ? this.extraNative?.() : undefined,
         fence: this.sourceFence,
         claims: this.sessionClaims,
-        ...((this.input.logicalRuntime || desktopGrant || argument.trim() === 'auto-off') && this.input.appId
+        ...((this.input.logicalRuntime || desktopGrant || ['auto-off', 'group-auto-off'].includes(argument.trim()))
+            && this.input.appId
           ? { appId: this.input.appId }
           : {}),
         ...(desktopGrant ? { desktopGrants: this.logicalOwner.desktopChannelGrants } : {}),
@@ -748,7 +750,7 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
-      if (job.code === 'IDLE_PRIORITY_MIGRATION_UNCERTAIN') return
+      if (job.code === 'IDLE_PRIORITY_MIGRATION_UNCERTAIN' || job.code === 'GROUP_PRIORITY_EFFECT_UNCERTAIN') return
       return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
@@ -786,6 +788,18 @@ export class ChannelConversationConsumer {
       if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
       if (
         job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')
+      ) return
+      if (
+        this.input.logicalRuntime && this.store.hasCommitBarrier() && await attemptChannelGroupPriority({
+          store: this.store,
+          native: this.extraNative?.(),
+          claims: this.sessionClaims,
+          appId: this.input.appId,
+          profileId: this.input.profileId,
+          event,
+          job,
+          signal: this.lifetime.signal,
+        })
       ) return
       if (
         this.input.logicalRuntime && this.store.hasCommitBarrier() && await attemptChannelIdlePriority({
