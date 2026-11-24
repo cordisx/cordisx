@@ -68,6 +68,13 @@ by the current owner. The authenticated browser entry is unavailable when no
 route can be allocated. Browser-specific validation is required before a
 browser can be treated as supported.
 
+The service must permit the Manager origin as a frame ancestor. The gateway
+preserves the service's `Content-Security-Policy`, `X-Frame-Options`, and
+`Cross-Origin-Resource-Policy` headers; conflicting restrictions can still
+block the frame. CORS controls cross-origin requests, not frame admission. The
+standalone Manager and its console origins are loopback-only and do not
+constitute a remote deployment endpoint.
+
 The gateway also relays authorization cookies issued by the verified service
 after console authentication. These cookies must be HttpOnly, Secure,
 SameSite=None, partitioned, host-only and scoped to `/`, with an explicit
