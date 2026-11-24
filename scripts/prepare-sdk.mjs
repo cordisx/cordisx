@@ -115,7 +115,7 @@ if (protocolSpec !== 'github:cordisx/cordisx-protocol#6b6c85234cac20a1bdb8f01a7f
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')
 const protocolManifest = await verifyPackage(protocolSource)
-if (protocolManifest.version !== '0.1.0-beta.18') throw new Error('Installed Protocol version mismatch')
+if (protocolManifest.version !== '0.1.0-beta.19') throw new Error('Installed Protocol version mismatch')
 await pack(protocolSource, artifacts)
 await run(process.execPath, ['scripts/prepare-bundled-runtime-plugins.mjs'], host)
 const cliTarball = await pack(cli, artifacts)

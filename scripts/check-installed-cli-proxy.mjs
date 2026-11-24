@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CLI_PROXY_COMMIT = 'aa4fd159502704c2645fd5ce47aa135464578b8e'
+const CLI_PROXY_COMMIT = 'cb6ad688587e4eedf5fa69d269363d9a52646b66'
 const CLI_PROXY_DEPENDENCY = `github:cordisx/plugin-cli-proxy-api#${CLI_PROXY_COMMIT}`
 
 /** Verify the installed convenience alias and its sibling service artifact. */
