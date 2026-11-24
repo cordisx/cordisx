@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { connect } from 'node:net'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ManagedConsoleBrowserLaunch,
   supportsManagedConsoleBrowserLaunch,
   verifiedManagedConsoleBrowserApp,
 } from '../packages/cli/src/launcher/managed-console-browser-launch.js'
 import { MAX_STANDALONE_CONSOLE_ORIGINS } from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
+import * as browserGateway from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
 
 const executable = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
 const builds = [
@@ -19,7 +21,70 @@ const signature = (hash: string) =>
     'CDHash=' + hash,
   ].join('\n')
 
+async function canConnect(port: number): Promise<boolean> {
+  return await new Promise(resolve => {
+    const socket = connect({ host: '127.0.0.1', port })
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('error', () => resolve(false))
+  })
+}
+
 describe('managed browser console App admission', () => {
+  it('keeps the launch unavailable when in-flight listener cleanup is unconfirmed', async () => {
+    const gateway = await browserGateway.openManagedConsoleBrowserGateway()
+    const open = vi.spyOn(browserGateway, 'openManagedConsoleBrowserGateway').mockResolvedValueOnce({
+      ...gateway,
+      async close() {
+        await gateway.close()
+        throw new Error('fixture cleanup failure')
+      },
+    })
+    const launch = new ManagedConsoleBrowserLaunch()
+    const signal = new AbortController().signal
+    const preparation = launch.prepareStandalone(signal).then(() => 'ready', () => 'cancelled')
+    try {
+      await expect(launch.close()).rejects.toThrow('managed browser console cleanup unavailable')
+      expect(await preparation).toBe('cancelled')
+      expect(launch.boundary()).toBeUndefined()
+      await expect(launch.prepareStandalone(signal)).rejects.toThrow('managed browser console unavailable')
+    } finally {
+      await launch.close().catch(() => undefined)
+      await gateway.close()
+      open.mockRestore()
+    }
+  })
+
+  it('waits for an in-flight listener to close before acknowledging shutdown', async () => {
+    const gateway = await browserGateway.openManagedConsoleBrowserGateway()
+    const port = Number(new URL(gateway.origin).port)
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => release = resolve)
+    const open = vi.spyOn(browserGateway, 'openManagedConsoleBrowserGateway').mockImplementationOnce(async () => {
+      await waiting
+      return gateway
+    })
+    const launch = new ManagedConsoleBrowserLaunch()
+    const preparation = launch.prepareStandalone(new AbortController().signal).then(() => 'ready', () => 'cancelled')
+    let closed = false
+    const closing = launch.close().then(() => closed = true)
+    try {
+      expect(await canConnect(port)).toBe(true)
+      expect(closed).toBe(false)
+      release()
+      await closing
+      expect(await preparation).toBe('cancelled')
+      expect(await canConnect(port)).toBe(false)
+    } finally {
+      release()
+      await launch.close()
+      await gateway.close()
+      open.mockRestore()
+    }
+  })
+
   it('does not publish standalone console origins after close starts during preparation', async () => {
     const launch = new ManagedConsoleBrowserLaunch()
     const lifetime = new AbortController()
