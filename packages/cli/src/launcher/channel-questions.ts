@@ -219,8 +219,6 @@ export class ChannelQuestions {
     const [deliveryId, q] = entry
     const event: ChannelEventRef = {
       ...q.target,
-      threadId: q.target.conversationId,
-      semantics: 'conversation',
       eventId: `question:${hash([deliveryId, actor])}`,
       messageId: action.messageId,
       actor: { ...ref, userId: actor },
