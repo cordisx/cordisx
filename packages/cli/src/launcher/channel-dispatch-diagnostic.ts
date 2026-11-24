@@ -13,6 +13,7 @@ export async function recordChannelDispatchFailure(
     if (current?.state === 'dispatching') {
       current.state = 'reconciliation-required'
       current.code = code ?? 'NATIVE_EFFECT_UNCERTAIN'
+      current.failureNotice ??= 'pending'
     } else if (current?.state === 'running') current.code = 'NATIVE_READBACK_UNAVAILABLE'
   })
   if (code) report?.(code)

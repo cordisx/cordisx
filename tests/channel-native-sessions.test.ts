@@ -27,6 +27,47 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('checks the model priority fence immediately before starting the native effect', async () => {
+    const call = vi.fn()
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      cwd: '/tmp',
+      nativeRequest: async () => ({}),
+      models: async () => ({ providers: [{ providerId: 'provider', models: [{ id: 'model' }] }] }),
+    })
+    const result = await sessions.start(
+      'fenced',
+      input,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { providerId: 'provider', model: 'model' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => false,
+    )
+    expect(result).toMatchObject({ state: 'busy' })
+    expect(call).not.toHaveBeenCalled()
+  })
+  it('uses the real bridge dry run without creating a native thread or turn', async () => {
+    const nativeRequest = vi.fn(async () => ({}))
+    const handler = createCodexBridgeHandler({
+      catalog: async () => [{ providerId: 'available', models: [{ id: 'model' }] }],
+      nativeRequest,
+    } as never, '/tmp')
+    const sessions = new ChannelNativeSessions({
+      bridge: () =>
+        ({ call: (_app: string, operation: string, value: unknown) => handler(operation, value) }) as AgentBridge,
+      cwd: '/tmp',
+      nativeRequest,
+    })
+    expect(await sessions.priorityPreflight({ providerId: 'missing', model: 'model' })).toBe(false)
+    expect(await sessions.priorityPreflight({ providerId: 'available', model: 'model' })).toBe(true)
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
   it('does not attribute another turn to a Channel dispatch before its native acknowledgement', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     let finish!: (value: unknown) => void

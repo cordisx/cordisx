@@ -1,3 +1,7 @@
+import { channelNativeExists, channelNativeLabel } from './channel-native-metadata.js'
+import type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
+export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
+import { channelDispatchFence, channelModelPreflight } from './channel-model-preflight.js'
 import { readChannelCompletion } from './channel-legacy-completion.js'
 import { channelPersonaTask } from './channel-memory-personas.js'
 import { type ChannelMemoryModelConnection, channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
@@ -52,16 +56,6 @@ import { logicalPresentation, placeLogicalDestination } from './logical-continua
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-export interface ChannelNativeTurnResult {
-  readonly state: 'running' | 'busy' | 'failed' | 'reconciliation-required'
-  readonly sessionId?: string
-  readonly turnId?: string
-  readonly code?: string
-}
-export type ChannelNativeReconciliationResult = Omit<ChannelNativeTurnResult, 'state'> & {
-  readonly state: 'running' | 'reconciliation-required'
-}
-
 /** Uses the launch's authenticated native backend and existing provider/credential preparation. */
 export class ChannelNativeSessions {
   readonly logicalHandoffPermits = new ChannelLogicalHandoffPermits()
@@ -740,17 +734,8 @@ export class ChannelNativeSessions {
   contextFor(token: string) {
     return [...this.sources.values()].find(entry => entry.token === token)
   }
-  async label(sessionId: string) {
-    const metadata = await codexThreadMetadata(this.input, sessionId)
-    return typeof metadata?.name === 'string' ? metadata.name : 'Codex 对话'
-  }
-  async exists(sessionId: string): Promise<boolean> {
-    try {
-      return (await codexThreadMetadata(this.input, sessionId))?.id === sessionId
-    } catch {
-      return false
-    }
-  }
+  label = (sessionId: string) => channelNativeLabel(this.input, sessionId)
+  exists = (sessionId: string) => channelNativeExists(this.input, sessionId)
   private contextOperations() {
     return channelNativeContextOperations({
       sources: this.sources,
@@ -766,6 +751,13 @@ export class ChannelNativeSessions {
   steerObserved(operationId: string, sessionId: string, turnId: string) {
     return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
   }
+
+  priorityPreflight = (
+    candidate: { providerId: string; model: string },
+    signal?: AbortSignal,
+    beforeProbe?: () => Promise<boolean>,
+  ) =>
+    channelModelPreflight(this.input.bridge(), this.input.cwd, candidate, signal, this.input.memoryConnect, beforeProbe)
 
   async start(
     operationId: string,
@@ -784,9 +776,10 @@ export class ChannelNativeSessions {
       },
       logicalHistory?: boolean,
       logicalHandoff?: string,
+      beforeDispatch?: () => Promise<boolean>,
     ]
   ): Promise<ChannelNativeTurnResult> {
-    const [continuation, logicalHistory = false, logicalHandoff] = continuationOptions
+    const [continuation, logicalHistory = false, logicalHandoff, beforeDispatch] = continuationOptions
     if (signal?.aborted) return { state: 'failed', code: 'CANCELLED' }
     const bridge = this.input.bridge()
     if (!bridge) return { state: 'failed', code: 'NATIVE_BACKEND_UNAVAILABLE' }
@@ -872,11 +865,16 @@ export class ChannelNativeSessions {
         this.sources.delete(operationId)
         return { state: 'failed', code: 'CANCELLED' }
       }
+      const attachmentTicket = await channelAttachmentTicket(message)
+      if (!await channelDispatchFence(beforeDispatch, attachmentTicket)) {
+        this.sources.delete(operationId)
+        return { state: 'busy' }
+      }
       const result = object(
         await bridge.call('codex', sessionId === undefined ? 'start_session' : 'send_message', {
           operationId: continuation?.operationId ?? operationId,
           prompt,
-          channelAttachmentTicket: await channelAttachmentTicket(message),
+          channelAttachmentTicket: attachmentTicket,
           ...(sessionId === undefined
             ? {
               cwd: continuation?.configuration.cwd ?? this.input.cwd,

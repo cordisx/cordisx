@@ -3,6 +3,13 @@ import type { ChannelMemoryModelConnection } from './channel-user-memory-model.j
 import { modelsForApp, servicesForApp } from './model-service-projection.js'
 import type { NativeManagedGatewayConnection } from './managed-service-native-connection.js'
 
+/** The provider is supported, but its managed connection could not be prepared. */
+export class ChannelManagedConnectionUnavailable extends Error {
+  constructor() {
+    super('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
+  }
+}
+
 /** Use enabled shared model services and their existing Host-private credential environment. */
 export function channelMemoryServiceConnection(
   config: Pick<HomeConfig, 'providers' | 'environmentVariables'>,
@@ -51,7 +58,9 @@ export function channelMemoryRuntimeConnection(input: {
     if (!input.managed(providerId)) {
       return channelMemoryServiceConnection(await input.config(), input.environment)(providerId, model, signal)
     }
-    const lease = await input.prepare(providerId)
+    const lease = await Promise.resolve().then(() => input.prepare(providerId)).catch(() => {
+      throw new ChannelManagedConnectionUnavailable()
+    })
     if (!input.active() || signal.aborted || !lease.value.models.aliases.some(item => item.gatewayModelId === model)) {
       lease.dispose()
       throw new Error('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
