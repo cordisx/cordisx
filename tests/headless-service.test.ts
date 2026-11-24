@@ -13,6 +13,9 @@ vi.mock(
   }),
 )
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../packages/cli/src/launcher/headless-managed-base-catalog.js', () => ({
+  prepareHeadlessManagedBaseCatalog: async () => undefined,
+}))
 vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
   ChatExecutionPreferences: class {
     static async open() {
@@ -40,6 +43,9 @@ const f = vi.hoisted(() => ({
   rejectHandoff: false,
   backendOptions: undefined as undefined | {
     onRequest: (method: string, params: unknown) => unknown
+    declaredProviders: readonly { providerId: string }[] | (() => Promise<readonly { providerId: string }[]>)
+    managedCatalog?: (id: string) => Promise<unknown>
+    workerEnvironment?: (id: string) => NodeJS.ProcessEnv
     nativeRequest: (
       method: string,
       params: Record<string, unknown>,
@@ -155,10 +161,10 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
       environment: NodeJS.ProcessEnv
       modelCatalogPath?: string
       modelCatalogPreserveProvider?: boolean
-      declaredProviders: readonly { providerId: string }[]
+      declaredProviders: readonly { providerId: string }[] | (() => Promise<readonly { providerId: string }[]>)
     },
   ) => {
-    f.declaredProviders = input.declaredProviders
+    f.declaredProviders = Array.isArray(input.declaredProviders) ? input.declaredProviders : []
     f.backendEnvironment = input.environment
     f.backendOptions = input as unknown as NonNullable<typeof f.backendOptions>
     f.backendReview = input
@@ -166,6 +172,8 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
     return {
       call: async () => ({}),
       nativeRequest: async () => ({}),
+      verifiedCatalogBase: async () => undefined,
+      verifyManagedProviderScope: async () => true,
       close: async () => {
         f.events.push('backend-close')
       },
@@ -383,6 +391,56 @@ describe('headless service lifecycle', () => {
         THREE_KEY: 'synthetic-THREE_KEY',
       })
       expect(f.reports).toEqual([])
+    } finally {
+      await service.close()
+    }
+  })
+  it('connects plugin routes and credentials while refusing an unproven native catalog', async () => {
+    const active = new Map<string, string>()
+    const activation = {
+      get nativeProviderIds() {
+        return [...active.keys()]
+      },
+      startup: { hasProvider: (id: string) => id === 'fixture' },
+      prepareNativeConnection(id: string) {
+        const model = active.get(id)
+        if (!model) throw new Error('unavailable')
+        return {
+          value: {
+            service: { pluginId: 'fixture-plugin', serviceId: 'service', generation: 'one' },
+            endpoint: { origin: 'http://127.0.0.1:8317', apiPath: '/v1', auth: { scheme: 'none' } },
+            models: {
+              generation: 'catalog-one',
+              defaultAlias: 'fixture',
+              aliases: [{ alias: 'fixture', gatewayModelId: model }],
+            },
+            cleanup: { authorityId: 'fixture' },
+          },
+          dispose() {},
+        }
+      },
+    } as unknown as import('../packages/cli/src/launcher/managed-service-plugin-lifecycle.js').ManagedServiceNativeActivation
+    const service = await startHeadlessService({
+      ...input,
+      nativeActivation: activation,
+      report: code => f.reports.push(code),
+    })
+    try {
+      const options = f.backendOptions!
+      if (typeof options.declaredProviders !== 'function') throw new Error('missing dynamic catalog')
+      expect(await options.declaredProviders()).toEqual([])
+      active.set('fixture', 'fixture-model')
+      expect(await options.declaredProviders()).toMatchObject([{ providerId: 'fixture' }])
+      expect(await options.managedCatalog!('fixture')).toMatchObject({ status: 'unavailable' })
+      expect(f.reports).toContain('HEADLESS_MANAGED_CATALOG_UNAVAILABLE')
+      let sent: Record<string, unknown> | undefined
+      await options.nativeRequest('thread/start', { modelProvider: 'fixture', model: 'fixture-model' }, async value => {
+        sent = value
+        return { thread: { id: 'thread-fixture' }, model: 'fixture-model' }
+      })
+      expect(sent).toMatchObject({ config: { 'model_providers.fixture': { wire_api: 'responses' } } })
+      active.clear()
+      expect(await options.declaredProviders()).toEqual([])
     } finally {
       await service.close()
     }

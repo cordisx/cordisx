@@ -129,6 +129,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             codexExecutable: 'codex',
             cwd: userHome,
             environment,
+            nativeActivation: services.nativeActivation(),
+            ...(managed === undefined ? {} : { managedComposition: managed }),
             report: code => diagnostic({ event: 'service-channel-error', code }),
           })
         }
