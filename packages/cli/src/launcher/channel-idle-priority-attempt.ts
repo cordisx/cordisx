@@ -96,24 +96,31 @@ export async function attemptChannelIdlePriority(input: {
     if (original === 'healthy' || original === 'inconclusive') return false
     if (original !== 'unavailable' || !await guard()) return true
     originalUnavailable = true
-    try {
-      await bounded(
-        (async () => {
-          const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
-          validateChannelTaskSelection(catalog, { ...grant.selection, ...grant.target })
-          await native.validateTaskConfiguration({ ...grant.selection, ...grant.target }, source)
-        })(),
-        signal,
-      )
-    } catch {
-      await failUndispatched()
-      return true
-    }
-    const target = await native.priorityEvidence(grant.target, signal, guard)
-    if (target !== 'healthy' || !await guard()) {
-      if (target !== 'cancelled' && current()) {
-        await failUndispatched()
+    let selected: typeof grant.target | undefined
+    for (const candidate of [grant.target, ...(grant.fallbackTargets ?? [])]) {
+      if (!await guard()) return true
+      try {
+        await bounded(
+          (async () => {
+            const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
+            validateChannelTaskSelection(catalog, { ...grant.selection, ...candidate })
+            await native.validateTaskConfiguration({ ...grant.selection, ...candidate }, source)
+          })(),
+          signal,
+        )
+      } catch {
+        if (!current()) return true
+        continue
       }
+      const evidence = await native.priorityEvidence(candidate, signal, guard)
+      if (evidence === 'cancelled' || !await guard()) return true
+      if (evidence === 'healthy') {
+        selected = candidate
+        break
+      }
+    }
+    if (!selected) {
+      if (current()) await failUndispatched()
       return true
     }
     const operationId = channelIdlePriorityOperation(job.id)
@@ -131,7 +138,7 @@ export async function attemptChannelIdlePriority(input: {
         logicalConversationId: grant.logicalId,
         source: grant.source,
         expectedRevision: revision,
-        target: grant.target,
+        target: selected,
         mode: 'linked',
         historyConsent: 'on-demand',
         historyCategories: ['user-text', 'assistant-text'],

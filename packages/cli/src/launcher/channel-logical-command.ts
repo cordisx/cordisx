@@ -79,7 +79,7 @@ export async function channelLogicalCommand(input: {
   idlePriorityOffers?: Map<string, { grant: ChannelIdlePriorityGrant; expiresAt: number }>
 }) {
   const parts = input.argument.trim().split(/\s+/u)
-  if (['auto', 'auto-off', 'auto-suggest'].includes(parts[0] ?? '')) {
+  if (['auto', 'auto-off', 'auto-suggest', 'auto-list', 'auto-suggest-list'].includes(parts[0] ?? '')) {
     return channelIdlePriorityCommand({ ...input, parts })
   }
   if (parts.length === 2 && parts[0] === 'status') {
