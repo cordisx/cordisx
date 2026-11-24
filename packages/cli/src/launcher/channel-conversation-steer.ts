@@ -174,6 +174,7 @@ export async function steerChannelQueued(
         delete current.code
       } else {
         current.state = result.state === 'accepted' ? 'running' : result.state
+        if (result.state === 'failed' || result.state === 'reconciliation-required') current.failureNotice ??= 'pending'
         if (result.code) current.code = result.code
         else delete current.code
       }

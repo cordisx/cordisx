@@ -1,4 +1,6 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import { type ChannelModelPriority, parseChannelModelPriority } from './channel-model-priority.js'
+import { type ChannelFailureNoticeConfig, parseChannelFailureNoticeConfig } from './channel-failure-notice-config.js'
 import {
   type ChannelGroupTaskAccess,
   type ChannelGroupUserTaskAccess,
@@ -136,6 +138,8 @@ export interface ChannelConversationJob {
   /** Target created for this job's latest live handoff; fences immediate repeated handoffs. */
   liveContinuationTarget?: string
   code?: string
+  /** A generic error notice is reserved once for this input, never a raw provider error. */
+  failureNotice?: 'pending' | 'attempted'
 }
 export interface ChannelConversationState {
   readonly contract: 'cordisx.channel-conversation-store/v1'
@@ -152,6 +156,8 @@ export interface ChannelConversationState {
   jobs: Record<string, ChannelConversationJob>
   taskConfigRevision: number
   taskConfig: ChannelTaskConfig
+  modelPriority: ChannelModelPriority
+  failureNotices: ChannelFailureNoticeConfig
   taskSettings: Record<string, ChannelTaskSetting>
   taskRequests: Record<string, ChannelTaskRequest>
   creationDefaults: ChatExecutionDefaults
@@ -189,6 +195,8 @@ function initial(): ChannelConversationState {
     jobs: {},
     taskConfigRevision: 0,
     taskConfig: CHANNEL_TASK_CONFIG_INITIAL,
+    modelPriority: { revision: 0, candidates: [] },
+    failureNotices: { revision: 0, enabled: true },
     taskSettings: {},
     taskRequests: {},
     creationDefaults: { revision: 0, settings: {} },
@@ -236,6 +244,8 @@ export class ChannelConversationStore {
       parsed.groupTaskAccess = parseChannelGroupTaskAccess(parsed.groupTaskAccess)
       parsed.groupUserTaskAccess = parseChannelGroupUserTaskAccess(parsed.groupUserTaskAccess)
       parsed.taskConfig = parseChannelTaskConfig(parsed.taskConfig ?? CHANNEL_TASK_CONFIG_INITIAL)
+      parsed.modelPriority = parseChannelModelPriority(parsed.modelPriority ?? { revision: 0, candidates: [] })
+      parsed.failureNotices = parseChannelFailureNoticeConfig(parsed.failureNotices ?? { revision: 0, enabled: true })
       parsed.taskConfigRevision ??= 0
       parsed.taskSettings ??= {}
       parsed.taskRequests ??= {}
@@ -343,6 +353,7 @@ export class ChannelConversationStore {
         if (job.state === 'dispatching') {
           job.state = 'reconciliation-required'
           job.code = 'NATIVE_EFFECT_UNCERTAIN'
+          job.failureNotice ??= 'pending'
         }
       }
     })

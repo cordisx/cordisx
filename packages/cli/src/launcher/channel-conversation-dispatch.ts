@@ -16,6 +16,7 @@ export function failChannelLogicalPersona(state: ChannelConversationState, jobId
   if (!job || job.state !== 'dispatching') return
   job.state = 'failed'
   job.code = 'CONTINUATION_PERSONA_UNAVAILABLE'
+  job.failureNotice ??= 'pending'
   for (const intent of Object.values(state.logicalContinuations?.intents ?? {})) {
     if (intent.handoffJobId === jobId && !intent.handoffTurnId) delete intent.handoffJobId
   }

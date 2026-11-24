@@ -1,9 +1,14 @@
+import { catchupChannelInputs, storeChannelInput } from './channel-conversation-input.js'
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
 import { channelCommandReply, channelConsumerReply } from './channel-command-reply.js'
 import { channelUserMemoryComposition } from './channel-user-memory-context.js'
 import { channelUserMemoryDispatch } from './channel-user-memory-dispatch.js'
 import { channelDispatchAllowed } from './channel-group-access.js'
 import { channelTaskPolicyChange } from './channel-task-policy-change.js'
+import { channelFailureNotice } from './channel-failure-notice.js'
+import { channelFailureNoticeConfigOperation } from './channel-failure-notice-config.js'
+import { channelModelPriorityOperation } from './channel-model-priority.js'
+import { channelPriorityFenceCurrent, selectChannelCreationModel } from './channel-model-priority-dispatch.js'
 import { channelPermissionOperation } from './channel-permission-cli.js'
 import { channelBindingLabels } from './channel-binding-labels.js'
 import { ChannelQuestions } from './channel-questions.js'
@@ -226,6 +231,11 @@ export class ChannelConversationConsumer {
   async executionOperation(operation: string, args: Record<string, unknown>) {
     return channelExecutionDispatch(this.continuation, this.creationDefaults, this.extraNative?.(), operation, args)
   }
+  modelPriorityOperation(operation: string, args: Record<string, unknown>) {
+    return operation.startsWith('failure-notices')
+      ? channelFailureNoticeConfigOperation(this.store, operation, args)
+      : channelModelPriorityOperation(this.store, operation, args)
+  }
   managementReadback() {
     return channelManagementReadback(this.store.snapshot())
   }
@@ -417,51 +427,12 @@ export class ChannelConversationConsumer {
     addressing?: ChannelCommandAddressing,
   ): Promise<void> {
     if (this.lifetime.signal.aborted) return
-    const fresh = await this.store.mutate(state => {
-      const prior = state.inputs[recordId]
-      if (prior) {
-        state.inputs[recordId] = {
-          ...prior,
-          mentionedBot: prior.mentionedBot || mentionedBot,
-          persisted: prior.persisted || persisted,
-          ...(addressing === undefined ? {} : { addressing: structuredClone(addressing) }),
-        }
-        return
-      }
-      state.inputs[recordId] = {
-        recordId,
-        input: structuredClone(message),
-        mentionedBot,
-        sequence: state.nextSequence++,
-        persisted,
-        ...(addressing === undefined ? {} : { addressing: structuredClone(addressing) }),
-        accepted: false,
-        routed: false,
-      }
-      return true
-    })
+    const fresh = await storeChannelInput(this.store, { recordId, message, mentionedBot, persisted, addressing })
     if (fresh) this.feedback.inputReceived(recordId, message.source.event)
     void this.pump()
   }
   private async catchup(): Promise<void> {
-    const access = this.input.access()
-    if (!access) return
-    const accounts = access.accounts()
-    if (!accounts.length) return
-    const cursor = this.store.snapshot().inputCursor
-    const read = await access.runtime.inputsSince(
-      CALLER,
-      accounts.map(account => ({ account: account.ref })),
-      cursor,
-      100,
-    )
-    if (this.lifetime.signal.aborted) return
-    for (const message of read.messages) await this.receive(message.recordId, message.input)
-    if (read.cursor !== cursor) {
-      await this.store.mutate(state => {
-        state.inputCursor = read.cursor
-      })
-    }
+    await catchupChannelInputs(this.store, this.input.access(), this.lifetime.signal, this.receive.bind(this))
   }
   async pump(): Promise<void> {
     if (this.lifetime.signal.aborted || this.pumping) return this.pumping
@@ -480,6 +451,7 @@ export class ChannelConversationConsumer {
       }
       const jobs = Object.values(this.store.snapshot().jobs).filter(job =>
         ['queued', 'running', 'replying', 'reconciliation-required'].includes(job.state)
+        || job.state === 'failed' && job.failureNotice === 'pending'
       )
       const offset = jobs.length ? this.jobOffset % jobs.length : 0
       const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 8)
@@ -487,12 +459,14 @@ export class ChannelConversationConsumer {
       await Promise.all(selected.map(async job => {
         try {
           await this.advance(job)
+          await channelFailureNotice(this.store, job.id, this.input.access(), this.reply.bind(this), this.input.report)
           this.feedback.jobUpdated(job.recordId)
           await this.feedback.completed(job.recordId).catch(() =>
             this.input.report?.('CHANNEL_FEEDBACK_COMPLETION_UNKNOWN')
           )
         } catch (error) {
           await recordChannelDispatchFailure(this.store, job.id, error, this.input.report)
+          await channelFailureNotice(this.store, job.id, this.input.access(), this.reply.bind(this), this.input.report)
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
@@ -831,6 +805,18 @@ export class ChannelConversationConsumer {
         )
         const handoff = await channelDispatchHandoff(this.store, job.id, event)
         if (handoff === false) return
+        const selected = await selectChannelCreationModel({
+          store: this.store,
+          captured,
+          tasks: this.taskSettings,
+          event,
+          jobId: job.id,
+          autoCreate: job.autoCreate,
+          continuing: !!continuation,
+          signal: this.lifetime.signal,
+          ...(native.priorityPreflight ? { preflight: native.priorityPreflight.bind(native) } : {}),
+        })
+        if (selected.state === 'stop') return
         const result = await native.start(
           job.id,
           message,
@@ -841,9 +827,12 @@ export class ChannelConversationConsumer {
             enabled: captured.jobs[job.id]!.finalDeliveryEnabled === true,
           },
           context,
-          job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
+          selected.settings,
           job.autoCreate ? this.creationDefaults.read().settings : undefined,
           ...channelContinuationArguments(continuation, this.continuation, logicalHistory, handoff),
+          ...(selected.fence
+            ? [async () => channelPriorityFenceCurrent(this.store, selected.fence!, event, job.id)] as const
+            : []),
         )
         const sourceCurrent = !continuation
           || result.state === 'running' && await this.continuation.sourceCurrent(continuation)
@@ -869,6 +858,9 @@ export class ChannelConversationConsumer {
             confirmChannelLogicalHandoff(state, job.id, result.sessionId, result.turnId)
           }
           current.state = result.state === 'busy' ? 'queued' : result.state
+          if (result.state === 'failed' || result.state === 'reconciliation-required') {
+            current.failureNotice ??= 'pending'
+          }
           if (result.sessionId) current.sessionId = result.sessionId
           if (result.turnId) current.turnId = result.turnId
           if (result.code) current.code = result.code
@@ -902,6 +894,7 @@ export class ChannelConversationConsumer {
         if (!mayFinishChannelJob(state, job)) return
         state.jobs[job.id]!.state = 'failed'
         state.jobs[job.id]!.code = completion.code ?? 'NATIVE_TURN_FAILED'
+        state.jobs[job.id]!.failureNotice ??= 'pending'
       })
       return
     }

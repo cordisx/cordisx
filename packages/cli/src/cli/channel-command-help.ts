@@ -111,6 +111,11 @@ const HELP: Readonly<Record<string, string>> = {
   docs:
     'List or read packaged plugin documentation. Input: {pluginId?:string,id?:string,locale?:string}. Select pluginId to disambiguate a document ID. Read-only; never loads credential files.',
   'model-list': 'Read admitted providers/models and supported efforts. Input: {}.',
+  'model-priority': 'Read the local Channel model priority and revision. Input: {}.',
+  'failure-notices': 'Read the Channel failure notice setting and revision. Input: {}.',
+  'failure-notices-set': 'Set Channel failure notices. Input: {expectedRevision,enabled:boolean}.',
+  'model-priority-set':
+    'Replace the local Channel model priority. Input: {expectedRevision,candidates:[{providerId,model}]}.',
   'task-settings':
     'Read one Channel task model settings. Input: {sessionId?}. Incoming tasks retain --context from the prompt.',
   'task-settings-set':
