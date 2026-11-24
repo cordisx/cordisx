@@ -2,11 +2,15 @@ import { isDeepStrictEqual } from 'node:util'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelConversationJob, ChannelConversationStore } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
+import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
+import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import { channelGroupPriorityCurrent } from './channel-group-priority.js'
 import { channelLogicalTransactionStore } from './channel-logical-continuation-store.js'
 import { removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 import { channelTaskCatalog, validateChannelTaskSelection } from './channel-task-selection.js'
 import { boundedChannelSelectionValidation } from './channel-model-priority-dispatch.js'
+import { channelIdlePriorityOperation } from './channel-idle-priority-status.js'
+import { attemptChannelGroupLinked } from './channel-group-linked-attempt.js'
 
 async function bounded<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -26,6 +30,8 @@ async function bounded<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
 export async function attemptChannelGroupPriority(input: {
   store: ChannelConversationStore
   native?: ChannelNativeSessions | undefined
+  access?: (() => ChannelConversationAccess | undefined) | undefined
+  fence?: ChannelNativeSourceFence | undefined
   claims: Set<string>
   appId?: string | undefined
   profileId: string
@@ -41,7 +47,10 @@ export async function attemptChannelGroupPriority(input: {
   if (!grant?.groupScope || grant.source.appId !== input.appId || grant.source.profileId !== input.profileId) {
     return false
   }
-  if (!channelGroupPriorityCurrent(store.snapshot(), grant, event)) return false
+  const candidates = [grant.target, ...(grant.fallbackTargets ?? [])]
+  if (!candidates.some(candidate => channelGroupPriorityCurrent(store.snapshot(), grant, event, candidate))) {
+    return false
+  }
   if (claims.has(source)) return true
   const captured = store.snapshot(), sequence = captured.inputs[job.recordId]?.sequence
   if (
@@ -54,9 +63,14 @@ export async function attemptChannelGroupPriority(input: {
   ) return true
   claims.add(source)
   let effectReserved = false, originalUnavailable = false, effectAllowed = true
-  const ready = (state: ReturnType<ChannelConversationStore['snapshot']>, target = grant.target) =>
-    !signal.aborted && channelGroupPriorityCurrent(state, grant, event, target)
+  const ready = (state: ReturnType<ChannelConversationStore['snapshot']>, target?: typeof grant.target) =>
+    !signal.aborted && (target
+      ? channelGroupPriorityCurrent(state, grant, event, target)
+      : candidates.some(candidate => channelGroupPriorityCurrent(state, grant, event, candidate)))
     && state.jobs[job.id]?.bindingId === grant.bindingId && state.jobs[job.id]?.sessionId === source
+    && (state.jobs[job.id]?.state === 'queued' || !grant.groupLinked
+        && state.jobs[job.id]?.state === 'reconciliation-required'
+        && state.jobs[job.id]?.code === 'GROUP_PRIORITY_EFFECT_UNCERTAIN')
     && state.inputs[job.recordId]?.accepted === true && state.inputs[job.recordId]?.routed === true
     && isDeepStrictEqual(state.inputs[job.recordId]?.input.source.event, event)
     && !Object.values(state.jobs).some(other =>
@@ -64,7 +78,17 @@ export async function attemptChannelGroupPriority(input: {
       && ['dispatching', 'running', 'replying', 'reconciliation-required'].includes(other.state)
     )
     && (!state.taskSettings[source] || state.taskSettings[source]?.application === 'applied')
-  const current = (target = grant.target) => ready(store.snapshot(), target)
+    && !Object.values(state.taskRequests).some(request =>
+      request.threadId === source
+      && ['pending', 'queued', 'applying', 'submitted', 'unknown'].includes(request.state)
+    )
+    && !Object.values(state.logicalContinuations?.intents ?? {}).some(intent =>
+      intent.request.source.sessionId === source && ['creating', 'unknown'].includes(intent.state)
+      && intent.request.operationId !== channelIdlePriorityOperation(job.id)
+    )
+    && (!state.liveTakeovers[source] || ['finished', 'abandoned'].includes(state.liveTakeovers[source]!.state))
+    && (!state.continuations[source]?.intent || state.continuations[source]?.intent?.state === 'completed')
+  const current = (target?: typeof grant.target) => ready(store.snapshot(), target)
   const failed = () =>
     store.mutate(state => {
       const latest = state.jobs[job.id]
@@ -85,7 +109,7 @@ export async function attemptChannelGroupPriority(input: {
       })
       return false
     }
-    const guard = async (target = grant.target) =>
+    const guard = async (target?: typeof grant.target) =>
       current(target)
       && isDeepStrictEqual(await bounded(native.taskSelection(source)), grant.selection)
     const original = await native.priorityEvidence(
@@ -97,8 +121,11 @@ export async function attemptChannelGroupPriority(input: {
     if (original !== 'unavailable' || !await guard()) return true
     originalUnavailable = true
     let selected: typeof grant.target | undefined
-    for (const candidate of [grant.target, ...(grant.fallbackTargets ?? [])]) {
-      if (!await guard(candidate)) return true
+    for (const candidate of candidates) {
+      if (!await guard(candidate)) {
+        if (!await guard()) return true
+        continue
+      }
       try {
         await boundedChannelSelectionValidation(async () => {
           validateChannelTaskSelection(channelTaskCatalog(await native.modelOperation('list', {})), {
@@ -122,6 +149,24 @@ export async function attemptChannelGroupPriority(input: {
       return true
     }
     const target = selected
+    if (grant.groupLinked) {
+      if (!input.fence || !input.access || !native.logicalMigrationLease) {
+        await failed()
+        return true
+      }
+      await attemptChannelGroupLinked({
+        ...input,
+        native,
+        access: input.access,
+        fence: input.fence,
+        appId: input.appId,
+        grant,
+        target,
+        sequence,
+        admitted: state => ready(state, target),
+      })
+      return true
+    }
     effectReserved = await store.mutate(state => {
       const latest = state.jobs[job.id]
       if (!latest || latest.state !== 'queued' || !ready(state, target)) {

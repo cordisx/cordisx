@@ -30,6 +30,8 @@ export interface ChannelIdlePriorityGrant {
   readonly fallbackTargets?: readonly { readonly providerId: string; readonly model: string }[]
   /** Group-only, same-provider policy; a personal grant never gains group authority. */
   readonly groupScope?: true
+  /** Explicit consent to the bounded group-only linked projection. */
+  readonly groupLinked?: true
   readonly expiresAt: number
 }
 
@@ -50,6 +52,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       'target',
       'fallbackTargets',
       'groupScope',
+      'groupLinked',
       'expiresAt',
     ])
     channelExact(source, ['hostId', 'appId', 'profileId', 'sessionId'])
@@ -78,6 +81,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       || !Number.isSafeInteger(row.policyRevision) || Number(row.policyRevision) < 0
       || !Number.isSafeInteger(row.expiresAt) || Number(row.expiresAt) <= 0
       || row.groupScope !== undefined && row.groupScope !== true
+      || row.groupLinked !== undefined && (row.groupLinked !== true || row.groupScope !== true)
     ) throw new Error('INVALID_IDLE_PRIORITY_GRANT')
     grants[key] = {
       bindingId: key,
@@ -91,6 +95,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       target: target as unknown as ChannelIdlePriorityGrant['target'],
       ...(fallbackTargets ? { fallbackTargets } : {}),
       ...(row.groupScope === true ? { groupScope: true as const } : {}),
+      ...(row.groupLinked === true ? { groupLinked: true as const } : {}),
       expiresAt: Number(row.expiresAt),
     }
   }

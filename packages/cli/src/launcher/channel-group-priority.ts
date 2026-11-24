@@ -33,18 +33,19 @@ export function channelGroupPriorityCurrent(
     || binding.sessionId !== grant.source.sessionId || !sameConversation(binding.channel, event)
     || Object.values(state.bindings).filter(row => row.state === 'active' && row.sessionId === binding.sessionId).length
       !== 1
-    || Object.values(state.bindings).some(row =>
-      row.sessionId === binding.sessionId
-      && (row.channel.kind !== 'group' || !sameConversation(row.channel, binding.channel))
-    )
-    || Object.values(state.jobs).some(job => {
-      if (job.sessionId !== binding.sessionId) return false
-      const origin = state.inputs[job.recordId]?.input.source.event
-      return !origin || origin.kind !== 'group' || !sameConversation(origin, binding.channel)
-    })
-    || Object.values(state.logicalContinuations?.relations ?? {}).some(relation =>
-      relation.destination.sessionId === binding.sessionId
-    )
+    || !grant.groupLinked && Object.values(state.bindings).some(row =>
+        row.sessionId === binding.sessionId
+        && (row.channel.kind !== 'group' || !sameConversation(row.channel, binding.channel))
+      )
+    || !grant.groupLinked && Object.values(state.jobs).some(job => {
+        if (job.sessionId !== binding.sessionId) return false
+        const origin = state.inputs[job.recordId]?.input.source.event
+        return !origin || origin.kind !== 'group' || !sameConversation(origin, binding.channel)
+      })
+    || !grant.groupLinked
+      && Object.values(state.logicalContinuations?.relations ?? {}).some(relation =>
+        relation.destination.sessionId === binding.sessionId
+      )
     || !event.actor?.userId || event.actor.adapterId !== event.adapterId || event.actor.accountId !== event.accountId
     || event.actor.tenantId !== event.tenantId || !channelDispatchAllowed(state, event)
     || !state.policy.enabled || state.policyRevision !== grant.policyRevision
@@ -79,7 +80,7 @@ export function channelGroupPriorityCurrent(
   if (
     position < 0 || !candidates.every(candidate => {
       position = list.findIndex((row, index) => index > position && isDeepStrictEqual(row, candidate))
-      return position >= 0 && candidate.providerId === grant.selection.providerId
+      return position >= 0 && (!!grant.groupLinked || candidate.providerId === grant.selection.providerId)
     })
   ) return false
   const chosen = target ?? grant.target
@@ -136,11 +137,18 @@ export async function channelGroupPriorityCommand(input: {
       if (current.logicalContinuations?.idlePriorityGrants?.[binding.id]?.groupScope) {
         removeChannelIdlePriorityGrant(current.logicalContinuations, binding.id)
       }
+      for (const intent of Object.values(current.logicalContinuations?.intents ?? {})) {
+        const projection = intent.groupProjection
+        if (projection && sameConversation(projection.group, binding.channel)) projection.revoked = true
+      }
     })
     return '已撤销当前群的自动切换规则。'
   }
-  const suggest = parts[0] === 'group-auto-suggest' && parts.length === 3
+  const linked = ['group-linked-suggest', 'group-linked'].includes(parts[0] ?? '')
+  const suggest = ['group-auto-suggest', 'group-linked-suggest'].includes(parts[0] ?? '') && parts.length === 3
   const confirm = parts[0] === 'group-auto' && parts.length === 4 && /^--confirm=[a-f0-9]{32}$/u.test(parts[3]!)
+    || parts[0] === 'group-linked' && parts.length === 5 && parts[3] === '--history=group-recorded'
+      && /^--confirm=[a-f0-9]{32}$/u.test(parts[4]!)
   if (!idlePriorityOffers || !suggest && !confirm) {
     return '用法：/continue-provider group-auto-suggest <当前服务商> <当前模型>；使用 group-auto-off 撤销。'
   }
@@ -162,7 +170,7 @@ export async function channelGroupPriorityCommand(input: {
   if (index < 0) return '当前模型不在优先级配置中。'
   const allowed: Candidate[] = []
   for (const candidate of state.modelPriority.candidates.slice(index + 1)) {
-    if (candidate.providerId !== selection.providerId) break
+    if (!linked && candidate.providerId !== selection.providerId) break
     if (
       channelTaskFields(candidate).some(command => channelCommandDenied(state.policy, event, command))
       || !channelTaskChangeAllowed(state.taskConfig, state.policy, event, candidate, { ...selection, ...candidate })
@@ -194,16 +202,23 @@ export async function channelGroupPriorityCommand(input: {
     fallbackTargets: allowed.slice(1),
     expiresAt: Date.now() + 24 * 60 * 60_000,
     groupScope: true,
+    ...(linked ? { groupLinked: true as const } : {}),
   }
   if (suggest) {
     const token = randomBytes(16).toString('hex')
     if (idlePriorityOffers.size >= 128) return '待确认的授权过多，请稍后再试。'
     idlePriorityOffers.set(token, { grant, expiresAt: Date.now() + 10 * 60_000 })
+    const command = linked
+      ? `group-linked ${selection.providerId} ${selection.model} --history=group-recorded`
+      : `group-auto ${selection.providerId} ${selection.model}`
+    const history = linked
+      ? '目标服务可按需读取本群最多最近16条已派发任务的文本输入及其确认送达的最终回复，每条最多4096字符；未记录、未确认、主动发送、附件、工具及推理内容会遗漏，不共享完整原生历史。'
+      : '保留原对话和项目。'
     return `本群空闲时，当前模型确认不可用后，将按顺序尝试 ${
       allowed.map(row => `${row.providerId} / ${row.model}`).join('、')
-    }；保留原对话和项目，探测可能产生费用。确认本群规则请在 10 分钟内发送 /continue-provider group-auto ${selection.providerId} ${selection.model} --confirm=${token}。`
+    }；${history}探测可能产生费用。确认本群规则请在 10 分钟内发送 /continue-provider ${command} --confirm=${token}。`
   }
-  const token = parts[3]!.slice('--confirm='.length), offer = idlePriorityOffers.get(token)
+  const token = parts[linked ? 4 : 3]!.slice('--confirm='.length), offer = idlePriorityOffers.get(token)
   if (
     !offer || offer.expiresAt <= Date.now()
     || !isDeepStrictEqual(offer.grant, { ...grant, expiresAt: offer.grant.expiresAt })
@@ -217,12 +232,17 @@ export async function channelGroupPriorityCommand(input: {
     const previous = current.logicalContinuations!.idlePriorityGrants[binding.id]
     if (previous && !previous.groupScope) return '当前绑定已有个人授权。'
     current.logicalContinuations!.idlePriorityGrants[binding.id] = approved
-    if (!channelGroupPriorityCurrent(current, approved, event)) {
+    if (
+      ![approved.target, ...(approved.fallbackTargets ?? [])]
+        .some(candidate => channelGroupPriorityCurrent(current, approved, event, candidate))
+    ) {
       if (previous) current.logicalContinuations!.idlePriorityGrants[binding.id] = previous
       else removeChannelIdlePriorityGrant(current.logicalContinuations!, binding.id)
       return '配置或权限已变化，未授权。'
     }
     idlePriorityOffers.delete(token)
-    return '已授权本群按配置顺序进行同服务商自动切换，24 小时内有效。'
+    return linked
+      ? '已授权本群按配置顺序自动接续；仅共享最多最近16条已派发任务的文本输入及其确认送达的最终回复，每条最多4096字符，其他历史会遗漏，24 小时内有效。'
+      : '已授权本群按配置顺序进行同服务商自动切换，24 小时内有效。'
   })
 }

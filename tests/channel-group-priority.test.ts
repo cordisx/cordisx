@@ -4,11 +4,17 @@ import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/cha
 import { parseChannelTaskConfig } from '../packages/cli/src/launcher/channel-task-config.js'
 import { channelGroupPriorityCommand } from '../packages/cli/src/launcher/channel-group-priority.js'
 import { attemptChannelGroupPriority } from '../packages/cli/src/launcher/channel-group-priority-attempt.js'
+import { ChannelNativeSourceFence } from '../packages/cli/src/launcher/channel-native-source-fence.js'
+import {
+  channelLogicalHistoryAvailable,
+  createChannelLogicalHistory,
+} from '../packages/cli/src/launcher/channel-logical-history.js'
+import { identity } from '../packages/cli/src/launcher/channel-conversation-refs.js'
 
 async function setup() {
   const f = await fixture(), store = f.consumer.profileLogicalOwner().store
   await store.bindCommitBarrier(async () => {})
-  const group = channel('synthetic-group', 'group')
+  const group = channel('oc_synthetic_group', 'group')
   const admin = message('admin', 'command', group).source.event
   const first = message('first', 'synthetic first', group).source.event
   const second = message('second', 'synthetic second', group).source.event
@@ -77,7 +83,7 @@ async function setup() {
         providerId: 'same',
         models: ['current', 'fallback', 'last']
           .map(id => ({ id, reasoningCapabilities: { efforts: ['low'] } })),
-      }],
+      }, { providerId: 'other', models: [{ id: 'cross', reasoningCapabilities: { efforts: ['low'] } }] }],
     })),
     validateTaskConfiguration: vi.fn(async () => {}),
     priorityEvidence: vi.fn(async (candidate: { model: string }) =>
@@ -88,8 +94,38 @@ async function setup() {
       selection = value
       return { status: 'selected', application: 'applied' }
     }),
+    continuationConfiguration: vi.fn(async () => ({
+      providerId: 'same',
+      model: 'current',
+      cwd: '/workspace',
+      serviceTier: null,
+      approvalsReviewer: 'user',
+      execution: { workMode: 'default', execution: 'read-only', approval: 'on-request', effort: 'low' },
+      sandbox: { type: 'readOnly' },
+      permissionProfile: null,
+    })),
+    logicalMigrationLease: vi.fn(async () => ({
+      state: 'acquired',
+      destination: () => undefined,
+      releaseSource: async () => true,
+      nativeRequest: async () => ({}),
+    })),
+    createLogicalDestination: vi.fn(async (request: { source: object }) => ({
+      state: 'created',
+      confirmed: true,
+      destination: { ...request.source, sessionId: 'destination' },
+    })),
+    logicalSourceVersion: vi.fn(async () => {
+      throw new Error('NATIVE_HISTORY_MUST_NOT_BE_READ')
+    }),
+    logicalHistoryPage: vi.fn(async () => {
+      throw new Error('NATIVE_HISTORY_MUST_NOT_BE_READ')
+    }),
+    sourceForLogicalTurn: vi.fn(async () => first),
+    logicalTurnActive: vi.fn(async () => true),
   }
-  const offers = new Map(), claims = new Set<string>()
+  const offers = new Map(), claims = new Set<string>(), fence = new ChannelNativeSourceFence(() => false)
+  Object.assign(f.runtime, { confirmedGroupDeliveryText: vi.fn(() => undefined) })
   const command = (parts: string[], event = admin) =>
     channelGroupPriorityCommand({
       store,
@@ -104,6 +140,8 @@ async function setup() {
     attemptChannelGroupPriority({
       store,
       native: native as never,
+      access: () => f.access,
+      fence,
       claims,
       appId: 'codex',
       profileId: 'fixture',
@@ -111,7 +149,7 @@ async function setup() {
       job: store.snapshot().jobs[id]!,
       signal: new AbortController().signal,
     })
-  return { ...f, businessNative: f.native, store, native, group, admin, first, second, command, run }
+  return { ...f, businessNative: f.native, store, native, group, admin, first, second, command, run, fence }
 }
 async function enable(f: Awaited<ReturnType<typeof setup>>) {
   const disclosure = await f.command(['group-auto-suggest', 'same', 'current'])
@@ -121,6 +159,252 @@ async function enable(f: Awaited<ReturnType<typeof setup>>) {
   expect(token).toBeDefined()
   expect(await f.command(['group-auto', 'same', 'current', `--confirm=${token}`])).toContain('已授权')
 }
+
+async function enableLinked(f: Awaited<ReturnType<typeof setup>>) {
+  const disclosure = await f.command(['group-linked-suggest', 'same', 'current'])
+  expect(disclosure).toContain('other / cross')
+  expect(disclosure).toContain('未记录')
+  const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(token).toBeDefined()
+  expect(await f.command(['group-linked', 'same', 'current', '--history=group-recorded', `--confirm=${token}`]))
+    .toContain('已授权')
+}
+
+it('links a group across providers using only attributed inputs and confirmed group replies', async () => {
+  const f = await setup()
+  const old = message('old', 'SYNTHETIC_GROUP_HISTORY', f.group)
+  const oldEvent = old.source.event
+  const excluded = message('excluded', 'SYNTHETIC_EXPLICIT_DENY', f.group)
+  excluded.source.event.actor!.userId = 'historical-denied'
+  await f.store.mutate(state => {
+    state.inputs.old = {
+      recordId: 'old',
+      input: old,
+      accepted: true,
+      routed: true,
+      persisted: true,
+      mentionedBot: true,
+      sequence: 0,
+    }
+    state.jobs.old = {
+      id: 'old-job',
+      recordId: 'old',
+      bindingId: 'b',
+      autoCreate: false,
+      state: 'completed',
+      sessionId: a,
+      turnId: 'old-turn',
+      finalDeliveryEnabled: true,
+    }
+    state.inputs.foreign = {
+      ...state.inputs.old!,
+      recordId: 'foreign',
+      input: message('foreign', 'SYNTHETIC_PRIVATE', channel('different', 'direct')),
+    }
+    state.jobs.foreign = { ...state.jobs.old!, id: 'foreign-job', recordId: 'foreign', bindingId: 'other' }
+    state.inputs.excluded = { ...state.inputs.old!, recordId: 'excluded', input: excluded }
+    state.jobs.excluded = { ...state.jobs.old!, id: 'excluded-job', recordId: 'excluded' }
+    state.taskConfig = parseChannelTaskConfig({
+      permissions: [
+        { id: 'admin', effect: 'allow', fields: ['providerId', 'model'], userIds: ['alice'] },
+        {
+          id: 'deny-history',
+          effect: 'deny',
+          fields: ['providerId', 'model'],
+          userIds: ['historical-denied'],
+          models: [{ providerId: 'other', model: 'cross' }],
+        },
+      ],
+    })
+  })
+  const receipt = vi.fn((id: string) =>
+    id === `delivery:${identity(['old-job', oldEvent])}` ? 'SYNTHETIC_CONFIRMED_REPLY' : undefined
+  )
+  Object.assign(f.runtime, { confirmedGroupDeliveryText: receipt })
+  await enableLinked(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.model === 'cross' ? 'healthy' : 'unavailable'
+  )
+  expect(await f.run()).toBe(true)
+  const state = f.store.snapshot()
+  expect(state.bindings.b!.sessionId).toBe('destination')
+  expect(state.jobs.j0).toMatchObject({ state: 'queued', sessionId: 'destination' })
+  expect(state.jobs.j1).toMatchObject({ state: 'queued', sessionId: 'destination' })
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+  expect(f.native.logicalSourceVersion).not.toHaveBeenCalled()
+  expect(receipt).not.toHaveBeenCalledWith(
+    `delivery:${identity(['excluded-job', excluded.source.event])}`,
+    expect.anything(),
+    expect.anything(),
+  )
+  const handler = createChannelLogicalHistory({
+    store: f.store,
+    native: () => f.native as never,
+    appId: 'codex',
+    profileId: 'fixture',
+  })
+  expect(channelLogicalHistoryAvailable(state, f.first, 'destination')).toBe(true)
+  const call = {
+    threadId: 'destination',
+    turnId: 'turn',
+    callId: 'call',
+    tool: 'cordisx_continuation_history',
+    arguments: {},
+  }
+  const page = await handler(call)
+  expect(page.success).toBe(true)
+  expect(JSON.stringify(page)).toContain('SYNTHETIC_GROUP_HISTORY')
+  expect(JSON.stringify(page)).toContain('SYNTHETIC_CONFIRMED_REPLY')
+  expect(JSON.stringify(page)).not.toContain('SYNTHETIC_PRIVATE')
+  expect(JSON.stringify(page)).not.toContain('SYNTHETIC_UNCONFIRMED')
+  expect(JSON.stringify(page)).not.toContain('SYNTHETIC_EXPLICIT_DENY')
+  expect(JSON.stringify(page)).not.toContain('SYNTHETIC_DENIED_REPLY')
+  expect(JSON.parse(page.contentItems[0]!.text).omitted).toContain('unsupported')
+  expect(f.native.logicalHistoryPage).not.toHaveBeenCalled()
+  f.native.sourceForLogicalTurn.mockResolvedValue(f.second)
+  expect((await handler(call)).success).toBe(true)
+  f.native.sourceForLogicalTurn.mockResolvedValue({ ...f.second, conversationId: 'oc_other_group' })
+  expect((await handler(call)).success).toBe(false)
+  f.native.sourceForLogicalTurn.mockResolvedValue(f.first)
+  const limited = await handler({ ...call, arguments: { limit: 1 } })
+  const cursor = JSON.parse(limited.contentItems[0]!.text).nextCursor
+  expect(typeof cursor).toBe('string')
+  const next = await handler({ ...call, arguments: { cursor } })
+  expect(next.success).toBe(true)
+  await f.command(['group-auto-off'])
+  expect((await handler(call)).success).toBe(false)
+})
+
+it('fences a created target when the group authorization is revoked during creation', async () => {
+  const f = await setup()
+  await enableLinked(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.model === 'cross' ? 'healthy' : 'unavailable'
+  )
+  f.native.createLogicalDestination.mockImplementation(async request => {
+    await f.command(['group-auto-off'])
+    return { state: 'created', confirmed: true, destination: { ...request.source, sessionId: 'destination' } }
+  })
+  expect(await f.run()).toBe(true)
+  expect(f.store.snapshot().bindings.b!.sessionId).toBe(a)
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+  expect(f.store.snapshot().jobs.j0!.state).toBe('reconciliation-required')
+})
+
+it('never repeats an unknown cross-provider destination creation', async () => {
+  const f = await setup()
+  await enableLinked(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.model === 'cross' ? 'healthy' : 'unavailable'
+  )
+  f.native.createLogicalDestination.mockRejectedValueOnce(new Error('synthetic lost response'))
+  expect(await f.run()).toBe(true)
+  expect(f.store.snapshot().jobs.j0).toMatchObject({
+    state: 'reconciliation-required',
+    code: 'IDLE_PRIORITY_MIGRATION_UNCERTAIN',
+  })
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+  await f.run()
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+})
+
+it('preserves the bounded group projection and authorization across restart', async () => {
+  const f = await setup()
+  const old = message('old', 'SYNTHETIC_RESTART_HISTORY', f.group)
+  await f.store.mutate(state => {
+    state.inputs.old = {
+      recordId: 'old',
+      input: old,
+      accepted: true,
+      routed: true,
+      persisted: true,
+      mentionedBot: true,
+      sequence: 0,
+    }
+    state.jobs.old = {
+      id: 'old-job',
+      recordId: 'old',
+      bindingId: 'b',
+      autoCreate: false,
+      state: 'completed',
+      sessionId: a,
+      turnId: 'old-turn',
+    }
+  })
+  await enableLinked(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.model === 'cross' ? 'healthy' : 'unavailable'
+  )
+  await f.run()
+  await f.consumer.dispose()
+  const reopened = await fixture(f.file)
+  const store = reopened.consumer.profileLogicalOwner().store
+  const handler = createChannelLogicalHistory({
+    store,
+    native: () => f.native as never,
+    appId: 'codex',
+    profileId: 'fixture',
+  })
+  const page = await handler({
+    threadId: 'destination',
+    turnId: 'turn',
+    callId: 'call',
+    tool: 'cordisx_continuation_history',
+    arguments: {},
+  })
+  expect(page.success).toBe(true)
+  expect(JSON.stringify(page)).toContain('SYNTHETIC_RESTART_HISTORY')
+  expect(f.native.logicalHistoryPage).not.toHaveBeenCalled()
+})
+
+it.each(['healthy', 'inconclusive'] as const)('does not create a linked target when source is %s', async status => {
+  const f = await setup()
+  await enableLinked(f)
+  f.native.priorityEvidence.mockResolvedValueOnce(status as never)
+  expect(await f.run()).toBe(false)
+  expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+  expect(f.store.snapshot().bindings.b!.sessionId).toBe(a)
+})
+
+it('fences a created target when group history changes before commit', async () => {
+  const f = await setup()
+  const old = message('old', 'SYNTHETIC_BEFORE', f.group)
+  await f.store.mutate(state => {
+    state.inputs.old = {
+      recordId: 'old',
+      input: old,
+      accepted: true,
+      routed: true,
+      persisted: true,
+      mentionedBot: true,
+      sequence: 0,
+    }
+    state.jobs.old = {
+      id: 'old-job',
+      recordId: 'old',
+      bindingId: 'b',
+      autoCreate: false,
+      state: 'completed',
+      sessionId: a,
+      turnId: 'old-turn',
+    }
+  })
+  await enableLinked(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.model === 'cross' ? 'healthy' : 'unavailable'
+  )
+  f.native.createLogicalDestination.mockImplementationOnce(async request => {
+    await f.store.mutate(state => {
+      const record = state.inputs.old!
+      state.inputs.old = { ...record, input: message('old', 'SYNTHETIC_AFTER', f.group) }
+    })
+    return { state: 'created', confirmed: true, destination: { ...request.source, sessionId: 'destination' } }
+  })
+  await f.run()
+  expect(f.store.snapshot().bindings.b!.sessionId).toBe(a)
+  expect(f.store.snapshot().jobs.j0).toMatchObject({ state: 'reconciliation-required' })
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+})
 
 describe('group priority, same provider', () => {
   it('requires a scoped administrator and an explicit disclosed group authorization', async () => {
@@ -193,8 +477,9 @@ describe('group priority, same provider', () => {
         ],
       })
     })
-    expect(await f.run()).toBe(false)
-    expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
+    expect(await f.run()).toBe(true)
+    expect(f.native.applyTaskSelection).toHaveBeenCalledOnce()
+    expect(f.native.applyTaskSelection.mock.calls[0]![1]).toMatchObject({ providerId: 'same', model: 'last' })
   })
   it('does not bypass an explicit sender continuation denial', async () => {
     const f = await setup()
@@ -323,6 +608,19 @@ describe('group priority, same provider', () => {
     const reopened = await fixture(f.file)
     expect(reopened.consumer.profileLogicalOwner().store.snapshot().jobs.j0)
       .toMatchObject({ state: 'reconciliation-required', failureNotice: 'pending' })
+  })
+  it('dispatches queued group messages once and in order after a linked migration', async () => {
+    const f = await setup()
+    await enableLinked(f)
+    f.native.priorityEvidence.mockImplementation(async candidate =>
+      candidate.model === 'cross' ? 'healthy' : 'unavailable'
+    )
+    f.consumer.setNativeExtras(() => ({ ...f.native, contextObservations: () => undefined }) as never)
+    for (let i = 0; i < 8; i++) await settle(f.consumer)
+    expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+    expect(f.businessNative.start).toHaveBeenCalledTimes(2)
+    expect(f.businessNative.start.mock.calls.map(call => call[1].source.event.eventId)).toEqual(['first', 'second'])
+    expect(f.store.snapshot().bindings.b!.sessionId).toBe('destination')
   })
   it('dispatches two group inputs only once after the selection is confirmed', async () => {
     const f = await setup()
