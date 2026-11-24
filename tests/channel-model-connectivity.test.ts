@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { channelModelConnectivity } from '../packages/cli/src/launcher/channel-model-connectivity.js'
+import {
+  channelModelConnectivity,
+  channelModelConnectivityEvidence,
+} from '../packages/cli/src/launcher/channel-model-connectivity.js'
 import type { ChannelMemoryModelConnection } from '../packages/cli/src/launcher/channel-user-memory-model.js'
 import { channelMemoryRuntimeConnection } from '../packages/cli/src/launcher/channel-user-memory-connection.js'
 
@@ -93,4 +96,62 @@ it('rechecks authority after obtaining a connection and before sending a probe',
   expect(await channelModelConnectivity(connect, candidate, undefined, 1000, async () => false)).toBe(false)
   expect(fetch).not.toHaveBeenCalled()
   expect(dispose).toHaveBeenCalledOnce()
+})
+
+it('distinguishes a completed real probe from unsupported or malformed responses', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose: () => {},
+  })
+  expect(await channelModelConnectivityEvidence(undefined, candidate)).toBe('inconclusive')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed' }))))
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('not json')))
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 503 })))
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
+})
+
+it('does not interpret cancellation, a revoked fence or an unknown fetch error as service failure', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose: () => {},
+  })
+  const cancelled = AbortSignal.abort()
+  expect(await channelModelConnectivityEvidence(connect, candidate, cancelled)).toBe('cancelled')
+  expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 1000, async () => false))
+    .toBe('cancelled')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new Error('unknown')
+    }),
+  )
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new Error('network', { cause: { code: 'ECONNRESET' } })
+    }),
+  )
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
+})
+
+it('does not treat an incomplete connection setup or a failed authority check as a model failure', async () => {
+  const stalled: ChannelMemoryModelConnection = () => new Promise(() => {})
+  expect(await channelModelConnectivityEvidence(stalled, candidate, undefined, 20)).toBe('inconclusive')
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose: () => {},
+  })
+  const denied = async () => {
+    throw new Error('guard', { cause: { code: 'ECONNRESET' } })
+  }
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 1000, denied)).toBe('inconclusive')
+  expect(fetch).not.toHaveBeenCalled()
 })
