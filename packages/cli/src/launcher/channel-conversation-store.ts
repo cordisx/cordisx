@@ -350,6 +350,9 @@ export class ChannelConversationStore {
         }
       }
       for (const job of Object.values(state.jobs)) {
+        if (job.state === 'reconciliation-required' && job.code === 'GROUP_PRIORITY_EFFECT_UNCERTAIN') {
+          job.failureNotice ??= 'pending'
+        }
         if (job.state === 'dispatching') {
           job.state = 'reconciliation-required'
           job.code = 'NATIVE_EFFECT_UNCERTAIN'
