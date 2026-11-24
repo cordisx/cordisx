@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { managerChildEnvironment } from '../packages/cli/src/cli/manager-supervisor.js'
+import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
@@ -549,8 +550,13 @@ it.skipIf(chrome === undefined)(
       await install('headless-after-browser')
       await install('unsupported-browser-plugin', [], true)
       await install('unavailable-dependent-plugin', [{ id: 'unsupported-browser-plugin', version: '1.0.0' }])
+      await install('configured-browser-plugin')
+      await install('configured-dependent-plugin', [{ id: 'configured-browser-plugin', version: '1.0.0' }])
+      const configs = new PackagePluginConfigStore(homeDir, 'default', endpoint.generation)
+      await configs.stage('configured-browser-plugin', 0, { token: 'fixture-private-plugin-configuration' }, 'fixture')
+      await configs.commit('configured-browser-plugin', 1, 'fixture')
       const final = await requestPluginManagementRpc(rpcPaths, endpoint, { kind: 'query' }) as any
-      expect(final.activationRevision).toBe(9)
+      expect(final.activationRevision).toBe(11)
       // A new renderer must cold-boot all currently active package graphs,
       // not just packages installed after it joins.
       third = await CdpClient.connect(await socketFor(spare.targetId))
@@ -560,6 +566,8 @@ it.skipIf(chrome === undefined)(
       await ready(third)
       expect((await snapshot(third)).active.plugins.map((item: { id: string }) => item.id).sort())
         .toEqual([
+          'configured-browser-plugin',
+          'configured-dependent-plugin',
           'dependent-browser-plugin',
           'first-browser-plugin',
           'headless-after-browser',
@@ -577,11 +585,17 @@ it.skipIf(chrome === undefined)(
       ) {
         expect(await third.evaluate(`globalThis.__${marker} === true`)).toBe(true)
       }
-      const unavailable = ['unsupported-browser-plugin', 'unavailable-dependent-plugin']
+      const unavailable = [
+        'unsupported-browser-plugin',
+        'unavailable-dependent-plugin',
+        'configured-browser-plugin',
+        'configured-dependent-plugin',
+      ]
       const verifyUnavailable = async (page: CdpClient) => {
         const plugins = await page.evaluate<Array<{ id: string; status: string }>>(
           'globalThis.__cordisxRuntime.snapshot().plugins',
         )
+        expect(JSON.stringify(plugins)).not.toContain('fixture-private-plugin-configuration')
         for (const id of unavailable) {
           expect(plugins.find(plugin => plugin.id === id)).toMatchObject({ status: 'failed' })
           expect(await page.evaluate(`globalThis.__${id.replaceAll('-', '_')} === undefined`)).toBe(true)

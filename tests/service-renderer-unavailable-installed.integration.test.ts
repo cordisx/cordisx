@@ -254,16 +254,71 @@ it('keeps an owner-managed service available beside an unsupported installed plu
   }
 }, 60_000)
 
-it('still refuses a supported plugin with unprojected configuration', async () => {
-  const f = await fixture({ protectProfileInputs: true })
+it('isolates service-free packages with unprojected configuration and their dependents', async () => {
+  const f = await fixture({ protectProfileInputs: true, browserManagement: true })
+  const privateValue = 'fixture-unprojected-private-value'
   try {
-    expect(await f.install('healthy-plugin')).toMatchObject({ outcome: 'applied' })
+    expect(
+      await f.install(
+        'configured-plugin',
+        0,
+        false,
+        'export const privateCodeMarker = "fixture-configured-code"; export function apply() {}',
+      ),
+    ).toMatchObject({ outcome: 'applied' })
+    expect(
+      await f.install('dependent-plugin', 1, false, undefined, [
+        { id: 'configured-plugin', version: '1.0.0' },
+      ]),
+    ).toMatchObject({ outcome: 'applied' })
+    expect(await f.install('healthy-plugin', 2)).toMatchObject({ outcome: 'applied' })
     const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
     const token = secret()
-    await configs.stage('healthy-plugin', 0, { value: 'private' }, token)
-    await configs.commit('healthy-plugin', 1, token)
+    await configs.stage('configured-plugin', 0, { value: privateValue }, token)
+    await configs.commit('configured-plugin', 1, token)
+    const prepared = await f.call({ action: 'prepare' }) as any
+    expect(prepared.status).toBe('ok')
+    expect(prepared.value.privateGraphs.map((graph: ServiceRendererPrivateGraph) => graph.pluginId))
+      .toEqual(['healthy-plugin'])
+    const completed = await f.call({
+      action: 'complete',
+      managerOrigin: origin,
+      graphs: prepared.value.privateGraphs.map(project),
+    }) as any
+    expect(completed.status).toBe('ok')
+    const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+    try {
+      const bundle = bytes.toString('utf8')
+      expect(bundle.match(/standaloneUnavailable\s*:\s*(?:true|!0)/gu)).toHaveLength(2)
+      expect(bundle).not.toContain(privateValue)
+      expect(bundle).not.toContain('fixture-configured-code')
+    } finally {
+      bytes.fill(0)
+    }
+    const management = JSON.stringify({
+      version: 1,
+      requestId: secret(),
+      token: 'renderer-binding-placeholder',
+      profileId: f.profileId,
+      operation: { kind: 'query' },
+    })
+    const query = await f.sessions.call(f.invocation, 'plugin-management', management) as any
+    expect(query.value.value.plugins.find((item: any) => item.id === 'configured-plugin').availableOperations)
+      .toEqual([])
+  } finally {
+    await f.close()
+  }
+}, 60_000)
+
+it('still refuses an unprojected configuration when the package owns a service', async () => {
+  const f = await fixture({ managedUiVersion: 15, protectProfileInputs: true })
+  try {
+    const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
+    const token = secret()
+    await configs.stage('fixture-service', 0, { value: 'private' }, token)
+    await configs.commit('fixture-service', 1, token)
     expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
   } finally {
     await f.close()
   }
-}, 30_000)
+}, 60_000)

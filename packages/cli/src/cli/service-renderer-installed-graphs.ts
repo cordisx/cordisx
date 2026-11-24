@@ -16,6 +16,7 @@ import { inspectServiceRendererInitialPackage } from './service-renderer-project
 export async function prepareServiceRendererInstalledGraphs(input: {
   readonly homeDir: string
   readonly plugins: readonly CordisXPluginActivationItemV1[]
+  readonly unprojectedConfigIds: ReadonlySet<string>
   readonly managedServiceUIAvailable: boolean
   readonly leases: PluginGenerationGraphLease[]
   readonly server: () => Promise<PluginGenerationArtifactServer>
@@ -31,7 +32,7 @@ export async function prepareServiceRendererInstalledGraphs(input: {
     const value = await inspectServiceRendererInitialPackage(input.homeDir, item)
     if (!input.current()) throw new Error('renderer-bootstrap-stale')
     inspected.set(item.id, value)
-    if (!value.supported) {
+    if (!value.supported || input.unprojectedConfigIds.has(item.id)) {
       if (!value.safeToOmit) throw new Error('renderer-bootstrap-plugin-unsupported')
       unavailable.add(item.id)
     }

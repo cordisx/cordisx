@@ -542,6 +542,11 @@ export class ServiceRendererBootstrap {
         const installed = await prepareServiceRendererInstalledGraphs({
           homeDir: this.input.homeDir,
           plugins: snapshot.active.plugins,
+          unprojectedConfigIds: new Set(
+            this.input.projectPluginConfig === undefined
+              ? plugins.filter(plugin => !emptyPluginConfig(plugin.config)).map(plugin => plugin.id)
+              : [],
+          ),
           managedServiceUIAvailable: this.managedServiceUI !== undefined,
           leases,
           server: async () => await this.input.lifecycle.artifactServer(),
