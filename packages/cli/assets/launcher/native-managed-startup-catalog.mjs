@@ -93,6 +93,7 @@ export function projectNativeManagedStartupCatalog(input) {
     const compactLimit = window === null || compact == null
       ? null
       : Math.min(compact, Number(BigInt(window) * 9n / 10n))
+    if (compactLimit !== null && compactLimit < 1) return unavailable('model-budget-unavailable')
     overrides.set(route.gatewayModelId, {
       ...original,
       context_window: window,

@@ -124,6 +124,16 @@ describe('native managed startup catalog', () => {
       .toBe('model-budget-unavailable')
   })
 
+  it('does not emit a zero compaction threshold for a tiny valid context window', () => {
+    const source = input()
+    const route = { gatewayModelId: 'model-a', aliases: ['a'] }
+    expect(projectNativeManagedStartupCatalog({ ...source, routes: [{ ...route, contextWindow: 1 }] }))
+      .toMatchObject({ status: 'unavailable', reason: 'model-budget-unavailable' })
+    const result = projectNativeManagedStartupCatalog({ ...source, routes: [{ ...route, contextWindow: 2 }] })
+    expect(result.status).toBe('ready')
+    expect(JSON.parse(result.bytes.toString()).models[0].auto_compact_token_limit).toBe(1)
+  })
+
   it('keeps its immutable private snapshot until explicitly closed', async () => {
     const result = await prepareNativeManagedStartupCatalog(input())
     expect(result.status).toBe('ready')
