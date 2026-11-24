@@ -178,6 +178,33 @@ describe('group priority, same provider', () => {
     expect(await f.run()).toBe(false)
     expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
   })
+  it('does not bypass an explicit sender continuation denial', async () => {
+    const f = await setup()
+    await enable(f)
+    await f.store.mutate(state => {
+      state.policy = parseChannelConversationPolicy({
+        enabled: true,
+        rules: [
+          {
+            id: 'admin',
+            action: 'command',
+            effect: 'allow',
+            userIds: ['alice'],
+            commands: ['allow-user', 'continue-provider'],
+          },
+          {
+            id: 'deny-member',
+            action: 'command',
+            effect: 'deny',
+            userIds: ['member-two'],
+            commands: ['continue-provider'],
+          },
+        ],
+      })
+    })
+    expect(await f.run()).toBe(false)
+    expect(f.native.applyTaskSelection).not.toHaveBeenCalled()
+  })
   it('does not switch a session previously bound to another conversation', async () => {
     const f = await setup()
     await enable(f)

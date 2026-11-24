@@ -84,10 +84,12 @@ export function channelGroupPriorityCurrent(
   const chosen = target ?? grant.target
   if (!candidates.some(candidate => isDeepStrictEqual(candidate, chosen))) return false
   const denied = (actor: ChannelEventRef) =>
-    channelTaskFields(chosen).some(command => channelCommandDenied(state.policy, actor, command))
+    [...channelTaskFields(chosen), 'continue-provider', 'task-settings'].some(command =>
+      channelCommandDenied(state.policy, actor, command)
+    )
     || channelTaskChangeDenied(state.taskConfig, state.policy, actor, chosen, { ...grant.selection, ...chosen })
   const adminAllowed = (actor: ChannelEventRef) =>
-    !channelTaskFields(chosen).some(command => channelCommandDenied(state.policy, actor, command))
+    !denied(actor)
     && channelTaskChangeAllowed(state.taskConfig, state.policy, actor, chosen, { ...grant.selection, ...chosen })
   if (!adminAllowed(admin) || denied(event)) return false
   return Object.values(state.jobs).filter(job => job.sessionId === binding.sessionId && job.state === 'queued')
