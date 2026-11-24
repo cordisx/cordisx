@@ -20,6 +20,22 @@ const signature = (hash: string) =>
   ].join('\n')
 
 describe('managed browser console App admission', () => {
+  it('does not publish standalone console origins after close starts during preparation', async () => {
+    const launch = new ManagedConsoleBrowserLaunch()
+    const lifetime = new AbortController()
+    const preparation = launch.prepareStandalone(lifetime.signal).then(() => 'ready', () => 'cancelled')
+    try {
+      const closing = launch.close()
+      await expect(launch.prepareStandalone(lifetime.signal)).rejects.toThrow('managed browser console unavailable')
+      await Promise.all([closing, launch.close()])
+      expect(await preparation).toBe('cancelled')
+      expect(launch.boundary()).toBeUndefined()
+      expect(await launch.prepareStandalone(lifetime.signal)).toHaveLength(MAX_STANDALONE_CONSOLE_ORIGINS)
+    } finally {
+      await launch.close()
+    }
+  })
+
   it('gives standalone documents distinct owned origins and releases them on close', async () => {
     const launch = new ManagedConsoleBrowserLaunch()
     const lifetime = new AbortController()
