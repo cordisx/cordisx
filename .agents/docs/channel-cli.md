@@ -966,6 +966,65 @@ by a currently eligible user from the source conversation. Agent tool calls
 cannot provide that user's approval. Rights and configuration are rechecked
 before the native change.
 
+`model-priority` reads the profile's ordered creation candidates and revision.
+The local user can replace them with `model-priority-set --input` containing
+`{"expectedRevision":0,"candidates":[{"providerId":"first","model":"one"},{"providerId":"second","model":"two"}]}`.
+Read the current revision first; an empty list disables the policy. The sender
+must have the existing exact provider and model grants for each eligible choice.
+Scoped provider/model defaults take precedence. Existing chats are unchanged
+unless the user separately enables the bounded idle continuation described below.
+Before a new task starts, the Host checks each permitted candidate in order using
+a dry run that verifies its catalog entry and declared key. Catalog validation
+and local dry runs each have a five-second timeout. Where a direct
+Responses connection is available, it also sends a synthetic request with a
+15-second timeout per candidate
+without user messages or tools; this may incur model usage. Probe HTTP 401/403,
+408/429, server errors, network failures, a failed managed connection and timeout
+move to the next candidate. A
+connection type or response that cannot be probed falls back to the local check,
+so its login and service health remain unknown. A successful probe only reflects
+that moment. An unsupported task-model effort or Fast setting excludes that
+candidate rather than changing the requested setting. Inherited execution
+defaults remain unchanged and may still be rejected by the selected model. After native dispatch,
+authentication failures, network errors and timeouts cannot safely trigger a
+replay: an uncertain outcome remains subject to reconciliation. This policy does
+not automatically transfer conversation history between providers.
+
+For an idle existing chat with one active direct binding, the Channel user can
+request a single automatic linked continuation to the immediately following
+authorized candidate in the local priority list:
+
+```text
+/continue-provider auto-suggest first one second two
+```
+
+The reply names both models, explains that the target service may receive the
+approved user and assistant text on demand, and provides a one-time confirmation
+command. Confirmation expires after ten minutes; the resulting authorization
+expires after 24 hours and can be revoked with `/continue-provider auto-off`.
+The Host moves only undispatched messages from the same authorized sender after
+the current model's real synthetic probe fails and the target probe succeeds.
+It checks the binding, model grants, source selection, project and native safety
+settings again. Changed permissions or selections invalidate the authorization;
+changing or removing the binding revokes it.
+Group, multiple-binding and providers without a supported direct probe are not
+eligible. A successful target probe must report the exact configured model ID;
+an absent or different reported ID is inconclusive. An unloaded source does not
+establish that it is idle. A probe can incur model
+usage. Running turns and tool waits are not
+interrupted, and an earlier failed or uncertain turn is never replayed. If native
+target creation is uncertain, the input remains fenced for administrator review.
+See [Idle Channel model priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v1.md).
+
+Failed or uncertain tasks can send a fixed notice asking the user to contact an
+administrator, independently of automatic final replies. `failure-notices`
+reads the setting and revision; the local user can disable it with
+`failure-notices-set --input '{"expectedRevision":0,"enabled":false}'` using
+the current revision. The notice follows the original conversation and send
+permissions and does not expose provider errors. Known failure codes use fixed
+safe categories; unknown failures and uncertain effects use generic wording.
+Unknown delivery results are not blindly repeated.
+
 Common profile creation settings are the base layer. Channel defaults, matching
 conversation/user rules and explicit selections override that layer; explicit
 Fast `false` remains meaningful. Enabling Fast requires catalog support. A

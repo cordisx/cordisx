@@ -10,6 +10,7 @@ import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations
 import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
+import { channelModelPriorityLocal } from './channel-model-priority.js'
 import { MemoryRecordValidationError } from './channel-memory-record-validation.js'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
 import type { ChannelMessageReadResult } from './channel-message-read.js'
@@ -164,6 +165,9 @@ export class ChannelConversationTools {
 
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
+    if (['model-priority', 'model-priority-set', 'failure-notices', 'failure-notices-set'].includes(operation)) {
+      return channelModelPriorityLocal(this.consumer, operation, value, metadata)
+    }
     if (
       operation === 'memory-persona-profile' || operation === 'memory-persona-bind'
       || operation === 'memory-persona-context'

@@ -136,6 +136,42 @@ function fixture(split = true, home = false) {
 }
 
 describe('26.1117 marker-light native thread', () => {
+  it('opens with the empty 26.1120 window slot and rejects nonempty slots', async () => {
+    const f = fixture(false)
+    const slot = f.document.createElement('div')
+    slot.className = 'shrink-0'
+    f.native.prepend(slot)
+    f.setRect(slot, f.rect(326, 0, 1594, 0))
+    const resizeLayer = f.element('[data-native-manager-resizer]')
+    const separator = resizeLayer.querySelector<HTMLElement>('[role="separator"]')!
+    separator.innerHTML = '<div aria-hidden="true"></div>'
+    resizeLayer.style.pointerEvents = 'none'
+    f.setRect(resizeLayer, f.rect(0, 0, 326, 1050))
+    f.setRect(separator, f.rect(318, 0, 16, 1050))
+    expect(resolveManagerPaneSeat(f.document)).toBeDefined()
+    slot.textContent = 'unexpected content'
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    slot.textContent = ''
+    resizeLayer.style.pointerEvents = 'auto'
+    expect(resolveManagerPaneSeat(f.document)).toBeUndefined()
+    resizeLayer.style.pointerEvents = 'none'
+    let dispose: (() => void) | undefined
+    try {
+      await act(async () => {
+        dispose = installReactCordisXManager(f.document, managerModel(), { presentationMode: 'overlay' })
+      })
+      await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+      expect(f.document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+      expect(f.draft.value).toBe('unsent draft')
+      await act(async () => f.element('[data-cordisx-manager-trigger]').click())
+      expect(f.native.inert).toBeFalsy()
+      expect(f.draft.value).toBe('unsent draft')
+    } finally {
+      await act(async () => dispose?.())
+      await f.dispose()
+    }
+  })
+
   it('opens, closes and reopens on the native home without losing its unsent draft', async () => {
     const f = fixture(false, true)
     const pane = resolveManagerPaneSeat(f.document)

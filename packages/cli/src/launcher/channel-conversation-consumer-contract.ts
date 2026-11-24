@@ -23,6 +23,7 @@ export interface ChannelConversationConsumerInput {
           | 'analyzeUserMemory'
           | 'taskSelection'
           | 'creationSelection'
+          | 'priorityPreflight'
         >
       >
     )
