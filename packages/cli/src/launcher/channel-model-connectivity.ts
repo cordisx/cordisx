@@ -2,15 +2,23 @@ import type { ChannelMemoryModelConnection } from './channel-user-memory-model.j
 import type { ChannelModelCandidate } from './channel-model-priority.js'
 import { ChannelManagedConnectionUnavailable } from './channel-user-memory-connection.js'
 
+export type ChannelConnectivityEvidence = 'healthy' | 'unavailable' | 'inconclusive' | 'cancelled'
+type ProbeResult = { evidence: ChannelConnectivityEvidence; legacyAvailable: boolean }
+const result = (evidence: ChannelConnectivityEvidence, legacyAvailable: boolean): ProbeResult => ({
+  evidence,
+  legacyAvailable,
+})
+
 /** Probe only with synthetic input and no tools; never send the Channel message. */
-export async function channelModelConnectivity(
+async function channelModelConnectivityProbe(
   connect: ChannelMemoryModelConnection | undefined,
   candidate: ChannelModelCandidate,
   parent?: AbortSignal,
   timeoutMs = 15_000,
   beforeRequest?: () => Promise<boolean>,
-): Promise<boolean> {
-  if (!connect) return true // This provider has no supported direct Responses connection.
+): Promise<ProbeResult> {
+  if (parent?.aborted) return result('cancelled', false)
+  if (!connect) return result('inconclusive', true)
   const timeout = AbortSignal.timeout(timeoutMs)
   const signal = parent ? AbortSignal.any([parent, timeout]) : timeout
   let claimed = false
@@ -29,12 +37,19 @@ export async function channelModelConnectivity(
     ])
     claimed = true
   } catch (error) {
-    // Unsupported direct connections are inconclusive; a known managed failure or timeout is unavailable.
-    return !signal.aborted && !(error instanceof ChannelManagedConnectionUnavailable)
+    // Local connection preparation is not a completed model request.
+    if (parent?.aborted) return result('cancelled', false)
+    // A stalled credential/connection setup is not evidence that a model request failed.
+    if (timeout.aborted) return result('inconclusive', false)
+    return result('inconclusive', !(error instanceof ChannelManagedConnectionUnavailable))
   }
+  let requestStarted = false
   try {
-    if (connection.protocols && !connection.protocols.includes('openai-responses')) return true
-    if (beforeRequest && !await beforeRequest()) return false
+    if (connection.protocols && !connection.protocols.includes('openai-responses')) return result('inconclusive', true)
+    if (beforeRequest && !await beforeRequest()) return result('cancelled', false)
+    if (parent?.aborted) return result('cancelled', false)
+    if (timeout.aborted) return result('inconclusive', false)
+    requestStarted = true
     const response = await fetch(`${connection.baseUrl.replace(/\/$/u, '')}/responses`, {
       method: 'POST',
       signal,
@@ -53,11 +68,11 @@ export async function channelModelConnectivity(
     })
     if ([401, 403, 408, 429].includes(response.status) || response.status >= 500) {
       await response.body?.cancel().catch(() => {})
-      return false
+      return result('unavailable', false)
     }
     if (!response.ok || Number(response.headers.get('content-length')) > 16384 || !response.body) {
       await response.body?.cancel().catch(() => {})
-      return true // Incompatible Responses implementations cannot establish health.
+      return result('inconclusive', true)
     }
     const reader = response.body.getReader()
     let bytes = 0, content = ''
@@ -67,7 +82,7 @@ export async function channelModelConnectivity(
         const chunk = await reader.read()
         if (chunk.done) break
         bytes += chunk.value.length
-        if (bytes > 16384) return true
+        if (bytes > 16384) return result('inconclusive', true)
         content += decoder.decode(chunk.value, { stream: true })
       }
       content += decoder.decode()
@@ -77,13 +92,48 @@ export async function channelModelConnectivity(
     // Parsing is intentionally only an acknowledgement; an unusual format is inconclusive.
     try {
       const result = JSON.parse(content) as { status?: unknown }
-      return result.status !== 'failed'
+      return result.status === 'completed'
+        ? { evidence: 'healthy', legacyAvailable: true }
+        : result.status === 'failed'
+        ? { evidence: 'unavailable', legacyAvailable: false }
+        : { evidence: 'inconclusive', legacyAvailable: true }
     } catch {
-      return true
+      return result('inconclusive', true)
     }
-  } catch {
-    return false // Network errors and the bounded probe timeout are safe to skip.
+  } catch (error) {
+    if (parent?.aborted) return result('cancelled', false)
+    if (timeout.aborted) return result(requestStarted ? 'unavailable' : 'inconclusive', false)
+    if (!requestStarted) return result('inconclusive', false)
+    // A generic fetch rejection can also be malformed local configuration or a redirect.
+    const cause = error instanceof Error && error.cause && typeof error.cause === 'object'
+      ? error.cause as { code?: unknown }
+      : undefined
+    return result(
+      [
+          'ECONNREFUSED',
+          'ECONNRESET',
+          'ENOTFOUND',
+          'EAI_AGAIN',
+          'EHOSTUNREACH',
+          'ETIMEDOUT',
+          'UND_ERR_CONNECT_TIMEOUT',
+          'UND_ERR_SOCKET',
+        ].includes(String(cause?.code))
+        ? 'unavailable'
+        : 'inconclusive',
+      false,
+    )
   } finally {
     connection.dispose()
   }
+}
+
+/** Existing creation selection retains its compatibility behavior for inconclusive probes. */
+export async function channelModelConnectivity(...args: Parameters<typeof channelModelConnectivityProbe>) {
+  return (await channelModelConnectivityProbe(...args)).legacyAvailable
+}
+
+/** Consumers that might move an existing conversation must require explicit evidence. */
+export async function channelModelConnectivityEvidence(...args: Parameters<typeof channelModelConnectivityProbe>) {
+  return (await channelModelConnectivityProbe(...args)).evidence
 }
