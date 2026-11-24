@@ -1005,7 +1005,8 @@ expires after 24 hours and can be revoked with `/continue-provider auto-off`.
 The Host moves only undispatched messages from the same authorized sender after
 the current model's real synthetic probe fails and the target probe succeeds.
 It checks the binding, model grants, source selection, project and native safety
-settings again. Changed permissions or selections invalidate the authorization.
+settings again. Changed permissions or selections invalidate the authorization;
+changing or removing the binding revokes it.
 Group, multiple-binding and providers without a supported direct probe are not
 eligible. A successful target probe must report the exact configured model ID;
 an absent or different reported ID is inconclusive. An unloaded source does not

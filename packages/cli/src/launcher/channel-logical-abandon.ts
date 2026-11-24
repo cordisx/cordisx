@@ -6,7 +6,7 @@ import { channelLogicalTransactionStore } from './channel-logical-continuation-s
 import { channelLogicalContinuationAdmitted } from './channel-logical-continuation-scope.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import { channelIdlePriorityOperation, channelIdlePriorityUncertain } from './channel-idle-priority-status.js'
-import { removeChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
+import { removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 
 /** User acknowledges an orphan may exist; no native effect is repeated or removed. */
 export async function abandonChannelLogicalContinuation(input: {

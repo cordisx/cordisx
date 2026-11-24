@@ -499,7 +499,20 @@ it('dispatches a new Channel input exactly once on the committed destination', a
   const disclosure = await sendCommand('auto-suggest old one new two')
   const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
   expect(token).toBeDefined()
+  await c.consumer.bindingAction('archive', 'b')
+  await c.consumer.bindingAction('restore', 'b')
   expect(await sendCommand(`auto old one new two --history=user,assistant --no-checkpoint --confirm=${token}`))
+    .toContain('确认已过期')
+  const next = await sendCommand('auto-suggest old one new two')
+  const nextToken = next.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(await sendCommand(`auto old one new two --history=user,assistant --no-checkpoint --confirm=${nextToken}`))
+    .toContain('已授权一次')
+  await c.consumer.bindingAction('archive', 'b')
+  await c.consumer.bindingAction('restore', 'b')
+  expect(store.snapshot().logicalContinuations?.idlePriorityGrants).toBeUndefined()
+  const last = await sendCommand('auto-suggest old one new two')
+  const lastToken = last.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+  expect(await sendCommand(`auto old one new two --history=user,assistant --no-checkpoint --confirm=${lastToken}`))
     .toContain('已授权一次')
   await c.consumer.receive('synthetic-record', input)
   await settle(c.consumer)

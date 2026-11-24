@@ -1,4 +1,5 @@
 import { catchupChannelInputs, storeChannelInput } from './channel-conversation-input.js'
+import { isDeepStrictEqual } from 'node:util'
 import { recordChannelDispatchFailure } from './channel-dispatch-diagnostic.js'
 import { channelCommandReply, channelConsumerReply } from './channel-command-reply.js'
 import { channelUserMemoryComposition } from './channel-user-memory-context.js'
@@ -58,6 +59,7 @@ import { attachCreatedChannelBinding, channelBindingAction } from './channel-bin
 import { channelLogicalCommand } from './channel-logical-command.js'
 import { attemptChannelIdlePriority } from './channel-idle-priority-attempt.js'
 import { recoverChannelIdlePriorityJob } from './channel-idle-priority-status.js'
+import { clearChannelIdlePriorityOffers, removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 import { logicalContinuationManagement } from './logical-continuation-management.js'
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { finishChannelJob } from './channel-conversation-completion.js'
@@ -267,7 +269,13 @@ export class ChannelConversationConsumer {
     return result
   }
   async bindingAction(action: 'archive' | 'restore' | 'unbind', id: string): Promise<boolean> {
-    return channelBindingAction(this.store, action, id, sessionId => this.sourceFence.isMigrating(sessionId))
+    return channelBindingAction(
+      this.store,
+      action,
+      id,
+      sessionId => this.sourceFence.isMigrating(sessionId),
+      id => clearChannelIdlePriorityOffers(this.logicalOwner.idlePriorityOffers, id),
+    )
   }
   async bind(value: unknown, sessionId: string): Promise<Conversation.ChannelChatBinding> {
     const args = channelRecord(value)
@@ -318,6 +326,10 @@ export class ChannelConversationConsumer {
         }
         if (args.replyMode === null) delete updated.replyMode
         if (args.replyFallbackMode === null) delete updated.replyFallbackMode
+        if (!isDeepStrictEqual(prior, updated)) {
+          removeChannelIdlePriorityGrant(state.logicalContinuations, id)
+          clearChannelIdlePriorityOffers(this.logicalOwner.idlePriorityOffers, id)
+        }
         state.bindings[id] = updated
         return updated
       }
@@ -334,6 +346,8 @@ export class ChannelConversationConsumer {
         ...replyOptions,
         state: 'active',
       }
+      removeChannelIdlePriorityGrant(state.logicalContinuations, id)
+      clearChannelIdlePriorityOffers(this.logicalOwner.idlePriorityOffers, id)
       state.bindings[id] = binding
       return binding
     })
@@ -349,6 +363,8 @@ export class ChannelConversationConsumer {
           binding.sessionId !== sessionId || args.bindingId !== undefined && id !== args.bindingId
           || selected !== undefined && !sameConversation(binding.channel, selected)
         ) continue
+        removeChannelIdlePriorityGrant(state.logicalContinuations, id)
+        clearChannelIdlePriorityOffers(this.logicalOwner.idlePriorityOffers, id)
         delete state.bindings[id]
         count += 1
         for (const job of Object.values(state.jobs)) {

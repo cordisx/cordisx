@@ -7,11 +7,8 @@ import { eventThread } from './channel-conversation-refs.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import { channelLogicalTransactionStore } from './channel-logical-continuation-store.js'
 import { channelLogicalBindingAdmitted } from './channel-logical-continuation-bind.js'
-import {
-  channelIdleGrantCurrent,
-  type ChannelIdlePriorityGrant,
-  removeChannelIdlePriorityGrant,
-} from './channel-idle-priority-grant.js'
+import { channelIdleGrantCurrent, type ChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
+import { removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 import { channelCommandDenied, channelPolicyAllows } from './channel-conversation-policy.js'
 import { channelTaskChangeAllowed, channelTaskFields, type ChannelTaskPatch } from './channel-task-config.js'
 import { channelTaskCatalog, validateChannelTaskSelection } from './channel-task-selection.js'

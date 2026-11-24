@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelConversationState } from './channel-conversation-store.js'
-import type { LogicalContinuationActor, LogicalContinuationState } from './logical-continuation-control.js'
+import type { LogicalContinuationActor } from './logical-continuation-control.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { channelExact, channelPolicyAllows, channelRecord, channelText } from './channel-conversation-policy.js'
 import { type ChannelTaskPatch, parseChannelTaskPatch } from './channel-task-config.js'
@@ -22,12 +22,6 @@ export interface ChannelIdlePriorityGrant {
   readonly selection: ChannelTaskPatch
   readonly target: { readonly providerId: string; readonly model: string }
   readonly expiresAt: number
-}
-
-export function removeChannelIdlePriorityGrant(state: LogicalContinuationState, bindingId: string): void {
-  if (!state.idlePriorityGrants) return
-  delete state.idlePriorityGrants[bindingId]
-  if (!Object.keys(state.idlePriorityGrants).length) delete state.idlePriorityGrants
 }
 
 export function parseChannelIdlePriorityGrants(value: unknown): Record<string, ChannelIdlePriorityGrant> {
