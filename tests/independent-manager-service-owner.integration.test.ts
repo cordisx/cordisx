@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -78,7 +78,9 @@ it('connects the independent manager to a real service owner without Channel or 
     const url = new URL(line)
     for (
       const file of [
-        'index.html',
+        'manager-standalone.html',
+        'manager-standalone.js',
+        'manager-resource-worker.js',
         'manager.js',
         'manager-shell.js',
         'manager-host.css',
@@ -89,7 +91,7 @@ it('connects the independent manager to a real service owner without Channel or 
     ) {
       const packaged = await readFile(path.join(home, 'package', 'dist', 'assets', 'manager', file), 'utf8')
       expect(packaged.length).toBeGreaterThan(0)
-      const response = await fetch(`${url.origin}/${file === 'index.html' ? '' : file}`)
+      const response = await fetch(`${url.origin}/${file === 'manager-standalone.html' ? '' : file}`)
       expect(response.status).toBe(200)
       expect(await response.text()).toBe(packaged)
       const policy = response.headers.get('content-security-policy')!
@@ -139,7 +141,14 @@ it('connects the independent manager to a real service owner without Channel or 
     expect(renderer).toEqual({
       status: 'ok',
       profileId: 'default',
-      channels: ['plugin-management', 'managed-service-ui', 'model-services', 'marketplace'],
+      channels: [
+        'plugin-management',
+        'managed-service-ui',
+        'model-services',
+        'native-catalog',
+        'permission-policy',
+        'marketplace',
+      ],
       commands: true,
       generation: expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u),
       rendererId: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -176,7 +185,9 @@ it('connects the independent manager to a real service owner without Channel or 
       status: 'ok',
       value: { status: 'ok', privateGraphs: [] },
     })
-    const boot = await callBootstrap({ action: 'complete', managerOrigin: url.origin, graphs: [] })
+    const publicJwk = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' })
+    const permissionPublicKey = { kty: publicJwk.kty, crv: publicJwk.crv, x: publicJwk.x, y: publicJwk.y }
+    const boot = await callBootstrap({ action: 'complete', managerOrigin: url.origin, graphs: [], permissionPublicKey })
     expect(boot.status).toBe('ok')
     expect(boot.value.status).toBe('ok')
     expect(boot.value.bundle.encoding).toBe('brotli-base64')
