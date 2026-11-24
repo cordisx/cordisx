@@ -2,7 +2,7 @@ import { channelNativeFailureCode } from './channel-native-failure.js'
 import { channelNativeExists, channelNativeLabel } from './channel-native-metadata.js'
 import type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
 export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
-import { channelDispatchFence, channelModelPreflight } from './channel-model-preflight.js'
+import { channelDispatchFence, channelModelPriorityProbes } from './channel-model-preflight.js'
 import { readChannelCompletion } from './channel-legacy-completion.js'
 import { channelPersonaTask } from './channel-memory-personas.js'
 import { type ChannelMemoryModelConnection, channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
@@ -436,8 +436,9 @@ export class ChannelNativeSessions {
       }),
     }
   }
-  async idle(threadId: string) {
-    return (await channelNativeIdle(this.input, threadId)) !== undefined
+  async idle(threadId: string, requireObservedIdle = false) {
+    const thread = await channelNativeIdle(this.input, threadId)
+    return thread !== undefined && (!requireObservedIdle || object(thread.status).type !== 'notLoaded')
   }
   async taskSelection(threadId: string): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
     const metadata = await codexThreadMetadata(this.input, threadId)
@@ -753,12 +754,12 @@ export class ChannelNativeSessions {
     return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
   }
 
-  priorityPreflight = (
-    candidate: { providerId: string; model: string },
-    signal?: AbortSignal,
-    beforeProbe?: () => Promise<boolean>,
-  ) =>
-    channelModelPreflight(this.input.bridge(), this.input.cwd, candidate, signal, this.input.memoryConnect, beforeProbe)
+  get priorityPreflight() {
+    return channelModelPriorityProbes(this.input).preflight
+  }
+  get priorityEvidence() {
+    return channelModelPriorityProbes(this.input).evidence
+  }
 
   async start(
     operationId: string,

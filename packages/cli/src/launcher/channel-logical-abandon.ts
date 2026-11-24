@@ -5,6 +5,8 @@ import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import { channelLogicalTransactionStore } from './channel-logical-continuation-store.js'
 import { channelLogicalContinuationAdmitted } from './channel-logical-continuation-scope.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
+import { channelIdlePriorityOperation, channelIdlePriorityUncertain } from './channel-idle-priority-status.js'
+import { removeChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
 
 /** User acknowledges an orphan may exist; no native effect is repeated or removed. */
 export async function abandonChannelLogicalContinuation(input: {
@@ -33,6 +35,13 @@ export async function abandonChannelLogicalContinuation(input: {
         !intent || intent.state !== 'unknown' || !isDeepStrictEqual(intent.actor, channelLogicalActor(input.event))
         || !channelLogicalContinuationAdmitted(state, input.event, input.profileId, source.sessionId)
       ) return false
+      for (const job of Object.values(state.jobs)) {
+        if (channelIdlePriorityOperation(job.id) !== input.operationId || !channelIdlePriorityUncertain(state, job)) {
+          continue
+        }
+        job.state = 'cancelled'
+        removeChannelIdlePriorityGrant(state.logicalContinuations!, job.bindingId ?? '')
+      }
       if (intent.destination) intent.orphanDestination = structuredClone(intent.destination)
       delete intent.destination
       intent.state = 'rejected'

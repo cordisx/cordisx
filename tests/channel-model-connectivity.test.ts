@@ -105,8 +105,10 @@ it('distinguishes a completed real probe from unsupported or malformed responses
     dispose: () => {},
   })
   expect(await channelModelConnectivityEvidence(undefined, candidate)).toBe('inconclusive')
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed' }))))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'model' }))))
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'other' }))))
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
   vi.stubGlobal('fetch', vi.fn(async () => new Response('not json')))
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
   vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 503 })))

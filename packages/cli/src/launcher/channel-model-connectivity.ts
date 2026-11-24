@@ -9,6 +9,22 @@ const result = (evidence: ChannelConnectivityEvidence, legacyAvailable: boolean)
   legacyAvailable,
 })
 
+async function boundedProbeFence(check: () => Promise<boolean>, signal: AbortSignal): Promise<boolean> {
+  let abort!: () => void
+  try {
+    return await Promise.race([
+      check(),
+      new Promise<never>((_, reject) => {
+        abort = () => reject(new Error('PROBE_CANCELLED'))
+        if (signal.aborted) abort()
+        else signal.addEventListener('abort', abort, { once: true })
+      }),
+    ])
+  } finally {
+    signal.removeEventListener('abort', abort)
+  }
+}
+
 /** Probe only with synthetic input and no tools; never send the Channel message. */
 async function channelModelConnectivityProbe(
   connect: ChannelMemoryModelConnection | undefined,
@@ -46,7 +62,7 @@ async function channelModelConnectivityProbe(
   let requestStarted = false
   try {
     if (connection.protocols && !connection.protocols.includes('openai-responses')) return result('inconclusive', true)
-    if (beforeRequest && !await beforeRequest()) return result('cancelled', false)
+    if (beforeRequest && !await boundedProbeFence(beforeRequest, signal)) return result('cancelled', false)
     if (parent?.aborted) return result('cancelled', false)
     if (timeout.aborted) return result('inconclusive', false)
     requestStarted = true
@@ -91,9 +107,9 @@ async function channelModelConnectivityProbe(
     }
     // Parsing is intentionally only an acknowledgement; an unusual format is inconclusive.
     try {
-      const result = JSON.parse(content) as { status?: unknown }
+      const result = JSON.parse(content) as { status?: unknown; model?: unknown }
       return result.status === 'completed'
-        ? { evidence: 'healthy', legacyAvailable: true }
+        ? { evidence: result.model === candidate.model ? 'healthy' : 'inconclusive', legacyAvailable: true }
         : result.status === 'failed'
         ? { evidence: 'unavailable', legacyAvailable: false }
         : { evidence: 'inconclusive', legacyAvailable: true }

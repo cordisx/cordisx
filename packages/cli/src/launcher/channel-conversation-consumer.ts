@@ -17,7 +17,7 @@ import { createChannelFeedback } from './channel-feedback-composition.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
-import { CALLER, type ChannelConversationConsumerInput, isThread } from './channel-conversation-consumer-contract.js'
+import { type ChannelConversationConsumerInput, isThread } from './channel-conversation-consumer-contract.js'
 export type { ChannelConversationConsumerInput } from './channel-conversation-consumer-contract.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { type ChannelCommandAddressing, ChannelCommandUsers } from './channel-command-users.js'
@@ -56,13 +56,13 @@ import {
 } from './profile-logical-conversation-owner.js'
 import { attachCreatedChannelBinding, channelBindingAction } from './channel-binding-action.js'
 import { channelLogicalCommand } from './channel-logical-command.js'
+import { attemptChannelIdlePriority } from './channel-idle-priority-attempt.js'
+import { recoverChannelIdlePriorityJob } from './channel-idle-priority-status.js'
 import { logicalContinuationManagement } from './logical-continuation-management.js'
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
-import { mayFinishChannelJob } from './channel-live-takeover.js'
+import { finishChannelJob } from './channel-conversation-completion.js'
 import {
-  channelAutoReplyTarget,
   channelCommandReplyTarget,
-  channelReplyDefaults,
   type ChannelReplyMode,
   channelReplyMode,
   channelReplyTarget,
@@ -600,8 +600,11 @@ export class ChannelConversationConsumer {
         native: this.input.logicalRuntime || desktopGrant ? this.extraNative?.() : undefined,
         fence: this.sourceFence,
         claims: this.sessionClaims,
-        ...((this.input.logicalRuntime || desktopGrant) && this.input.appId ? { appId: this.input.appId } : {}),
+        ...((this.input.logicalRuntime || desktopGrant || argument.trim() === 'auto-off') && this.input.appId
+          ? { appId: this.input.appId }
+          : {}),
         ...(desktopGrant ? { desktopGrants: this.logicalOwner.desktopChannelGrants } : {}),
+        idlePriorityOffers: this.logicalOwner.idlePriorityOffers,
         profileId: this.input.profileId,
         event,
         recordId: record.recordId,
@@ -729,10 +732,12 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
+      if (job.code === 'IDLE_PRIORITY_MIGRATION_UNCERTAIN') return
       return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }
     if (job.state === 'queued') {
       if (!state.policy.enabled || !channelDispatchAllowed(state, event)) return
+      if (await recoverChannelIdlePriorityJob(this.store, job.id)) return
       if (job.sessionId && ChannelConversationStore.logicalSourceFenced(state, job.sessionId)) return
       if (job.bindingId && state.bindings[job.bindingId]?.state !== 'active') {
         await this.store.mutate(state => {
@@ -765,6 +770,19 @@ export class ChannelConversationConsumer {
       if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
       if (
         job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')
+      ) return
+      if (
+        this.input.logicalRuntime && this.store.hasCommitBarrier() && await attemptChannelIdlePriority({
+          store: this.store,
+          native: this.extraNative?.(),
+          fence: this.sourceFence,
+          claims: this.sessionClaims,
+          appId: this.input.appId,
+          profileId: this.input.profileId,
+          event,
+          job,
+          signal: this.lifetime.signal,
+        })
       ) return
       if (job.sessionId) this.sessionClaims.add(job.sessionId)
       let continuation: Awaited<ReturnType<ChannelContinuationManager['reserve']>>
@@ -880,75 +898,17 @@ export class ChannelConversationConsumer {
       }
       return
     }
-    if (!job.sessionId || !job.turnId || !mayFinishChannelJob(state, job)) return
-    const binding = job.bindingId === undefined ? undefined : state.bindings[job.bindingId]
-    const defaults = job.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
-    const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
-    const includeFinal = job.finalDeliveryEnabled === true && state.policy.enabled && state.policy.autoReply
-      && binding?.state === 'active' && binding.autoReply && mode !== 'none'
-      && channelDispatchAllowed(state, event) && channelPolicyAllows(state.policy, 'send', event)
-    const completion = await native.completion(job.sessionId, job.turnId, includeFinal)
-    if (completion.state === 'running') return
-    if (completion.state === 'failed') {
-      await this.store.mutate(state => {
-        if (!mayFinishChannelJob(state, job)) return
-        state.jobs[job.id]!.state = 'failed'
-        state.jobs[job.id]!.code = completion.code ?? 'NATIVE_TURN_FAILED'
-        state.jobs[job.id]!.failureNotice ??= 'pending'
-      })
-      return
-    }
-    if (this.lifetime.signal.aborted) return
-    if (!includeFinal) {
-      await this.store.mutate(state => {
-        if (!mayFinishChannelJob(state, job)) return
-        state.jobs[job.id]!.state = 'completed'
-      })
-      return
-    }
-    const access = this.input.access()
-    const deliveryId = `delivery:${identity([job.id, event])}`
-    const existingTarget = access?.runtime.deliverySnapshot(deliveryId, CALLER)?.target
-    const target = await this.store.mutate(state => {
-      if (!mayFinishChannelJob(state, job)) return undefined
-      const current = state.jobs[job.id]!
-      const binding = current.bindingId === undefined ? undefined : state.bindings[current.bindingId]
-      const defaults = current.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
-      const mode = current.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
-      if (
-        current.finalDeliveryEnabled !== true || !state.policy.enabled || !state.policy.autoReply
-        || !channelDispatchAllowed(state, event)
-        || binding?.state !== 'active' || !binding.autoReply || !completion.text || mode === 'none'
-      ) {
-        current.state = 'completed'
-        return undefined
-      }
-      try {
-        const replyTarget = existingTarget ?? channelAutoReplyTarget(event, defaults, current.replyMode)
-        if (!replyTarget) throw new Error('INVALID_REPLY_MODE')
-        current.replyTarget ??= replyTarget
-      } catch (error) {
-        current.state = 'failed'
-        current.code = error instanceof Error && error.message === 'REPLY_MESSAGE_REQUIRED'
-          ? error.message
-          : 'INVALID_REPLY_MODE'
-        return undefined
-      }
-      current.state = 'replying'
-      return current.replyTarget
-    })
-    if (target && completion.text) {
-      const receipt = await this.reply(job.id, event, completion.text, target)
-      await this.store.mutate(state => {
-        const current = state.jobs[job.id]!
-        current.state = receipt === 'sent' || receipt === 'denied'
-          ? 'completed'
-          : receipt === 'dead-letter' || receipt === 'cancelled'
-          ? 'failed'
-          : 'replying'
-        if (current.state === 'failed') current.code = 'CHANNEL_DELIVERY_FAILED'
-      })
-    }
+    await finishChannelJob(
+      {
+        store: this.store,
+        native,
+        signal: this.lifetime.signal,
+        access: this.input.access,
+        reply: this.reply.bind(this),
+      },
+      job,
+      event,
+    )
   }
   private async reply(
     operation: string,
@@ -982,6 +942,7 @@ export class ChannelConversationConsumer {
     this.approvals.dispose()
     this.continuation.dispose()
     this.logicalOwner.desktopChannelGrants.clear()
+    this.logicalOwner.idlePriorityOffers.clear()
     await this.store.close()
   }
   sendAllowed(event: ChannelEventRef): boolean {

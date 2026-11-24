@@ -1,6 +1,7 @@
 import { ChannelConversationStore } from './channel-conversation-store.js'
 import { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import { DesktopChannelGrants } from './desktop-channel-grants.js'
+import type { ChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
 
 /** One profile runtime owns this store and shares its source fence with every entry point. */
 export function profileLogicalConversationOwner(store: ChannelConversationStore) {
@@ -8,11 +9,13 @@ export function profileLogicalConversationOwner(store: ChannelConversationStore)
     ChannelConversationStore.logicalSessionFenced(store.snapshot(), threadId)
   )
   const desktopChannelGrants = new DesktopChannelGrants()
+  const idlePriorityOffers = new Map<string, { grant: ChannelIdlePriorityGrant; expiresAt: number }>()
   let recoveryProbe: ((sources: readonly string[]) => Promise<boolean>) | undefined
   return {
     store,
     fence,
     desktopChannelGrants,
+    idlePriorityOffers,
     bindRecoveryProbe(probe: (sources: readonly string[]) => Promise<boolean>) {
       if (recoveryProbe) throw new Error('LOGICAL_RECOVERY_ALREADY_BOUND')
       recoveryProbe = probe
