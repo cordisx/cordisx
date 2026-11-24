@@ -71,7 +71,7 @@ export const CHANNEL_COMMAND_DEFINITIONS = [
   {
     name: 'continue-provider',
     usage:
-      '/continue-provider suggest <服务商> <模型> | /continue-provider linked|fork|preferred <服务商> <模型> <历史授权> --no-checkpoint|--checkpoint | /continue-provider auto-suggest <当前服务商> <当前模型> <后续服务商> <后续模型> | /continue-provider auto-off | /continue-provider preference linked|fork|inherit | /continue-provider status <操作 ID> | /continue-provider abandon <操作 ID> --confirm-orphan-possible',
+      '/continue-provider suggest <服务商> <模型> | /continue-provider linked|fork|preferred <服务商> <模型> <历史授权> --no-checkpoint|--checkpoint | /continue-provider auto-suggest <当前服务商> <当前模型> <后续服务商> <后续模型> | /continue-provider auto-suggest-list <当前服务商> <当前模型> | /continue-provider group-auto-suggest <当前服务商> <当前模型> | /continue-provider auto-off|group-auto-off | /continue-provider preference linked|fork|inherit | /continue-provider status <操作 ID> | /continue-provider abandon <操作 ID> --confirm-orphan-possible',
     summary: '新建底层对话并保留原对话；按选择授权历史与检查点。仅当前私聊单一绑定；迁移时不要从其他原生进程修改来源。',
     readOnly: false,
   },

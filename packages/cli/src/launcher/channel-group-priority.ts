@@ -6,7 +6,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import type { ChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
 import { channelLogicalTransactionStore } from './channel-logical-continuation-store.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
-import { eventThread } from './channel-conversation-refs.js'
+import { sameConversation } from './channel-conversation-refs.js'
 import { channelDispatchAllowed } from './channel-group-access.js'
 import { channelCommandDenied, channelPolicyAllows } from './channel-conversation-policy.js'
 import { channelTaskChangeAllowed, channelTaskChangeDenied, channelTaskFields } from './channel-task-config.js'
@@ -30,16 +30,17 @@ export function channelGroupPriorityCurrent(
     !grant.groupScope || !binding || binding.state !== 'active' || binding.mode !== 'deliver'
     || binding.channel.kind !== 'group' || event.kind !== 'group'
     || binding.hostId !== 'local' || binding.profileId !== grant.source.profileId
-    || binding.sessionId !== grant.source.sessionId || !isDeepStrictEqual(binding.channel, eventThread(event))
+    || binding.sessionId !== grant.source.sessionId || !sameConversation(binding.channel, event)
     || Object.values(state.bindings).filter(row => row.state === 'active' && row.sessionId === binding.sessionId).length
       !== 1
     || Object.values(state.bindings).some(row =>
-      row.sessionId === binding.sessionId && !isDeepStrictEqual(row.channel, binding.channel)
+      row.sessionId === binding.sessionId
+      && (row.channel.kind !== 'group' || !sameConversation(row.channel, binding.channel))
     )
     || Object.values(state.jobs).some(job => {
       if (job.sessionId !== binding.sessionId) return false
       const origin = state.inputs[job.recordId]?.input.source.event
-      return !origin || !isDeepStrictEqual(eventThread(origin), binding.channel)
+      return !origin || origin.kind !== 'group' || !sameConversation(origin, binding.channel)
     })
     || Object.values(state.logicalContinuations?.relations ?? {}).some(relation =>
       relation.destination.sessionId === binding.sessionId
@@ -96,7 +97,10 @@ export function channelGroupPriorityCurrent(
     .every(job => {
       const record = state.inputs[job.recordId], origin = record?.input.source.event
       return job.bindingId === binding.id && !job.autoCreate && !!record?.accepted && !!origin
-        && isDeepStrictEqual(eventThread(origin), binding.channel) && channelDispatchAllowed(state, origin)
+        && origin.kind === 'group' && sameConversation(origin, binding.channel)
+        && !!origin.actor?.userId && origin.actor.adapterId === origin.adapterId
+        && origin.actor.accountId === origin.accountId && origin.actor.tenantId === origin.tenantId
+        && channelDispatchAllowed(state, origin)
         && !denied(origin)
     })
 }
@@ -116,7 +120,7 @@ export async function channelGroupPriorityCommand(input: {
   const state = store.snapshot()
   const matches = Object.values(state.bindings).filter(binding =>
     binding.state === 'active'
-    && binding.profileId === profileId && isDeepStrictEqual(binding.channel, eventThread(event))
+    && binding.profileId === profileId && binding.channel.kind === 'group' && sameConversation(binding.channel, event)
   )
   if (matches.length !== 1) return '需要当前群恰好绑定一个对话。'
   const binding = matches[0]!
@@ -180,7 +184,7 @@ export async function channelGroupPriorityCommand(input: {
   const grant: ChannelIdlePriorityGrant = {
     bindingId: binding.id,
     source,
-    actor: channelLogicalActor(event),
+    actor: channelLogicalActor({ ...event, threadId: binding.channel.threadId, semantics: binding.channel.semantics }),
     logicalId,
     priorityRevision: state.modelPriority.revision,
     taskConfigRevision: state.taskConfigRevision,

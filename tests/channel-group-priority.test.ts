@@ -164,6 +164,24 @@ describe('group priority, same provider', () => {
       target: { providerId: 'same', model: 'last' },
     })
   })
+  it('recognizes different reply threads in the same authenticated group', async () => {
+    const f = await setup()
+    const admin = { ...f.admin, threadId: 'admin-topic', semantics: 'topic' as const }
+    const first = { ...f.first, threadId: 'reply-one', semantics: 'reply-chain' as const }
+    const second = { ...f.second, threadId: 'reply-two', semantics: 'reply-chain' as const }
+    await f.store.mutate(state => {
+      for (const [id, event] of [['r0', first], ['r1', second]] as const) {
+        const input = state.inputs[id]!.input
+        state.inputs[id] = { ...state.inputs[id]!, input: { ...input, source: { ...input.source, event } } as never }
+      }
+    })
+    const disclosure = await f.command(['group-auto-suggest', 'same', 'current'], admin)
+    const token = disclosure.match(/--confirm=([a-f0-9]{32})/u)?.[1]
+    expect(token).toBeDefined()
+    expect(await f.command(['group-auto', 'same', 'current', `--confirm=${token}`], admin)).toContain('已授权')
+    expect(await f.run('j0', first)).toBe(true)
+    expect(f.native.applyTaskSelection).toHaveBeenCalledOnce()
+  })
   it('does not bypass a group member explicit deny', async () => {
     const f = await setup()
     await enable(f)
