@@ -33,7 +33,13 @@ import type {
 } from '@cordisx/protocol/channel-outbound/v1'
 import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
-import { deliverySnapshot, inputsSince, latestInputCursor, ownsPlainCard } from './consumer-readback.js'
+import {
+  confirmedGroupDeliveryText,
+  deliverySnapshot,
+  inputsSince,
+  latestInputCursor,
+  ownsPlainCard,
+} from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
   accountKey,
@@ -462,6 +468,15 @@ export class ChannelRuntime {
 
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
     return deliverySnapshot(this.#store.snapshot(), id, caller)
+  }
+  /** Launcher-only exact receipt lookup, never exposed to plugins. */
+  confirmedGroupDeliveryText(
+    id: string,
+    caller: ChannelPluginIdentity,
+    target: import('./types.js').ChannelConversationRef,
+  ) {
+    this.#assertRuntimeActive()
+    return confirmedGroupDeliveryText(this.#store.snapshot(), id, caller, target)
   }
   ownsPlainCard(target: import('./types.js').ChannelConversationRef, messageId: string): boolean {
     this.#assertRuntimeActive()

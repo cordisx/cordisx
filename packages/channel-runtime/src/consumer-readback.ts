@@ -113,3 +113,20 @@ export function deliverySnapshot(state: ChannelStoreState, id: string, caller: C
     ...(record.errorCode === undefined ? {} : { code: record.errorCode }),
   }
 }
+
+/** Launcher-only lookup of one caller-owned, positively acknowledged group text delivery. */
+export function confirmedGroupDeliveryText(
+  state: ChannelStoreState,
+  id: string,
+  caller: ChannelPluginIdentity,
+  target: import('./types.js').ChannelConversationRef,
+): string | undefined {
+  const receipt = deliverySnapshot(state, id, caller)
+  if (
+    !receipt || receipt.state !== 'sent' || !receipt.externalMessageId || target.kind !== 'group'
+    || receipt.target.kind !== 'group' || receipt.target.adapterId !== target.adapterId
+    || receipt.target.accountId !== target.accountId || receipt.target.tenantId !== target.tenantId
+    || receipt.target.conversationId !== target.conversationId
+  ) return undefined
+  return state.outbox[id]?.text.slice(0, 4_096)
+}

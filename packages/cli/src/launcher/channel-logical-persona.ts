@@ -32,6 +32,8 @@ function personaPath(
     if (matches.length !== 1 || depth === 16) return false
     const relation = matches[0]!, intent = logical.intents[relation.operationId]
     if (!intent || intent.state !== 'applied') return false
+    // A group projection never authorizes native per-actor persona migration.
+    if (intent.groupProjection) break
     if (
       ![intent.actor, intent.channelHistoryActor].some(actor => isDeepStrictEqual(actor, channelLogicalActor(event)))
     ) {

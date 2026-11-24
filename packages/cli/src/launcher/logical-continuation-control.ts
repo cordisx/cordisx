@@ -10,6 +10,11 @@ import type { LogicalHistoryCategory } from './logical-continuation-history.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { type ChannelIdlePriorityGrant, parseChannelIdlePriorityGrants } from './channel-idle-priority-grant.js'
+import {
+  type ChannelGroupHistoryProjection,
+  channelGroupProjectionVersion,
+  parseChannelGroupHistoryProjection,
+} from './channel-group-history-projection.js'
 
 export type LogicalContinuationRequest = ConversationContinuationRequestV1
 /** The owning Host constructs this from a verified user action or authenticated Channel dispatch. */
@@ -32,6 +37,7 @@ export interface LogicalContinuationIntent {
   readonly evidence: LogicalContinuationEvidence
   /** Separately authenticated participant in a jointly approved linked migration. */
   channelHistoryActor?: LogicalContinuationActor
+  groupProjection?: ChannelGroupHistoryProjection
   state: 'creating' | 'unknown' | 'rejected' | 'applied'
   destination?: LogicalSessionRef
   code?: string
@@ -288,6 +294,7 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
         'actor',
         'evidence',
         'channelHistoryActor',
+        'groupProjection',
         'state',
         'destination',
         'code',
@@ -301,6 +308,9 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
     const actor = raw.actor as unknown as LogicalContinuationActor
     const evidence = raw.evidence as unknown as LogicalContinuationEvidence
     const destination = raw.destination as LogicalSessionRef | undefined
+    const groupProjection = raw.groupProjection === undefined
+      ? undefined
+      : parseChannelGroupHistoryProjection(raw.groupProjection)
     if (
       id !== request.operationId || !validRequest(request) || !text(actor.principal) || !text(actor.scope)
       || !exact(actor, ['principal', 'scope']) || !validEvidence(request, evidence)
@@ -308,6 +318,8 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
           || !exact(raw.channelHistoryActor, ['principal', 'scope'])
           || !text(raw.channelHistoryActor.principal) || !text(raw.channelHistoryActor.scope)
           || request.mode !== 'linked' || raw.state !== 'applied')
+      || groupProjection !== undefined && (request.mode !== 'linked' || raw.state !== 'applied'
+          || channelGroupProjectionVersion(groupProjection) !== evidence.sourceHistoryVersion)
       || typeof raw.state !== 'string' || !['creating', 'unknown', 'rejected', 'applied'].includes(raw.state)
       || raw.code !== undefined && !text(raw.code, 128)
       || raw.handoffJobId !== undefined

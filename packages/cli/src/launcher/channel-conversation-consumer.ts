@@ -793,6 +793,8 @@ export class ChannelConversationConsumer {
         this.input.logicalRuntime && this.store.hasCommitBarrier() && await attemptChannelGroupPriority({
           store: this.store,
           native: this.extraNative?.(),
+          access: this.input.access,
+          fence: this.sourceFence,
           claims: this.sessionClaims,
           appId: this.input.appId,
           profileId: this.input.profileId,
