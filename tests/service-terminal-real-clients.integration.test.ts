@@ -211,6 +211,8 @@ describe.skipIf(!enabled)('installed terminal clients with isolated model-servic
           CORDISX_HOME: root,
           CODEX_HOME: codexHome,
           CLAUDE_CONFIG_DIR: claudeHome,
+          // On macOS Claude Code defaults to /tmp independently of TMPDIR.
+          CLAUDE_CODE_TMPDIR: root,
           XDG_CONFIG_HOME: path.join(root, 'xdg-config'),
           XDG_CACHE_HOME: path.join(root, 'xdg-cache'),
           XDG_DATA_HOME: path.join(root, 'xdg-data'),
