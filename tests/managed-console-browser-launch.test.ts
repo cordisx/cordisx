@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ManagedConsoleBrowserLaunch,
   supportsManagedConsoleBrowserLaunch,
   verifiedManagedConsoleBrowserApp,
 } from '../packages/cli/src/launcher/managed-console-browser-launch.js'
+import { MAX_STANDALONE_CONSOLE_ORIGINS } from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
 
 const executable = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
 const builds = [
@@ -18,6 +20,36 @@ const signature = (hash: string) =>
   ].join('\n')
 
 describe('managed browser console App admission', () => {
+  it('gives standalone documents distinct owned origins and releases them on close', async () => {
+    const launch = new ManagedConsoleBrowserLaunch()
+    const lifetime = new AbortController()
+    const origins = await launch.prepareStandalone(lifetime.signal)
+    try {
+      expect(origins).toHaveLength(MAX_STANDALONE_CONSOLE_ORIGINS)
+      expect(new Set(origins).size).toBe(origins.length)
+      const input = {
+        service: 'fixture',
+        generation: 'one',
+        upstream: 'http://127.0.0.1:12345',
+        redeemPath: '/auth/browser',
+        signal: lifetime.signal,
+        verify: async () => true,
+      } as const
+      const first = launch.boundary()!.open(input)!
+      const second = launch.boundary()!.open(input)!
+      expect(first.origin).not.toBe(second.origin)
+      expect(origins).toContain(first.origin)
+      expect(origins).toContain(second.origin)
+      expect(first.admit('a'.repeat(32))).toBe(true)
+      expect(second.admit('b'.repeat(32))).toBe(true)
+      first.dispose()
+      expect(second.admit('c'.repeat(32))).toBe(false)
+    } finally {
+      await launch.close()
+    }
+    expect(launch.boundary()).toBeUndefined()
+  })
+
   it.each(builds)('retains native browser support for signed App build %s', (build, hash) => {
     expect(verifiedManagedConsoleBrowserApp(executable, build + '\n', signature(hash))).toBe(true)
   })

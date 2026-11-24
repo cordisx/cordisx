@@ -67,6 +67,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly appId: string
   readonly profileId: string
   readonly runtimeGeneration: string
+  readonly managerConsoleOrigins?: readonly string[]
   readonly token: string
   readonly coordinator: PluginLifecycleCoordinator
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
@@ -346,6 +347,7 @@ export async function openProductionPluginManagementComposition(input: {
       profileId: input.profileId,
       configPath: input.configPath,
       generation: input.runtimeGeneration,
+      ...(input.managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins: input.managerConsoleOrigins }),
       processStartedAt,
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,

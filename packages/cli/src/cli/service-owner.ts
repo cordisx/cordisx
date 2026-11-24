@@ -122,6 +122,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           dryRun: false,
           requireOwnedProcess: true,
         })
+        const managerConsoleOrigins = await services.browserConsoleLaunch.prepareStandalone(lifetime.signal)
+          .catch(() => undefined)
         rendererManagedServiceUI = createManagerManagedServiceUIBridge({
           profileId,
           runtimeGeneration: generation,
@@ -132,6 +134,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           allowLogout: true,
           allowAccountReads: true,
           allowAccountToggle: true,
+          ...(managerConsoleOrigins === undefined ? {} : { browserConsoleOrigins: managerConsoleOrigins }),
           runtime: services,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
@@ -338,6 +341,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           configPath,
           appId,
           runtimeGeneration: generation,
+          ...(managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins }),
           token: randomUUID(),
           coordinator,
           rendererParticipant: rendererParticipants.participant,
@@ -411,6 +415,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             },
             () => rendererReadonlyChannel?.close(),
             () => rendererManagedServiceUI?.dispose(),
+            () => services?.browserConsoleLaunch.close(),
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),

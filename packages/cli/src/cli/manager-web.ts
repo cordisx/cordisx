@@ -11,6 +11,7 @@ import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 import { ManagerObservationPolls } from './manager-observation-polls.js'
+import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 // Renderer retirement may have to drain active reads and release graph leases.
@@ -133,6 +134,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   const resumes = new ManagerSessionResumeGrants()
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
+  const consoleOrigins = owner.managerConsoleOrigins === undefined
+    ? undefined
+    : canonicalManagedConsoleBrowserOrigins(owner.managerConsoleOrigins)
   let bootstraps!: ManagerBootstrapEntries
   const retireSession = async (
     token: string,
@@ -241,7 +245,9 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     // Browser annotation tools inject style elements; inline scripts and style attributes stay restricted.
     response.setHeader(
       'content-security-policy',
-      "default-src 'none'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'none'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; worker-src 'self'; connect-src 'self'; "
+        + (consoleOrigins === undefined ? '' : `frame-src ${consoleOrigins.join(' ')}; `)
+        + "base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     )
     if (request.headers.host !== authority) return json(response, 403, { error: 'INVALID_HOST' })
     const origin = request.headers.origin

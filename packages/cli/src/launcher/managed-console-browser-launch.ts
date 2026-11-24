@@ -3,8 +3,10 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import {
   type ManagedConsoleBrowserGateway,
+  MAX_STANDALONE_CONSOLE_ORIGINS,
   openManagedConsoleBrowserGateway,
 } from './managed-console-browser-gateway.js'
+import type { ManagedBrowserConsoleBoundary } from './managed-service-browser-console-broker.js'
 
 /** App builds whose browser resolver and cookie boundary have native evidence. */
 const VERIFIED_CODE_DIRECTORIES = new Map([
@@ -53,15 +55,53 @@ export async function supportsManagedConsoleBrowserLaunch(
 /** The launcher owns the resolver and gateway for the lifetime of its isolated App. */
 export class ManagedConsoleBrowserLaunch {
   private gateway: ManagedConsoleBrowserGateway | undefined
+  private standaloneGateways: readonly ManagedConsoleBrowserGateway[] = []
+  private standaloneBoundary: ManagedBrowserConsoleBoundary | undefined
   private ready = false
+  private preparingStandalone = false
 
-  readonly boundary = () => this.ready ? this.gateway?.boundary : undefined
+  readonly boundary = () => this.ready ? this.gateway?.boundary ?? this.standaloneBoundary : undefined
 
   async prepare(executable: string, hostArgs: readonly string[], signal: AbortSignal): Promise<readonly string[]> {
     if (!await supportsManagedConsoleBrowserLaunch(executable, hostArgs, signal)) return hostArgs
     this.gateway = await openManagedConsoleBrowserGateway().catch(() => undefined)
     signal.throwIfAborted()
     return this.gateway ? [...hostArgs, this.gateway.hostArgument] : hostArgs
+  }
+
+  /** A standalone Manager uses the browser's localhost handling and a separate origin. */
+  async prepareStandalone(signal: AbortSignal): Promise<readonly string[]> {
+    if (
+      signal.aborted || this.gateway !== undefined || this.standaloneGateways.length > 0 || this.preparingStandalone
+    ) {
+      throw new Error('managed browser console unavailable')
+    }
+    this.preparingStandalone = true
+    const gateways: ManagedConsoleBrowserGateway[] = []
+    try {
+      for (let index = 0; index < MAX_STANDALONE_CONSOLE_ORIGINS; index++) {
+        signal.throwIfAborted()
+        gateways.push(await openManagedConsoleBrowserGateway())
+      }
+      signal.throwIfAborted()
+      this.standaloneGateways = gateways
+      this.standaloneBoundary = {
+        open(input) {
+          for (const gateway of gateways) {
+            const route = gateway.boundary.open(input)
+            if (route) return route
+          }
+          return undefined
+        },
+      }
+      this.ready = true
+      return gateways.map(gateway => gateway.origin)
+    } catch (error) {
+      await Promise.allSettled(gateways.map(async gateway => await gateway.close()))
+      throw error
+    } finally {
+      this.preparingStandalone = false
+    }
   }
 
   markReady() {
@@ -71,7 +111,10 @@ export class ManagedConsoleBrowserLaunch {
   async close() {
     this.ready = false
     const gateway = this.gateway
+    const standalone = this.standaloneGateways
     this.gateway = undefined
-    await gateway?.close()
+    this.standaloneGateways = []
+    this.standaloneBoundary = undefined
+    await Promise.all([...(gateway ? [gateway] : []), ...standalone].map(async item => await item.close()))
   }
 }

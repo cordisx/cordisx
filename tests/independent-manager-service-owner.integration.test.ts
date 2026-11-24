@@ -18,6 +18,7 @@ import {
 import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
 import { readSupervisorState } from '../packages/cli/src/cli/supervisor-state.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
+import { MAX_STANDALONE_CONSOLE_ORIGINS } from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
 
 const exec = promisify(execFile)
 
@@ -73,6 +74,7 @@ it('connects the independent manager to a real service owner without Channel or 
       .toMatchObject({ status: 'ready', mode: 'service' })
     const endpoint = await readPluginManagementRpcEndpoint(pluginManagementRpcPaths(home, 'codex', 'default'))
     expect(endpoint?.mailboxId).toBeDefined()
+    expect(endpoint?.managerConsoleOrigins).toHaveLength(MAX_STANDALONE_CONSOLE_ORIGINS)
     expect(await usesNamespacedManagementRpc(endpoint!)).toBe(false)
     const line = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
     const url = new URL(line)
@@ -99,6 +101,7 @@ it('connects the independent manager to a real service owner without Channel or 
       expect(policy).toContain("style-src 'self'")
       expect(policy).toContain("style-src-elem 'self' 'unsafe-inline'")
       expect(policy).toContain("img-src 'self' data:")
+      expect(policy).toContain(`frame-src ${endpoint!.managerConsoleOrigins!.join(' ')};`)
       expect(policy).not.toMatch(/(?:script-src|style-src)\s+[^;]*'unsafe-inline'/u)
     }
     for (

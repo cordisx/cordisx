@@ -58,6 +58,7 @@ export async function openManagerOwner(profile?: string, env: NodeJS.ProcessEnv 
     appId,
     profileId,
     generation: endpoint.generation,
+    ...(endpoint.managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins: endpoint.managerConsoleOrigins }),
     async isCurrent(): Promise<boolean> {
       const current = await readPluginManagementRpcEndpoint(paths)
       return current?.generation === endpoint.generation && current.token === endpoint.token

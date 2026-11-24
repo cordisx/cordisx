@@ -28,6 +28,27 @@ import { openPluginManagementService } from '../packages/cli/src/management/serv
 const exec = promisify(execFile)
 
 describe('independent manager production boundaries', () => {
+  it('allows only the owner-issued managed console origin in frames', async () => {
+    const origin = `http://console-${'a'.repeat(32)}.cordisx-console.localhost:12345`
+    const owner = {
+      appId: 'codex',
+      profileId: 'fixture',
+      generation: 'generation',
+      managerConsoleOrigins: [origin],
+      isCurrent: async () => true,
+      request: async () => ({ status: 'unavailable' }),
+    } as unknown as Parameters<typeof startManagerWeb>[0]
+    const web = await startManagerWeb(owner)
+    try {
+      const response = await fetch(new URL(web.url).origin)
+      expect(response.headers.get('content-security-policy')).toContain(`frame-src ${origin};`)
+      expect(response.headers.get('content-security-policy')).not.toContain('frame-src http://127.0.0.1:')
+    } finally {
+      await web.close()
+    }
+    await expect(startManagerWeb({ ...owner, managerConsoleOrigins: ['http://example.test'] })).rejects.toThrow()
+  })
+
   it('allows annotation style elements without allowing inline scripts or style attributes', async () => {
     const web = await startManagerWeb(
       {

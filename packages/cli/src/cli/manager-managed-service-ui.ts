@@ -12,6 +12,9 @@ import type { ManagerRendererChannel, ManagerRendererChannelContext } from './ma
 import { ManagerStartupObservation } from './manager-startup-observation.js'
 import { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import { ManagerManagedServiceAccounts } from './manager-managed-service-accounts.js'
+import { ManagerManagedServiceWebEntry } from './manager-managed-service-web-entry.js'
+import type { ManagedServiceBindingV1 } from '@cordisx/protocol/managed-service/v1'
+import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
 import { createManagerManagedServiceAccountRoute } from './manager-managed-service-account-route.js'
 import {
   ManagerManagedServiceObservation,
@@ -54,6 +57,7 @@ interface Session {
   readonly capabilities: readonly OwnerCapability[]
   readonly startup: ManagerStartupObservation
   readonly observation: ManagerManagedServiceObservation
+  readonly webEntry?: ManagerManagedServiceWebEntry
   readonly authenticationRequests: Set<string>
   readonly onAbort: () => void
 }
@@ -230,6 +234,8 @@ export function createManagerManagedServiceUIBridge(input: {
   readonly allowAccountReads?: boolean
   /** Enabled only with owner-side service, Manager and UI-read reservations. */
   readonly allowAccountToggle?: boolean
+  /** Owner-created, isolated browser gateway for this Manager generation. */
+  readonly browserConsoleOrigins?: readonly string[]
   readonly runtime: {
     capabilities(): readonly ManagedServiceUICapabilityMutation[]
     waitForInitialManagedServiceUI?(signal: AbortSignal): Promise<void>
@@ -240,6 +246,9 @@ export function createManagerManagedServiceUIBridge(input: {
     }
   }
 }) {
+  const browserConsoleOrigins = input.browserConsoleOrigins === undefined
+    ? undefined
+    : canonicalManagedConsoleBrowserOrigins(input.browserConsoleOrigins)
   const sessions = new Map<string, Session>()
   const usedRenderers = new Set<string>()
   const usedAliases = new Set<string>()
@@ -287,7 +296,7 @@ export function createManagerManagedServiceUIBridge(input: {
     session.context.signal.removeEventListener('abort', session.onAbort)
     retirements.set(
       id,
-      Promise.all([session.startup.retire(), session.observation.retire()])
+      Promise.all([session.startup.retire(), session.observation.retire(), session.webEntry?.retire() ?? true])
         .then(results => results.every(Boolean)).catch(() => false),
     )
   }
@@ -404,6 +413,16 @@ export function createManagerManagedServiceUIBridge(input: {
     }
     const startup = new ManagerStartupObservation(observationInput)
     const observation = new ManagerManagedServiceObservation(observationInput)
+    const webEntry = browserConsoleOrigins === undefined ? undefined : new ManagerManagedServiceWebEntry({
+      context,
+      runtimeGeneration: input.runtimeGeneration,
+      consoleOrigins: browserConsoleOrigins,
+      allocateId,
+      assertCurrent: () => assertCurrent(session, context),
+      onUncertain: () => retire(context.rendererId),
+      invoke: observationInput.invoke,
+      sanitize: observationInput.sanitize,
+    })
     session = {
       context,
       fence: currentFence,
@@ -411,6 +430,7 @@ export function createManagerManagedServiceUIBridge(input: {
       capabilities,
       startup,
       observation,
+      ...(webEntry === undefined ? {} : { webEntry }),
       authenticationRequests: new Set(),
       onAbort: () => retire(context.rendererId),
     }
@@ -456,6 +476,20 @@ export function createManagerManagedServiceUIBridge(input: {
           const parsed = parseManagedServiceUIBindingRequest(forwarded, validation, owner)
           if (!observationOperations.has(parsed.operation)) throw unavailable()
           return session.observation.prepare(parsed as ManagerManagedServiceObservationRequest, alias)
+        }
+        if (session.webEntry && ['readWebEntry', 'cancelWebEntry', 'consoleBrowser'].includes(request.operation)) {
+          if (context.admitted !== true) throw unavailable()
+          const owner = { pluginId: alias.public.pluginId, pluginGeneration: alias.public.pluginGeneration }
+          const parsed = parseManagedServiceUIBindingRequest(
+            { ...request, token: alias.ownerToken },
+            validator(alias.ownerToken, input.profileId, input.runtimeGeneration),
+            owner,
+          )
+          if (parsed.operation === 'readWebEntry' || parsed.operation === 'cancelWebEntry') {
+            return session.webEntry.prepareWeb(alias, parsed)
+          }
+          if (parsed.operation === 'consoleBrowser') return session.webEntry.prepareBrowser(alias, parsed)
+          throw unavailable()
         }
         if (request.operation === 'toggleAccount' && input.allowAccountToggle && accountReads) {
           if (context.admitted !== true) throw unavailable()
@@ -681,6 +715,15 @@ export function createManagerManagedServiceUIBridge(input: {
               validation,
               owner,
             )
+            const webEntry = context.admitted === true && session.webEntry
+              ? session.webEntry.project(
+                alias,
+                parsed.serviceId,
+                service.binding as ManagedServiceBindingV1,
+                service.webEntry,
+                service.authenticatedConsole,
+              )
+              : {}
             let logout = false
             if (input.allowLogout && capabilities.logout) {
               const checkId = 'capability-' + randomBytes(16).toString('hex')
@@ -721,6 +764,7 @@ export function createManagerManagedServiceUIBridge(input: {
                   contract: service.contract,
                   schemaVersion: 1,
                   binding: service.binding,
+                  ...webEntry,
                   ...(input.allowAuthentication && service.authenticationTimeoutMs !== undefined
                       && Number.isSafeInteger(service.authenticationTimeoutMs)
                       && (service.authenticationTimeoutMs as number) >= 100

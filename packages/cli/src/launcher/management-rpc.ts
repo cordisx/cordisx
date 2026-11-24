@@ -32,6 +32,7 @@ import {
   parseManagerChannelCredentialOperation,
 } from './manager-channel-credentials.js'
 import { type ManagerRendererOperation, parseManagerRendererOperation } from '../cli/manager-renderer-rpc.js'
+import { canonicalManagedConsoleBrowserOrigins } from './managed-console-browser-gateway.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -96,6 +97,7 @@ export interface PluginManagementRpcEndpoint {
   readonly processStartedAt: string
   readonly token: string
   readonly generation: string
+  readonly managerConsoleOrigins?: readonly string[]
   readonly mailboxId?: string
   readonly pidNamespace?: string
 }
@@ -245,6 +247,11 @@ export async function handlePluginManagementRpcRequest(
 function validEndpoint(value: unknown): value is PluginManagementRpcEndpoint {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
+  try {
+    if (item.managerConsoleOrigins !== undefined) canonicalManagedConsoleBrowserOrigins(item.managerConsoleOrigins)
+  } catch {
+    return false
+  }
   return item.schemaVersion === 1
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
@@ -294,6 +301,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly configPath: string
   readonly generation: string
   readonly processStartedAt: string
+  readonly managerConsoleOrigins?: readonly string[]
   readonly service: PluginManagementService
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
@@ -306,6 +314,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly managerRenderer?: (operation: ManagerRendererOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
+  if (input.managerConsoleOrigins !== undefined) canonicalManagedConsoleBrowserOrigins(input.managerConsoleOrigins)
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
   await mkdir(paths.directory, { recursive: true, mode: 0o700 })
@@ -474,6 +483,7 @@ export async function startPluginManagementRpcServer(input: {
       processStartedAt: input.processStartedAt,
       token,
       generation: input.generation,
+      ...(input.managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins: input.managerConsoleOrigins }),
       ...(mailboxId ? { mailboxId } : {}),
       ...(mailboxId && pidNamespace ? { pidNamespace } : {}),
     })
