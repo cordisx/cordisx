@@ -226,28 +226,29 @@ describe('managed service runtime', () => {
     const registration = await binding.registry.register(cliDefinition('recover-service'), {
       revision: 'sha256:9999999999999999999999999999999999999999999999999999999999999999',
     })
-
+    expect(registration.nativeProviderCapabilities).toEqual({ contextWindow: true })
     const first = await registration.ensureReady()
     expect(first.status).toBe('authentication-required')
     const beforeLogin = await registration.inspect()
     expect(beforeLogin.state).toBe('authentication-required')
     expect(beforeLogin.authentication.state).toBe('missing')
-
     const login = await registration.authenticate('login')
     expect(login.status).toBe('accepted')
     const afterLogin = await registration.inspect()
     expect(afterLogin.state).toBe('registered')
     expect(afterLogin.authentication.state).toBe('configured')
-
     const second = await registration.ensureReady()
     expect(second.status).toBe('ready')
-
     const generation = registration.binding.serviceGeneration
     const defaultAlias = 'aiden/gpt-5.6-sol'
-    const routes = [{ alias: defaultAlias, gatewayModelId: 'gpt-5.6-sol' }]
+    const routes = [{ alias: defaultAlias, gatewayModelId: 'gpt-5.6-sol', contextWindow: 64_000 }]
     const digest = `sha256:${
       createHash('sha256').update(
-        JSON.stringify([generation, defaultAlias, routes.map(route => [route.alias, route.gatewayModelId])]),
+        JSON.stringify([
+          generation,
+          defaultAlias,
+          routes.map(route => [route.alias, route.gatewayModelId, null, route.contextWindow]),
+        ]),
       ).digest('hex')
     }` as const
     const published = await registration.publishNativeProvider({
@@ -257,7 +258,9 @@ describe('managed service runtime', () => {
     })
     expect(published.status).toBe('accepted')
     expect(host.listNativeProviderIds()).toEqual(['aiden'])
-
+    const connection = host.preparePublishedNativeConnection('aiden')
+    expect(connection.value.models.aliases).toMatchObject([{ contextWindow: 64_000 }])
+    connection.dispose()
     await binding.dispose()
   })
   it('stops authentication before spawn when already aborted and reaps a non-responsive child on abort', async () => {

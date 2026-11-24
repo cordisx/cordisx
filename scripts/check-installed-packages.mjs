@@ -33,7 +33,7 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#398c6df543d5555fc6299adb401be6e57de52eef') {
+if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#694f14af5e98a466667517458bba2338d1def470') {
   throw new Error('source cordisx must pin the merged Protocol source')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
