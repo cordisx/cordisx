@@ -53,11 +53,14 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
       alias: string
       gatewayModelId: string
       reasoningCapabilities?: ModelReasoningCapabilities
+      contextWindow?: number
     }[] = []
     for (const route of routes) {
       if (
-        !exactObject(route, ['alias', 'gatewayModelId'])
-        && !exactObject(route, ['alias', 'gatewayModelId', 'reasoningCapabilities'])
+        route === null || typeof route !== 'object' || Array.isArray(route)
+        || Object.keys(route).some(key =>
+          !['alias', 'gatewayModelId', 'reasoningCapabilities', 'contextWindow'].includes(key)
+        )
       ) return undefined
       const { alias, gatewayModelId } = route
       if (
@@ -71,6 +74,10 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
         ? undefined
         : parseModelReasoningCapabilities(route.reasoningCapabilities)
       if (route.reasoningCapabilities !== undefined && reasoningCapabilities === undefined) return undefined
+      const contextWindow = route.contextWindow
+      if (contextWindow !== undefined && (!Number.isSafeInteger(contextWindow) || (contextWindow as number) < 1)) {
+        return undefined
+      }
       const rawEfforts = (route.reasoningCapabilities as { efforts?: unknown } | undefined)?.efforts
       if (
         reasoningCapabilities !== undefined
@@ -80,6 +87,7 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
         alias,
         gatewayModelId,
         ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
+        ...(contextWindow === undefined ? {} : { contextWindow: contextWindow as number }),
       })
     }
     if (!aliases.has(defaultAlias)) return undefined
@@ -99,7 +107,9 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
             route => [
               route.alias,
               route.gatewayModelId,
-              ...(route.reasoningCapabilities === undefined ? [] : [route.reasoningCapabilities]),
+              ...(route.contextWindow === undefined
+                ? route.reasoningCapabilities === undefined ? [] : [route.reasoningCapabilities]
+                : [route.reasoningCapabilities ?? null, route.contextWindow]),
             ],
           ),
         ]),
@@ -116,6 +126,7 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
           alias: route.alias,
           gatewayModelId: route.gatewayModelId,
           ...(route.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: route.reasoningCapabilities }),
+          ...(route.contextWindow === undefined ? {} : { contextWindow: route.contextWindow }),
         })
       )),
     })

@@ -6,7 +6,7 @@ import {
   type ModelSelectorIconOverrides,
   type ProviderBrandProjection,
 } from '../model-selector-branding.js'
-import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import type { ModelProviderDisplay } from '../model-provider-display.js'
 
 export interface NativeModelProviderCatalogEntry {
@@ -26,6 +26,8 @@ export interface NativeModelProviderCatalogEntry {
       readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
     readonly notListed?: boolean
     readonly reasoningCapabilities?: ModelReasoningCapabilities
+    /** Declared context limit, not proof of the upstream's actual limit. */
+    readonly contextWindow?: number
     readonly supportsFastMode?: boolean
   }[]
   readonly defaultModelId?: string
@@ -53,17 +55,48 @@ function projectProvider(
   const connection = session.value
   const models = new Map<
     string,
-    { label: string; aliases: string[]; reasoningCapabilities?: ModelReasoningCapabilities }
+    {
+      label: string
+      aliases: string[]
+      reasoningCapabilities: ModelReasoningCapabilities | undefined
+      contextWindow: number | undefined
+    }
   >()
   for (const alias of connection.models.aliases) {
+    const reasoning = parseModelReasoningCapabilities(alias.reasoningCapabilities)
+    const rawWindow = (alias as { readonly contextWindow?: unknown }).contextWindow
+    const window = typeof rawWindow === 'number' && Number.isSafeInteger(rawWindow) && rawWindow > 0
+      ? rawWindow
+      : undefined
     const current = models.get(alias.gatewayModelId)
     if (current === undefined) {
       models.set(alias.gatewayModelId, {
         label: alias.alias,
         aliases: [alias.alias],
-        ...(alias.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: alias.reasoningCapabilities }),
+        reasoningCapabilities: reasoning,
+        contextWindow: window,
       })
-    } else if (!current.aliases.includes(alias.alias)) current.aliases.push(alias.alias)
+    } else {
+      if (!current.aliases.includes(alias.alias)) current.aliases.push(alias.alias)
+      current.contextWindow = current.contextWindow === undefined || window === undefined
+        ? undefined
+        : Math.min(current.contextWindow, window)
+      const previous = current.reasoningCapabilities
+      if (previous === undefined || reasoning === undefined) current.reasoningCapabilities = undefined
+      else {
+        const efforts = previous.efforts.filter(effort => reasoning.efforts.includes(effort))
+        const defaultEffort = previous.defaultEffort === reasoning.defaultEffort && previous.defaultEffort !== undefined
+            && efforts.includes(previous.defaultEffort)
+          ? previous.defaultEffort
+          : undefined
+        current.reasoningCapabilities = efforts.length === 0
+          ? undefined
+          : Object.freeze({
+            efforts: Object.freeze(efforts),
+            ...(defaultEffort === undefined ? {} : { defaultEffort }),
+          })
+      }
+    }
   }
   const defaultModelId = connection.models.aliases.find(alias => alias.alias === connection.models.defaultAlias)
     ?.gatewayModelId
@@ -88,6 +121,7 @@ function projectProvider(
         label: model.label,
         aliases: Object.freeze([...model.aliases]),
         ...(model.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: model.reasoningCapabilities }),
+        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
         ...(selectorIcons?.models[providerId]?.[id] === undefined
           ? {}
           : { selectorBrand: selectorIcons.models[providerId]![id] }),
