@@ -9,6 +9,74 @@ import { startModelApiServer } from '../packages/cli/src/launcher/model-api-serv
 // Real loopback transport catches credential routing, streaming, resource
 // methods, WebSocket frame translation and disconnect/lifetime regressions.
 describe('Host model API transport', () => {
+  it('survives interrupted upstream and client streams', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'cordisx-model-api-stream-'))
+    let clientDisconnected!: () => void
+    const clientClosed = new Promise<void>(resolve => clientDisconnected = resolve)
+    const upstream = createServer(async (req, res) => {
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      const input = JSON.parse(Buffer.concat(chunks).toString())
+      if (input.input === 'healthy') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('data: first\n\n')
+      if (input.input === 'upstream-close') setTimeout(() => res.socket?.destroy(), 25)
+      else res.once('close', clientDisconnected)
+    })
+    await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
+    let disposed = 0
+    const api = await startModelApiServer({
+      homeDir: home,
+      profileId: 'stream',
+      port: 0,
+      catalog: async () => [{
+        providerId: 'mock',
+        pluginId: 'fixture',
+        models: [{ id: 'model', label: 'Mock', aliases: [] }],
+      }],
+      connect: async () => ({
+        baseUrl: `http://127.0.0.1:${(upstream.address() as { port: number }).port}/v1`,
+        headers: {},
+        dispose() {
+          disposed++
+        },
+      }),
+    })
+    const headers = {
+      authorization: `Bearer ${(await readFile(api.accessKeyFile, 'utf8')).trim()}`,
+      'content-type': 'application/json',
+    }
+    const request = (input: string) =>
+      fetch(api.baseUrl + '/responses', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: 'mock::model', input, stream: true }),
+      })
+    try {
+      const broken = await request('upstream-close')
+      await expect(broken.text()).rejects.toThrow()
+      expect((await fetch(api.baseUrl.slice(0, -3) + '/healthz')).status).toBe(200)
+
+      const cancelled = await request('client-close')
+      const reader = cancelled.body!.getReader()
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('first')
+      await reader.cancel()
+      await clientClosed
+
+      expect(await (await request('healthy')).json()).toEqual({ ok: true })
+      expect(disposed).toBe(3)
+    } finally {
+      await api.close()
+      upstream.closeAllConnections()
+      await new Promise<void>(resolve => upstream.close(() => resolve()))
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('routes exact catalogs and protocols, retains upstream sessions and isolates the access key', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'cordisx-model-api-'))
     const received: Array<{ method?: string; url?: string; auth?: string; body: unknown }> = []
