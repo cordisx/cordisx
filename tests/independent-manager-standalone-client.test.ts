@@ -1,259 +1,14 @@
-import { webcrypto } from 'node:crypto'
-import { JSDOM } from 'jsdom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { startStandaloneManager } from '../packages/cli/src/independent-manager/standalone-client.js'
-
-const entryToken = 'a'.repeat(64)
-const sessionToken = 'b'.repeat(64)
-const rendererId = 'c'.repeat(64)
-const commandId = 'd'.repeat(64)
-const origin = 'http://127.0.0.1:43123'
-const activation = {
-  recordKind: 'active',
-  profileId: 'work',
-  runtimeGeneration: 'owner-1',
-  revision: 0,
-  lastGoodRevision: 0,
-  plugins: [],
-}
-const response = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
-
-function abortResponse(signal: AbortSignal): Promise<Response> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) return reject(new Error('closed'))
-    signal.addEventListener('abort', () => reject(new Error('closed')), { once: true })
-  })
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  return { promise, resolve, reject }
-}
-
-function fixture(input: {
-  readonly invalidSessionAt?: number
-  readonly sessionTransportFailuresAt?: readonly number[]
-  readonly unauthorizedSessionAt?: number
-  readonly bundlePath?: string
-  readonly graphs?: readonly unknown[]
-  readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
-  readonly exchangeGate?: Promise<void>
-  readonly bootstrapGate?: Promise<void>
-  readonly importGate?: Promise<void>
-  readonly startGate?: Promise<void>
-  readonly loseAck?: boolean
-  readonly resume?: boolean
-  readonly resumeGate?: Promise<void>
-  readonly loseResumeResponse?: boolean
-  readonly issueResume?: boolean
-  readonly controlledPoll?: boolean
-  readonly holdBindings?: boolean
-  readonly pluginManagement?: boolean
-  readonly permissionPolicy?: boolean
-  readonly modelServices?: boolean
-  readonly admissionGate?: Promise<void>
-  readonly credentialFailure?: boolean
-} = {}) {
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
-  })
-  const win = dom.window
-  if (input.permissionPolicy) Object.defineProperty(win.crypto, 'subtle', { value: webcrypto.subtle })
-  let beforeUnload: ((event: BeforeUnloadEvent) => void) | undefined
-  let pageHide: ((event: PageTransitionEvent) => void) | undefined
-  const addListener = win.addEventListener.bind(win)
-  Object.defineProperty(win, 'addEventListener', {
-    value: (type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
-      if (type === 'beforeunload') beforeUnload = listener as (event: BeforeUnloadEvent) => void
-      if (type === 'pagehide') pageHide = listener as (event: PageTransitionEvent) => void
-      addListener(type, listener, options)
-    },
-  })
-  if (input.resume) win.sessionStorage.setItem('cordisx-manager-resume-id', 'e'.repeat(64))
-  const serviceWorker = new win.EventTarget()
-  Object.defineProperty(win.navigator, 'serviceWorker', { value: serviceWorker })
-  const unavailable = vi.fn()
-  const registry = { stage: vi.fn(), publish: vi.fn(), retire: vi.fn(), dispose: vi.fn() }
-  const runtime = {
-    activePluginGeneration: vi.fn(() => activation),
-    configuredPluginGraphGenerations: vi.fn(() => input.configuredGraphs ?? []),
-    pluginRegistryEpoch: vi.fn(() => 3),
-    settleRegistryProjection: vi.fn(async () => {}),
-    adoptRecoveredActivation: vi.fn(),
-    stagePluginMutation: vi.fn(),
-    publishPluginMutation: vi.fn(),
-    completePluginMutation: vi.fn(),
-    finalizePluginMutation: vi.fn(),
-    rollbackPluginMutation: vi.fn(),
-    dispose: vi.fn(async () => {}),
-  }
-  let allowAdmission!: () => void
-  let checks = 0
-  let polls = 0
-  let resumes = 0
-  let rejectPoll: ((error: Error) => void) | undefined
-  let resolvePoll: ((response: Response) => void) | undefined
-  let rejectBinding: ((error: Error) => void) | undefined
-  let sessionCurrent = true
-  const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
-    if (path === '/api/session') {
-      const result = response({ token: sessionToken, ...(input.issueResume ? { resumeId: 'f'.repeat(64) } : {}) })
-      return input.exchangeGate
-        ? Promise.race([input.exchangeGate.then(() => result), abortResponse(options.signal!)])
-        : Promise.resolve(result)
-    }
-    if (path === `/api/session/resume/${'e'.repeat(64)}`) {
-      if (input.loseResumeResponse) return Promise.reject(new Error('lost recovery response'))
-      if (input.resumeGate) {
-        return Promise.race([
-          input.resumeGate.then(() => response({ token: sessionToken, resumeId: 'f'.repeat(64) })),
-          abortResponse(options.signal!),
-        ])
-      }
-      if (resumes++ === 0) {
-        return Promise.resolve(new Response(JSON.stringify({ error: 'RESUME_PENDING' }), { status: 409 }))
-      }
-      return Promise.resolve(response({ token: sessionToken, resumeId: 'f'.repeat(64) }))
-    }
-    if (path === '/api/renderer/open') {
-      return Promise.resolve(response({
-        status: 'ok',
-        rendererId,
-        generation: 'owner-1',
-        profileId: 'work',
-        channels: [
-          'config',
-          ...(input.pluginManagement ? ['plugin-management'] : []),
-          ...(input.permissionPolicy ? ['permission-policy'] : []),
-          ...(input.modelServices ? ['model-services'] : []),
-          ...(input.credentialFailure ? ['channel-credentials'] : []),
-        ],
-        commands: true,
-      }))
-    }
-    if (path === '/api/renderer/session') {
-      checks++
-      if (input.sessionTransportFailuresAt?.includes(checks)) {
-        return Promise.reject(new TypeError('temporary network failure'))
-      }
-      if (checks === input.unauthorizedSessionAt) {
-        return Promise.resolve(new Response('{}', { status: 401 }))
-      }
-      return Promise.resolve(
-        response({ current: sessionCurrent && checks !== input.invalidSessionAt, rendererId, generation: 'owner-1' }),
-      )
-    }
-    if (path === '/api/renderer/bootstrap') {
-      const result = response({
-        status: 'ok',
-        bundleUrl: input.bundlePath ?? '/api/renderer/bundle.js',
-        initialGraphs: input.graphs ?? [],
-      })
-      return input.bootstrapGate
-        ? Promise.race([input.bootstrapGate.then(() => result), abortResponse(options.signal!)])
-        : Promise.resolve(result)
-    }
-    if (path === '/api/renderer/poll') {
-      if (polls++ === 0) {
-        return Promise.resolve(response({
-          command: {
-            id: commandId,
-            sequence: 1,
-            method: 'synchronize',
-            payload: { active: activation, registryEpoch: 3 },
-          },
-        }))
-      }
-      if (!input.controlledPoll) return abortResponse(options.signal!)
-      return new Promise((resolve, reject) => {
-        resolvePoll = resolve
-        rejectPoll = reject
-        options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
-      })
-    }
-    if (path === '/api/renderer/admit') {
-      return new Promise((resolve, reject) => {
-        allowAdmission = () => {
-          void Promise.resolve(input.admissionGate).then(() => resolve(response({ admitted: true })))
-        }
-        options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
-      })
-    }
-    if (path === '/api/renderer/acknowledge') {
-      if (input.loseAck) return Promise.reject(new Error('lost acknowledgement'))
-      allowAdmission()
-      return Promise.resolve(response({ accepted: true }))
-    }
-    if (path === '/api/renderer/close') return Promise.resolve(response({ closed: true }))
-    if (path === '/api/renderer/binding' && input.credentialFailure) {
-      return Promise.resolve(new Response('{}', { status: 503 }))
-    }
-    if (path === '/api/renderer/binding' && input.holdBindings) {
-      return Promise.race([
-        abortResponse(options.signal!),
-        new Promise<Response>((_, reject) => rejectBinding = reject),
-      ])
-    }
-    throw new Error(`Unexpected request ${path}`)
-  })
-  Object.defineProperty(win, 'fetch', { value: fetch })
-  const auth = {
-    start: vi.fn(async () => true),
-    isBound: vi.fn(async (): Promise<boolean | undefined> => true),
-    recover: vi.fn(async () => true),
-    revokeLocal: vi.fn(async () => true),
-  }
-  const createResourceAuth = vi.fn((config: { isSessionCurrent: () => Promise<boolean> }) => {
-    auth.start.mockImplementation(async () => await config.isSessionCurrent())
-    return auth
-  })
-  let reportResultUnknown: ((source?: 'permission-policy') => void) | undefined
-  const start = vi.fn(async (...args: unknown[]) => {
-    reportResultUnknown = args[2] as (source?: 'permission-policy') => void
-    await input.startGate
-    Object.assign(win, { __cordisxRuntime: runtime, __cordisxPluginGenerationResourcesV1: registry })
-    return runtime
-  })
-  const importBundle = vi.fn(async () => {
-    await input.importGate
-    return { startStandaloneManagerComposition: start }
-  })
-  const manager = startStandaloneManager({
-    window: win as unknown as Window,
-    onUnavailable: unavailable,
-    createResourceAuth: createResourceAuth as never,
-    importBundle: importBundle as never,
-  })
-  return {
-    dom,
-    win,
-    serviceWorker,
-    manager,
-    fetch,
-    auth,
-    start,
-    importBundle,
-    unavailable,
-    runtime,
-    registry,
-    beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
-    pageHide: () => pageHide?.({ isTrusted: true } as PageTransitionEvent),
-    failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
-    failBinding: () => rejectBinding?.(new Error('navigation interrupted the binding')),
-    reportResultUnknown: () => reportResultUnknown?.(),
-    reportPermissionUnknown: () => reportResultUnknown?.('permission-policy'),
-    deliverPoll: (value: unknown) => resolvePoll?.(response({ command: value })),
-    pollStarted: () => rejectPoll !== undefined,
-    revokeSession: () => {
-      sessionCurrent = false
-    },
-  }
-}
+import {
+  activation,
+  commandId,
+  deferred,
+  entryToken,
+  fixture,
+  origin,
+  rendererId,
+  sessionToken,
+} from './fixtures/standalone-manager-client.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -339,11 +94,91 @@ it('retains recovery after a lost response so the tab can retry', async () => {
   try {
     expect(await test.manager.ready).toBe(false)
     expect(test.unavailable).toHaveBeenCalledOnce()
+    expect(test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))).toHaveLength(2)
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-attempt')).toMatch(/^[a-f0-9]{64}:[a-f0-9]{64}$/u)
   } finally {
     await test.manager.close()
     test.dom.window.close()
+  }
+})
+
+it('retries one interrupted recovery exchange with the same tab attempt', async () => {
+  const test = fixture({ resume: true, resumeTransportFailures: 1 })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const requests = test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))
+    expect(requests).toHaveLength(3)
+    const attempts = requests.map(([, options]) => (JSON.parse(String(options.body)) as { attempt: string }).attempt)
+    expect(attempts[0]).toMatch(/^[a-f0-9]{64}$/u)
+    expect(new Set(attempts).size).toBe(1)
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('waits for the original recovery exchange when its retirement is still pending', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ resume: true, resumeTransportFailures: 1, resumePendingResponses: 64 })
+  try {
+    await vi.advanceTimersByTimeAsync(17_000)
+    expect(await test.manager.ready).toBe(true)
+    const requests = test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))
+    const attempts = requests.map(([, options]) => (JSON.parse(String(options.body)) as { attempt: string }).attempt)
+    expect(new Set(attempts).size).toBe(1)
+    expect(test.unavailable).not.toHaveBeenCalled()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('stops waiting when recovery remains pending beyond the bounded window', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ resume: true, resumePendingResponses: 100 })
+  try {
+    await vi.advanceTimersByTimeAsync(21_000)
+    expect(await test.manager.ready).toBe(false)
+    expect(test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))).toHaveLength(80)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
+    expect(test.unavailable).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('bounds recovery even if pending replies are slow', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ resume: true, resumePendingResponses: 100, resumePendingDelay: 19_000 })
+  try {
+    await vi.advanceTimersByTimeAsync(45_100)
+    expect(await test.manager.ready).toBe(false)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('e'.repeat(64))
+    expect(test.unavailable).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not retry an explicit recovery denial or a legacy exchange without an attempt', async () => {
+  for (
+    const options of [
+      { resume: true, resumeUnauthorized: true },
+      { resume: true, resumeTransportFailures: 1, resumeAttemptUnavailable: true },
+    ]
+  ) {
+    const test = fixture(options)
+    try {
+      expect(await test.manager.ready).toBe(false)
+      expect(test.fetch.mock.calls.filter(call => call[0].startsWith('/api/session/resume/'))).toHaveLength(1)
+    } finally {
+      await test.manager.close()
+      test.dom.window.close()
+    }
   }
 })
 

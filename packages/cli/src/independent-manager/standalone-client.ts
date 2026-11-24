@@ -22,11 +22,15 @@ const bundleUrl = '/api/renderer/bundle.js'
 const heartbeatMilliseconds = 15_000
 const requestMilliseconds = 20_000
 const bootMilliseconds = 60_000
+const resumeMilliseconds = 45_000
+const resumePendingLimit = 80
+const resumePollMilliseconds = 250
 const resumeStorageKey = 'cordisx-manager-resume-id'
 const resumeAttemptStorageKey = 'cordisx-manager-resume-attempt'
 const entryStorageKey = 'cordisx-manager-entry-attempt'
 
 class ManagerSessionTransportError extends Error {}
+class ManagerResumeTransportError extends Error {}
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
@@ -173,8 +177,13 @@ export function startStandaloneManager(input: {
     const timer = setTimeout(() => timeout.abort(), deadline)
     try {
       const transportFailure = (error: unknown): never => {
-        if (path === '/api/renderer/session' && !closed && !lifetime.signal.aborted) {
-          throw new ManagerSessionTransportError('manager-session-transport', { cause: error })
+        if (!closed && !lifetime.signal.aborted) {
+          if (path === '/api/renderer/session') {
+            throw new ManagerSessionTransportError('manager-session-transport', { cause: error })
+          }
+          if (path.startsWith('/api/session/resume/')) {
+            throw new ManagerResumeTransportError('manager-resume-transport', { cause: error })
+          }
         }
         throw error
       }
@@ -269,16 +278,34 @@ export function startStandaloneManager(input: {
     resumeId = undefined
   }
   const resumeSession = async (id: string, attempt: string | undefined): Promise<Record<string, unknown>> => {
-    for (let retry = 0; retry < 20; retry++) {
-      const result = await post(
-        `/api/session/resume/${id}`,
-        attempt === undefined ? {} : { attempt },
-        undefined,
-        true,
-        true,
-      )
+    let retriedTransport = false
+    let pending = 0
+    while (pending < resumePendingLimit) {
+      let result: Record<string, unknown>
+      try {
+        result = await post(
+          `/api/session/resume/${id}`,
+          attempt === undefined ? {} : { attempt },
+          undefined,
+          true,
+          true,
+        )
+      } catch (error) {
+        // The owner retires any session issued by the first exchange before
+        // accepting the same attempt again. Never retry a legacy exchange.
+        if (retriedTransport || attempt === undefined || !(error instanceof ManagerResumeTransportError)) throw error
+        retriedTransport = true
+        await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
+        continue
+      }
       if (result.error !== 'RESUME_PENDING' || Object.keys(result).length !== 1) return result
-      await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
+      // An interrupted exchange can still be retiring the old renderer. The
+      // owner allows up to 15 seconds for that confirmation; do not exhaust
+      // the polling budget before the owner can report its result.
+      pending++
+      if (pending < resumePendingLimit) {
+        await bounded(new Promise(resolve => setTimeout(resolve, resumePollMilliseconds)), lifetime.signal, 1_000)
+      }
     }
     throw new Error('manager-resume-unavailable')
   }
@@ -394,7 +421,7 @@ export function startStandaloneManager(input: {
         )
         : entryToken !== '' || previousResume === undefined
         ? undefined
-        : await resumeSession(previousResume, recoveryAttempt)
+        : await bounded(resumeSession(previousResume, recoveryAttempt), lifetime.signal, resumeMilliseconds)
       if (!exchanged || typeof exchanged.token !== 'string' || !tokenPattern.test(exchanged.token)) {
         throw new Error('manager-session-invalid')
       }

@@ -134,6 +134,14 @@ it.skipIf(chrome === undefined)(
           '(() => {',
           '  const send = window.fetch.bind(window)',
           '  window.fetch = (resource, options) => {',
+          '    if (typeof resource === "string" && resource.startsWith("/api/session/resume/") && sessionStorage.getItem("fixture-auto-resume") === "1") {',
+          '      return send(resource, options).then(response => {',
+          '        if (!response.ok) return response',
+          '        sessionStorage.removeItem("fixture-auto-resume")',
+          '        sessionStorage.setItem("fixture-auto-resume-lost", "1")',
+          '        throw new TypeError("simulated lost recovery response")',
+          '      })',
+          '    }',
           '    if (resource === "/api/renderer/binding") {',
           '      try {',
           '        const envelope = JSON.parse(options.body)',
@@ -361,6 +369,16 @@ it.skipIf(chrome === undefined)(
             + ' && item.scope.extensionPoints?.[0] === ' + JSON.stringify(resetPoint) + ')?.policy',
         ),
       ).toBe('ask')
+      const beforeAutoRetry = await page.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
+      await page.evaluate("sessionStorage.setItem('fixture-auto-resume', '1')")
+      await page.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await page!.evaluate("sessionStorage.getItem('fixture-auto-resume-lost')")).toBe('1')
+        expect(await page!.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).not.toBe(beforeAutoRetry)
+      }, { timeout: 30_000 })
+      await ready()
+      expect(await page.evaluate("sessionStorage.getItem('fixture-permission-count')")).toBe('1')
+      expect(await page.evaluate("sessionStorage.getItem('fixture-migration-count')")).toBe('1')
     } finally {
       await peer?.close().catch(() => undefined)
       await page?.close().catch(() => undefined)
