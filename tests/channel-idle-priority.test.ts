@@ -221,6 +221,56 @@ it('does not migrate after the disclosed list or authorization changes', async (
   expect(f.store.snapshot().jobs.j!.state).toBe('queued')
 })
 
+it('stops immediately when a candidate probe is cancelled', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockResolvedValueOnce('unavailable').mockResolvedValueOnce('cancelled' as never)
+  expect(await f.run()).toBe(true)
+  expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old', 'new'])
+  expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+  expect(f.store.snapshot().jobs.j!.state).toBe('queued')
+})
+
+it.each(['healthy', 'inconclusive'] as const)(
+  'keeps a non-first current model when its probe is %s',
+  async evidence => {
+    const f = await fixture()
+    await addThird(f)
+    await f.store.mutate(state => {
+      state.modelPriority = {
+        ...state.modelPriority,
+        candidates: [
+          { providerId: 'earlier', model: 'zero' },
+          ...state.modelPriority.candidates,
+        ],
+      }
+    })
+    await enableList(f)
+    f.native.priorityEvidence.mockResolvedValueOnce(evidence as never)
+    expect(await f.run()).toBe(false)
+    expect(f.native.priorityEvidence.mock.calls.map(([candidate]) => candidate.providerId)).toEqual(['old'])
+    expect(f.native.createLogicalDestination).not.toHaveBeenCalled()
+    expect(f.store.snapshot().bindings.b!.sessionId).toBe('source')
+    expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'queued', sessionId: 'source' })
+  },
+)
+
+it('does not probe or create another target after a fallback creation result is unknown', async () => {
+  const f = await fixture()
+  await addThird(f)
+  await enableList(f)
+  f.native.priorityEvidence.mockImplementation(async candidate =>
+    candidate.providerId === 'third' ? 'healthy' : 'unavailable'
+  )
+  f.native.createLogicalDestination.mockRejectedValueOnce(new Error('synthetic lost receipt'))
+  expect(await f.run()).toBe(true)
+  expect(f.store.snapshot().jobs.j).toMatchObject({ state: 'reconciliation-required' })
+  await f.run()
+  expect(f.native.priorityEvidence).toHaveBeenCalledTimes(3)
+  expect(f.native.createLogicalDestination).toHaveBeenCalledOnce()
+})
+
 it('discloses and selects only permitted candidates, preserving their configured order', async () => {
   const f = await fixture()
   await addThird(f)
