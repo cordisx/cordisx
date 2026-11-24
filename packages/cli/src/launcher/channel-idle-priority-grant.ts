@@ -4,7 +4,13 @@ import type { ChannelConversationState } from './channel-conversation-store.js'
 import type { LogicalContinuationActor } from './logical-continuation-control.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { channelExact, channelPolicyAllows, channelRecord, channelText } from './channel-conversation-policy.js'
-import { type ChannelTaskPatch, parseChannelTaskPatch } from './channel-task-config.js'
+import {
+  channelTaskChangeAllowed,
+  channelTaskFields,
+  type ChannelTaskPatch,
+  parseChannelTaskPatch,
+} from './channel-task-config.js'
+import { channelCommandDenied } from './channel-conversation-policy.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import { channelLogicalBindingAdmitted } from './channel-logical-continuation-bind.js'
 import { logicalConversationIdentity } from './logical-conversation-identity.js'
@@ -21,6 +27,7 @@ export interface ChannelIdlePriorityGrant {
   readonly policyRevision: number
   readonly selection: ChannelTaskPatch
   readonly target: { readonly providerId: string; readonly model: string }
+  readonly fallbackTargets?: readonly { readonly providerId: string; readonly model: string }[]
   readonly expiresAt: number
 }
 
@@ -39,6 +46,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       'policyRevision',
       'selection',
       'target',
+      'fallbackTargets',
       'expiresAt',
     ])
     channelExact(source, ['hostId', 'appId', 'profileId', 'sessionId'])
@@ -48,6 +56,16 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
     for (const field of ['principal', 'scope']) channelText(actor[field])
     channelText(target.providerId, 128)
     channelText(target.model, 512)
+    const fallbackTargets = row.fallbackTargets === undefined ? undefined : (() => {
+      if (!Array.isArray(row.fallbackTargets) || row.fallbackTargets.length > 6) {
+        throw new Error('INVALID_IDLE_PRIORITY_GRANT')
+      }
+      return row.fallbackTargets.map(value => {
+        const candidate = channelRecord(value)
+        channelExact(candidate, ['providerId', 'model'])
+        return { providerId: channelText(candidate.providerId, 128), model: channelText(candidate.model, 512) }
+      })
+    })()
     channelText(row.logicalId)
     if (
       key !== row.bindingId || key !== channelText(row.bindingId) || source.hostId !== 'local'
@@ -67,6 +85,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       policyRevision: Number(row.policyRevision),
       selection,
       target: target as unknown as ChannelIdlePriorityGrant['target'],
+      ...(fallbackTargets ? { fallbackTargets } : {}),
       expiresAt: Number(row.expiresAt),
     }
   }
@@ -83,6 +102,12 @@ export function channelIdleGrantCurrent(
   const { source, selection, target } = grant
   const candidates = state.modelPriority.candidates
   const index = candidates.findIndex(row => row.providerId === selection.providerId && row.model === selection.model)
+  const targets = [target, ...(grant.fallbackTargets ?? [])]
+  let position = index
+  const ordered = targets.every(candidate => {
+    position = candidates.findIndex((row, i) => i > position && isDeepStrictEqual(row, candidate))
+    return position >= 0
+  })
   const job = jobId ? state.jobs[jobId] : undefined
   const parents = Object.values(state.logicalContinuations?.relations ?? {}).filter(relation =>
     isDeepStrictEqual(relation.destination, source)
@@ -97,7 +122,12 @@ export function channelIdleGrantCurrent(
   }
   return grant.expiresAt > Date.now() && state.modelPriority.revision === grant.priorityRevision
     && state.taskConfigRevision === grant.taskConfigRevision && state.policyRevision === grant.policyRevision
-    && index >= 0 && isDeepStrictEqual(candidates[index + 1], target)
+    && index >= 0 && ordered
+    && (grant.fallbackTargets !== undefined || isDeepStrictEqual(candidates[index + 1], target))
+    && targets.every(candidate =>
+      !channelTaskFields(candidate).some(command => channelCommandDenied(state.policy, event, command))
+      && channelTaskChangeAllowed(state.taskConfig, state.policy, event, candidate, { ...selection, ...candidate })
+    )
     && isDeepStrictEqual(state.logicalContinuations?.idlePriorityGrants?.[grant.bindingId], grant)
     && isDeepStrictEqual(grant.actor, channelLogicalActor(event))
     && grant.logicalId === logicalConversationIdentity(state.logicalContinuations, source)

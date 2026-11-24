@@ -1016,6 +1016,23 @@ interrupted, and an earlier failed or uncertain turn is never replayed. If nativ
 target creation is uncertain, the input remains fenced for administrator review.
 See [Idle Channel model priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v1.md).
 
+To authorize one idle continuation across several later candidates in their
+configured order, request a disclosure instead with:
+
+```text
+/continue-provider auto-suggest-list first one
+```
+
+The disclosure lists the exact candidates allowed for the sender and compatible
+with the current settings. Confirm using the returned one-time command; it
+authorizes at most one migration in 24 hours. If the current model's real probe
+fails, the Host checks the disclosed candidates in order and selects the first
+with a successful real probe. An unavailable or unprobeable candidate is not
+selected. Changed priorities, permissions, actor, binding or source settings
+invalidate the grant. If the current model is confirmed unavailable and no
+authorized target passes, the input is not dispatched. This does not authorize group history or migration of an already
+started turn. See [Idle Channel model priority v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v2.md).
+
 Failed or uncertain tasks can send a fixed notice asking the user to contact an
 administrator, independently of automatic final replies. `failure-notices`
 reads the setting and revision; the local user can disable it with
