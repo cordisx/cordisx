@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.77",
+  "version": "0.1.0-beta.78",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -149,8 +149,8 @@
     "fsevents": "~2.3.3"
   },
   "cordisxSources": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#10b62a213a60c1ffd381af276dca3819d32401cd",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
+    "@cordisx/channel": "github:cordisx/plugin-channel#53b9958c0c1573096aaaf8e7f7074a291a7bee04",
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#cb6ad688587e4eedf5fa69d269363d9a52646b66"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
