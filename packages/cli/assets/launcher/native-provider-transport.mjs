@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { lstat, readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import { readNativeLines } from './native-json-lines.mjs'
 
@@ -7,6 +9,49 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 const provider = value => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/u.test(value) ? value : undefined
 const key = id => JSON.stringify([typeof id, id])
 const MAX_WORKERS = 128
+export const managedProviderCatalogProtocol = 1
+const closeCatalog = catalog => Promise.resolve().then(() => catalog?.close?.()).catch(() => undefined)
+
+async function verifyCatalog(catalog) {
+  if (
+    !object(catalog) || catalog.status !== 'ready' || !path.isAbsolute(catalog.path ?? '')
+    || !/^[a-f0-9]{64}$/u.test(catalog.sha256 ?? '') || !/^[a-f0-9]{64}$/u.test(catalog.revision ?? '')
+    || typeof catalog.close !== 'function'
+  ) throw new Error('Native provider catalog unavailable')
+  const metadata = await lstat(catalog.path)
+  if (
+    !metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024
+    || (process.platform !== 'win32' && ((metadata.mode & 0o077) !== 0
+      || (process.getuid && metadata.uid !== process.getuid())))
+  ) {
+    throw new Error('Native provider catalog unavailable')
+  }
+  const bytes = await readFile(catalog.path)
+  if (createHash('sha256').update(bytes).digest('hex') !== catalog.sha256) {
+    throw new Error('Native provider catalog unavailable')
+  }
+}
+
+// Codex accepts configuration flags both before and after `app-server`. When
+// both positions are used, the subcommand list can replace the root list.
+// Keep their original order in one subcommand list before appending our flags.
+function catalogWorkerArguments(args, insertion, overrides, catalogArgs) {
+  const common = [], before = [], after = []
+  const collect = (items, remaining) => {
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index]
+      if (['-c', '--config', '--enable', '--disable'].includes(item)) {
+        if (index + 1 >= items.length) throw new Error('Native provider launch unavailable')
+        common.push(item, items[++index])
+      } else if (item.startsWith('--config=') || item.startsWith('--enable=') || item.startsWith('--disable=')) {
+        common.push(item)
+      } else remaining.push(item)
+    }
+  }
+  collect(args.slice(0, insertion), before)
+  collect(args.slice(insertion + 1), after)
+  return [...before, 'app-server', ...after, ...common, ...overrides, ...catalogArgs]
+}
 
 /** Multiplex native connections after the Host has admitted the original request.
  * Credentials and endpoints remain in that request's config, never argv or disk.
@@ -15,11 +60,27 @@ const MAX_WORKERS = 128
  */
 export function createNativeProviderTransport(
   primary,
-  { executable, args, env, initialize, diagnostic, uncertain, reviewRouting } = {},
+  {
+    executable,
+    args,
+    env,
+    cwd,
+    initialize,
+    diagnostic,
+    uncertain,
+    reviewRouting,
+    managedCatalog,
+    workerEnvironment,
+    onlyManagedRouting,
+    readThreadCatalog,
+    recordThreadCatalog,
+  } = {},
 ) {
   const stdout = new PassThrough()
   const workers = new Map()
   const owners = new Map()
+  // Unsubscribe does not prove that Codex has released a thread writer.
+  const unloaded = new Map()
   const serverRequests = new Map()
   const primaryWrite = primary.stdin.write.bind(primary.stdin)
   const observe = details => {
@@ -43,6 +104,29 @@ export function createNativeProviderTransport(
         : connection.resolveReady()
       return
     }
+    if (connection !== primary && connection.catalogCheckId === message.id && message.method === undefined) {
+      message.error || message.result?.config?.model_catalog_json !== connection.catalog.path
+        || message.result?.config?.model_provider !== connection.providerId
+        ? connection.rejectCatalog(new Error('Native provider catalog configuration unavailable'))
+        : connection.resolveCatalog()
+      return
+    }
+    if (onlyManagedRouting && connection !== primary && connection.catalog && message.method === 'thread/started') {
+      const thread = object(message.params?.thread)
+      if (
+        typeof thread?.id === 'string' && !owners.has(thread.id)
+        && [...connection.pending.values()].some(item => ['thread/start', 'thread/fork'].includes(item.method))
+      ) {
+        owners.set(thread.id, {
+          connection,
+          status: thread.status,
+          model: thread.model,
+          providerId: connection.providerId,
+          catalogState: 'pending',
+        })
+      }
+    }
+    let catalogRecord
     if (message.method === undefined) {
       const pending = connection.pending?.get(key(message.id))
       if (pending) {
@@ -60,9 +144,30 @@ export function createNativeProviderTransport(
             status: thread.status,
             model: message.result.model ?? thread.model,
             providerId: message.result.modelProvider ?? thread.modelProvider,
+            ...(onlyManagedRouting && connection.catalog && pending.method === 'thread/resume'
+              ? { catalogState: 'recorded' }
+              : {}),
           })
+          unloaded.delete(thread.id)
+          if (
+            onlyManagedRouting && connection.catalog
+            && ['thread/start', 'thread/fork'].includes(pending.method)
+          ) {
+            const owner = owners.get(thread.id)
+            owner.catalogState = 'pending'
+            catalogRecord = {
+              owner,
+              threadId: thread.id,
+              providerId: connection.providerId,
+              revision: connection.catalog.revision,
+            }
+          }
         }
-        if (!message.error && pending.method === 'thread/unsubscribe') owners.delete(pending.threadId)
+        if (!message.error && pending.method === 'thread/unsubscribe') {
+          const owner = owners.get(pending.threadId)
+          if (owner?.connection && owner.connection !== primary) unloaded.set(pending.threadId, owner.connection)
+          owners.delete(pending.threadId)
+        }
         if (!message.error && pending.method === 'turn/start' && message.result?.turn?.id) {
           const owner = owners.get(pending.threadId)
           if (owner?.connection === connection) owner.turn = message.result.turn
@@ -101,13 +206,40 @@ export function createNativeProviderTransport(
         if (message.method === 'thread/status/changed') owner.status = message.params.status
         if (message.method === 'turn/started') owner.turn = message.params.turn
         if (message.method === 'turn/completed') delete owner.turn
-        if (message.method === 'thread/closed') owners.delete(threadId)
+        if (message.method === 'thread/closed') {
+          unloaded.set(threadId, connection)
+          owners.delete(threadId)
+        }
       }
     }
     if (reviewRouting && message.method === 'thread/settings/updated') {
       const owner = owners.get(message.params?.threadId), settings = message.params?.threadSettings
       if (owner && typeof settings?.model === 'string') owner.model = settings.model
       if (owner && typeof settings?.modelProvider === 'string') owner.providerId = settings.modelProvider
+    }
+    if (catalogRecord) {
+      void Promise.resolve().then(() =>
+        recordThreadCatalog(catalogRecord.threadId, {
+          providerId: catalogRecord.providerId,
+          revision: catalogRecord.revision,
+        })
+      ).then(() => {
+        catalogRecord.owner.catalogState = 'recorded'
+        emit(message, original)
+      }, () => {
+        catalogRecord.owner.catalogState = 'unconfirmed'
+        uncertain?.(message.id)
+        emit({
+          id: message.id,
+          error: {
+            code: -32000,
+            message:
+              'Thread was created but its model metadata could not be saved. Check thread history before retrying.',
+            data: { type: 'managedCatalogReconciliationRequired', threadId: catalogRecord.threadId },
+          },
+        })
+      })
+      return
     }
     emit(message, original)
   }
@@ -125,12 +257,90 @@ export function createNativeProviderTransport(
   primary.pending = new Map()
   attach(primary.stdout, primary)
 
-  const workerFor = async id => {
-    let worker = workers.get(id)
+  const currentCatalog = async id => {
+    let catalog
+    if (managedCatalog) {
+      try {
+        catalog = await managedCatalog(id)
+      } catch {
+        catalog = { status: 'unavailable', reason: 'catalog-preparation-failed' }
+      }
+      if (catalog?.status === 'unavailable') {
+        const reason = /^[a-z0-9-]{1,80}$/u.test(catalog.reason ?? '') ? catalog.reason : 'catalog-unavailable'
+        observe({ phase: 'managed-catalog-unavailable', provider: id, reason })
+        return { status: 'unavailable' }
+      }
+      if (catalog !== undefined) {
+        try {
+          await verifyCatalog(catalog)
+        } catch (error) {
+          await closeCatalog(catalog)
+          throw error
+        }
+      }
+    }
+    return catalog === undefined ? { status: 'unmanaged' } : { status: 'ready', catalog }
+  }
+
+  const checkCurrentCatalog = async worker => {
+    if (!managedCatalog) return
+    const latest = await currentCatalog(worker.providerId)
+    try {
+      if (latest.status === 'unavailable') throw new Error('MANAGED_CATALOG_UNAVAILABLE')
+      if ((worker.catalog?.revision ?? null) !== (latest.catalog?.revision ?? null)) {
+        observe({ phase: 'managed-catalog-changed', provider: worker.providerId })
+        throw new Error('MANAGED_CATALOG_CHANGED')
+      }
+    } finally {
+      await closeCatalog(latest.catalog)
+    }
+  }
+
+  const retireWorker = async worker => {
+    if (worker.closed) return true
+    if (
+      worker.pending.size > 0 || [...owners.values()].some(owner => owner.connection === worker)
+      || [...serverRequests.values()].some(request => request.connection === worker)
+    ) return false
+    worker.retiring ??= new Promise(resolve => {
+      const timer = setTimeout(() => resolve(false), 5000)
+      worker.child.once('exit', () => {
+        clearTimeout(timer)
+        resolve(true)
+      })
+      if (worker.child.exitCode !== null) {
+        clearTimeout(timer)
+        resolve(true)
+      } else worker.child.kill('SIGTERM')
+    })
+    return await worker.retiring
+  }
+
+  const workerFor = async (id, catalog) => {
+    const workerKey = JSON.stringify([id, catalog?.revision ?? null])
+    let worker = workers.get(workerKey)
+    if (worker && catalog) await closeCatalog(catalog)
     if (!worker) {
-      if (workers.size >= MAX_WORKERS) throw new Error('Native provider connection limit reached')
+      for (const [existingKey, existing] of workers) {
+        if (
+          existing.providerId !== id || existingKey === workerKey || existing.pending.size > 0
+          || [...owners.values()].some(owner => owner.connection === existing)
+          || [...serverRequests.values()].some(request => request.connection === existing)
+        ) continue
+        if (!await retireWorker(existing)) {
+          await closeCatalog(catalog)
+          throw new Error('MANAGED_CATALOG_SOURCE_IN_USE')
+        }
+      }
+      if (workers.size >= MAX_WORKERS) {
+        await closeCatalog(catalog)
+        throw new Error('Native provider connection limit reached')
+      }
       const insertion = args.indexOf('app-server')
-      if (insertion < 0 || !initializeParams) throw new Error('Native provider launch unavailable')
+      if (insertion < 0 || !initializeParams) {
+        await closeCatalog(catalog)
+        throw new Error('Native provider launch unavailable')
+      }
       const overrides = [
         '-c',
         `model_provider=${JSON.stringify(id)}`,
@@ -139,13 +349,33 @@ export function createNativeProviderTransport(
           JSON.stringify(id)
         }={name="CordisX provider transport",base_url="http://127.0.0.1:0/v1",wire_api="responses",requires_openai_auth=false}}`,
       ]
-      const child = spawn(executable, [...args.slice(0, insertion), ...overrides, ...args.slice(insertion)], {
-        env,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      })
+      let workerEnv
+      try {
+        workerEnv = workerEnvironment ? await workerEnvironment(id) : env
+        if (workerEnvironment && !object(workerEnv)) throw new Error('Native provider environment unavailable')
+      } catch (error) {
+        await closeCatalog(catalog)
+        throw error
+      }
+      const catalogArgs = catalog ? ['-c', `model_catalog_json=${JSON.stringify(catalog.path)}`] : []
+      let child
+      try {
+        const launchArgs = catalog || workerEnvironment
+          ? catalogWorkerArguments(args, insertion, overrides, catalogArgs)
+          : [...args.slice(0, insertion), ...overrides, ...args.slice(insertion)]
+        child = spawn(executable, launchArgs, {
+          env: workerEnv,
+          ...(cwd ? { cwd } : {}),
+          stdio: ['pipe', 'pipe', 'inherit'],
+        })
+      } catch (error) {
+        await closeCatalog(catalog)
+        throw error
+      }
       worker = {
         child,
         providerId: id,
+        catalog,
         pending: new Map(),
         write: child.stdin.write.bind(child.stdin),
         initializeId: `cordisx-provider-initialize-${randomUUID()}`,
@@ -164,14 +394,15 @@ export function createNativeProviderTransport(
           reject(error)
         }
       })
-      workers.set(id, worker)
+      workers.set(workerKey, worker)
       attach(child.stdout, worker)
       const failed = details => {
         observe({ childPid: child.pid, provider: id, ...details })
         if (worker.closed) return
         worker.closed = true
-        if (workers.get(id) === worker) workers.delete(id)
+        if (workers.get(workerKey) === worker) workers.delete(workerKey)
         worker.rejectReady(new Error('Native provider connection closed'))
+        worker.rejectCatalog?.(new Error('Native provider connection closed'))
         for (const pending of worker.pending.values()) {
           uncertain?.(pending.id)
           emit({
@@ -211,16 +442,48 @@ export function createNativeProviderTransport(
         ['ENOENT', 'EACCES', 'EPERM', 'EPIPE', 'ECONNRESET'].includes(error?.code) ? error.code : 'unknown'
       child.once('error', error => failed({ phase: 'provider-spawn-failed', errorCode: errorCode(error) }))
       child.once('exit', (exitCode, signal) => failed({ phase: 'provider-exited', exitCode, signal }))
+      child.once('close', () => {
+        void closeCatalog(catalog)
+      })
       child.stdin.on('error', error => failed({ phase: 'provider-input-error', errorCode: errorCode(error) }))
       void send(worker.write, { id: worker.initializeId, method: 'initialize', params: initializeParams })
         .catch(worker.rejectReady)
     }
-    await worker.ready
-    if (worker.closed || disposed) throw new Error('Native provider connection closed')
-    if (!worker.initialized) {
-      worker.initialized = true
+    worker.starting ??= (async () => {
+      await worker.ready
+      if (worker.closed || disposed) throw new Error('Native provider connection closed')
       await send(worker.write, { method: 'initialized', params: {} })
-    }
+      if (worker.catalog) {
+        try {
+          worker.catalogCheckId = `cordisx-catalog-check-${randomUUID()}`
+          const checked = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Native provider catalog check timed out')), 15000)
+            worker.resolveCatalog = () => {
+              clearTimeout(timer)
+              resolve()
+            }
+            worker.rejectCatalog = error => {
+              clearTimeout(timer)
+              reject(error)
+            }
+          })
+          await send(worker.write, {
+            id: worker.catalogCheckId,
+            method: 'config/read',
+            params: { includeLayers: false },
+          })
+          await checked
+          await verifyCatalog(worker.catalog)
+          observe({ phase: 'managed-catalog-ready', provider: id })
+        } catch (error) {
+          if (workers.get(workerKey) === worker) workers.delete(workerKey)
+          if (worker.child.exitCode === null) worker.child.kill('SIGTERM')
+          throw error
+        }
+      }
+    })()
+    await worker.starting
+    if (worker.closed || disposed) throw new Error('Native provider connection closed')
     return worker
   }
 
@@ -255,14 +518,73 @@ export function createNativeProviderTransport(
       if (!reviewRouting.models.includes(model)) throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
     }
     let connection = owners.get(params?.threadId)?.connection ?? primary
+    if (
+      onlyManagedRouting && connection !== primary && message.method === 'turn/start'
+      && owners.get(params?.threadId)?.catalogState !== 'recorded'
+    ) {
+      throw new Error('MANAGED_CATALOG_HISTORY_UNAVAILABLE')
+    }
+    if (message.method === 'turn/start' && connection !== primary) await checkCurrentCatalog(connection)
     if (initializeParams && ['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
       const config = object(params?.config)
       const tables = config ? Object.keys(config).filter(name => name.startsWith('model_providers.')) : []
       const id = provider(params?.modelProvider) ?? provider(config?.model_provider)
         ?? (tables.length === 1 ? provider(tables[0].slice('model_providers.'.length)) : undefined)
       const table = id && (object(config?.[`model_providers.${id}`]) ?? object(config?.model_providers?.[id]))
-      if (id && id !== 'openai' && table?.wire_api === 'responses') connection = await workerFor(id)
-      else if (id === 'openai') connection = primary
+      if (id && id !== 'openai' && table?.wire_api === 'responses') {
+        const previous = owners.get(params?.threadId)
+        if (
+          message.method === 'thread/resume' && previous?.providerId === id
+          && previous.connection !== primary && !previous.connection.closed
+        ) {
+          if (onlyManagedRouting && previous.catalogState !== 'recorded') {
+            throw new Error('MANAGED_CATALOG_HISTORY_UNAVAILABLE')
+          }
+          await checkCurrentCatalog(previous.connection)
+          connection = previous.connection
+        } else {
+          const resolved = await currentCatalog(id)
+          if (onlyManagedRouting && resolved.status === 'unmanaged') connection = primary
+          else if (onlyManagedRouting && resolved.status === 'unavailable') {
+            throw new Error('MANAGED_CATALOG_UNAVAILABLE')
+          } else {
+            if (
+              onlyManagedRouting
+              && (typeof readThreadCatalog !== 'function' || typeof recordThreadCatalog !== 'function')
+            ) {
+              await closeCatalog(resolved.catalog)
+              throw new Error('MANAGED_CATALOG_UNAVAILABLE')
+            }
+            if (onlyManagedRouting && message.method === 'thread/resume') {
+              let proof
+              try {
+                proof = await readThreadCatalog(params.threadId)
+              } catch { /* Unknown proof fails closed. */ }
+              if (!proof || proof.providerId !== id || proof.revision !== resolved.catalog?.revision) {
+                await closeCatalog(resolved.catalog)
+                throw new Error(proof ? 'MANAGED_CATALOG_CHANGED' : 'MANAGED_CATALOG_HISTORY_UNAVAILABLE')
+              }
+            }
+            const source = message.method === 'thread/resume' ? unloaded.get(params.threadId) : undefined
+            if (
+              source && (source.providerId !== id
+                || (source.catalog?.revision ?? null) !== (resolved.catalog?.revision ?? null))
+            ) {
+              await closeCatalog(resolved.catalog)
+              throw new Error('MANAGED_CATALOG_CHANGED')
+            }
+            if (source && !source.closed) {
+              await closeCatalog(resolved.catalog)
+              connection = source
+            } else {
+              connection = await workerFor(id, resolved.catalog)
+            }
+          }
+        }
+      } else if (id === 'openai') connection = primary
+    }
+    if (connection !== primary && ['thread/start', 'thread/fork'].includes(message.method)) {
+      await checkCurrentCatalog(connection)
     }
     if (disposed || connection.closed) throw new Error('Native provider connection closed')
     if (message.id !== undefined && message.method !== undefined) {
@@ -297,12 +619,31 @@ export function createNativeProviderTransport(
             await route(frame, original)
           } catch (error) {
             if (frame.id !== undefined) {
-              uncertain?.(frame.id)
+              if (
+                ![
+                  'MANAGED_CATALOG_CHANGED',
+                  'MANAGED_CATALOG_UNAVAILABLE',
+                  'MANAGED_CATALOG_SOURCE_IN_USE',
+                  'MANAGED_CATALOG_HISTORY_UNAVAILABLE',
+                ].includes(
+                  error?.message,
+                )
+              ) {
+                uncertain?.(frame.id)
+              }
               emit({
                 id: frame.id,
                 error: {
                   code: -32000,
-                  message: error?.message?.startsWith('REVIEW_')
+                  message: error?.message === 'MANAGED_CATALOG_CHANGED'
+                    ? 'Model metadata changed; this conversation cannot safely continue with its previous catalog.'
+                    : error?.message === 'MANAGED_CATALOG_UNAVAILABLE'
+                    ? 'Model metadata is unavailable. Contact an administrator or try again later.'
+                    : error?.message === 'MANAGED_CATALOG_SOURCE_IN_USE'
+                    ? 'The previous model worker did not stop safely. Contact an administrator.'
+                    : error?.message === 'MANAGED_CATALOG_HISTORY_UNAVAILABLE'
+                    ? "This conversation's model metadata cannot be verified. Contact an administrator."
+                    : error?.message?.startsWith('REVIEW_')
                     ? error.message
                     : 'Native provider transport unavailable. Check thread history before retrying.',
                 },
@@ -325,6 +666,7 @@ export function createNativeProviderTransport(
     }
     workers.clear()
     owners.clear()
+    unloaded.clear()
     serverRequests.clear()
     fragments = []
     stdin.destroy()
