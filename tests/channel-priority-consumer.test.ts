@@ -6,6 +6,40 @@ import { type AgentBridge, createCodexBridgeHandler } from '../packages/cli/src/
 import { a, channel, fixture, message, settle } from './helpers/channel-conversation-fixture.js'
 
 describe('Channel priority and failure notices', () => {
+  it('validates model capabilities before spending a probe request', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    const preflight = vi.fn().mockResolvedValue(true)
+    Object.assign(f.native, { priorityPreflight: preflight })
+    f.consumer.setNativeExtras(() =>
+      ({
+        ...f.native,
+        modelOperation: async () => ({
+          providers: [
+            { providerId: 'first', models: [{ id: 'one' }] },
+            { providerId: 'second', models: [{ id: 'two', supportsFastMode: true }] },
+          ],
+        }),
+        validateTaskConfiguration: async () => {},
+      }) as never
+    )
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await store.mutate(state => {
+      state.taskConfig = parseChannelTaskConfig({
+        defaults: { fast: true },
+        permissions: [{ id: 'allow', effect: 'allow', userIds: ['alice'], fields: ['providerId', 'model'] }],
+      })
+    })
+    await f.consumer.modelPriorityOperation('model-priority-set', {
+      expectedRevision: 0,
+      candidates: [{ providerId: 'first', model: 'one' }, { providerId: 'second', model: 'two' }],
+    })
+    await f.consumer.receive('inbox:capability', message('om_capability'))
+    await settle(f.consumer)
+    expect(preflight).toHaveBeenCalledOnce()
+    expect(preflight.mock.calls[0]![0]).toEqual({ providerId: 'second', model: 'two' })
+    expect(f.native.start.mock.calls[0]![6]).toEqual({ providerId: 'second', model: 'two', fast: true })
+  })
   it('composes real preflight with an authentication failure and selects the next model', async () => {
     const f = await fixture()
     await f.consumer.policySet({ enabled: true }, 0)
@@ -127,7 +161,7 @@ describe('Channel priority and failure notices', () => {
     expect(preflight).not.toHaveBeenCalled()
     expect(f.native.start).not.toHaveBeenCalled()
     expect(f.consumer.status().jobs[0]).toMatchObject({ state: 'failed', code: 'MODEL_PRIORITY_UNAVAILABLE' })
-    expect(f.runtime.notifyOnce.mock.calls[0]![0].text).toBe('任务处理失败，请联系管理员。')
+    expect(f.runtime.notifyOnce.mock.calls[0]![0].text).toBe('模型选择暂不可用，请联系管理员。')
     await store.mutate(state => {
       state.taskConfig = parseChannelTaskConfig({ defaults: { providerId: 'chosen', model: 'chosen-model' } })
     })

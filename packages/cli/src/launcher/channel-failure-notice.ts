@@ -6,6 +6,13 @@ import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { sameConversation } from './channel-conversation-refs.js'
 import { channelAutoReplyTarget, channelCommandReplyTarget, channelReplyDefaults } from './channel-reply-routing.js'
 
+/** Only these fixed codes have a safe, unambiguous public description. */
+const FAILURE_TEXT = new Map([
+  ['MODEL_PRIORITY_UNAVAILABLE', '模型选择暂不可用，请联系管理员。'],
+  ['NATIVE_BACKEND_UNAVAILABLE', '任务服务暂不可用，请联系管理员。'],
+  ['CONTINUATION_PERSONA_UNAVAILABLE', '任务上下文暂不可用，请联系管理员。'],
+])
+
 /** Reserve a generic notice once before calling the stable outbox. */
 export async function channelFailureNotice(
   store: ChannelConversationStore,
@@ -35,17 +42,20 @@ export async function channelFailureNotice(
     try {
       const target = job.replyTarget ?? channelAutoReplyTarget(event, defaults, job.replyMode)
         ?? channelCommandReplyTarget(event, access?.replyCapabilities?.(event))
-      return { event, target, uncertain: job.state === 'reconciliation-required' }
+      return {
+        event,
+        target,
+        text: job.state === 'reconciliation-required'
+          ? '任务状态暂时无法确认，请联系管理员核查。'
+          : FAILURE_TEXT.get(job.code ?? '') ?? '任务处理失败，请联系管理员。',
+      }
     } catch {
       return undefined
     }
   })
   if (!reserved || !store.snapshot().failureNotices.enabled) return
-  const text = reserved.uncertain
-    ? '任务状态暂时无法确认，请联系管理员核查。'
-    : '任务处理失败，请联系管理员。'
   try {
-    await reply(`${jobId}:failure`, reserved.event, text, reserved.target)
+    await reply(`${jobId}:failure`, reserved.event, reserved.text, reserved.target)
   } catch {
     // A delivery with an unknown receipt is never blindly sent again.
     report?.('CHANNEL_FAILURE_NOTICE_UNKNOWN')

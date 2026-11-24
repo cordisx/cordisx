@@ -8,6 +8,7 @@ export async function channelModelConnectivity(
   candidate: ChannelModelCandidate,
   parent?: AbortSignal,
   timeoutMs = 15_000,
+  beforeRequest?: () => Promise<boolean>,
 ): Promise<boolean> {
   if (!connect) return true // This provider has no supported direct Responses connection.
   const timeout = AbortSignal.timeout(timeoutMs)
@@ -33,6 +34,7 @@ export async function channelModelConnectivity(
   }
   try {
     if (connection.protocols && !connection.protocols.includes('openai-responses')) return true
+    if (beforeRequest && !await beforeRequest()) return false
     const response = await fetch(`${connection.baseUrl.replace(/\/$/u, '')}/responses`, {
       method: 'POST',
       signal,

@@ -84,3 +84,13 @@ it('bounds a stalled connection and disposes a lease that arrives after the time
   resolve({ baseUrl: 'https://example.test', headers: {}, dispose })
   await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
 })
+
+it('rechecks authority after obtaining a connection and before sending a probe', async () => {
+  const dispose = vi.fn()
+  const connect: ChannelMemoryModelConnection = async () => ({ baseUrl: 'https://example.test', headers: {}, dispose })
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivity(connect, candidate, undefined, 1000, async () => false)).toBe(false)
+  expect(fetch).not.toHaveBeenCalled()
+  expect(dispose).toHaveBeenCalledOnce()
+})

@@ -981,8 +981,9 @@ without user messages or tools; this may incur model usage. Probe HTTP 401/403,
 move to the next candidate. A
 connection type or response that cannot be probed falls back to the local check,
 so its login and service health remain unknown. A successful probe only reflects
-that moment. An unsupported effort or Fast setting excludes that candidate
-rather than changing the requested setting. After native dispatch,
+that moment. An unsupported task-model effort or Fast setting excludes that
+candidate rather than changing the requested setting. Inherited execution
+defaults remain unchanged and may still be rejected by the selected model. After native dispatch,
 authentication failures, network errors and timeouts cannot safely trigger a
 replay: an uncertain outcome remains subject to reconciliation. This policy does
 not automatically transfer conversation history between providers.
@@ -992,8 +993,9 @@ administrator, independently of automatic final replies. `failure-notices`
 reads the setting and revision; the local user can disable it with
 `failure-notices-set --input '{"expectedRevision":0,"enabled":false}'` using
 the current revision. The notice follows the original conversation and send
-permissions and does not expose provider errors. Unknown delivery results are
-not blindly repeated.
+permissions and does not expose provider errors. Known failure codes use fixed
+safe categories; unknown failures and uncertain effects use generic wording.
+Unknown delivery results are not blindly repeated.
 
 Common profile creation settings are the base layer. Channel defaults, matching
 conversation/user rules and explicit selections override that layer; explicit

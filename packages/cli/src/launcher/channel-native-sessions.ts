@@ -752,8 +752,12 @@ export class ChannelNativeSessions {
     return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
   }
 
-  priorityPreflight = (candidate: { providerId: string; model: string }, signal?: AbortSignal) =>
-    channelModelPreflight(this.input.bridge(), this.input.cwd, candidate, signal, this.input.memoryConnect)
+  priorityPreflight = (
+    candidate: { providerId: string; model: string },
+    signal?: AbortSignal,
+    beforeProbe?: () => Promise<boolean>,
+  ) =>
+    channelModelPreflight(this.input.bridge(), this.input.cwd, candidate, signal, this.input.memoryConnect, beforeProbe)
 
   async start(
     operationId: string,

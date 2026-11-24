@@ -32,6 +32,7 @@ export async function channelModelPreflight(
   candidate: { providerId: string; model: string },
   signal?: AbortSignal,
   connect?: ChannelMemoryModelConnection,
+  beforeProbe?: () => Promise<boolean>,
 ): Promise<boolean> {
   if (!bridge || signal?.aborted) return false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -49,7 +50,10 @@ export async function channelModelPreflight(
         }),
       ]),
     )
-    if (result.status === 'dry-run') return channelModelConnectivity(connect, candidate, signal)
+    if (result.status === 'dry-run') {
+      if (beforeProbe && !await beforeProbe()) return false
+      return channelModelConnectivity(connect, candidate, signal, 15_000, beforeProbe)
+    }
     if (
       ['provider-key-missing', 'provider-not-configured', 'model-not-in-provider-catalog'].includes(
         String(result.reason),

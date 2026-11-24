@@ -28,7 +28,11 @@ export async function selectChannelCreationModel(input: {
   readonly store: ChannelConversationStore
   readonly captured: ChannelConversationState
   readonly tasks: ChannelTaskSettings
-  readonly preflight?: (candidate: ChannelModelCandidate, signal?: AbortSignal) => Promise<boolean>
+  readonly preflight?: (
+    candidate: ChannelModelCandidate,
+    signal?: AbortSignal,
+    beforeProbe?: () => Promise<boolean>,
+  ) => Promise<boolean>
   readonly signal: AbortSignal
   readonly event: ChannelEventRef
   readonly jobId: string
@@ -43,6 +47,11 @@ export async function selectChannelCreationModel(input: {
   const defaults = channelTaskDefaults(captured.taskConfig, captured.policy, event)
   const priority = !input.continuing && !defaults.providerId && !defaults.model ? captured.modelPriority : undefined
   if (!priority?.candidates.length) return { state: 'ready', settings: await tasks.defaults(event) }
+  const fence = {
+    priority: priority.revision,
+    taskConfig: captured.taskConfigRevision,
+    policy: captured.policyRevision,
+  }
   let settings: ChannelTaskPatch | undefined
   try {
     for (const candidate of priority.candidates) {
@@ -51,11 +60,8 @@ export async function selectChannelCreationModel(input: {
         channelTaskFields(candidate).some(command => channelCommandDenied(captured.policy, event, command))
         || !channelTaskChangeAllowed(captured.taskConfig, captured.policy, event, candidate, selection)
       ) continue
-      if (!input.preflight || !await input.preflight(candidate, input.signal)) continue
       try {
         await tasks.validate(selection)
-        settings = selection
-        break
       } catch (error) {
         if (
           error instanceof Error
@@ -64,6 +70,16 @@ export async function selectChannelCreationModel(input: {
         ) continue
         throw error
       }
+      if (!channelPriorityFenceCurrent(store, fence, event, jobId)) break
+      if (
+        !input.preflight || !await input.preflight(
+          candidate,
+          input.signal,
+          async () => channelPriorityFenceCurrent(store, fence, event, jobId),
+        )
+      ) continue
+      settings = selection
+      break
     }
   } catch {
     // Preflight cannot create a native effect; unavailable authority stops selection.
@@ -83,7 +99,7 @@ export async function selectChannelCreationModel(input: {
     return {
       state: 'ready',
       settings,
-      fence: { priority: priority.revision, taskConfig: captured.taskConfigRevision, policy: captured.policyRevision },
+      fence,
     }
   }
   await store.mutate(state => {
