@@ -35,6 +35,8 @@ interface View {
   readonly entry: Entry
   readonly ownerViewId: string
   readonly publicViewId: string
+  readonly issueSettled: Promise<void>
+  retirement?: Promise<boolean>
 }
 const opaqueId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
 const webCodes = new Set([
@@ -273,48 +275,52 @@ export class ManagerManagedServiceWebEntry {
     if (this.closed || this.entries.get(key(entry.alias, entry.serviceId)) !== entry) throw unavailable()
     const viewKey = key(entry.alias, request.request.viewId)
     let view = this.views.get(viewKey)
+    let finishIssue = () => {}
     if (request.request.action === 'issue') {
       if (this.usedViews.has(viewKey) || this.usedViews.size >= 4_096) throw unavailable()
       this.usedViews.add(viewKey)
-      view = { entry, publicViewId: request.request.viewId, ownerViewId: this.input.allocateId() }
+      const issueSettled = new Promise<void>(resolve => finishIssue = resolve)
+      view = { entry, publicViewId: request.request.viewId, ownerViewId: this.input.allocateId(), issueSettled }
       this.views.set(viewKey, view)
     } else {
       if (!view || view.entry !== entry) {
         return { requestId: request.requestId, ok: true, value: { status: 'unavailable', reason: 'cancelled' } }
       }
-      this.views.delete(viewKey)
+      return await this.dispatchBrowserRetirement(viewKey, view, request.requestId)
     }
-    const ownerRequestId = 'manager-console-' + randomBytes(16).toString('hex')
     try {
-      const result = this.input.sanitize(
-        await this.input.invoke(
-          this.envelope(entry, {
-            requestId: ownerRequestId,
-            operation: 'consoleBrowser',
-            serviceId: entry.serviceId,
-            binding: entry.parentBinding,
-            request: { ...request.request, viewId: view.ownerViewId },
-          }),
-          this.input.context.signal,
-        ),
-        ownerRequestId,
-      )
+      const ownerRequestId = 'manager-console-' + randomBytes(16).toString('hex')
+      let result: Record<string, unknown>
+      try {
+        result = this.input.sanitize(
+          await this.input.invoke(
+            this.envelope(entry, {
+              requestId: ownerRequestId,
+              operation: 'consoleBrowser',
+              serviceId: entry.serviceId,
+              binding: entry.parentBinding,
+              request: { ...request.request, viewId: view.ownerViewId },
+            }),
+            this.input.context.signal,
+          ),
+          ownerRequestId,
+        )
+      } finally {
+        finishIssue()
+      }
       this.input.assertCurrent()
       if (this.closed) throw unavailable()
-      if (result.ok === false) {
-        if (request.request.action === 'issue') throw unavailable()
-        return { ...result, requestId: request.requestId }
-      }
+      if (result.ok === false) throw unavailable()
       const value = object(result.value)
       if (
         value.status === 'unavailable' && exact(value, ['status', 'reason'])
         && typeof value.reason === 'string' && consoleReasons.has(value.reason)
       ) {
-        if (request.request.action === 'issue') this.views.delete(viewKey)
+        if (this.views.get(viewKey) === view) this.views.delete(viewKey)
         return { requestId: request.requestId, ok: true, value }
       }
       if (
-        request.request.action !== 'issue' || this.views.get(viewKey) !== view
+        this.views.get(viewKey) !== view || view.retirement !== undefined
         || !exact(value, ['status', 'binding', 'serviceGeneration', 'origin', 'url'])
         || value.status !== 'available' || !isDeepStrictEqual(value.binding, entry.parentBinding)
         || value.serviceGeneration !== entry.owner.serviceGeneration || typeof value.origin !== 'string'
@@ -329,18 +335,41 @@ export class ManagerManagedServiceWebEntry {
       ) throw unavailable()
       return { requestId: request.requestId, ok: true, value }
     } catch (error) {
-      if (request.request.action === 'issue') {
-        this.views.delete(viewKey)
-        if (!await this.retireView(view).catch(() => false)) {
-          this.uncertain = true
-          this.input.onUncertain()
-        }
+      finishIssue()
+      const retired = await this.retireView(view).catch(() => false)
+      if (retired && this.views.get(viewKey) === view) this.views.delete(viewKey)
+      if (!retired) {
+        this.uncertain = true
+        this.input.onUncertain()
       }
       throw error
     }
   }
 
-  private async retireView(view: View): Promise<boolean> {
+  private async dispatchBrowserRetirement(viewKey: string, view: View, requestId: string) {
+    let confirmed = false
+    try {
+      confirmed = await this.retireView(view)
+      if (!confirmed) throw unavailable()
+      if (this.views.get(viewKey) === view) this.views.delete(viewKey)
+      this.input.assertCurrent()
+      if (this.closed) throw unavailable()
+      return { requestId, ok: true, value: { status: 'unavailable', reason: 'cancelled' } }
+    } catch (error) {
+      if (!confirmed) {
+        this.uncertain = true
+        this.input.onUncertain()
+      }
+      throw error
+    }
+  }
+
+  private retireView(view: View): Promise<boolean> {
+    return view.retirement ??= this.performRetireView(view)
+  }
+
+  private async performRetireView(view: View): Promise<boolean> {
+    await view.issueSettled
     if (this.input.context.signal.aborted) return true
     const requestId = 'manager-console-retire-' + randomBytes(16).toString('hex')
     const result = this.input.sanitize(

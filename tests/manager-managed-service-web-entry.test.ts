@@ -143,6 +143,247 @@ describe('standalone Manager managed web entry', () => {
     f.bridge.dispose()
   })
 
+  it.each(['lost', 'rejected'])('does not confirm renderer retirement when a console retirement is %s', async mode => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    const browser = (action: 'issue' | 'retire') =>
+      f.request(token, 'consoleBrowser', {
+        binding,
+        request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+      })
+    await f.bridge.channel.prepare(browser('issue'), context).dispatch()
+    f.handle.mockImplementationOnce(async raw => {
+      if (mode === 'lost') throw new Error('retirement reply lost')
+      return { requestId: JSON.parse(raw).requestId, ok: false, code: 'owner-unavailable' }
+    })
+    await expect(f.bridge.channel.prepare(browser('retire'), context).dispatch()).rejects.toThrow()
+    f.bridge.retire(context)
+    expect(await f.bridge.waitForRetirement(context.rendererId)).toBe(false)
+    f.bridge.dispose()
+  })
+
+  it('waits for an in-flight console retirement when its renderer closes', async () => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    const browser = (action: 'issue' | 'retire') =>
+      f.request(token, 'consoleBrowser', {
+        binding,
+        request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+      })
+    await f.bridge.channel.prepare(browser('issue'), context).dispatch()
+    let release: (() => void) | undefined
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return await new Promise(resolve => {
+        release = () =>
+          resolve({
+            requestId: input.requestId,
+            ok: true,
+            value: { status: 'unavailable', reason: 'cancelled' },
+          })
+      })
+    })
+    const pending = f.bridge.channel.prepare(browser('retire'), context).dispatch().then(() => true, () => false)
+    try {
+      await vi.waitFor(() => expect(release).toBeDefined())
+      f.bridge.retire(context)
+      let finished = false
+      const retirement = f.bridge.waitForRetirement(context.rendererId).then(result => {
+        finished = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(finished).toBe(false)
+      release!()
+      expect(await retirement).toBe(true)
+      await pending
+      expect(
+        f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
+          call.operation === 'consoleBrowser' && call.request.action === 'retire'
+        ),
+      ).toHaveLength(1)
+    } finally {
+      release?.()
+      await pending
+      f.bridge.dispose()
+    }
+  })
+
+  it('retires an in-flight console issue before confirming renderer closure', async () => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    let release: (() => void) | undefined
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return await new Promise(resolve => {
+        release = () =>
+          resolve({
+            requestId: input.requestId,
+            ok: true,
+            value: {
+              status: 'available',
+              binding,
+              serviceGeneration: 'service-1',
+              origin: consoleOrigin,
+              url: consoleOrigin + '/auth/browser?ticket=' + ticket,
+            },
+          })
+      })
+    })
+    const issue = f.request(token, 'consoleBrowser', {
+      binding,
+      request: { action: 'issue', viewId: 'view-1', serviceGeneration: 'service-1' },
+    })
+    const pending = f.bridge.channel.prepare(issue, context).dispatch().then(() => true, () => false)
+    try {
+      await vi.waitFor(() => expect(release).toBeDefined())
+      f.bridge.retire(context)
+      let finished = false
+      const retirement = f.bridge.waitForRetirement(context.rendererId).then(result => {
+        finished = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(finished).toBe(false)
+      expect(
+        f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
+          call.operation === 'consoleBrowser' && call.request.action === 'retire'
+        ),
+      ).toHaveLength(0)
+      release!()
+      expect(await retirement).toBe(true)
+      expect(await pending).toBe(false)
+      expect(
+        f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
+          call.operation === 'consoleBrowser' && call.request.action === 'retire'
+        ),
+      ).toHaveLength(1)
+    } finally {
+      release?.()
+      await pending
+      f.bridge.dispose()
+    }
+  })
+
+  it('waits for an in-flight issue before an explicit console retirement', async () => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    let release: (() => void) | undefined
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return await new Promise(resolve => {
+        release = () =>
+          resolve({
+            requestId: input.requestId,
+            ok: true,
+            value: {
+              status: 'available',
+              binding,
+              serviceGeneration: 'service-1',
+              origin: consoleOrigin,
+              url: consoleOrigin + '/auth/browser?ticket=' + ticket,
+            },
+          })
+      })
+    })
+    const browser = (action: 'issue' | 'retire') =>
+      f.request(token, 'consoleBrowser', {
+        binding,
+        request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+      })
+    const issue = f.bridge.channel.prepare(browser('issue'), context).dispatch().then(() => true, () => false)
+    let retirement: Promise<unknown> | undefined
+    try {
+      await vi.waitFor(() => expect(release).toBeDefined())
+      retirement = f.bridge.channel.prepare(browser('retire'), context).dispatch()
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(
+        f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
+          call.operation === 'consoleBrowser' && call.request.action === 'retire'
+        ),
+      ).toHaveLength(0)
+      release!()
+      expect(await retirement).toMatchObject({ ok: true, value: { status: 'unavailable', reason: 'cancelled' } })
+      expect(await issue).toBe(false)
+      expect(
+        f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
+          call.operation === 'consoleBrowser' && call.request.action === 'retire'
+        ),
+      ).toHaveLength(1)
+    } finally {
+      release?.()
+      await retirement?.catch(() => undefined)
+      await issue
+      f.bridge.retire(context)
+      await f.bridge.waitForRetirement(context.rendererId)
+      f.bridge.dispose()
+    }
+  })
+
+  it('waits for cleanup after a rejected console issue when its renderer closes', async () => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return {
+        requestId: input.requestId,
+        ok: true,
+        value: {
+          status: 'available',
+          binding,
+          serviceGeneration: 'service-1',
+          origin: 'http://127.0.0.1:9',
+          url: 'http://127.0.0.1:9/',
+        },
+      }
+    })
+    let release: (() => void) | undefined
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return await new Promise(resolve => {
+        release = () =>
+          resolve({
+            requestId: input.requestId,
+            ok: true,
+            value: { status: 'unavailable', reason: 'cancelled' },
+          })
+      })
+    })
+    const issue = f.request(token, 'consoleBrowser', {
+      binding,
+      request: { action: 'issue', viewId: 'view-1', serviceGeneration: 'service-1' },
+    })
+    const pending = f.bridge.channel.prepare(issue, context).dispatch().then(() => true, () => false)
+    try {
+      await vi.waitFor(() => expect(release).toBeDefined())
+      f.bridge.retire(context)
+      let finished = false
+      const retirement = f.bridge.waitForRetirement(context.rendererId).then(result => {
+        finished = true
+        return result
+      })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(finished).toBe(false)
+      release!()
+      expect(await retirement).toBe(true)
+      expect(await pending).toBe(false)
+    } finally {
+      release?.()
+      await pending
+      f.bridge.dispose()
+    }
+  })
+
   it('cancels only the requesting renderer and drains pending reads at retirement', async () => {
     const f = fixture()
     const pending = new Map<string, (value: Record<string, unknown>) => void>()
