@@ -5,12 +5,14 @@ import {
   ChannelConversationStore,
 } from './channel-conversation-store.js'
 import { bindingIdentity, eventThread, sameConversation } from './channel-conversation-refs.js'
+import { removeChannelIdlePriorityGrant } from './channel-idle-priority-revoke.js'
 
 export function channelBindingAction(
   store: ChannelConversationStore,
   action: 'archive' | 'restore' | 'unbind',
   id: string,
   isMigrating: (sessionId: string) => boolean,
+  bindingChanged?: (id: string) => void,
 ) {
   return store.mutate(state => {
     const binding = state.bindings[id]
@@ -18,6 +20,8 @@ export function channelBindingAction(
     if (isMigrating(binding.sessionId) || ChannelConversationStore.logicalSourceFenced(state, binding.sessionId)) {
       throw new Error('CONTINUATION_PENDING')
     }
+    if (action !== 'restore') removeChannelIdlePriorityGrant(state.logicalContinuations, id)
+    bindingChanged?.(id)
     if (action === 'unbind') delete state.bindings[id]
     else binding.state = action === 'archive' ? 'archived' : 'active'
     for (const job of Object.values(state.jobs)) {

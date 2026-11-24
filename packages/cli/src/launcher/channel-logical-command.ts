@@ -22,6 +22,8 @@ import { abandonChannelLogicalContinuation } from './channel-logical-abandon.js'
 import { channelDesktopAuthorization } from './channel-desktop-authorization.js'
 import type { DesktopChannelGrants } from './desktop-channel-grants.js'
 import { jointHistorySourceAllowed } from './channel-joint-history.js'
+import { channelIdlePriorityCommand } from './channel-idle-priority-command.js'
+import type { ChannelIdlePriorityGrant } from './channel-idle-priority-grant.js'
 
 function conversationScope(state: ChannelConversationState, appId: string, profileId: string, event: ChannelEventRef) {
   const matches = Object.values(state.bindings).filter(binding =>
@@ -74,8 +76,12 @@ export async function channelLogicalCommand(input: {
   recordId: string
   argument: string
   desktopGrants?: DesktopChannelGrants
+  idlePriorityOffers?: Map<string, { grant: ChannelIdlePriorityGrant; expiresAt: number }>
 }) {
   const parts = input.argument.trim().split(/\s+/u)
+  if (['auto', 'auto-off', 'auto-suggest'].includes(parts[0] ?? '')) {
+    return channelIdlePriorityCommand({ ...input, parts })
+  }
   if (parts.length === 2 && parts[0] === 'status') {
     const intent = input.store.snapshot().logicalContinuations?.intents[parts[1]!]
     if (!intent || !isDeepStrictEqual(intent.actor, channelLogicalActor(input.event))) return '未找到此操作。'

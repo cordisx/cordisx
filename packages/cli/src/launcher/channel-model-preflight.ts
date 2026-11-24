@@ -1,4 +1,4 @@
-import { channelModelConnectivity } from './channel-model-connectivity.js'
+import { channelModelConnectivity, channelModelConnectivityEvidence } from './channel-model-connectivity.js'
 import type { ChannelMemoryModelConnection } from './channel-user-memory-model.js'
 import type { AgentBridge } from './agent-bridge.js'
 import { consumeChannelAttachmentTicket } from './channel-inbound-resources.js'
@@ -67,5 +67,24 @@ export async function channelModelPreflight(
     throw error
   } finally {
     if (timer) clearTimeout(timer)
+  }
+}
+
+export function channelModelPriorityProbes(input: {
+  bridge: () => AgentBridge | undefined
+  cwd: string
+  memoryConnect?: ChannelMemoryModelConnection | undefined
+}) {
+  return {
+    preflight: (
+      candidate: { providerId: string; model: string },
+      signal?: AbortSignal,
+      before?: () => Promise<boolean>,
+    ) => channelModelPreflight(input.bridge(), input.cwd, candidate, signal, input.memoryConnect, before),
+    evidence: (
+      candidate: { providerId: string; model: string },
+      signal?: AbortSignal,
+      before?: () => Promise<boolean>,
+    ) => channelModelConnectivityEvidence(input.memoryConnect, candidate, signal, 15_000, before),
   }
 }

@@ -9,6 +9,7 @@ import type { ContinuationConfiguration } from './channel-continuation-config.js
 import type { LogicalHistoryCategory } from './logical-continuation-history.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { type ChannelIdlePriorityGrant, parseChannelIdlePriorityGrants } from './channel-idle-priority-grant.js'
 
 export type LogicalContinuationRequest = ConversationContinuationRequestV1
 /** The owning Host constructs this from a verified user action or authenticated Channel dispatch. */
@@ -46,6 +47,7 @@ export interface LogicalContinuationState {
   relations: Record<string, LogicalContinuationRelation>
   preferences?: Record<string, ConversationContinuationPreferenceV1>
   preferenceRevisions?: Record<string, number>
+  idlePriorityGrants?: Record<string, ChannelIdlePriorityGrant>
 }
 /** Call during store recovery before any dispatch; an interrupted effect is never replayed. */
 export function recoverLogicalContinuations(state: LogicalContinuationState): void {
@@ -239,10 +241,12 @@ function relation(
 /** Validate durable intent and relation pairs before an owning store resumes dispatch. */
 export function parseLogicalContinuationState(value: unknown): LogicalContinuationState {
   if (
-    !record(value) || !exact(value, ['revision', 'intents', 'relations', 'preferences', 'preferenceRevisions'])
+    !record(value)
+    || !exact(value, ['revision', 'intents', 'relations', 'preferences', 'preferenceRevisions', 'idlePriorityGrants'])
     || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0
     || !record(value.intents) || !record(value.relations)
   ) throw new Error('INVALID_LOGICAL_CONTINUATION_STORE')
+  if (value.idlePriorityGrants !== undefined) parseChannelIdlePriorityGrants(value.idlePriorityGrants)
   if (value.preferenceRevisions !== undefined) {
     if (!record(value.preferenceRevisions)) throw new Error('INVALID_LOGICAL_CONTINUATION_STORE')
     for (const [key, revision] of Object.entries(value.preferenceRevisions)) {

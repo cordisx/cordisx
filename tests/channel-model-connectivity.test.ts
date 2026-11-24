@@ -105,8 +105,10 @@ it('distinguishes a completed real probe from unsupported or malformed responses
     dispose: () => {},
   })
   expect(await channelModelConnectivityEvidence(undefined, candidate)).toBe('inconclusive')
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed' }))))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'model' }))))
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'other' }))))
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
   vi.stubGlobal('fetch', vi.fn(async () => new Response('not json')))
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
   vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 503 })))
@@ -153,5 +155,18 @@ it('does not treat an incomplete connection setup or a failed authority check as
   const fetch = vi.fn()
   vi.stubGlobal('fetch', fetch)
   expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 1000, denied)).toBe('inconclusive')
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('bounds a stalled authorization recheck without sending a probe or declaring service failure', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose: () => {},
+  })
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivityEvidence(connect, candidate, undefined, 20, () => new Promise(() => {})))
+    .toBe('inconclusive')
   expect(fetch).not.toHaveBeenCalled()
 })

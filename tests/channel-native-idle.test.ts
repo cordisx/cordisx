@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { channelNativeIdle } from '../packages/cli/src/launcher/channel-native-idle.js'
+import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
 
 describe('Channel native idle readback', () => {
   it('accepts an error only if the latest turn failed and the thread remains in error', async () => {
@@ -26,5 +27,13 @@ describe('Channel native idle readback', () => {
       .mockImplementationOnce(async () => ({ data: [{ id: 'turn', status: 'failed' }] }))
       .mockImplementationOnce(async () => ({ thread: { id: 'chat', status: { type: 'active' } } }))
     expect(await channelNativeIdle({ nativeRequest }, 'chat')).toBeUndefined()
+  })
+  it('requires an observed idle state for automatic migration, while retaining legacy unloaded behavior', async () => {
+    const nativeRequest = vi.fn(async () => ({ thread: { id: 'chat', status: { type: 'notLoaded' } } }))
+    const native = new ChannelNativeSessions({ bridge: () => undefined, cwd: '/tmp', nativeRequest })
+    expect(await native.idle('chat')).toBe(true)
+    expect(await native.idle('chat', true)).toBe(false)
+    nativeRequest.mockResolvedValue({ thread: { id: 'chat', status: { type: 'idle' } } })
+    expect(await native.idle('chat', true)).toBe(true)
   })
 })

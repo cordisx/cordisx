@@ -32,6 +32,11 @@ export async function startChannelLogicalContinuation(input: {
   event: ChannelEventRef
   request: LogicalContinuationRequest
   preference?: ConversationContinuationPreferenceV1 | null
+  automatic?: {
+    selection: ChannelTaskPatch
+    admitted(state: ChannelConversationState): boolean
+    consume(state: ChannelConversationState): boolean
+  }
 }) {
   const { store, native, claims, fence, appId, profileId, event, request } = input
   const source = request.source.sessionId
@@ -80,6 +85,7 @@ export async function startChannelLogicalContinuation(input: {
         }) ?? null
         : null,
     ))
+    && (!input.automatic || input.automatic.admitted(state))
     && !channelTaskFields(target).some(command => channelCommandDenied(state.policy, event, command))
     && channelTaskChangeAllowed(state.taskConfig, state.policy, event, target, { ...observedSelection, ...target })
   const control = new LogicalContinuationControl(channelLogicalTransactionStore(store), {
@@ -87,9 +93,11 @@ export async function startChannelLogicalContinuation(input: {
     admitted: (root, caller) => isDeepStrictEqual(caller, actor) && admitted(root),
     bind: (root, caller, _request, destination) =>
       isDeepStrictEqual(caller, actor)
-      && bindChannelLogicalContinuation(root, event, profileId, source, destination.sessionId, request.target),
+      && bindChannelLogicalContinuation(root, event, profileId, source, destination.sessionId, request.target)
+      && (!input.automatic || input.automatic.consume(root)),
     preflight: async caller => {
       if (!isDeepStrictEqual(caller, actor) || !scopeAdmitted(store.snapshot())) return undefined
+      if (input.automatic && !await native.idle(source, true)) return undefined
       const catalog = object(await native.modelOperation('list', {})).providers
       if (
         !Array.isArray(catalog)
@@ -99,6 +107,7 @@ export async function startChannelLogicalContinuation(input: {
         )
       ) return undefined
       const selection = await native.taskSelection(source)
+      if (input.automatic && !isDeepStrictEqual(input.automatic.selection, selection)) return undefined
       if (observedSelection && !isDeepStrictEqual(observedSelection, selection)) return undefined
       observedSelection ??= selection
       if (request.mode === 'linked' && request.handoffConsent === 'checkpoint') {
@@ -112,6 +121,7 @@ export async function startChannelLogicalContinuation(input: {
         !sourceConfiguration || selection.providerId !== sourceConfiguration.providerId
         || selection.model !== sourceConfiguration.model
         || selection.effort !== undefined && selection.effort !== sourceConfiguration.execution.effort
+        || input.automatic && selection.fast !== (sourceConfiguration.serviceTier === 'priority')
       ) return undefined
       if (
         request.mode === 'fork' && (request.target.providerId !== sourceConfiguration.providerId
