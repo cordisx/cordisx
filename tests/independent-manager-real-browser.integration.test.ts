@@ -198,6 +198,39 @@ it.skipIf(chrome === undefined)(
       await ready(first)
       expect(await first.evaluate('location.hash')).toBe('')
       expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-entry-attempt')")).toBeNull()
+      // Browser annotations inject their own style element into a shadow root.
+      // Allow that UI while keeping inline script and style attributes blocked.
+      const annotationPolicy = await first.evaluate(`(() => {
+        const host = document.createElement('div')
+        const shadow = host.attachShadow({ mode: 'open' })
+        const style = document.createElement('style')
+        style.textContent = '.annotation-policy-probe { color: rgb(12, 34, 56) }'
+        const box = document.createElement('div')
+        box.className = 'annotation-policy-probe'
+        shadow.append(style, box)
+        const attribute = document.createElement('div')
+        attribute.setAttribute('style', 'position: fixed')
+        const script = document.createElement('script')
+        script.textContent = 'globalThis.__annotationInlineScriptRan = true'
+        document.body.append(host, attribute, script)
+        const result = {
+          styleSheets: shadow.styleSheets.length,
+          color: getComputedStyle(box).color,
+          attributePosition: getComputedStyle(attribute).position,
+          scriptRan: globalThis.__annotationInlineScriptRan === true,
+        }
+        host.remove()
+        attribute.remove()
+        script.remove()
+        delete globalThis.__annotationInlineScriptRan
+        return result
+      })()`)
+      expect(annotationPolicy).toEqual({
+        styleSheets: 1,
+        color: 'rgb(12, 34, 56)',
+        attributePosition: 'static',
+        scriptRan: false,
+      })
       const priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(priorResume).toMatch(/^[a-f0-9]{64}$/u)
       const migrationComplete = async () => {

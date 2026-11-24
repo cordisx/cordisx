@@ -238,9 +238,10 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     response.setHeader('referrer-policy', 'no-referrer')
     response.setHeader('x-content-type-options', 'nosniff')
     response.setHeader('x-frame-options', 'DENY')
+    // Browser annotation tools inject style elements; inline scripts and style attributes stay restricted.
     response.setHeader(
       'content-security-policy',
-      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'none'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; worker-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     )
     if (request.headers.host !== authority) return json(response, 403, { error: 'INVALID_HOST' })
     const origin = request.headers.origin

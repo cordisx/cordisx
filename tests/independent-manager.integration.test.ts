@@ -28,6 +28,33 @@ import { openPluginManagementService } from '../packages/cli/src/management/serv
 const exec = promisify(execFile)
 
 describe('independent manager production boundaries', () => {
+  it('allows annotation style elements without allowing inline scripts or style attributes', async () => {
+    const web = await startManagerWeb(
+      {
+        appId: 'codex',
+        profileId: 'fixture',
+        generation: 'generation',
+        isCurrent: async () => true,
+        request: async () => ({ status: 'unavailable' }),
+      } as unknown as Parameters<typeof startManagerWeb>[0],
+    )
+    try {
+      const response = await fetch(new URL(web.url).origin)
+      const directives = new Map(
+        response.headers.get('content-security-policy')!.split(';').map(part => {
+          const [name, ...values] = part.trim().split(/\s+/u)
+          return [name, values.join(' ')]
+        }),
+      )
+      expect(directives.get('style-src')).toBe("'self'")
+      expect(directives.get('style-src-elem')).toBe("'self' 'unsafe-inline'")
+      expect(directives.get('script-src')).toBe("'self'")
+      expect(directives.get('frame-ancestors')).toBe("'none'")
+    } finally {
+      await web.close()
+    }
+  })
+
   it('never forwards model-service saves to an older owner without the safe-write handshake', async () => {
     let writes = 0
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-old-owner-'))

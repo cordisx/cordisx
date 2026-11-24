@@ -95,8 +95,9 @@ it('connects the independent manager to a real service owner without Channel or 
       const policy = response.headers.get('content-security-policy')!
       expect(policy).toContain("script-src 'self'")
       expect(policy).toContain("style-src 'self'")
+      expect(policy).toContain("style-src-elem 'self' 'unsafe-inline'")
       expect(policy).toContain("img-src 'self' data:")
-      expect(policy).not.toContain('unsafe-inline')
+      expect(policy).not.toMatch(/(?:script-src|style-src)\s+[^;]*'unsafe-inline'/u)
     }
     for (
       const [route, file] of [
