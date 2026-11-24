@@ -28,6 +28,8 @@ export interface ChannelIdlePriorityGrant {
   readonly selection: ChannelTaskPatch
   readonly target: { readonly providerId: string; readonly model: string }
   readonly fallbackTargets?: readonly { readonly providerId: string; readonly model: string }[]
+  /** Group-only, same-provider policy; a personal grant never gains group authority. */
+  readonly groupScope?: true
   readonly expiresAt: number
 }
 
@@ -47,6 +49,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       'selection',
       'target',
       'fallbackTargets',
+      'groupScope',
       'expiresAt',
     ])
     channelExact(source, ['hostId', 'appId', 'profileId', 'sessionId'])
@@ -74,6 +77,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       || !Number.isSafeInteger(row.taskConfigRevision) || Number(row.taskConfigRevision) < 0
       || !Number.isSafeInteger(row.policyRevision) || Number(row.policyRevision) < 0
       || !Number.isSafeInteger(row.expiresAt) || Number(row.expiresAt) <= 0
+      || row.groupScope !== undefined && row.groupScope !== true
     ) throw new Error('INVALID_IDLE_PRIORITY_GRANT')
     grants[key] = {
       bindingId: key,
@@ -86,6 +90,7 @@ export function parseChannelIdlePriorityGrants(value: unknown): Record<string, C
       selection,
       target: target as unknown as ChannelIdlePriorityGrant['target'],
       ...(fallbackTargets ? { fallbackTargets } : {}),
+      ...(row.groupScope === true ? { groupScope: true as const } : {}),
       expiresAt: Number(row.expiresAt),
     }
   }
@@ -120,7 +125,7 @@ export function channelIdleGrantCurrent(
       return false
     }
   }
-  return grant.expiresAt > Date.now() && state.modelPriority.revision === grant.priorityRevision
+  return !grant.groupScope && grant.expiresAt > Date.now() && state.modelPriority.revision === grant.priorityRevision
     && state.taskConfigRevision === grant.taskConfigRevision && state.policyRevision === grant.policyRevision
     && index >= 0 && ordered
     && (grant.fallbackTargets !== undefined || isDeepStrictEqual(candidates[index + 1], target))

@@ -1016,6 +1016,21 @@ interrupted, and an earlier failed or uncertain turn is never replayed. If nativ
 target creation is uncertain, the input remains fenced for administrator review.
 See [Idle Channel model priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v1.md).
 
+In a group with one active binding, an administrator with `allow-user`,
+`continue-provider` and the applicable model permissions can request a
+same-provider rule with `/continue-provider group-auto-suggest first one`.
+The returned disclosure lists the compatible later models and a one-time
+confirmation command. The rule lasts 24 hours, applies to eligible senders in
+that exact group and can be revoked with `/continue-provider group-auto-off`.
+The administrator must have model-change permission; each queued sender needs
+dispatch permission and explicit model denies remain effective. The current model stays selected when healthy or when its
+probe is inconclusive. After confirmed unavailability, the Host probes the
+disclosed same-provider models in order and changes the existing idle native
+conversation only after durable reservation and confirmation. An uncertain
+selection blocks the input for administrator reconciliation. This rule does not
+transfer history to another provider and stops at a cross-provider candidate.
+See [Group Channel idle model priority v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/group-idle-priority-v2.md).
+
 To authorize one idle continuation across several later candidates in their
 configured order, request a disclosure instead with:
 

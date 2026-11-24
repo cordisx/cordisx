@@ -221,6 +221,28 @@ export function channelTaskChangeAllowed(
   })
 }
 
+/** A group rule grants no sender model-change authority, but cannot override explicit value denials. */
+export function channelTaskChangeDenied(
+  config: ChannelTaskConfig,
+  policy: ChannelConversationPolicy,
+  event: ChannelEventRef,
+  patch: ChannelTaskPatch,
+  selection: ChannelTaskPatch,
+): boolean {
+  return Object.keys(patch).some(field =>
+    config.permissions.some(rule =>
+      rule.effect === 'deny' && (!rule.fields || rule.fields.includes(field as keyof ChannelTaskPatch))
+      && channelTaskScopeMatches(rule, policy, event)
+      && (!rule.providerIds || !!selection.providerId && rule.providerIds.includes(selection.providerId))
+      && (!rule.models
+        || rule.models.some(model => model.providerId === selection.providerId && model.model === selection.model))
+      && (!rule.efforts || !!selection.effort && rule.efforts.includes(selection.effort))
+      && (!rule.fastModes || selection.fast !== undefined && rule.fastModes.includes(selection.fast))
+      && (!rule.projectIds || !!selection.projectId && rule.projectIds.includes(selection.projectId))
+    )
+  )
+}
+
 /** Model authority may still use a legacy command deny, but never a coarse allow as a field grant. */
 export function channelTaskFields(patch: ChannelTaskPatch): readonly string[] {
   return Object.keys(patch).map(field =>
