@@ -986,6 +986,7 @@ export class ChannelNativeSessions {
     readonly state: 'running' | 'completed' | 'failed'
     readonly text?: string
     readonly code?: string
+    readonly unverifiedFinal?: true
   }> {
     const turn = await codexTurn(this.input, sessionId, turnId)
     if (!turn || ['inProgress', 'running'].includes(String(turn.status))) return { state: 'running' }

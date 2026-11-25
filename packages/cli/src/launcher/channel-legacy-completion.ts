@@ -4,20 +4,27 @@ import { JsonLineRpcError } from '../providers/json-line-rpc.js'
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
-type Completion = { state: 'completed' | 'failed'; text?: string; code?: string }
+type Completion = { state: 'completed' | 'failed'; text?: string; code?: string; unverifiedFinal?: true }
 
-/** Only use an unphased answer when the complete turn leaves no commentary ambiguity. */
+/** Keep the legacy unphased fallback distinct from a native final-answer marker. */
 function completionFromItems(items: readonly Record<string, unknown>[], complete: boolean): Completion {
   const finals = items
     .filter(item => item.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.text === 'string')
     .map(item => String(item.text))
   if (finals.length) return { state: 'completed', text: finals.join('\n') }
   const messages = items.filter(item => item.type === 'agentMessage')
-  const candidate = messages[0]
+  const candidate = messages.at(-1)
   if (
-    complete && messages.length === 1 && candidate !== undefined && candidate === items.at(-1)
+    complete && candidate !== undefined && candidate === items.at(-1)
     && candidate.phase == null && typeof candidate.text === 'string' && candidate.text.trim().length > 0
-  ) return { state: 'completed', text: candidate.text }
+    && messages.every(item => item.phase == null || item.phase === 'commentary')
+  ) {
+    return {
+      state: 'completed',
+      text: candidate.text,
+      unverifiedFinal: true,
+    }
+  }
   return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
 }
 
