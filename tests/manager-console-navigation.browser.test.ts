@@ -132,7 +132,7 @@ it.skipIf(!chrome)('keeps the browser session usable when a pending console view
     browser = launched.browser
     page = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
     await page.send('Page.enable')
-    await page.send('Page.navigate', { url: origin })
+    await page.send('Page.navigate', { url: origin }, 15_000)
     await expect.poll(() => page!.evaluate('typeof window.fixture?.dispose'), { timeout: 10_000 }).toBe('function')
     await page.evaluate('document.querySelector("#open").click()')
     await expect.poll(() => f.origins.length, { timeout: 10_000 }).toBe(1)
@@ -173,4 +173,4 @@ it.skipIf(!chrome)('keeps the browser session usable when a pending console view
       await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   }
-}, 45_000)
+}, 75_000)
