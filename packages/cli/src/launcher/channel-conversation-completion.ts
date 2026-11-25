@@ -81,10 +81,7 @@ export async function finishChannelJob(
     return current.replyTarget
   })
   if (target && completion.text) {
-    const text = completion.unverifiedFinal
-      ? `本轮已结束，最后输出如下（无法确认是否为最终答复）：\n\n${completion.text}`
-      : completion.text
-    const receipt = await reply(job.id, event, text, target)
+    const receipt = await reply(job.id, event, completion.text, target)
     await store.mutate(state => {
       const current = state.jobs[job.id]!
       current.state = receipt === 'sent' || receipt === 'denied'

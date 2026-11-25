@@ -4,7 +4,7 @@ import { JsonLineRpcError } from '../providers/json-line-rpc.js'
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
-type Completion = { state: 'completed' | 'failed'; text?: string; code?: string; unverifiedFinal?: true }
+type Completion = { state: 'completed' | 'failed'; text?: string; code?: string }
 
 /** Keep the legacy unphased fallback distinct from a native final-answer marker. */
 function completionFromItems(items: readonly Record<string, unknown>[], complete: boolean): Completion {
@@ -21,17 +21,12 @@ function completionFromItems(items: readonly Record<string, unknown>[], complete
     return { state: 'completed', text: parts.join('\n') }
   }
   const messages = items.filter(item => item.type === 'agentMessage')
-  const candidate = messages.at(-1)
+  const candidate = messages[0]
   if (
-    candidate !== undefined && candidate === items.at(-1)
+    messages.length === 1 && candidate !== undefined && candidate === items.at(-1)
     && candidate.phase == null && typeof candidate.text === 'string' && candidate.text.trim().length > 0
-    && messages.every(item => item.phase == null || item.phase === 'commentary')
   ) {
-    return {
-      state: 'completed',
-      text: candidate.text,
-      unverifiedFinal: true,
-    }
+    return { state: 'completed', text: candidate.text }
   }
   return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
 }

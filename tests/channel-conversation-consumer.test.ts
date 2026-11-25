@@ -8,24 +8,6 @@ import { a, account, b, channel, fixture, message, settle } from './helpers/chan
 const commandGrant = { id: 'commands', action: 'command' as const, effect: 'allow' as const }
 
 describe('persistent Channel chat consumer', () => {
-  it('labels an unverified last output rather than presenting it as a confirmed final answer', async () => {
-    const f = await fixture()
-    await f.consumer.policySet({ enabled: true, autoReply: true }, 0)
-    await f.consumer.bind({ channel: channel(), mode: 'deliver', autoReply: true }, a)
-    f.native.completion.mockResolvedValue({ state: 'running' } as never)
-    await f.consumer.receive('inbox:unphased', message('om_unphased'), true)
-    await settle(f.consumer)
-    f.native.completion.mockResolvedValue({
-      state: 'completed',
-      text: 'The task is still in progress.',
-      unverifiedFinal: true,
-    } as never)
-    await settle(f.consumer)
-    expect(f.runtime.notifyOnce.mock.calls.map(([input]) => input.text)).toEqual([
-      '本轮已结束，最后输出如下（无法确认是否为最终答复）：\n\nThe task is still in progress.',
-    ])
-  })
-
   it('does not dispatch queued work until Desktop fence recovery is ready', async () => {
     const f = await fixture(undefined, false, true)
     await f.consumer.policySet({

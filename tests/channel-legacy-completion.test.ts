@@ -19,7 +19,6 @@ describe('Channel completion for unphased native messages', () => {
     await expect(legacyChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
       state: 'completed',
       text: 'reply',
-      unverifiedFinal: true,
     })
     expect(request).toHaveBeenCalledWith('thread/turns/list', {
       threadId: 'chat',
@@ -32,6 +31,7 @@ describe('Channel completion for unphased native messages', () => {
 
   it.each([
     ['explicit commentary', [agent('progress', 'commentary')]],
+    ['more than one assistant message', [agent('progress'), agent('reply')]],
     ['message followed by a tool call', [agent('progress'), { type: 'commandExecution' }]],
     ['empty message', [agent('  ')]],
     ['unknown phase', [agent('progress', 'other')]],
@@ -40,19 +40,6 @@ describe('Channel completion for unphased native messages', () => {
       state: 'failed',
       code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE',
     })
-  })
-
-  it('marks the trailing message of a completed unphased turn as unverified', async () => {
-    const request = readTurn([agent('progress'), { type: 'commandExecution' }, agent('reply')])
-    await expect(legacyChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
-      state: 'completed',
-      text: 'reply',
-      unverifiedFinal: true,
-    })
-    await expect(legacyChannelCompletion(readTurn([agent('progress'), agent('still working')]), 'chat', 'turn'))
-      .resolves.toEqual({ state: 'completed', text: 'still working', unverifiedFinal: true })
-    await expect(legacyChannelCompletion(readTurn([agent('progress'), agent('reply')], 'interrupted'), 'chat', 'turn'))
-      .resolves.toEqual({ state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' })
   })
 
   it('prefers explicit final answers and rejects incomplete or wrong turns', async () => {
@@ -114,7 +101,6 @@ describe('Channel completion for unphased native messages', () => {
     await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
       state: 'completed',
       text: 'reply',
-      unverifiedFinal: true,
     })
   })
 

@@ -768,12 +768,12 @@ while the turn runs. With forwarding disabled, completion reads only exact-turn
 status and does not fetch assistant items. Old pending turns without a captured
 opt-in are not converted into automatic replies. An already enqueued outbound
 message retains its durable receipt and cannot be unsent by a later toggle.
-For a completed turn, consecutive terminal messages marked as final are
-forwarded in order. If the phase is missing, a trailing assistant message from
-a fully read turn may be forwarded as the last output with an uncertainty label.
-It may be progress and does not establish that the user's goal is complete.
-Explicit commentary, messages followed by later items, summary views, and
-incomplete pagination remain unavailable for automatic delivery.
+For a completed turn, consecutive final messages are forwarded in order only
+when they end the fully read turn. If the provider omits message phases, the
+existing fallback accepts an unphased message only when the whole exact turn
+was read, it is the sole assistant message, and it is the last item. Explicit
+commentary, multiple unphased messages, later items, summary views, and incomplete
+or malformed pagination remain unavailable for automatic delivery.
 
 The Host “Messages and commands” form exposes [reply policy v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/reply-routing-v2.md).
 Set the profile default, its fallback, and optional platform/account/tenant/
@@ -812,9 +812,8 @@ still duplicate the final. Automatic receipt-linked suppression needs a Protocol
 owner contract before implementation; the Host does not infer intent from text
 or suppress a final merely because any manual send exists.
 
-Private reasoning, tool output, and explicitly marked commentary are not
-indiscriminately forwarded. Unphased output remains uncertain as described
-above. Background notification requires
+Only agent-selected outward text is sent; private reasoning, tool output, and
+commentary are not indiscriminately forwarded. Background notification requires
 a supported lifecycle to return the result to an active authorized turn. Prompt
 guidance alone creates neither a scheduler nor a guaranteed wakeup; no new
 background-result integration is implemented here.
