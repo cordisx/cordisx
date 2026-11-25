@@ -136,6 +136,7 @@ function StartingManager({ document, state, reportRoute }: {
           standaloneMode
           workspaceMode={false}
           actionsEnabled={false}
+          unresolvedTitle={zh ? '页面' : 'Page'}
         />
       }
     >

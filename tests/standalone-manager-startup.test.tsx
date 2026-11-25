@@ -3,6 +3,8 @@ import { expect, it, vi } from 'vitest'
 import { createStandaloneStartup } from '../packages/cli/src/independent-manager/standalone-startup.js'
 import { installStandaloneManager } from '../packages/cli/src/renderer/manager/install-standalone.js'
 import { HostManagerNavigationController } from '../packages/cli/src/renderer/manager/navigation-controller.js'
+import { writeStandaloneManagerRoute } from '../packages/cli/src/renderer/manager/model/standalone-route-storage.js'
+import type { ManagerRoute } from '../packages/cli/src/renderer/manager/model/routes.js'
 import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 import { modelProviderCopy } from '../packages/cli/src/renderer/model-provider-copy.js'
 import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
@@ -121,6 +123,45 @@ it('prompts for a refresh when an idle interrupted connection can be recovered',
       startup.unavailable('refresh')
     })
     expect(fixture.element('[data-cordisx-manager-startup] p[role=status]').textContent).toContain('刷新页面重试')
+  } finally {
+    await act(async () => startup?.dispose())
+    await fixture.dispose()
+  }
+})
+
+it.each(
+  [
+    {
+      locale: 'zh-CN',
+      label: '页面',
+      route: { kind: 'manager-content', id: 'example:manager', reference: { id: 'root' } },
+      identifier: 'example:manager',
+    },
+    {
+      locale: 'en',
+      label: 'Page',
+      route: { kind: 'plugin', pluginId: 'example-plugin', page: 'config' },
+      identifier: 'example-plugin',
+    },
+  ] as const,
+)('does not expose an unresolved route while starting in $locale', async ({ locale, label, route, identifier }) => {
+  const fixture = reactManagerFixture()
+  fixture.document.documentElement.lang = locale
+  writeStandaloneManagerRoute(fixture.dom.window.sessionStorage, route)
+  let startup: ReturnType<typeof createStandaloneStartup> | undefined
+  let adopted: ManagerRoute | undefined
+  try {
+    await act(async () => {
+      startup = createStandaloneStartup(fixture.document)
+    })
+    const heading = fixture.element('[data-cordisx-manager-startup] .cxr-heading')
+    expect(heading.textContent).toContain(label)
+    expect(heading.textContent).not.toContain(identifier)
+    await act(async () => {
+      startup!.stage(next => adopted = next)
+      expect(startup!.connected()).toBe(true)
+    })
+    expect(adopted).toEqual(route)
   } finally {
     await act(async () => startup?.dispose())
     await fixture.dispose()

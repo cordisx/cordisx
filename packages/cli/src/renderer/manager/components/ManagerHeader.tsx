@@ -13,18 +13,21 @@ import type { useManagerRouter } from '../hooks/useManagerRouter.js'
 import type { ManagerRoute } from '../model/routes.js'
 import type { ModelServicesSecondaryPage } from '../pages/model-catalog/ModelTransferPages.js'
 
-function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
+function title(route: ManagerRoute, snapshot: ManagerSnapshot, unresolvedTitle?: string): string {
   const locale = snapshot.localization.locale
-  if (route.kind === 'plugin') return snapshot.plugins.find(item => item.id === route.pluginId)?.name ?? route.pluginId
+  if (route.kind === 'plugin') {
+    return snapshot.plugins.find(item => item.id === route.pluginId)?.name ?? unresolvedTitle ?? route.pluginId
+  }
   if (route.kind === 'plugin-bundle') {
-    return snapshot.pluginBundles?.bundles.find(item => item.id === route.bundleId)?.name ?? route.bundleId
+    return snapshot.pluginBundles?.bundles.find(item => item.id === route.bundleId)?.name ?? unresolvedTitle
+      ?? route.bundleId
   }
   if (route.kind === 'permission') return projectPermissionCapabilityName(route.capability, locale)
   if (route.kind === 'extension-point') {
     return snapshot.extensionPoints?.points.find(item => item.id === route.pointId)?.titleProjection.text
-      ?? route.pointId
+      ?? unresolvedTitle ?? route.pointId
   }
-  if (route.kind === 'route' || route.kind === 'page') return route.qualifiedId
+  if (route.kind === 'route' || route.kind === 'page') return unresolvedTitle ?? route.qualifiedId
   if (route.kind === 'marketplace-plugin') return productLocale(locale) === 'zh-CN' ? '插件详情' : 'Plugin details'
   if (route.kind === 'marketplace-source-edit') {
     return productLocale(locale) === 'zh-CN'
@@ -47,7 +50,8 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
       : 'New chat defaults'
   }
   if (route.kind === 'manager-content') {
-    return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
+    return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? unresolvedTitle
+      ?? route.id
   }
   const keys = {
     plugins: 'manager.nav.plugins',
@@ -243,6 +247,7 @@ export function ManagerHeader({
   setHeaderActionsSeat,
   onClose,
   actionsEnabled = true,
+  unresolvedTitle,
 }: {
   readonly router: ReturnType<typeof useManagerRouter>
   readonly snapshot: ManagerSnapshot
@@ -254,8 +259,9 @@ export function ManagerHeader({
   readonly setHeaderActionsSeat?: (element: HTMLElement | null) => void
   readonly onClose?: () => void
   readonly actionsEnabled?: boolean
+  readonly unresolvedTitle?: string
 }) {
-  const heading = modelServicesSecondaryPage?.title ?? title(router.route, snapshot)
+  const heading = modelServicesSecondaryPage?.title ?? title(router.route, snapshot, unresolvedTitle)
   const contributionId = router.route.kind === 'manager-content' ? router.route.id : undefined
   const contributionIcon = contributionId === undefined
     ? undefined
