@@ -1,4 +1,5 @@
 import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
+import { isChannelExactRequestDeclaration } from '../channel-exact-request-permissions.js'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import {
@@ -520,7 +521,8 @@ export function authorizationPlanV4(
     declarations: staged.manifest.runtimeManifest.capabilities.filter(
       declaration =>
         isLegacyPermissionDeclarationV4(declaration)
-        && !isRuntimeExactRequestDeclaration(declaration),
+        && !isRuntimeExactRequestDeclaration(declaration)
+        && !isChannelExactRequestDeclaration(declaration),
     ) as readonly CordisXCapabilityDeclarationV4[],
     policiesV2,
     policiesV4,

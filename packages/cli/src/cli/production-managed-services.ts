@@ -8,7 +8,8 @@ import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import type { PluginActivationStore } from '../launcher/plugin-activation.js'
 
 function supportsStartupConfiguration(manifest: CordisXConfigPlugin['manifest']): boolean {
-  return manifest?.schemaVersion === 15 && manifest.services.some(service => service.kind === 'managed-backend')
+  return (manifest?.schemaVersion === 15 || manifest?.schemaVersion === 16 && manifest.startup !== undefined)
+    && manifest.services.some(service => service.kind === 'managed-backend')
 }
 
 /** Owns production admission wiring; runtime remains the only service producer. */
@@ -40,7 +41,9 @@ export function createProductionManagedServiceLifecycle(input: {
           }
           const staged = await loadStagedPluginPackage(input.homeDir, item.digest)
           if (!supportsStartupConfiguration(staged.manifest.runtimeManifest)) {
-            throw new Error(`managed service startup configuration requires a v15 managed backend for ${pluginId}`)
+            throw new Error(
+              `managed service startup configuration requires a managed backend with startup for ${pluginId}`,
+            )
           }
         }
       },
@@ -52,9 +55,14 @@ export function createProductionManagedServiceLifecycle(input: {
         if (!plugin.enabled || !options.pluginIds.includes(plugin.id) || plugin.package === undefined) return []
         const explicitConfig = startupConfig.get(plugin.id)
         if (explicitConfig !== undefined && !supportsStartupConfiguration(plugin.manifest)) {
-          throw new Error(`managed service startup configuration requires a v15 managed backend for ${plugin.id}`)
+          throw new Error(
+            `managed service startup configuration requires a managed backend with startup for ${plugin.id}`,
+          )
         }
-        if (plugin.manifest?.schemaVersion !== 14 && plugin.manifest?.schemaVersion !== 15) return []
+        if (
+          plugin.manifest?.schemaVersion !== 14 && plugin.manifest?.schemaVersion !== 15
+          && plugin.manifest?.schemaVersion !== 16
+        ) return []
         return plugin.manifest.services.flatMap(service =>
           service.kind === 'managed-backend'
             ? [managedBackendRuntimeServiceAccess(

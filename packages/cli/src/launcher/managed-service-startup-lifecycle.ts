@@ -14,7 +14,10 @@ export async function readStartupAdmissions(
       const staged = await loadStagedPluginPackage(homeDir, plugin.digest)
       const manifest = staged.manifest.runtimeManifest
       if (!('startup' in manifest)) return []
-      if (manifest.schemaVersion !== 15) throw new Error('startup declaration requires manifest v15')
+      if (manifest.schemaVersion !== 15 && manifest.schemaVersion !== 16) {
+        throw new Error('startup declaration requires manifest v15 or v16')
+      }
+      if (manifest.startup === undefined) return []
       return [
         {
           pluginId: plugin.id,

@@ -11,11 +11,13 @@ import {
 import { authorizationPlanV4 } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import { stagePluginPackageSourceV1 } from '../packages/cli/src/launcher/packages/index.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../packages/cli/src/channel-exact-request-permissions.js'
 import {
   PLUGIN_PACKAGE_SCHEMA_V11,
   PLUGIN_PACKAGE_SCHEMA_V12,
   PLUGIN_PACKAGE_SCHEMA_V13,
   PLUGIN_PACKAGE_SCHEMA_V14,
+  PLUGIN_PACKAGE_SCHEMA_V16,
 } from '../packages/cli/src/launcher/packages/manifest.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
@@ -33,7 +35,7 @@ afterEach(async () => {
   temporary.clear()
 })
 
-async function fixture(version: 11 | 12 | 13) {
+async function fixture(version: 11 | 12 | 13 | 16) {
   const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-package-v${version}-`))
   temporary.add(root)
   const source = path.join(root, 'source')
@@ -41,14 +43,22 @@ async function fixture(version: 11 | 12 | 13) {
   await mkdir(source, { recursive: true })
   await writeFile(path.join(source, 'index.js'), 'export function apply() {}\n')
   const runtime = {
-    $schema: version === 13
+    $schema: version === 16
+      ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V16
+      : version === 13
       ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V13
       : version === 12
       ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V12
       : CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
     schemaVersion: version,
     id: 'runtime-exact',
-    capabilities: version === 13
+    capabilities: version === 16
+      ? [
+        { name: 'channel.accounts.read', required: false, scope: {} },
+        { name: 'channel.accounts.connect', required: false, scope: { runtime: 'exact-request' } },
+        { name: 'channel.bindings.write', required: false, scope: { runtime: 'exact-request' } },
+      ]
+      : version === 13
       ? [{ name: 'tasks.create', required: false, scope: { runtime: 'exact-request' } }]
       : [],
     services: [],
@@ -60,7 +70,9 @@ async function fixture(version: 11 | 12 | 13) {
     `${
       JSON.stringify(
         {
-          $schema: version === 13
+          $schema: version === 16
+            ? PLUGIN_PACKAGE_SCHEMA_V16
+            : version === 13
             ? PLUGIN_PACKAGE_SCHEMA_V13
             : version === 12
             ? PLUGIN_PACKAGE_SCHEMA_V12
@@ -222,6 +234,26 @@ describe('runtime exact-request package admission', () => {
         'models.read',
         'tasks.catalog.read',
       ])
+      await removeStagedPluginPackage(homeDir, staged.digest)
+    },
+  )
+
+  it.each(['install', 'update', 'enable'] as const)(
+    'keeps v16 exact Channel requests out of the %s installation policy',
+    async operation => {
+      const { source, homeDir } = await fixture(16)
+      const staged = await stagePluginPackageSourceV1({
+        kind: 'local-directory',
+        location: pathToFileURL(source).href,
+      }, {
+        homeDir,
+        runtimeValidators: {
+          [CORDISX_PLUGIN_MANIFEST_SCHEMA_V16]: value => normalizeLatestRuntimeManifest(value, 'runtime-exact'),
+        },
+      })
+      const plan = authorizationPlanV4(staged, operation, 'work', 'runtime-1', 'module-1', 'request-1', [], [])
+      expect(plan.declarations.map(declaration => declaration.capability)).toEqual(['channel.accounts.read'])
+      expect(JSON.stringify(plan)).not.toContain('exact-request')
       await removeStagedPluginPackage(homeDir, staged.digest)
     },
   )

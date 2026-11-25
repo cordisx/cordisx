@@ -23,11 +23,12 @@ function project(graph: ServiceRendererPrivateGraph) {
   }
 }
 
-it.each([14, 15] as const)(
-  'projects v%s managed UI identities and existing grants into isolated read-only sessions',
-  async version => {
+it.each([[14, false], [15, false], [16, false], [16, true]] as const)(
+  'projects v%s managed UI identities with withoutStartup=%s into isolated read-only sessions',
+  async (version, withoutStartup) => {
     const f = await fixture({
       managedUiVersion: version,
+      managedWithoutStartup: withoutStartup,
       managedUiGrant: true,
       protectProfileInputs: true,
       browserManagement: true,
@@ -167,6 +168,15 @@ it.each([14, 15] as const)(
   },
   120_000,
 )
+
+it('does not project an unsupported v16 Channel capability with a managed service', async () => {
+  const f = await fixture({ managedUiVersion: 16, managedChannelExact: true, protectProfileInputs: true })
+  try {
+    expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+  } finally {
+    await f.close()
+  }
+}, 30_000)
 
 it('binds installed aliases to the exact owner package and never promotes non-manager grants', async () => {
   const f = await fixture({ managedUiVersion: 14, protectProfileInputs: true })

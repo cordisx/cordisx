@@ -26,9 +26,11 @@ const chrome = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Conten
   }
 })
 
-it.skipIf(!managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux')(
-  'binds a real managed-service owner and browser to the selected private startup configuration',
-  async () => {
+it.skipIf(!managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux').each(
+  [15, 16] as const,
+)(
+  'binds a v%s managed-service owner and browser to the selected private startup configuration',
+  async version => {
     const root = await mkdtemp('/tmp/cx-managed-startup-browser-')
     const home = path.join(root, 'home')
     const configPath = path.join(home, 'config.json')
@@ -107,7 +109,7 @@ it.skipIf(!managerPackage || !chrome || process.platform !== 'darwin' && process
         true,
         'https://example.test/fixtures',
         pluginSource,
-        { version: 15, nodeConfig: true },
+        { version, nodeConfig: true, expectedConfigMarker: marker },
       )
       expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
         .toMatchObject({ status: 'ready', mode: 'service' })
@@ -169,10 +171,24 @@ it.skipIf(!managerPackage || !chrome || process.platform !== 'darwin' && process
           },
         }),
       )
-      await expect.poll(
-        () => second.evaluate('(/连接不可用|connection unavailable/i).test(document.body.textContent || "")'),
-        { timeout: 30_000 },
-      ).toBe(true)
+      try {
+        await expect.poll(
+          () =>
+            second.evaluate(
+              '(/连接不可用|连接中断|操作结果未确认|connection unavailable|connection interrupted|operation result is unknown/i)'
+                + '.test(document.body.textContent || "")',
+            ),
+          { timeout: 30_000 },
+        ).toBe(true)
+        expect(await second.evaluate('typeof globalThis.__cordisxRuntime?.snapshot')).not.toBe('function')
+      } catch (cause) {
+        const state = await second.evaluate<unknown>(
+          '({ body: document.body.textContent?.slice(0, 400), '
+            + 'ready: document.documentElement.dataset.cordisxReady, '
+            + 'plugins: globalThis.__cordisxRuntime?.snapshot?.().plugins.map(({id, status}) => ({id, status})) })',
+        )
+        throw new Error('Expected stale profile retirement: ' + JSON.stringify(state), { cause })
+      }
     } finally {
       await Promise.allSettled(pages.map(async page => await page.close()))
       if (browser) await stopChrome(browser)

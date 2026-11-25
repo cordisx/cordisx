@@ -1,4 +1,5 @@
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../channel-exact-request-permissions.js'
 import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
 import { attachmentEqual, type RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
 import { loadStagedPluginPackage, stagedPluginModulePath } from '../launcher/plugin-package.js'
@@ -174,6 +175,7 @@ async function inspectRendererPackage(
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
+    || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 && manifest.schemaVersion === 16
   const managed = allowReadOnlyManaged && managedVersion
     && manifest.services.some(service => service.kind === 'managed-backend')
     && manifest.services.every(service =>

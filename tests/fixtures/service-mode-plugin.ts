@@ -6,7 +6,9 @@ import { allowedDecisionV4 } from '../../packages/cli/src/launcher/plugin-lifecy
 import {
   PLUGIN_PACKAGE_SCHEMA_V14,
   PLUGIN_PACKAGE_SCHEMA_V15,
+  PLUGIN_PACKAGE_SCHEMA_V16,
 } from '../../packages/cli/src/launcher/packages/manifest.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../../packages/cli/src/channel-exact-request-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
@@ -89,7 +91,10 @@ export async function stageServiceModePlugin(
   canonicalSource: string | null = 'https://example.test/fixtures',
   browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
   options: {
-    readonly version?: 14 | 15
+    readonly version?: 14 | 15 | 16
+    readonly withoutStartup?: boolean
+    readonly channelExact?: boolean
+    readonly expectedConfigMarker?: string
     readonly uiPoints?: readonly string[]
     readonly authentication?: boolean
     readonly logout?: boolean
@@ -129,14 +134,22 @@ export async function stageServiceModePlugin(
       : {}),
   }
   const version = options.version ?? 14
+  const progressive = version === 15 || version === 16 && options.withoutStartup !== true
   const registration = `
 export async function apply(ctx, input) {
+  ${
+    options.expectedConfigMarker === undefined ? '' : `
+    if (input.configuration?.value?.marker !== ${JSON.stringify(options.expectedConfigMarker)}) {
+    throw new Error('Fixture startup configuration did not reach the service')
+  }
+  `
+  }
   const handle = await ctx.managedServices.register(${JSON.stringify(value)}, { revision: '${
     digest(JSON.stringify(value))
   }' })
   ctx.effect(() => () => handle.dispose())
   ${
-    version === 15 || options.authentication ? '' : `
+    progressive || options.authentication ? '' : `
   const ready = await handle.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')
   const result = await handle.publishNativeProvider({
@@ -152,7 +165,7 @@ apply.inject = ['managedServices']
     ? `export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture',
         validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { marker: { type: 'string' } } }) }`
     : ''
-  const service = version === 14 ? registration : `${nodeConfig}
+  const service = !progressive ? registration : `${nodeConfig}
 ${registration}
 export async function prepare(ctx, input) {
   const ready = await input.registration.ensureReady({ signal: input.signal })
@@ -171,16 +184,29 @@ export async function prepare(ctx, input) {
   if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
 }
 `
-  const runtimeSchema = version === 15 ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 : CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
+  const runtimeSchema = version === 16
+    ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V16
+    : version === 15
+    ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V15
+    : CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
   const runtime = JSON.stringify({
     $schema: runtimeSchema,
     schemaVersion: version,
     id,
-    capabilities: options.uiPoints === undefined ? [] : [{
-      name: 'ui.extension-points.render',
-      required: true,
-      scope: { extensionPoints: options.uiPoints },
-    }],
+    capabilities: [
+      ...(options.uiPoints === undefined ? [] : [{
+        name: 'ui.extension-points.render',
+        required: true,
+        scope: { extensionPoints: options.uiPoints },
+      }]),
+      ...(options.channelExact
+        ? [{
+          name: 'channel.accounts.connect',
+          required: false,
+          scope: { runtime: 'exact-request' },
+        }]
+        : []),
+    ],
     services: withService
       ? [{
         ...declaration('gateway', id, []),
@@ -202,7 +228,7 @@ export async function prepare(ctx, input) {
         ],
       }]
       : [],
-    ...(version === 15
+    ...(progressive
       ? {
         startup: {
           contract: 'cordisx.startup-declaration/v1',
@@ -238,7 +264,11 @@ export async function prepare(ctx, input) {
     writeFile(
       path.join(dir, 'cordisx-package.json'),
       JSON.stringify({
-        $schema: version === 15 ? PLUGIN_PACKAGE_SCHEMA_V15 : PLUGIN_PACKAGE_SCHEMA_V14,
+        $schema: version === 16
+          ? PLUGIN_PACKAGE_SCHEMA_V16
+          : version === 15
+          ? PLUGIN_PACKAGE_SCHEMA_V15
+          : PLUGIN_PACKAGE_SCHEMA_V14,
         schemaVersion: version,
         id,
         version: '1.0.0',

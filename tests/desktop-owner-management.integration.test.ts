@@ -9,6 +9,7 @@ import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-ren
 import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
+import { loadActiveBrowserGraphs } from '../packages/cli/src/cli/renderer-composition.js'
 import { startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
 import {
   effectiveConfigFingerprint,
@@ -387,9 +388,9 @@ it.each([false, true])(
   90_000,
 )
 
-it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
-  'binds the running Desktop managed-service authority to an admitted Manager',
-  async () => {
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux').each([15, 16] as const)(
+  'binds the v%s Desktop managed-service authority to an admitted Manager',
+  async version => {
     const root = await mkdtemp('/tmp/cx-desktop-managed-owner-')
     const homeDir = path.join(root, 'home')
     const configPath = path.join(homeDir, 'config.json')
@@ -399,7 +400,7 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
     await mkdir(homeDir, { mode: 0o700 })
     await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
     await stageServiceModePlugin(root, homeDir, profileId, true, source, 'export function apply() {}', {
-      version: 15,
+      version,
       uiPoints: ['manager.content', 'manager.settings.navigation-items'],
     })
     const policies = exactDomPermissionPolicies(profileId, [{
@@ -469,6 +470,13 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
       await writeSupervisorState(paths, state)
       expect(await coordinator.prepareRecovery()).toHaveLength(0)
       const active = await store.bindRuntimeGeneration()
+      const graphs = await loadActiveBrowserGraphs(store, active, {
+        homeDir,
+        artifactServer,
+        lifecycleRuntime: cdp,
+      })
+      expect(graphs.hasManagedBackends).toBe(true)
+      expect(graphs.activatedPlugins[0]?.runtimeGraph).toBeDefined()
       owner.initialize(active, false)
       const startup = await managed.initialize(active)
       await Promise.all([startup.coreReady, startup.adopted])

@@ -57,7 +57,9 @@ export async function fixture(
   options: {
     delayLease?: boolean
     managedBackend?: boolean
-    managedUiVersion?: 14 | 15
+    managedUiVersion?: 14 | 15 | 16
+    managedWithoutStartup?: boolean
+    managedChannelExact?: boolean
     managedUiSource?: string
     managedUiGrant?: boolean
     managedStartupConfig?: HomeConfigProfile['managedServiceStartupConfig']
@@ -177,6 +179,8 @@ export async function fixture(
        }`,
       options.managedUiVersion === undefined ? {} : {
         version: options.managedUiVersion,
+        withoutStartup: options.managedWithoutStartup,
+        channelExact: options.managedChannelExact,
         nodeConfig: options.managedStartupConfig !== undefined,
         uiPoints: ['manager.settings.navigation-items', 'manager.content', 'workspace.toolbar.items'],
       },

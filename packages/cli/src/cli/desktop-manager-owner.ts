@@ -288,7 +288,8 @@ export async function createDesktopManagerOwnerIfEligible(
       const staged = await loadServiceRendererInitialPackage(input.homeDir, plugin)
       if (
         (staged.manifest.runtimeManifest.capabilities.length > 0
-          || staged.manifest.runtimeManifest.schemaVersion === 15)
+          || staged.manifest.runtimeManifest.schemaVersion === 15
+          || staged.manifest.runtimeManifest.schemaVersion === 16)
         && process.platform !== 'darwin' && process.platform !== 'linux'
       ) return undefined
     }

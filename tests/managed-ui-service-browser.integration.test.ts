@@ -121,9 +121,9 @@ const fixture = [
 
 it.skipIf(
   !archive || !managerPackage || !chrome || !codex || process.platform !== 'darwin' && process.platform !== 'linux',
-)(
-  'opens a managed plugin and configured Channel in two real Manager pages and recovers after owner loss',
-  async () => {
+).each([15, 16] as const)(
+  'opens a v%s managed plugin and configured Channel in two real Manager pages and recovers after owner loss',
+  async version => {
     const root = await mkdtemp('/tmp/cx-managed-ui-browser-')
     const homeDir = path.join(root, 'h')
     const userHome = path.join(root, 'u')
@@ -156,6 +156,9 @@ it.skipIf(
     const ready = async (page: CdpClient) => {
       await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 60_000 })
         .toBe('true')
+      await expect.poll(() => page.evaluate('document.documentElement.dataset.cordisxManagerReady'), {
+        timeout: 60_000,
+      }).toBe('true')
       await expect.poll(() => page.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 20_000 })
         .toBe('available')
       await expect.poll(() => page.evaluate('globalThis.__fixtureServiceStatus'), { timeout: 20_000 })
@@ -220,7 +223,7 @@ it.skipIf(
         { mode: 0o600 },
       )
       await stageServiceModePlugin(root, homeDir, 'default', true, 'https://example.test/fixtures', fixture, {
-        version: 15,
+        version,
         uiPoints: ['manager.content', 'manager.settings.navigation-items'],
         authentication: true,
       })
@@ -555,31 +558,68 @@ it.skipIf(
       await checkPackage(undefined)
       await first.evaluate('document.querySelector("[data-settings-navigation-item^=fixture-service]").click()')
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
+      await first.evaluate('globalThis.__fixtureBeforeManagedReload = true')
       await first.send('Page.reload')
+      await expect.poll(
+        async () => await first.evaluate('globalThis.__fixtureBeforeManagedReload === undefined').catch(() => false),
+        { timeout: 15_000 },
+      ).toBe(true)
       await ready(first)
       await expect.poll(() => first.evaluate('Boolean(document.querySelector("[data-managed-fixture]"))')).toBe(true)
       const channelForm = async (page: CdpClient) => {
         await page.evaluate('document.querySelector("[data-settings-navigation-item^=channel]").click()')
         await expect.poll(
+          () =>
+            page.evaluate(
+              'document.querySelector("[data-settings-navigation-item^=channel]")?.getAttribute("aria-current") === "page"',
+            ),
+          { timeout: 15_000 },
+        ).toBe(true)
+        await expect.poll(
           () => page.evaluate('Boolean(document.querySelector("[data-manager-collection-item]"))'),
           { timeout: 15_000 },
         )
           .toBe(true)
-        await expect.poll(() =>
-          page.evaluate([
-            '(() => {',
-            "  const row = [...document.querySelectorAll('[data-manager-collection-item]')].find(item =>",
-            "    item.textContent.includes('Simulator') || item.textContent.includes('模拟器'))",
-            "  const button = row?.querySelector('.cxr-manager-collection-open')",
-            '  if (!button) return false',
-            '  button.click(); return true',
-            '})()',
-          ].join('\n')), { timeout: 15_000 }).toBe(true)
-        await expect.poll(
-          () => page.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
-          { timeout: 15_000 },
-        )
-          .toBe(true)
+        try {
+          await expect.poll(() =>
+            page.evaluate([
+              '(() => {',
+              "  const row = [...document.querySelectorAll('[data-manager-collection-item]')].find(item =>",
+              "    (item.textContent.includes('Simulator') || item.textContent.includes('模拟器')) &&",
+              '    item.getBoundingClientRect().width > 0 && item.getBoundingClientRect().height > 0)',
+              "  const button = row?.querySelector('.cxr-manager-collection-open')",
+              '  if (!button || button.disabled) return false',
+              '  button.click(); return true',
+              '})()',
+            ].join('\n')), { timeout: 15_000 }).toBe(true)
+        } catch (cause) {
+          const state = await page.evaluate<unknown>(`({
+            text: document.body.textContent?.slice(-1500),
+            navigation: [...document.querySelectorAll('[data-settings-navigation-item]')].map(item => ({
+              label: item.textContent, current: item.getAttribute('aria-current'), disabled: item.disabled,
+            })),
+            rows: [...document.querySelectorAll('[data-manager-collection-item]')].map(item => ({
+              text: item.textContent, width: item.getBoundingClientRect().width,
+              height: item.getBoundingClientRect().height,
+              disabled: item.querySelector('.cxr-manager-collection-open')?.disabled,
+            })),
+          })`)
+          throw new Error('Channel connection unavailable: ' + JSON.stringify(state), { cause })
+        }
+        try {
+          await expect.poll(
+            () => page.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
+            { timeout: 15_000 },
+          ).toBe(true)
+        } catch (cause) {
+          const state = await page.evaluate<unknown>(`({
+            text: document.body.textContent?.slice(-1500),
+            inputs: [...document.querySelectorAll('input')].map(input => ({ id: input.id, disabled: input.disabled })),
+            forms: document.querySelectorAll('[data-channel-connection-form]').length,
+            plugins: globalThis.__cordisxRuntime?.snapshot?.().plugins.map(({id, status}) => ({id, status})),
+          })`)
+          throw new Error('Channel form unavailable: ' + JSON.stringify(state), { cause })
+        }
       }
       await channelForm(first)
       await channelForm(second)

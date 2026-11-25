@@ -355,7 +355,8 @@ export async function loadActiveBrowserGraphs(
     : await loadPluginComposition(store, activation)
   const activatedPlugins = await attachActiveBrowserGraphs({ ...options, plugins })
   const hasManagedBackends = activatedPlugins.some(plugin =>
-    plugin.enabled && (plugin.manifest?.schemaVersion === 14 || plugin.manifest?.schemaVersion === 15)
+    plugin.enabled && (plugin.manifest?.schemaVersion === 14 || plugin.manifest?.schemaVersion === 15
+      || plugin.manifest?.schemaVersion === 16)
     && plugin.manifest.services.some(service => service.kind === 'managed-backend')
   )
   return { activatedPlugins, hasManagedBackends }

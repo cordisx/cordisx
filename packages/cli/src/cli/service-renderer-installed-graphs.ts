@@ -1,5 +1,6 @@
 import path from 'node:path'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../channel-exact-request-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
@@ -56,12 +57,16 @@ export async function prepareServiceRendererInstalledGraphs(input: {
   for (const item of input.plugins) {
     if (unavailable.has(item.id)) continue
     const manifest = inspected.get(item.id)!.staged.manifest.runtimeManifest
-    if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.capabilities.length > 0) {
+    if (
+      manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15
+      || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 || manifest.capabilities.length > 0
+    ) {
       needsIdentityProjection = true
     }
     if (
       manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
       || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15
+      || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16
     ) {
       if (!input.managedServiceUIAvailable) throw new Error('renderer-bootstrap-plugin-unsupported')
       if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
