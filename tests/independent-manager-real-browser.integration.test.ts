@@ -347,11 +347,15 @@ it.skipIf(chrome === undefined)(
       second = await CdpClient.connect(await socketFor(created.targetId))
       await second.send('Runtime.enable')
       await ready(second)
-      // A lost idle poll must retire the old renderer and leave this tab able
-      // to request a new one. The second authenticated page remains live.
+      // A lost idle poll can continue only after the sidecar confirms that no
+      // command was offered. Keep this page's in-memory search and session.
       const beforeLostPoll = await first.evaluate<string>(
         "sessionStorage.getItem('cordisx-manager-resume-id')",
       )
+      await first.evaluate("document.querySelector('[data-unified-plugins-page] input[type=search]').focus()")
+      await first.send('Input.insertText', { text: 'fixture-search-draft' })
+      expect(await first.evaluate("document.querySelector('[data-unified-plugins-page] input[type=search]').value"))
+        .toBe('fixture-search-draft')
       await first.evaluate(`(() => {
         const send = window.fetch.bind(window)
         let dropped = false
@@ -360,17 +364,54 @@ it.skipIf(chrome === undefined)(
             dropped = true
             return Promise.reject(new TypeError('controlled lost poll'))
           }
+          if (resource === '/api/renderer/poll-recover') {
+            return send(resource, options).then(async response => {
+              const value = await response.clone().json()
+              globalThis.__fixturePollRecovered = value.recovered === true
+              return response
+            })
+          }
           return send(resource, options)
         }
       })()`)
       await vi.waitFor(async () => {
-        expect(await first!.evaluate("document.querySelector('p[role=status]')?.textContent"))
-          .toMatch(/刷新页面重试|Refresh the page to retry/u)
+        expect(await first!.evaluate('globalThis.__fixturePollRecovered')).toBe(true)
       }, { timeout: 25_000 })
       expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).toBe(beforeLostPoll)
-      await first.send('Page.reload')
-      await ready(first)
-      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).not.toBe(beforeLostPoll)
+      expect(await first.evaluate("document.querySelector('[data-unified-plugins-page] input[type=search]').value"))
+        .toBe('fixture-search-draft')
+      expect(await first.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBe('true')
+      expect(await second.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBe('true')
+      // Also lose the response after the sidecar completed an empty poll.
+      await first.evaluate(`(() => {
+        const send = window.fetch.bind(window)
+        let dropped = false
+        window.fetch = (resource, options) => {
+          if (resource === '/api/renderer/poll' && !dropped) {
+            return send(resource, options).then(async response => {
+              const value = await response.clone().json()
+              if (value.command === null) {
+                dropped = true
+                throw new TypeError('controlled lost empty response')
+              }
+              return response
+            })
+          }
+          if (resource === '/api/renderer/poll-recover') {
+            return send(resource, options).then(async response => {
+              globalThis.__fixtureEmptyPollRecovered = (await response.clone().json()).recovered === true
+              return response
+            })
+          }
+          return send(resource, options)
+        }
+      })()`)
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate('globalThis.__fixtureEmptyPollRecovered')).toBe(true)
+      }, { timeout: 45_000 })
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).toBe(beforeLostPoll)
+      expect(await first.evaluate("document.querySelector('[data-unified-plugins-page] input[type=search]').value"))
+        .toBe('fixture-search-draft')
       expect(await second.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBe('true')
       // Inspect only the privacy result, never the response or its private inputs.
       await first.evaluate(`(() => {

@@ -57,6 +57,7 @@ export function fixture(input: {
   readonly resumeAttemptUnavailable?: boolean
   readonly issueResume?: boolean
   readonly controlledPoll?: boolean
+  readonly pollRecovery?: boolean
   readonly holdBindings?: boolean
   readonly pluginManagement?: boolean
   readonly permissionPolicy?: boolean
@@ -181,6 +182,9 @@ export function fixture(input: {
       return input.bootstrapGate
         ? Promise.race([input.bootstrapGate.then(() => result), abortResponse(options.signal!)])
         : Promise.resolve(result)
+    }
+    if (path === '/api/renderer/poll-recover' && input.pollRecovery !== undefined) {
+      return Promise.resolve(response({ recovered: input.pollRecovery }))
     }
     if (path === '/api/renderer/poll') {
       if (polls++ === 0) {

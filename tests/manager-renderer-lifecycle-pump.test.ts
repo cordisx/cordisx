@@ -82,6 +82,155 @@ it('closes without replay when an acknowledgement response is lost', async () =>
   expect(failed).toHaveBeenCalledOnce()
 })
 
+it('keeps an idle page connected after the sidecar confirms a lost poll had no command', async () => {
+  let polls = 0
+  let drop: (() => void) | undefined
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/poll-recover') {
+      expect(JSON.parse(String(options.body))).toEqual({ pollSequence: 2 })
+      return Promise.resolve(response({ recovered: true }))
+    }
+    if (path === '/api/renderer/poll') {
+      polls++
+      expect(JSON.parse(String(options.body))).toEqual({ timeoutMs: 15_000, pollSequence: polls })
+      if (polls === 1) return Promise.resolve(response({ command: null }))
+      if (polls === 2) {
+        return new Promise<Response>((_, reject) => {
+          drop = () => reject(new TypeError('lost poll response'))
+          options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
+        })
+      }
+    }
+    return waitForAbort(options.signal!)
+  })
+  const client = { closed: false, handle: vi.fn(), close: vi.fn(async () => {}) }
+  const failed = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    canRecoverPoll: () => true,
+    onFailure: failed,
+  })
+  try {
+    expect(await pump.admitted).toBe(true)
+    await vi.waitFor(() => expect(drop).toBeDefined())
+    drop!()
+    await vi.waitFor(() => expect(polls).toBe(3))
+    expect(client.handle).not.toHaveBeenCalled()
+    expect(client.close).not.toHaveBeenCalled()
+    expect(failed).not.toHaveBeenCalled()
+  } finally {
+    await pump.close()
+    await pump.stopped
+  }
+})
+
+it.each([
+  { label: 'an in-flight write', canRecover: false, response: { recovered: true }, requests: 0 },
+  { label: 'a possibly offered command', canRecover: true, response: { recovered: false }, requests: 1 },
+])('retires after a lost poll with $label', async ({ canRecover, response: confirmation, requests }) => {
+  let polls = 0
+  let drop: (() => void) | undefined
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/poll-recover') return Promise.resolve(response(confirmation))
+    if (path === '/api/renderer/poll' && polls++ === 0) return Promise.resolve(response({ command: null }))
+    return new Promise<Response>((_, reject) => {
+      drop = () => reject(new TypeError('lost poll response'))
+      options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
+    })
+  })
+  const client = { closed: false, handle: vi.fn(), close: vi.fn(async () => {}) }
+  const failed = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    canRecoverPoll: () => canRecover,
+    onFailure: failed,
+  })
+  expect(await pump.admitted).toBe(true)
+  await vi.waitFor(() => expect(drop).toBeDefined())
+  drop!()
+  await pump.stopped
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll-recover')).toHaveLength(requests)
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(2)
+  expect(client.handle).not.toHaveBeenCalled()
+  expect(failed).toHaveBeenCalledExactlyOnceWith('poll-transport')
+})
+
+it('stops if a write begins before poll recovery is confirmed', async () => {
+  let polls = 0
+  let drop: (() => void) | undefined
+  let confirm: (() => void) | undefined
+  let idle = true
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/poll-recover') {
+      return new Promise<Response>(resolve => confirm = () => resolve(response({ recovered: true })))
+    }
+    if (path === '/api/renderer/poll' && polls++ === 0) return Promise.resolve(response({ command: null }))
+    return new Promise<Response>((_, reject) => {
+      drop = () => reject(new TypeError('lost poll response'))
+      options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
+    })
+  })
+  const client = { closed: false, handle: vi.fn(), close: vi.fn(async () => {}) }
+  const failed = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    canRecoverPoll: () => idle,
+    onFailure: failed,
+  })
+  expect(await pump.admitted).toBe(true)
+  await vi.waitFor(() => expect(drop).toBeDefined())
+  drop!()
+  await vi.waitFor(() => expect(confirm).toBeDefined())
+  idle = false
+  confirm!()
+  await pump.stopped
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(2)
+  expect(failed).toHaveBeenCalledExactlyOnceWith('poll-transport')
+})
+
+it('limits consecutive poll recovery attempts', async () => {
+  let polls = 0
+  let drop: (() => void) | undefined
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/poll-recover') return Promise.resolve(response({ recovered: true }))
+    if (path === '/api/renderer/poll') {
+      polls++
+      if (polls === 1) return Promise.resolve(response({ command: null }))
+      if (polls === 3) return Promise.reject(new TypeError('second lost poll'))
+    }
+    return new Promise<Response>((_, reject) => {
+      drop = () => reject(new TypeError('first lost poll'))
+      options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
+    })
+  })
+  const client = { closed: false, handle: vi.fn(), close: vi.fn(async () => {}) }
+  const failed = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    canRecoverPoll: () => true,
+    onFailure: failed,
+  })
+  expect(await pump.admitted).toBe(true)
+  await vi.waitFor(() => expect(drop).toBeDefined())
+  drop!()
+  await pump.stopped
+  expect(polls).toBe(3)
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll-recover')).toHaveLength(1)
+  expect(failed).toHaveBeenCalledExactlyOnceWith('poll-transport')
+})
+
 it('bounds a stalled acknowledgement and retires the session without replay', async () => {
   vi.useFakeTimers()
   const fetch = vi.fn((path: string, options: RequestInit) => {

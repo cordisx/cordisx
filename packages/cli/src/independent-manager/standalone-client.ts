@@ -650,6 +650,9 @@ export function startStandaloneManager(input: {
         window: browser,
         sessionToken: token,
         client: lifecycle,
+        canRecoverPoll: () =>
+          admissionConfirmed && lifecycle?.canResume() === true
+          && removeBindings?.canRecoverAfterTransport() === true,
         onFailure: reason => {
           if (navigating && canPreserveResume()) void close(true)
           else fail(undefined, reason === 'poll-transport')

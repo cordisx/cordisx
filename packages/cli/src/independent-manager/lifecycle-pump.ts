@@ -15,6 +15,8 @@ export function startManagerRendererLifecyclePump(input: {
   readonly sessionToken: string
   readonly client: Client
   readonly onFailure?: (reason?: 'poll-transport') => void
+  /** Only an idle, admitted renderer may attempt owner-confirmed poll recovery. */
+  readonly canRecoverPoll?: () => boolean
   /** Called only after the owner has accepted a successful quiescence receipt. */
   readonly onQuiesced?: () => void
 }): {
@@ -27,6 +29,8 @@ export function startManagerRendererLifecyclePump(input: {
   let closed = false
   let failureReported = false
   let closing: Promise<void> | undefined
+  let hasAdmitted = false
+  let nextSequence = 1
   const close = (): Promise<void> => {
     if (closing !== undefined) return closing
     closed = true
@@ -45,12 +49,15 @@ export function startManagerRendererLifecyclePump(input: {
     void close()
   }
   const post = async (
-    path: '/api/renderer/poll' | '/api/renderer/admit' | '/api/renderer/acknowledge',
+    path: '/api/renderer/poll' | '/api/renderer/poll-recover' | '/api/renderer/admit' | '/api/renderer/acknowledge',
     body: unknown,
   ) => {
     if (closed) throw new Error('renderer-pump-closed')
     const timeout = new AbortController()
-    const timer = setTimeout(() => timeout.abort(), path === '/api/renderer/poll' ? 25_000 : 20_000)
+    const timer = setTimeout(
+      () => timeout.abort(),
+      path === '/api/renderer/poll-recover' ? 40_000 : path === '/api/renderer/poll' ? 25_000 : 20_000,
+    )
     try {
       const transportFailure = (error: unknown): never => {
         if (!closed && path === '/api/renderer/poll') {
@@ -85,11 +92,26 @@ export function startManagerRendererLifecyclePump(input: {
 
   // The owner may need this poll to deliver synchronize before admission can
   // complete. Start the poll first and wait for both paths independently.
-  const firstPoll = post('/api/renderer/poll', { timeoutMs: 15_000 })
+  const poll = () => {
+    if (!Number.isSafeInteger(nextSequence) || nextSequence >= Number.MAX_SAFE_INTEGER) {
+      throw new Error('renderer-poll-sequence-unavailable')
+    }
+    const sequence = nextSequence++
+    return { sequence, result: post('/api/renderer/poll', { timeoutMs: 15_000, pollSequence: sequence }) }
+  }
+  const canRecover = () => {
+    try {
+      return hasAdmitted && !closed && input.canRecoverPoll?.() === true
+    } catch {
+      return false
+    }
+  }
+  const firstPoll = poll()
   const admitted = post('/api/renderer/admit', {}).then(result => {
     if (closed || result.admitted !== true || Object.keys(result).length !== 1) {
       throw new Error('renderer-admission-unavailable')
     }
+    hasAdmitted = true
     return true
   }).catch(() => {
     fail()
@@ -97,12 +119,29 @@ export function startManagerRendererLifecyclePump(input: {
   })
   const stopped = (async () => {
     let polling = firstPoll
+    let consecutiveRecoveries = 0
     try {
       while (!closed) {
-        const result = await polling
+        let result: Record<string, unknown>
+        try {
+          result = await polling.result
+        } catch (error) {
+          if (error instanceof PollTransportError && consecutiveRecoveries === 0 && canRecover()) {
+            try {
+              const recovery = await post('/api/renderer/poll-recover', { pollSequence: polling.sequence })
+              if (recovery.recovered === true && Object.keys(recovery).length === 1 && canRecover()) {
+                consecutiveRecoveries++
+                polling = poll()
+                continue
+              }
+            } catch { /* A failed confirmation falls back to normal retirement. */ }
+          }
+          throw error
+        }
         if (Object.keys(result).length !== 1 || !Object.hasOwn(result, 'command')) {
           throw new Error('renderer-pump-invalid')
         }
+        consecutiveRecoveries = 0
         if (result.command !== null) {
           const receipt = await input.client.handle(result.command)
           if (closed) return
@@ -115,7 +154,7 @@ export function startManagerRendererLifecyclePump(input: {
             return
           }
         }
-        if (!closed) polling = post('/api/renderer/poll', { timeoutMs: 15_000 })
+        if (!closed) polling = poll()
       }
     } catch (error) {
       fail(error instanceof PollTransportError ? 'poll-transport' : undefined)

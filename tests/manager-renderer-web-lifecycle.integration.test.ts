@@ -15,11 +15,16 @@ it('binds lifecycle commands and receipts to one authenticated browser session',
     ownerGeneration: 'generation',
     ownerCurrent: () => true,
     authenticateGateway: async input => JSON.stringify(input) === JSON.stringify(gateway),
-    channels: new Map([['plugin-management', {
-      prepare: () => {
-        throw new Error('unused')
-      },
-    }]]),
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['manager-bootstrap', {
+        prepare: () => ({ mode: 'read', dispatch: async () => ({ status: 'ok', current: true }) }),
+      }],
+    ]),
     participant: {
       create({ browserSessionId, handle }) {
         const peer = new ManagerRendererCommandPeer({
@@ -82,7 +87,7 @@ it('binds lifecycle commands and receipts to one authenticated browser session',
     expect(await post(first, 'poll', { timeoutMs: 10, gateway })).toMatchObject({ status: 400 })
 
     // Matches the production lifecycle pump's poll interval.
-    const firstPoll = post(first, 'poll', { timeoutMs: 15_000 })
+    const firstPoll = post(first, 'poll', { timeoutMs: 15_000, pollSequence: 1 })
     const secondPoll = post(second, 'poll', { timeoutMs: 2_000 })
     const firstAdmit = post(first, 'admit', {})
     const secondAdmit = post(second, 'admit', {})
@@ -111,14 +116,31 @@ it('binds lifecycle commands and receipts to one authenticated browser session',
     expect(await secondAdmit).toMatchObject({ status: 200, body: { admitted: true } })
     expect(await post(first, 'acknowledge', { receipt: firstReceipt })).toMatchObject({ status: 503 })
 
+    // A request lost before reaching the sidecar is retired by sequence; a
+    // late copy cannot accidentally dispatch a second owner poll.
+    expect(await post(first, 'poll-recover', { pollSequence: 2 })).toMatchObject({
+      status: 200,
+      body: { recovered: true },
+    })
+    expect(await post(first, 'poll', { timeoutMs: 10, pollSequence: 2 })).toMatchObject({ status: 409 })
+    const emptyPoll = post(first, 'poll', { timeoutMs: 100, pollSequence: 3 })
+    const recovery = post(first, 'poll-recover', { pollSequence: 3 })
+    expect(await emptyPoll).toMatchObject({ status: 200, body: { command: null } })
+    expect(await recovery).toMatchObject({ status: 200, body: { recovered: true } })
+
     const pending = peers[0]!.request('prepare', {
       transactionId: 'fixture-tx',
       transactionEpoch: 'fixture-epoch',
       expectedRegistryEpoch: 0,
     })
     const rejected = expect(pending).rejects.toThrow('renderer-command-result-unknown')
-    const command = (await post(first, 'poll', { timeoutMs: 2_000 })).body.command
+    const command = (await post(first, 'poll', { timeoutMs: 2_000, pollSequence: 4 })).body.command
     expect(command).toMatchObject({ method: 'prepare', sequence: 2 })
+    // A command was offered, so it must never be replayed by poll recovery.
+    expect(await post(first, 'poll-recover', { pollSequence: 4 })).toMatchObject({
+      status: 200,
+      body: { recovered: false },
+    })
     await web.close()
     await rejected
     expect(peers[0]!.closed).toBe(true)

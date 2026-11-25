@@ -301,6 +301,25 @@ it('retains same-tab recovery when an idle lifecycle poll loses its connection',
   }
 })
 
+it('keeps an idle session when the sidecar confirms that the lost poll was empty', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, pollRecovery: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.failPoll()
+    await vi.waitFor(() =>
+      expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(3)
+    )
+    expect(test.unavailable).not.toHaveBeenCalled()
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll-recover')).toHaveLength(1)
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/close')).toBe(false)
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
 it('does not preserve a recovery grant when a dispatched migration is still in flight', async () => {
   const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, pluginManagement: true })
   try {
@@ -319,6 +338,7 @@ it('does not preserve a recovery grant when a dispatched migration is still in f
     expect(JSON.parse(String(close[1].body))).toEqual({})
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
     expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/binding')).toHaveLength(1)
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/poll-recover')).toBe(false)
   } finally {
     await test.manager.close()
     test.dom.window.close()
@@ -335,6 +355,7 @@ it('does not preserve a recovery grant after an explicit lifecycle poll denial',
     const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
     expect(JSON.parse(String(close[1].body))).toEqual({})
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/poll-recover')).toBe(false)
   } finally {
     await test.manager.close()
     test.dom.window.close()
@@ -360,6 +381,7 @@ it('does not preserve a recovery grant while a lifecycle transaction is reserved
     const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
     expect(JSON.parse(String(close[1].body))).toEqual({})
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/poll-recover')).toBe(false)
   } finally {
     await test.manager.close()
     test.dom.window.close()

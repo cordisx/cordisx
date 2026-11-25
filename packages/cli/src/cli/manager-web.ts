@@ -11,6 +11,8 @@ import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 import { ManagerObservationPolls } from './manager-observation-polls.js'
+import type { ManagerLifecyclePolls } from './manager-lifecycle-polls.js'
+import { handleManagerRendererLifecycleHttp } from './manager-renderer-lifecycle-http.js'
 import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
@@ -129,6 +131,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     rendererPermissionKey?: string
     resources?: Set<ServerResponse>
     observations?: ManagerObservationPolls
+    lifecyclePolls?: ManagerLifecyclePolls
   }
   const sessions = new Map<string, BrowserSession>()
   const resumes = new ManagerSessionResumeGrants()
@@ -152,6 +155,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     clearTimeout(session.timer)
     session.controller.abort()
     session.observations?.close()
+    session.lifecyclePolls?.close()
     session.graphs?.close()
     for (const response of session.resources ?? []) response.destroy()
     void session.rendererBundle?.then(result => result.bundle.fill(0)).catch(() => undefined)
@@ -612,58 +616,20 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         }
       }
-      if (['/api/renderer/admit', '/api/renderer/poll', '/api/renderer/acknowledge'].includes(url.pathname)) {
-        if (!session.rendererCommands || session.rendererOpen === undefined || options.rendererGateway === undefined) {
-          return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
-        }
-        const action = url.pathname.slice('/api/renderer/'.length)
-        if (
-          action === 'admit' && Object.keys(input).length !== 0
-          || action === 'poll' && (Object.keys(input).length !== 1
-              || !Number.isSafeInteger(input.timeoutMs) || Number(input.timeoutMs) < 1
-              || Number(input.timeoutMs) > 30_000)
-          || action === 'acknowledge' && (Object.keys(input).length !== 1
-              || !Object.hasOwn(input, 'receipt') || Buffer.byteLength(JSON.stringify(input)) > 196 * 1024)
-        ) return json(response, 400, { error: 'INVALID_REQUEST' })
-        const handle = await session.rendererOpen
-        if (!activeSession()) return revoked()
-        if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
-        const common = {
-          kind: 'manager-renderer' as const,
+      if (
+        url.pathname.startsWith('/api/renderer/') && await handleManagerRendererLifecycleHttp({
+          path: url.pathname,
+          body: input,
+          session,
           gateway: options.rendererGateway,
-          browserSessionId: session.id,
-          handle,
-        }
-        const operation: PluginManagementRpcOperation = action === 'admit'
-          ? { ...common, action: 'admit' }
-          : action === 'poll'
-          ? { ...common, action: 'poll', timeoutMs: Number(input.timeoutMs) }
-          : { ...common, action: 'acknowledge', receipt: input.receipt }
-        // Poll can hand out a command, and acknowledge can settle a mutation.
-        // If either response is lost the caller must reconcile, not retry it.
-        try {
-          const result = object(await scopedRequest(operation, true))
-          if (result?.status === 'unknown') {
-            await retireSession(token)
-            return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
-          }
-          if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_COMMANDS_UNAVAILABLE' })
-          if (action === 'poll') {
-            const value = object(result.value)
-            if (!value || Object.keys(value).length !== 1 || !Object.hasOwn(value, 'command')) {
-              throw new Error('invalid')
-            }
-            return scopedReply({
-              command: value.command === null ? null : session.graphs!.projectCommand(value.command),
-            })
-          }
-          if (action === 'acknowledge') session.graphs!.acknowledge(input.receipt)
-          return scopedReply(result.value)
-        } catch {
-          await retireSession(token)
-          return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
-        }
-      }
+          active: activeSession,
+          request: scopedRequest,
+          send: (status, value) => json(response, status, value),
+          reply: scopedReply,
+          revoked,
+          retire: async () => await retireSession(token),
+        })
+      ) return
       if (url.pathname === '/api/renderer/binding') {
         if (
           Object.keys(input).length !== 2 || typeof input.channel !== 'string'

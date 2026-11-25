@@ -185,11 +185,14 @@ entry for an independent tab.
 This includes a hard reload, where the fixed resource worker reclaims the page
 before the new authenticated session binds. Requests still queued before owner
 admission are cancelled rather than treated as dispatched writes.
-If an admitted, idle Manager page loses its lifecycle poll connection, the same
-tab may refresh using its short-lived recovery grant. The owner must confirm
-that the old renderer and its resources have retired before admitting the
-replacement. Writes and lifecycle commands are not replayed. Explicit denial,
-an in-flight write, or an unconfirmed result still prevents this recovery.
+If an admitted, idle Manager page loses its lifecycle poll connection, it can
+continue when the sidecar confirms that the poll was sealed before dispatch or
+completed without offering a command, and the owner confirms the same renderer.
+This recovery is bounded. Otherwise, the same tab may request a refresh using
+its short-lived recovery grant; the owner must confirm that the old renderer
+and its resources have retired before admitting a replacement. Writes and
+lifecycle commands are not replayed. Explicit denial, an in-flight write, or an
+unconfirmed result still prevents this recovery.
 If the response to the one-time Marketplace startup migration is lost while a
 tab is leaving, that tab may request recovery without replaying the migration.
 The owner must still confirm that the previous renderer and any write have
