@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -217,11 +217,9 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       })).json()
       await rememberBackend(failureResponse.pid)
       const serviceHome = path.join(home, 'managed-services', 'fixture-service', 'gateway')
-      const generations = (await readdir(serviceHome, { withFileTypes: true })).filter(entry => entry.isDirectory())
-      expect(generations).toHaveLength(1)
-      restrictedDirectory = path.join(serviceHome, generations[0]!.name)
-      await writeFile(path.join(restrictedDirectory, 'synthetic-cleanup-lock'), 'fixture')
-      await chmod(restrictedDirectory, 0o500)
+      expect((await stat(serviceHome)).isDirectory()).toBe(true)
+      restrictedDirectory = serviceHome
+      await chmod(restrictedDirectory, 0o000)
       await expect(lifecycle('stop')).rejects.toThrow(/service cleanup failed/i)
       expect(await readSupervisorState(supervisorPaths(home, 'codex', profile)))
         .toMatchObject({ phase: 'failed', serviceCleanup: 'failed' })
