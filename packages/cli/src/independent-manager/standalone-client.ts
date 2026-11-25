@@ -31,6 +31,7 @@ const entryStorageKey = 'cordisx-manager-entry-attempt'
 
 class ManagerSessionTransportError extends Error {}
 class ManagerResumeTransportError extends Error {}
+class ManagerOpenUnavailableError extends Error {}
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
@@ -201,13 +202,23 @@ export function startStandaloneManager(input: {
         referrerPolicy: 'no-referrer',
         signal: AbortSignal.any([lifetime.signal, timeout.signal]),
       }).catch(transportFailure)
-      if ((!response.ok && !(allowPending && response.status === 409)) || closed || timeout.signal.aborted) {
+      const openUnavailable = path === '/api/renderer/open' && response.status === 503
+      if (
+        (!response.ok && !(allowPending && response.status === 409) && !openUnavailable)
+        || closed || timeout.signal.aborted
+      ) {
         throw new Error('manager-session-unavailable')
       }
       const text = await response.text().catch(transportFailure)
       if (text.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('manager-response-invalid')
       const value: unknown = JSON.parse(text)
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('manager-response-invalid')
+      if (openUnavailable) {
+        if (Object.keys(value).length === 1 && (value as Record<string, unknown>).error === 'RENDERER_UNAVAILABLE') {
+          throw new ManagerOpenUnavailableError('manager-open-unavailable')
+        }
+        throw new Error('manager-session-unavailable')
+      }
       return value as Record<string, unknown>
     } finally {
       clearTimeout(timer)
@@ -361,12 +372,18 @@ export function startStandaloneManager(input: {
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
-  const fail = (reason?: 'result-unknown', interruptedTransport = false) => {
+  const fail = (reason?: 'result-unknown', interruptedTransport = false, openUnavailable = false) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
       || interruptedTransport && removeBindings?.canRecoverAfterTransport() === false
-    const refresh = interruptedTransport && !uncertain && admissionConfirmed && resumeId !== undefined
-      && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
+    const refresh = !uncertain && resumeId !== undefined && (
+      interruptedTransport && admissionConfirmed
+        && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
+      // No plugin runtime or user operation exists when the owner refuses an
+      // initial renderer open. Retirement still has to be confirmed on resume.
+      || openUnavailable && sessionToken !== undefined && !admissionConfirmed
+        && lifecycle === undefined && removeBindings === undefined && runtime === undefined
+    )
     if (!notified) {
       notified = true
       try {
@@ -671,12 +688,12 @@ export function startStandaloneManager(input: {
       if (!admitted || closed) throw new Error('manager-admission-unavailable')
       admissionConfirmed = true
       return true
-    } catch {
+    } catch (error) {
       // Navigation can abort a startup request after beforeunload but before
       // pagehide. Preserve only the same idle session that pagehide could
       // preserve; the owner still has to confirm its retirement.
       if (navigating && canPreserveResume()) void close(true)
-      else fail()
+      else fail(undefined, false, error instanceof ManagerOpenUnavailableError)
       return false
     }
   })()

@@ -43,6 +43,7 @@ export function fixture(input: {
   readonly graphs?: readonly unknown[]
   readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   readonly exchangeGate?: Promise<void>
+  readonly openFailure?: { readonly status: number; readonly body: unknown }
   readonly bootstrapGate?: Promise<void>
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
@@ -146,6 +147,11 @@ export function fixture(input: {
       return Promise.resolve(response({ token: sessionToken, resumeId: 'f'.repeat(64) }))
     }
     if (path === '/api/renderer/open') {
+      if (input.openFailure) {
+        return Promise.resolve(
+          new Response(JSON.stringify(input.openFailure.body), { status: input.openFailure.status }),
+        )
+      }
       return Promise.resolve(response({
         status: 'ok',
         rendererId,
