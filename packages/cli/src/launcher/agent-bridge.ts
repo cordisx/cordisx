@@ -520,7 +520,7 @@ export function createCodexBridgeHandler(
           if (status === 'active') throw new BridgeOperationError('session-busy')
           if (status === 'notLoaded') {
             signal?.throwIfAborted()
-            await codex.nativeRequest('thread/resume', { threadId })
+            await codex.nativeRequest('thread/resume', { threadId, excludeTurns: true })
           }
           signal?.throwIfAborted()
           const link = codexThreadLink(threadId)

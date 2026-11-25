@@ -32,6 +32,7 @@ it('probes only synthetic input without tools and disposes the credential lease'
     stream: false,
     input: [{ role: 'user', content: [{ type: 'input_text', text: 'Connectivity check.' }] }],
   })
+  expect(JSON.parse(String(request.body)).prompt_cache_key).toMatch(/^[0-9a-f-]{36}$/u)
   expect(dispose).toHaveBeenCalledOnce()
 })
 

@@ -221,7 +221,7 @@ export class CodexChatConfiguration {
       const before = this.observations.get(id)?.revision ?? 0
       this.hydrating.add(id)
       try {
-        const resumed = object(await this.authority.request('thread/resume', { threadId: id }))
+        const resumed = object(await this.authority.request('thread/resume', { threadId: id, excludeTurns: true }))
         if (object(resumed.thread).id !== id) throw new Error('CHAT_SETTINGS_UNAVAILABLE')
         const fresh = this.observations.get(id)
         settings = { ...resumed, ...(fresh && fresh.revision > before ? fresh.value : {}) }
@@ -462,7 +462,7 @@ export class CodexChatConfiguration {
       // An unloaded thread cannot have an active turn in this backend. Resume it
       // through the existing configuration pipeline before changing its reviewer.
       if (operation === 'reviewer-set' && object(native.status).type === 'notLoaded') {
-        const resumed = object(await this.authority.request('thread/resume', { threadId: id }))
+        const resumed = object(await this.authority.request('thread/resume', { threadId: id, excludeTurns: true }))
         if (object(resumed.thread).id !== id) throw new Error('SESSION_NOT_FOUND')
         native = await this.nativeThread(id!)
       }
