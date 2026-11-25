@@ -213,11 +213,24 @@ export function validateChannelSendFallback(value: unknown): ChannelSendFallback
   return { mode: 'text', text: boundedText(fallback.text) }
 }
 
+export function validateChannelTerminalIntent(value: unknown): void {
+  const intent = record(value)
+  keys(intent, ['contract', 'schemaVersion', 'inputOperationId'])
+  if (
+    intent.contract !== 'cordisx.channel-terminal-intent/v1' || intent.schemaVersion !== 1
+    || typeof intent.inputOperationId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(intent.inputOperationId)
+  ) throw new Error('INVALID_CHANNEL_PAYLOAD')
+}
+
 export function prepareChannelSendInput(value: unknown): unknown {
   const input = record(value)
   if (Object.hasOwn(input, 'fallback')) validateChannelSendFallback(input.fallback)
+  if (Object.hasOwn(input, 'terminal')) {
+    validateChannelTerminalIntent(input.terminal)
+    if (!input.target || Object.hasOwn(input, 'targets')) throw new Error('INVALID_CHANNEL_PAYLOAD')
+  }
   if (!Object.hasOwn(input, 'payload') && !Object.hasOwn(input, 'content')) return value
-  keys(input, ['account', 'target', 'targets', 'operationId', 'payload', 'content', 'fallback'])
+  keys(input, ['account', 'target', 'targets', 'operationId', 'payload', 'content', 'fallback', 'terminal'])
   if (Object.hasOwn(input, 'payload') && Object.hasOwn(input, 'content')) throw new Error('INVALID_CHANNEL_PAYLOAD')
   const field = Object.hasOwn(input, 'payload') ? 'payload' : 'content'
   const payload = validateChannelSendPayload(input[field])

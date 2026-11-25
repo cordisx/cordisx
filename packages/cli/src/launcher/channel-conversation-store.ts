@@ -1,4 +1,5 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import { validateChannelTerminalDeliveries } from './channel-terminal-delivery.js'
 import { type ChannelModelPriority, parseChannelModelPriority } from './channel-model-priority.js'
 import { type ChannelFailureNoticeConfig, parseChannelFailureNoticeConfig } from './channel-failure-notice-config.js'
 import {
@@ -135,6 +136,16 @@ export interface ChannelConversationJob {
   replyDefaults?: ChannelReplyDefaults
   replyMode?: ChannelReplyMode
   replyTarget?: ChannelThreadRef
+  /** Write-ahead fence for one explicitly declared terminal send. */
+  terminalDelivery?: {
+    inputOperationId: string
+    sendOperationId: string
+    deliveryId: string
+    callerGeneration: string
+    fingerprint: string
+    target: ChannelThreadRef
+    outcome?: { state: 'completed' | 'failed'; code?: string }
+  }
   /** Target created for this job's latest live handoff; fences immediate repeated handoffs. */
   liveContinuationTarget?: string
   code?: string
@@ -143,7 +154,7 @@ export interface ChannelConversationJob {
 }
 export interface ChannelConversationState {
   readonly contract: 'cordisx.channel-conversation-store/v1'
-  schemaVersion: 1 | 2
+  schemaVersion: 1 | 2 | 3
   revision: number
   policyRevision: number
   policy: ChannelConversationPolicy
@@ -232,14 +243,17 @@ export class ChannelConversationStore {
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8')) as ChannelConversationState
       if (
-        parsed.contract !== value.contract || ![1, 2].includes(parsed.schemaVersion)
+        parsed.contract !== value.contract || ![1, 2, 3].includes(parsed.schemaVersion)
         || !Number.isSafeInteger(parsed.revision)
         || !Number.isSafeInteger(parsed.nextSequence) || typeof parsed.inputCursor !== 'string'
         || !parsed.bindings || !parsed.inputs || !parsed.jobs
       ) throw new Error('INVALID_CONVERSATION_STORE')
-      if (parsed.schemaVersion === 2) {
+      if (parsed.schemaVersion === 2 || parsed.schemaVersion === 3 && parsed.logicalContinuations !== undefined) {
         parsed.logicalContinuations = parseLogicalContinuationState(parsed.logicalContinuations)
-      } else if (parsed.logicalContinuations !== undefined) throw new Error('INVALID_CONVERSATION_STORE')
+      } else if (parsed.schemaVersion === 1 && parsed.logicalContinuations !== undefined) {
+        throw new Error('INVALID_CONVERSATION_STORE')
+      }
+      validateChannelTerminalDeliveries(parsed)
       parsed.policy = parseChannelConversationPolicy(parsed.policy)
       parsed.groupTaskAccess = parseChannelGroupTaskAccess(parsed.groupTaskAccess)
       parsed.groupUserTaskAccess = parseChannelGroupUserTaskAccess(parsed.groupUserTaskAccess)

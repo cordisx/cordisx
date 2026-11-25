@@ -31,7 +31,12 @@ import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { channelJobBlocks, reconcileChannelJob, steerChannelQueued } from './channel-conversation-steer.js'
-import { sameChannelPrincipal } from './channel-source-principal.js'
+import { selectChannelReplyMode } from './channel-reply-selection.js'
+import {
+  channelTerminalSchema,
+  channelTurnSteerFence,
+  reconcileChannelTerminalDelivery,
+} from './channel-terminal-delivery.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
@@ -65,12 +70,7 @@ import { clearChannelIdlePriorityOffers, removeChannelIdlePriorityGrant } from '
 import { logicalContinuationManagement } from './logical-continuation-management.js'
 import { assertChannelLogicalHandoff, confirmChannelLogicalHandoff } from './channel-logical-handoff.js'
 import { finishChannelJob } from './channel-conversation-completion.js'
-import {
-  channelCommandReplyTarget,
-  type ChannelReplyMode,
-  channelReplyMode,
-  channelReplyTarget,
-} from './channel-reply-routing.js'
+import { channelCommandReplyTarget, type ChannelReplyMode, channelReplyMode } from './channel-reply-routing.js'
 import {
   CHANNEL_COMMANDS,
   channelCommandDenied,
@@ -86,6 +86,7 @@ import type * as Conversation from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
 
 export class ChannelConversationConsumer {
+  private readonly deliveryClaims = new Set<string>()
   private readonly lifetime = new AbortController()
   private readonly timer: ReturnType<typeof setInterval>
   private pumping: Promise<void> | undefined
@@ -379,45 +380,17 @@ export class ChannelConversationConsumer {
   status(sessionId?: string) {
     return channelStatusReadback(this.store.snapshot(), sessionId)
   }
-  /** Select the final-response route for this exact incoming turn; this operation never sends a message. */
-  async selectReplyMode(value: unknown, sessionId: string, turnId?: string) {
-    const args = channelRecord(value)
-    channelExact(args, ['operationId', 'mode'])
-    const operationId = channelText(args.operationId, 128)
-    const mode = channelReplyMode(args.mode) as ChannelReplyMode
-    // Wait for the reserved dispatch if a native tool arrives before start() returns; never retry it.
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const job = this.store.snapshot().jobs[operationId]
-      if (!job || job.state !== 'dispatching' || this.lifetime.signal.aborted) break
-      if (job.sessionId !== undefined && job.sessionId !== sessionId) throw new Error('REPLY_OPERATION_NOT_FOUND')
-      await new Promise(resolve => setTimeout(resolve, 20))
+  claimDeliveryIds(ids: readonly string[]): () => void {
+    if (new Set(ids).size !== ids.length || ids.some(id => this.deliveryClaims.has(id))) {
+      throw new Error('CHANNEL_DELIVERY_BUSY')
     }
-    if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
-    return this.store.mutate(state => {
-      const job = state.jobs[operationId]
-      if (!job || job.sessionId !== sessionId || turnId !== undefined && job.turnId !== turnId) {
-        throw new Error('REPLY_OPERATION_NOT_FOUND')
-      }
-      if (job.state !== 'running' || job.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
-      const record = state.inputs[job.recordId]
-      if (!record) throw new Error('REPLY_OPERATION_NOT_FOUND')
-      if (job.steeredInto) {
-        const parent = job.steerParent && state.jobs[job.steerParent]
-        const original = parent && state.inputs[parent.recordId]
-        if (
-          !parent || !original || parent.steeredInto || parent.sessionId !== job.sessionId
-          || parent.bindingId !== job.bindingId || parent.turnId !== job.turnId || job.steeredInto !== job.turnId
-          || !sameChannelPrincipal(original.input.source.event, record.input.source.event)
-        ) throw new Error('REPLY_OPERATION_NOT_FOUND')
-        if (parent.state !== 'running' || parent.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
-        // Other routes are anchored to an incoming message, so only the owner can choose them.
-        if (mode !== 'none') throw new Error('REPLY_MODE_CHANGE_REQUIRES_OWNER')
-        parent.replyMode = 'none'
-      }
-      if (mode !== 'none') channelReplyTarget(record.input.source.event, mode)
-      job.replyMode = mode
-      return { operationId, mode, sendsMessage: false }
-    })
+    for (const id of ids) this.deliveryClaims.add(id)
+    return () => {
+      for (const id of ids) this.deliveryClaims.delete(id)
+    }
+  }
+  selectReplyMode(value: unknown, sessionId: string, turnId?: string) {
+    return selectChannelReplyMode(this.store, this.lifetime.signal, value, sessionId, turnId)
   }
   history(value: unknown, sessionId: string) {
     const args = channelRecord(value)
@@ -764,6 +737,25 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
+      if (job.code === 'CHANNEL_TERMINAL_DELIVERY_UNRESOLVED') {
+        await reconcileChannelTerminalDelivery(this.store, this.input.access(), job.id)
+        return
+      }
+      if (job.code === 'CHANNEL_STEER_FINAL_UNRESOLVED') {
+        const fence = channelTurnSteerFence(this.store.snapshot(), job)
+        if (!fence.dispatching && !fence.uncertain) {
+          await this.store.mutate(state => {
+            const current = state.jobs[job.id]
+            if (current?.state !== 'reconciliation-required' || current.code !== job.code) return
+            const latest = channelTurnSteerFence(state, current)
+            if (latest.dispatching || latest.uncertain) return
+            current.state = 'running'
+            delete current.code
+            channelTerminalSchema(state)
+          })
+        }
+        return
+      }
       if (job.code === 'IDLE_PRIORITY_MIGRATION_UNCERTAIN' || job.code === 'GROUP_PRIORITY_EFFECT_UNCERTAIN') return
       return await reconcileChannelJob(this.store, native, job, record, this.input.profileId)
     }

@@ -1,9 +1,4 @@
-import type {
-  ChannelRuntime,
-  ChannelSubscriptionFilter,
-  ChannelTenantRef,
-  ChannelThreadRef,
-} from '@cordisx/channel-runtime'
+import type { ChannelSubscriptionFilter, ChannelTenantRef, ChannelThreadRef } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { richtextRequirements } from '@cordisx/channel-runtime'
 import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations-rpc.js'
@@ -12,13 +7,8 @@ import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import { channelModelPriorityLocal } from './channel-model-priority.js'
 import { MemoryRecordValidationError } from './channel-memory-record-validation.js'
-import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
-import type { ChannelMessageReadResult } from './channel-message-read.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
-import type { ChannelDirectoryReadback } from './channel-live-directory.js'
-import type { ChannelCommandUserReadback } from './channel-command-users.js'
-import { type ChannelReplyCapabilities } from './channel-reply-routing.js'
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
 import type { ChannelAdminPairing } from './channel-admin-pairing.js'
 import { questionDeliveryId } from './channel-questions.js'
@@ -27,59 +17,12 @@ import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
 import { channelForwardRpc } from './channel-forward-rpc.js'
 import { authorizeChannelForward } from './channel-forward-permissions.js'
+import { validateChannelTerminalIntent } from '../cli/channel-send-payload.js'
+import { canonicalTaskJson } from '../agent-task-record.js'
+import { reserveChannelTerminalDelivery } from './channel-terminal-delivery.js'
 
-export interface ChannelConversationAccess {
-  readonly forward?: ReturnType<typeof import('./channel-forward-service.js').createChannelForwardService>
-  messageOperations?(operation: string, input: Record<string, unknown>, context: {
-    source?: import('@cordisx/channel-runtime').ChannelEventRef | undefined
-    callerScope: string
-    authorize: (event: import('@cordisx/channel-runtime').ChannelEventRef, write: boolean) => void
-  }): Promise<unknown>
-  readonly outbound?: ChannelOutboundRpc
-  feedbackReact?(
-    event: import('@cordisx/channel-runtime').ChannelEventRef,
-    emoji: string,
-  ): Promise<import('./channel-feedback.js').ChannelReactionReceipt>
-  feedbackRemove?(
-    event: import('@cordisx/channel-runtime').ChannelEventRef,
-    reactionId: string,
-  ): Promise<import('./channel-feedback.js').ChannelReactionReceipt>
-  feedbackWait?(
-    event: import('@cordisx/channel-runtime').ChannelEventRef,
-    target: ChannelThreadRef,
-    text: string,
-    recordId: string,
-  ): Promise<void>
-  readonly generation: string
-  readonly runtime: ChannelRuntime
-  accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
-  conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
-  remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
-  readMessage?(
-    event: import('@cordisx/channel-runtime').ChannelEventRef,
-    messageId: string,
-  ): Promise<ChannelMessageReadResult>
-  /** Display-only cache-first directory. Never use for permissions or command target resolution. */
-  displayConversations?(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
-  conversationDisplay?(
-    ref: import('@cordisx/channel-runtime').ChannelConversationRef,
-  ): import('./channel-conversation-directory.js').ChannelConversationIdentity
-  /** Launcher-only identity/capability lookups; no new plugin or Agent authority. */
-  users?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<ChannelCommandUserReadback>
-  senderName?(event: import('@cordisx/channel-runtime').ChannelEventRef): string | undefined
-  messageContext?(
-    message: import('@cordisx/channel-runtime').ChannelUserInput,
-    addressing?: import('./channel-command-users.js').ChannelCommandAddressing,
-  ): Promise<import('./channel-message-context.js').ChannelMessageContext>
-  replyCapabilities?(event: import('@cordisx/channel-runtime').ChannelEventRef): ChannelReplyCapabilities
-  name?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<string | undefined>
-  conversationIdentity?(
-    event: import('@cordisx/channel-runtime').ChannelEventRef,
-  ): Promise<import('./channel-conversation-directory.js').ChannelConversationIdentity>
-  sendCard?(event: import('@cordisx/channel-runtime').ChannelEventRef, card: object): Promise<string>
-  updateCard?(event: import('@cordisx/channel-runtime').ChannelEventRef, messageId: string, card: object): Promise<void>
-  drain(ref: ChannelTenantRef): Promise<void>
-}
+import type { ChannelConversationAccess } from './channel-conversation-access.js'
+export type { ChannelConversationAccess } from './channel-conversation-access.js'
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_REQUEST')
@@ -753,12 +696,18 @@ export class ChannelConversationTools {
       }
       if (operation === 'send' || operation === 'send-many' || operation === 'receipt') {
         const allowed = operation === 'send'
-          ? ['account', 'target', 'text', 'operationId', 'payload', 'content', 'fallback', 'progressToken']
+          ? ['account', 'target', 'text', 'operationId', 'payload', 'content', 'fallback', 'progressToken', 'terminal']
           : operation === 'send-many'
           ? ['account', 'targets', 'text', 'operationId', 'payload', 'content', 'fallback']
           : ['account', 'operationId', 'targetCount']
         if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('INVALID_REQUEST')
         const operationId = text(input.operationId, 128)
+        if (input.terminal !== undefined) {
+          validateChannelTerminalIntent(input.terminal)
+          if (input.progressToken !== undefined || !this.consumer || !scopedCaller?.turnId || !source) {
+            throw new Error('TERMINAL_CONTEXT_UNAVAILABLE')
+          }
+        }
         const progressGuard = () => {
           if (input.progressToken !== undefined) {
             if (!this.consumer) throw new Error('CHANNEL_PROGRESS_NOTICE_STALE')
@@ -794,137 +743,182 @@ export class ChannelConversationTools {
               JSON.stringify([caller, ref, multiple ? `${operationId}:${index}` : operationId]),
             ).digest('hex')
           }`
-        const contents = operation === 'receipt'
-          ? undefined
-          : current.outbound?.content(
-            input,
-            outboundCaller,
-            parsed,
-            index => current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined,
-          )
-        const receipts: unknown[] = []
-        if (typed && contents) {
-          for (let index = 0; index < parsed.length; index += 1) {
-            if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
-            const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
-            const requested = contents[index]!
-            if (
-              Buffer.byteLength(
-                JSON.stringify({
-                  contract: 'cordisx.channel-message-send/v2',
-                  schemaVersion: 2,
-                  target: parsed[index],
-                  kind: 'reply',
-                  idempotencyKey: deliveryIdFor(index),
-                  content: requested.content,
-                  fallback: requested.fallback,
-                }),
-                'utf8',
-              ) > 196_608
-            ) throw new Error('INVALID_CHANNEL_PAYLOAD')
-            const requirements = richtextRequirements(requested.content)
-            if (requirements.userIds.length) {
-              await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)
-            }
-            const richtext = requirements.paragraphs
-              ? (await current.runtime.outboundCapabilitiesV2(parsed[index]!, caller)).richtext
-              : undefined
-            if (
-              (!capabilities.types.includes(requested.content.type)
-                || requirements.paragraphs && richtext?.paragraphs !== true
-                || requirements.userIds.length > 0 && richtext?.mentions !== true)
-              && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
-            ) {
-              throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')
-            }
-            if ('handle' in requested.content && capabilities.types.includes(requested.content.type)) {
-              const media = current.outbound!.store.descriptor(
-                outboundCallerScope(outboundCaller),
-                requested.content.handle,
-                parsed[index]!,
-              )
-              if (!Number.isSafeInteger(capabilities.maxMediaBytes) || media.size > capabilities.maxMediaBytes) {
-                throw new Error('MEDIA_SIZE_DENIED')
-              }
-            }
-            if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
-              throw new Error('CHANNEL_GENERATION_CHANGED')
-            }
-          }
-        }
-        let attempted = 0
+        const release = operation === 'receipt' ? () => {} : this.consumer?.claimDeliveryIds(
+          Array.from({ length: count }, (_, index) => deliveryIdFor(index)),
+        ) ?? (() => {})
         try {
-          for (let index = 0; index < count; index += 1) {
-            if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
-              throw new Error('CHANNEL_GENERATION_CHANGED')
-            }
-            const deliveryId = deliveryIdFor(index)
-            if (operation !== 'receipt') {
-              progressGuard()
-              this.consumer?.trackProgressDelivery(deliveryId, source, callerSession, outboundCaller.turnId)
-              attempted += 1
-              const notification = {
-                target: parsed[index]!,
-                kind: 'reply' as const,
-                text: sendText ?? '',
-                ...(contents ? contents[index]! : {}),
-              }
-              if (input.progressToken !== undefined) {
-                if (!current.runtime.notifyGuardedOnce) throw new Error('CHANNEL_PROGRESS_GUARD_UNAVAILABLE')
-                await current.runtime.notifyGuardedOnce(notification, caller, deliveryId, () => {
-                  try {
-                    progressGuard()
-                    return this.access()?.generation === current.generation
-                  } catch {
-                    return false
-                  }
-                })
-              } else {await current.runtime.notifyOnce(
-                  {
-                    target: parsed[index]!,
+          const contents = operation === 'receipt'
+            ? undefined
+            : current.outbound?.content(
+              input,
+              outboundCaller,
+              parsed,
+              index => current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined,
+            )
+          const receipts: unknown[] = []
+          if (typed && contents) {
+            for (let index = 0; index < parsed.length; index += 1) {
+              if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
+              const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
+              const requested = contents[index]!
+              if (
+                Buffer.byteLength(
+                  JSON.stringify({
+                    contract: 'cordisx.channel-message-send/v2',
+                    schemaVersion: 2,
+                    target: parsed[index],
                     kind: 'reply',
-                    text: sendText ?? '',
-                    ...(contents ? contents[index]! : {}),
-                  },
-                  caller,
-                  deliveryId,
-                )}
-              if (!this.lifetime.signal.aborted) await current.drain(ref)
+                    idempotencyKey: deliveryIdFor(index),
+                    content: requested.content,
+                    fallback: requested.fallback,
+                  }),
+                  'utf8',
+                ) > 196_608
+              ) throw new Error('INVALID_CHANNEL_PAYLOAD')
+              const requirements = richtextRequirements(requested.content)
+              if (requirements.userIds.length) {
+                await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)
+              }
+              const richtext = requirements.paragraphs
+                ? (await current.runtime.outboundCapabilitiesV2(parsed[index]!, caller)).richtext
+                : undefined
+              if (
+                (!capabilities.types.includes(requested.content.type)
+                  || requirements.paragraphs && richtext?.paragraphs !== true
+                  || requirements.userIds.length > 0 && richtext?.mentions !== true)
+                && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
+              ) {
+                throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')
+              }
+              if ('handle' in requested.content && capabilities.types.includes(requested.content.type)) {
+                const media = current.outbound!.store.descriptor(
+                  outboundCallerScope(outboundCaller),
+                  requested.content.handle,
+                  parsed[index]!,
+                )
+                if (!Number.isSafeInteger(capabilities.maxMediaBytes) || media.size > capabilities.maxMediaBytes) {
+                  throw new Error('MEDIA_SIZE_DENIED')
+                }
+              }
+              if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+                throw new Error('CHANNEL_GENERATION_CHANGED')
+              }
             }
-            // Missing is explicit. JSON.stringify must never silently erase a missing receipt.
-            receipts.push(current.runtime.deliverySnapshot(deliveryId, caller) ?? null)
           }
-        } catch (error) {
+          const pendingIds = new Set(
+            Object.values(this.consumer?.profileLogicalOwner().store.snapshot().jobs ?? {})
+              .flatMap(job => job.terminalDelivery ? [job.terminalDelivery.deliveryId] : []),
+          )
+          if (
+            operation !== 'receipt' && input.terminal === undefined
+            && Array.from({ length: count }, (_, index) => deliveryIdFor(index)).some(id => pendingIds.has(id))
+          ) {
+            throw new Error('TERMINAL_DELIVERY_PENDING')
+          }
+          let terminalExisting = false
+          if (input.terminal !== undefined) {
+            const deliveryId = deliveryIdFor(0)
+            if (!pendingIds.has(deliveryId) && current.runtime.deliverySnapshot(deliveryId, caller)) {
+              throw new Error('TERMINAL_SEND_ID_ALREADY_USED')
+            }
+            const terminal = input.terminal as { inputOperationId: string }
+            const fingerprint = createHash('sha256').update(canonicalTaskJson({
+              operationId,
+              target: parsed[0],
+              text: sendText ?? null,
+              content: contents?.[0] ?? null,
+            })).digest('hex')
+            const reservation = await reserveChannelTerminalDelivery(this.consumer!.profileLogicalOwner().store, {
+              inputOperationId: terminal.inputOperationId,
+              sendOperationId: operationId,
+              sessionId: scopedCaller!.threadId,
+              turnId: scopedCaller!.turnId!,
+              source: source!,
+              target: parsed[0]!,
+              generation: caller.generation,
+              fingerprint,
+              deliveryId,
+            })
+            terminalExisting = !reservation.created
+          }
+          let attempted = 0
+          try {
+            for (let index = 0; index < count; index += 1) {
+              if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+                throw new Error('CHANNEL_GENERATION_CHANGED')
+              }
+              const deliveryId = deliveryIdFor(index)
+              if (operation !== 'receipt' && !terminalExisting) {
+                progressGuard()
+                this.consumer?.trackProgressDelivery(deliveryId, source, callerSession, outboundCaller.turnId)
+                attempted += 1
+                const notification = {
+                  target: parsed[index]!,
+                  kind: 'reply' as const,
+                  text: sendText ?? '',
+                  ...(contents ? contents[index]! : {}),
+                }
+                if (input.terminal !== undefined) {
+                  await current.runtime.notifyTerminalOnce(notification, caller, deliveryId)
+                } else if (input.progressToken !== undefined) {
+                  if (!current.runtime.notifyGuardedOnce) throw new Error('CHANNEL_PROGRESS_GUARD_UNAVAILABLE')
+                  await current.runtime.notifyGuardedOnce(notification, caller, deliveryId, () => {
+                    try {
+                      progressGuard()
+                      return this.access()?.generation === current.generation
+                    } catch {
+                      return false
+                    }
+                  })
+                } else {await current.runtime.notifyOnce(
+                    {
+                      target: parsed[index]!,
+                      kind: 'reply',
+                      text: sendText ?? '',
+                      ...(contents ? contents[index]! : {}),
+                    },
+                    caller,
+                    deliveryId,
+                  )}
+                if (!this.lifetime.signal.aborted) await current.drain(ref)
+              }
+              // Missing is explicit. JSON.stringify must never silently erase a missing receipt.
+              receipts.push(current.runtime.deliverySnapshot(deliveryId, caller) ?? null)
+            }
+          } catch (error) {
+            return {
+              status: 'partial',
+              generation: current.generation,
+              operationId,
+              deliveryState: 'unknown',
+              receipts,
+              attempted,
+              code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+                ? error.message
+                : 'CHANNEL_EFFECT_UNCERTAIN',
+            }
+          }
           return {
-            status: 'partial',
+            status: 'ok',
             generation: current.generation,
             operationId,
-            deliveryState: 'unknown',
-            receipts,
-            attempted,
-            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
-              ? error.message
-              : 'CHANNEL_EFFECT_UNCERTAIN',
+            deliveryState: receipts.every(receipt => (receipt as { state?: string } | null)?.state === 'sent')
+              ? 'sent'
+              : receipts.every(receipt => receipt === null)
+              ? input.terminal === undefined ? 'not-found' : 'unknown'
+              : receipts.some(receipt =>
+                  ['dead-letter', 'cancelled'].includes(String((receipt as { state?: string } | null)?.state))
+                )
+              ? 'failed'
+              : receipts.some(receipt =>
+                  ['queued', 'sending', 'retrying'].includes(String((receipt as { state?: string } | null)?.state))
+                )
+              ? 'pending'
+              : 'unknown',
+            ...(multiple ? { receipts } : { receipt: receipts[0] }),
           }
-        }
-        return {
-          status: 'ok',
-          generation: current.generation,
-          operationId,
-          deliveryState: receipts.every(receipt => (receipt as { state?: string } | null)?.state === 'sent')
-            ? 'sent'
-            : receipts.every(receipt => receipt === null)
-            ? 'not-found'
-            : receipts.some(receipt =>
-                ['dead-letter', 'cancelled'].includes(String((receipt as { state?: string } | null)?.state))
-              )
-            ? 'failed'
-            : receipts.some(receipt =>
-                ['queued', 'sending', 'retrying'].includes(String((receipt as { state?: string } | null)?.state))
-              )
-            ? 'pending'
-            : 'unknown',
-          ...(multiple ? { receipts } : { receipt: receipts[0] }),
+        } finally {
+          release()
         }
       }
       if (

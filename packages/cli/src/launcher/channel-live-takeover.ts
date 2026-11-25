@@ -93,6 +93,7 @@ export class ChannelLiveTakeover {
       if (
         !policy.policy.enabled || entry?.intent || state.liveTakeovers[input.source]
         || !job || job.sessionId !== input.source || job.turnId !== input.sourceTurn || job.state !== 'running'
+        || job.terminalDelivery
         || !job.bindingId || state.bindings[job.bindingId]?.state !== 'active'
         || state.bindings[job.bindingId]?.sessionId !== input.source
         || Object.values(state.jobs).some(other =>
