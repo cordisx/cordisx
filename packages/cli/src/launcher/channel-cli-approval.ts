@@ -8,6 +8,7 @@ const READS = new Set([
   'bind-status',
   'history',
   'remote-history',
+  'thread-history',
   'message-get',
   'message-capabilities',
   'message-operation-receipt',

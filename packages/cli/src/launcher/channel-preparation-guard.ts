@@ -6,6 +6,7 @@ const READ_ONLY = new Set([
   'local-bindings',
   'history',
   'remote-history',
+  'thread-history',
   'message-get',
   'message-capabilities',
   'message-operation-receipt',

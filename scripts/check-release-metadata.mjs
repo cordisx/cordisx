@@ -6,7 +6,7 @@ import { releaseFromTag } from './release-version.mjs'
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
 const expectedVersion = '0.1.0-beta.81'
-const expectedProtocolVersion = 'github:cordisx/cordisx-protocol#54aa3ad0ed4f63eb9ecd550392843c76d42ab256'
+const expectedProtocolVersion = 'github:cordisx/cordisx-protocol#7342dff881756f03d5c464907dc8582e81ce58e9'
 const expectedCliProxySource = 'github:cordisx/plugin-cli-proxy-api#25ff53db12e51e66b304f9f2139c706af0b0c761'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
 
