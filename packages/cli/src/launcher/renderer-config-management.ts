@@ -53,6 +53,11 @@ export interface DesktopManagerConfigProof {
       readonly dependencies: readonly string[]
       readonly canonicalSource?: string
     }
+    readonly configured?: {
+      readonly version: string
+      readonly integrity: string
+      readonly moduleGeneration: string
+    }
     readonly configuration: ManagerPluginConfigSnapshot
   }
 }
@@ -79,10 +84,12 @@ export function desktopManagerConfigProofExpression(pluginId: string): string {
     const runtime = globalThis.__cordisxRuntime;
     if (!runtime?.activePluginGeneration || !runtime?.pluginRegistryEpoch || !runtime?.snapshot) return { ok: true };
     const plugin = runtime.snapshot().plugins.find(item => item.id === ${JSON.stringify(pluginId)});
-    if (!plugin?.package || !plugin.configuration) return { ok: true };
+    if (!plugin?.configuration) return { ok: true };
+    const configured = plugin.package ? undefined : runtime.configuredPluginProvenance?.(plugin.id);
+    if (!plugin.package && !configured) return { ok: true };
     return { ok: true, result: {
       snapshot: { active: runtime.activePluginGeneration(), registryEpoch: runtime.pluginRegistryEpoch() },
-      plugin: { id: plugin.id, source: plugin.source, package: plugin.package, configuration: plugin.configuration }
+      plugin: { id: plugin.id, source: plugin.source, package: plugin.package, configured, configuration: plugin.configuration }
     } };
   })()`
 }

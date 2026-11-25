@@ -32,7 +32,7 @@ export async function inspectServiceRendererConfiguredPlugin(homeDir: string, pl
   return { staged, artifact }
 }
 
-/** An owner-selected, service-free configured archive with no private configuration. */
+/** An owner-selected, service-free configured archive with owner-proved configuration. */
 export class ServiceRendererConfiguredPlugin {
   private identity?: ServiceRendererIdentityProjection
   private bound: ManagerRendererChannelContext | undefined
@@ -43,6 +43,7 @@ export class ServiceRendererConfiguredPlugin {
     private readonly input: {
       readonly homeDir: string
       readonly plugin: CordisXConfigPlugin
+      readonly projectedConfig: unknown
       readonly current: () => boolean
     },
     readonly lease: PluginGenerationGraphLease,
@@ -53,15 +54,27 @@ export class ServiceRendererConfiguredPlugin {
     readonly plugin: CordisXConfigPlugin
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
+    readonly projectConfiguration?: (plugin: CordisXConfigPlugin) => Promise<unknown>
   }): Promise<ServiceRendererConfiguredPlugin | undefined> {
     const value = input.plugin.config
     if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
-    if (
-      value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 0
-    ) return undefined
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
     const inspected = await inspectServiceRendererConfiguredPlugin(input.homeDir, input.plugin)
     if (!inspected) return undefined
     const { staged, artifact } = inspected
+    let projectedConfig: unknown = {}
+    if (Object.keys(value).length !== 0) {
+      if (!input.projectConfiguration) return undefined
+      try {
+        projectedConfig = await input.projectConfiguration(input.plugin)
+      } catch {
+        if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
+        return undefined
+      }
+      if (projectedConfig === null || typeof projectedConfig !== 'object' || Array.isArray(projectedConfig)) {
+        return undefined
+      }
+    }
     if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
     const lease = await input.server.lease(
       {
@@ -76,7 +89,7 @@ export class ServiceRendererConfiguredPlugin {
       lease.retire()
       throw new Error('renderer-configured-plugin-unavailable')
     }
-    return new ServiceRendererConfiguredPlugin(input, lease)
+    return new ServiceRendererConfiguredPlugin({ ...input, projectedConfig: structuredClone(projectedConfig) }, lease)
   }
 
   isCurrent(): boolean {
@@ -151,7 +164,7 @@ export class ServiceRendererConfiguredPlugin {
           entry: this.input.plugin.entry,
           source,
           enabled: true,
-          config: {},
+          config: structuredClone(this.input.projectedConfig),
           revision: this.input.plugin.revision ?? 0,
           manifest: this.input.plugin.manifest,
           distributionArtifact: { ...this.input.plugin.distributionArtifact },
@@ -214,6 +227,7 @@ export async function prepareConfiguredPlugins(input: {
   readonly configured: ServiceRendererConfiguredPlugin[]
   readonly leases: PluginGenerationGraphLease[]
   readonly current: () => boolean
+  readonly projectConfiguration?: (plugin: CordisXConfigPlugin) => Promise<unknown>
 }): Promise<CordisXConfigPlugin[]> {
   const unavailable: CordisXConfigPlugin[] = []
   for (const plugin of input.plugins) {

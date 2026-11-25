@@ -7,7 +7,7 @@ import { c as createTar } from 'tar'
 export async function configuredManagerPlugin(
   root: string,
   id = 'configured-demo',
-  options: { invalidPage?: boolean } = {},
+  options: { invalidPage?: boolean; configSchema?: boolean } = {},
 ) {
   const directory = path.join(root, `${id}-package`)
   await mkdir(directory)
@@ -31,10 +31,20 @@ export async function configuredManagerPlugin(
       digest: `sha256:${createHash('sha256').update(runtime).digest('hex')}`,
     },
   }
+  const configSchema = options.configSchema
+    ? [
+      "const descriptor = { type: 'object', dict: { label: { type: 'string' },",
+      "  token: { type: 'string', meta: { role: 'secret' } } } }",
+      "export const Config = { ...descriptor, '~standard': { version: 1, vendor: 'schemastery',",
+      '  validate: value => ({ value }) }, toJSON: () => descriptor }',
+      "export const configApplies = 'live'",
+    ].join('\n')
+    : ''
   const module = `
 export const name = ${JSON.stringify(id)};
 export const inject = ['slots', 'pages', 'routes'];
-export function apply(ctx) {
+${configSchema}
+export function apply(ctx, config) {
   const title = { key: 'fixture.title', fallback: 'Configured fixture' };
   ctx.pages.register({
     $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v3.schema.json',
@@ -44,7 +54,9 @@ export function apply(ctx) {
   }
     icon: 'host:settings', chrome: 'standard'
   }, ({ container }) => {
-    container.textContent = 'Configured fixture page';
+    container.textContent = ${
+    options.configSchema ? "'Configured fixture page: ' + config.label" : "'Configured fixture page'"
+  };
     return () => { container.textContent = ''; };
   });
   ctx.routes.register({

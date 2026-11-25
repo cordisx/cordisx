@@ -608,6 +608,9 @@ export class ServiceRendererBootstrap {
           current: () => this.current(rendererId, entry),
           unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),
           retire: () => entry.peer.close(),
+          ...(this.input.protectProfileInputs && this.input.projectPluginConfig
+            ? { projectConfiguration: async plugin => await this.input.projectPluginConfig!.project(snapshot, plugin) }
+            : {}),
         })
         entry.snapshot = snapshot
         entry.config = config

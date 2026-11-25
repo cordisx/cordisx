@@ -59,9 +59,11 @@ export async function desktopConfiguredFixtures(root: string, enabled: boolean) 
   if (!enabled) return undefined
   const publicPlugin = await configuredManagerPlugin(root, 'configured-public')
   const privatePlugin = await configuredManagerPlugin(root, 'configured-private')
+  const provedPlugin = await configuredManagerPlugin(root, 'configured-proved', { configSchema: true })
   return {
     publicPlugin,
     privatePlugin,
+    provedPlugin,
     entries: [
       { id: 'configured-public', entry: publicPlugin.archive },
       {
@@ -69,21 +71,28 @@ export async function desktopConfiguredFixtures(root: string, enabled: boolean) 
         entry: privatePlugin.archive,
         config: { token: 'synthetic-configured-secret' },
       },
+      {
+        id: 'configured-proved',
+        entry: provedPlugin.archive,
+        config: { label: 'synthetic-configured-visible', token: 'synthetic-proved-secret' },
+      },
     ],
   }
 }
 
 export function desktopConfiguredPolicies(profileId: string, plugins: readonly CordisXConfigPlugin[]) {
-  const plugin = plugins.find(item => item.id === 'configured-public')
-  if (!plugin?.source) throw new Error('configured fixture source is unavailable')
-  return exactDomPermissionPolicies(profileId, [{
-    id: plugin.id,
-    entry: plugin.entry,
-    pointIds: ['manager.settings.navigation-items', 'manager.content'],
-  }]).map(policy => ({
-    ...policy,
-    key: { ...policy.key, identity: { ...policy.key.identity, source: plugin.source! } },
-  }))
+  return ['configured-public', 'configured-proved'].flatMap(id => {
+    const plugin = plugins.find(item => item.id === id)
+    if (!plugin?.source) throw new Error('configured fixture source is unavailable')
+    return exactDomPermissionPolicies(profileId, [{
+      id: plugin.id,
+      entry: plugin.entry,
+      pointIds: ['manager.settings.navigation-items', 'manager.content'],
+    }]).map(policy => ({
+      ...policy,
+      key: { ...policy.key, identity: { ...policy.key.identity, source: plugin.source! } },
+    }))
+  })
 }
 
 export async function verifyDesktopConfiguredNavigation(page: CdpClient) {
@@ -104,21 +113,41 @@ export async function verifyDesktopConfiguredPlugins(
   for (const page of pages) {
     await verifyDesktopConfiguredNavigation(page)
     const projection = await page.evaluate<string>('JSON.stringify(globalThis.__cordisxRuntime.snapshot().plugins)')
-    const plugins = JSON.parse(projection) as Array<{ id: string; status: string }>
+    const plugins = JSON.parse(projection) as Array<
+      { id: string; status: string; configuration?: { writable: boolean } }
+    >
     expect(projection).toContain('configured-public')
     expect(projection).toContain('configured-private')
     expect(plugins.find(plugin => plugin.id === 'configured-public')?.status).toBe('active')
     expect(plugins.find(plugin => plugin.id === 'configured-private')?.status).toBe('failed')
+    expect(plugins.find(plugin => plugin.id === 'configured-proved')?.status).toBe('active')
+    expect(plugins.find(plugin => plugin.id === 'configured-proved')?.configuration?.writable).toBe(false)
     expect(plugins.find(plugin => plugin.id === 'unsupported-installed')?.status).toBe('failed')
     expect(projection).not.toContain('synthetic-configured-secret')
+    expect(projection).not.toContain('synthetic-proved-secret')
     expect(projection).not.toContain('synthetic-installed-private')
     expect(projection).not.toContain(installedSource)
     expect(projection).not.toContain(fixture.publicPlugin.source)
     expect(projection).not.toContain(fixture.privatePlugin.source)
+    expect(projection).not.toContain(fixture.provedPlugin.source)
     expect(await page.evaluate('typeof globalThis.__unsupportedInstalledLoaded')).toBe('undefined')
     await page.evaluate('document.querySelector("[data-settings-navigation-item^=configured-public]").click()')
     await vi.waitFor(async () => {
       expect(await page.evaluate('document.body.textContent.includes("Configured fixture page")')).toBe(true)
+    }, { timeout: 15_000 })
+    await vi.waitFor(async () => {
+      expect(
+        await page.evaluate('Boolean(document.querySelector("[data-settings-navigation-item^=configured-proved]"))'),
+      )
+        .toBe(true)
+    }, { timeout: 20_000 })
+    await page.evaluate('document.querySelector("[data-settings-navigation-item^=configured-proved]").click()')
+    await vi.waitFor(async () => {
+      expect(
+        await page.evaluate(
+          'document.body.textContent.includes("Configured fixture page: synthetic-configured-visible")',
+        ),
+      ).toBe(true)
     }, { timeout: 15_000 })
   }
 }

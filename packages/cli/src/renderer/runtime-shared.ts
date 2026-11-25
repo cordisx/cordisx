@@ -575,6 +575,12 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   activePluginGeneration(): CordisXPluginActivationRecordV1
   /** Actual configured graphs loaded into this independent renderer. */
   configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
+  /** Native owner readback of a configured archive loaded by this renderer. */
+  configuredPluginProvenance?(pluginId: string): {
+    readonly version: string
+    readonly integrity: string
+    readonly moduleGeneration: string
+  } | undefined
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
   /** Adopt an owner-confirmed configuration write without replacing this Manager. */

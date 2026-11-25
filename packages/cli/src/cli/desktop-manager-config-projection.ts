@@ -67,7 +67,16 @@ type ProjectedConfig = { readonly value: unknown; readonly writable: boolean; re
 
 function projectionKey(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): string {
   return createHash('sha256').update(
-    JSON.stringify([snapshot, plugin.id, plugin.package, plugin.revision, plugin.config]),
+    JSON.stringify([
+      snapshot,
+      plugin.id,
+      plugin.source,
+      plugin.package,
+      plugin.configuredArchiveDigest,
+      plugin.distributionArtifact,
+      plugin.revision,
+      plugin.config,
+    ]),
   ).digest('hex')
 }
 
@@ -77,6 +86,7 @@ function projectedConfig(
   proof: DesktopManagerConfigProof,
 ): ProjectedConfig {
   const value = projectDesktopManagerConfig(snapshot, plugin, proof)
+  if (plugin.package === undefined) return { value, writable: false, lifecycle: false }
   const descriptor = proof.plugin.configuration
   const lifecycle = descriptor.applies === 'live' && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
     && isDeepStrictEqual(
@@ -100,15 +110,25 @@ export function projectDesktopManagerConfig(
   const active = snapshot.active.plugins.find(item => item.id === plugin.id)
   const item = proof?.plugin
   const config = item?.configuration
+  const installed = plugin.package !== undefined
+  const packageMatches = installed && active !== undefined && item?.package !== undefined
+    && item.configured === undefined
+    && item.package.version === active.version && item.package.digest === active.digest
+    && item.package.moduleGeneration === active.moduleGeneration
+    && item.package.canonicalSource === active.canonicalSource
+    && isDeepStrictEqual(item.package.dependencies, active.dependencies.map(dependency => dependency.id))
+    && plugin.package!.digest === active.digest && plugin.package!.moduleGeneration === active.moduleGeneration
+  const configuredMatches = !installed && active === undefined && plugin.enabled
+    && typeof plugin.configuredArchiveDigest === 'string'
+    && /^sha256:[a-f0-9]{64}$/u.test(plugin.configuredArchiveDigest)
+    && plugin.distributionArtifact !== undefined && item?.package === undefined && item?.configured !== undefined
+    && item.configured.version === plugin.distributionArtifact.version
+    && item.configured.integrity === plugin.distributionArtifact.integrity
+    && typeof item.configured.moduleGeneration === 'string' && item.configured.moduleGeneration.length > 0
   if (
-    !active || !plugin.package || !item?.package || !config
+    !item || !config || (!packageMatches && !configuredMatches)
     || !isDeepStrictEqual(normalized(proof.snapshot), normalized(snapshot))
     || item.id !== plugin.id || item.source !== plugin.source
-    || item.package.version !== active.version || item.package.digest !== active.digest
-    || item.package.moduleGeneration !== active.moduleGeneration
-    || item.package.canonicalSource !== active.canonicalSource
-    || !isDeepStrictEqual(item.package.dependencies, active.dependencies.map(dependency => dependency.id))
-    || plugin.package.digest !== active.digest || plugin.package.moduleGeneration !== active.moduleGeneration
     || config.namespace !== plugin.id || config.schemaKind !== 'schemastery'
     || config.revision !== plugin.revision || config.lastGoodRevision !== config.revision
     || !Array.isArray(config.fields) || config.fields.length > 256

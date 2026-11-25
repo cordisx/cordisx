@@ -59,6 +59,7 @@ import {
   verifyDesktopConfiguredPlugins,
   waitForDesktopRetirement,
 } from './suites/desktop-configured-plugin-browser.js'
+import { verifyDesktopSharedModelServices } from './suites/desktop-model-services-browser.js'
 import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 import {
   draftDesktopConfig,
@@ -169,7 +170,7 @@ async function exerciseDesktopOwner(
   })
   const artifactServer = await startPluginGenerationArtifactServer()
   const cdp = new CdpPluginLifecycleRuntime()
-  if (archive !== undefined && !review || lifecycleFixture) {
+  if (archive !== undefined && !review || coordinateLifecycle) {
     // This fixture supplies CDP documents; native launch graph promotion is a separate boundary.
     cdp.markBrowserGraphTransportReady()
     cdp.setBrowserGraphBootstrapRefresh(async () => {})
@@ -759,62 +760,7 @@ async function exerciseDesktopOwner(
         ).toBe(true)
       }
     }
-    for (const page of [first, second]) {
-      await page.evaluate(`(() => {
-          const button = [...document.querySelectorAll('button')].find(item =>
-            ['Model services', '模型服务'].includes(item.textContent.trim()))
-          if (!button) throw new Error('Model services navigation is unavailable')
-          button.click()
-        })()`)
-      await vi.waitFor(async () => {
-        expect(await page.evaluate('Boolean(document.querySelector(".cxms-shared-header"))')).toBe(true)
-        expect(await page.evaluate('getComputedStyle(document.querySelector(".cxms-shared-header")).display'))
-          .toBe('flex')
-      }, { timeout: 15_000 })
-    }
-    await first.evaluate(`(() => {
-        const add = [...document.querySelectorAll('.cxms-shared-header button')].find(button =>
-          ['Add shared service', '添加跨应用服务'].includes(button.textContent.trim()))
-        if (!add) throw new Error('Model service add action is unavailable')
-        add.click()
-      })()`)
-    await vi.waitFor(async () => {
-      expect(await first!.evaluate('Boolean(document.querySelector(".cxmc-editor [data-config-path=id] input"))'))
-        .toBe(true)
-      expect(await first!.evaluate('getComputedStyle(document.querySelector(".cxmc-editor-actions")).display'))
-        .toBe('flex')
-    }, { timeout: 10_000 })
-    for (
-      const [field, value] of [
-        ['id', 'desktop-fixture'],
-        ['displayName', 'Desktop fixture'],
-        ['baseUrl', 'https://example.test'],
-        ['codexModels', 'fixture-model'],
-        ['apiKey', 'desktop-fixture-secret'],
-      ]
-    ) {
-      await first.evaluate(`(() => {
-          const input = document.querySelector(${JSON.stringify(`.cxmc-editor [data-config-path="${field}"] input`)})
-          if (!input) throw new Error('Model service field is unavailable')
-          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)})
-          input.dispatchEvent(new Event('input', { bubbles: true }))
-          input.dispatchEvent(new Event('change', { bubbles: true }))
-        })()`)
-    }
-    await vi.waitFor(async () => {
-      expect(await first!.evaluate('!document.querySelector(".cxmc-editor-actions button:last-child").disabled'))
-        .toBe(true)
-    }, { timeout: 10_000 })
-    await first.evaluate('document.querySelector(".cxmc-editor-actions button:last-child").click()')
-    for (const page of [first, second]) {
-      await vi.waitFor(async () => {
-        expect(await page.evaluate('Boolean(document.querySelector("[data-shared-model-service=desktop-fixture]"))'))
-          .toBe(true)
-      }, { timeout: 20_000 })
-      expect(await page.evaluate('document.body.textContent.includes("desktop-fixture-secret")')).toBe(false)
-    }
-    const stored = JSON.parse(await readFile(configPath, 'utf8')) as { providers: Array<{ id: string }> }
-    expect(stored.providers.some(provider => provider.id === 'desktop-fixture')).toBe(true)
+    await verifyDesktopSharedModelServices(first, second, configPath)
     await first.evaluate('globalThis.__desktopBeforeReload = true')
     await first.send('Page.reload')
     await vi.waitFor(async () => {
@@ -918,7 +864,7 @@ async function exerciseDesktopOwner(
     second = undefined
     await vi.waitFor(async () => {
       expect(await owner.lifecycle.pluginConfiguration(list)).toMatchObject(
-        archive === undefined ? { status: 'ok', plugins: [] } : { status: 'ok' },
+        archive === undefined && extras === undefined ? { status: 'ok', plugins: [] } : { status: 'ok' },
       )
     }, { timeout: 15_000 })
   } finally {
@@ -952,6 +898,12 @@ it.skipIf(chrome === undefined)(
   'shares one Desktop owner between a real CDP document and two standalone Manager pages',
   async () => await exerciseDesktopOwner(),
   120_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'projects a proven configured archive into two Desktop Manager pages',
+  async () => await exerciseDesktopOwner(undefined, false, false, false, false, true),
+  180_000,
 )
 
 it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(

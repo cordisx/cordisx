@@ -49,6 +49,66 @@ it('projects only the exact native schema fields and never serializes a secret',
   expect(JSON.stringify(result)).not.toContain('synthetic-secret')
 })
 
+it('projects a configured archive only from the matching Desktop configuration proof', async () => {
+  const configured = {
+    id: 'configured-demo',
+    source: 'https://example.test/configured-demo',
+    enabled: true,
+    revision: 4,
+    configuredArchiveDigest: 'sha256:' + 'b'.repeat(64),
+    distributionArtifact: { version: '1.0.0', integrity: 'sha256:' + 'c'.repeat(64) },
+    config: { label: 'visible', token: 'synthetic-configured-secret' },
+  }
+  const native = {
+    snapshot,
+    plugin: {
+      id: configured.id,
+      source: configured.source,
+      configured: { ...configured.distributionArtifact, moduleGeneration: 'artifact_configured' },
+      configuration: {
+        namespace: configured.id,
+        schemaKind: 'schemastery',
+        revision: 4,
+        lastGoodRevision: 4,
+        value: { label: 'visible' },
+        fields: [
+          { path: ['label'], type: 'string' },
+          { path: ['token'], type: 'string', role: 'secret' },
+        ],
+        secrets: [{ path: ['token'], set: false }],
+      },
+    },
+  }
+  expect(projectDesktopManagerConfig(snapshot, configured as any, native as any)).toEqual({ label: 'visible' })
+  const projector = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => Symbol.for('configured-seat'),
+    read: async () => native as any,
+  })
+  expect(await projector.canWrite(snapshot, configured as any)).toBe(false)
+  expect(await projector.canCoordinateLifecycle(snapshot, configured as any)).toBe(false)
+  for (
+    const changed of [
+      { ...configured, source: 'https://example.test/other' },
+      {
+        ...configured,
+        distributionArtifact: { ...configured.distributionArtifact, integrity: 'sha256:' + 'd'.repeat(64) },
+      },
+      { ...configured, revision: 5 },
+      { ...configured, config: { ...configured.config, undeclared: 'synthetic-private' } },
+    ]
+  ) {
+    expect(() => projectDesktopManagerConfig(snapshot, changed as any, native as any)).toThrow(
+      'desktop-manager-config-unavailable',
+    )
+  }
+  const leaked = structuredClone(native)
+  ;(leaked.plugin.configuration.value as Record<string, string>).token = 'synthetic-configured-secret'
+  expect(() => projectDesktopManagerConfig(snapshot, configured as any, leaked as any)).toThrow(
+    'desktop-manager-config-unavailable',
+  )
+})
+
 it('rejects stale identity, unclassified fields, leaked secrets and pending restarts', () => {
   const stale = structuredClone(proof)
   stale.plugin.package.moduleGeneration = 'different'

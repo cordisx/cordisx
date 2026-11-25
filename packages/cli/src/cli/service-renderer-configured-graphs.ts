@@ -26,6 +26,7 @@ export async function prepareServiceRendererConfiguredGraphs(input: {
   readonly current: () => boolean
   readonly unchanged: () => Promise<boolean>
   readonly retire: () => void
+  readonly projectConfiguration?: (plugin: CordisXConfigPlugin) => Promise<unknown>
 }): Promise<void> {
   if (input.channel !== undefined && input.channelOwner === undefined) input.unavailable.push(input.channel)
   if (input.plugins.length > 0) {
@@ -36,6 +37,7 @@ export async function prepareServiceRendererConfiguredGraphs(input: {
       configured: input.configured,
       leases: input.leases,
       current: input.current,
+      ...(input.projectConfiguration === undefined ? {} : { projectConfiguration: input.projectConfiguration }),
     })
     input.unavailable.push(...unavailable)
   }
