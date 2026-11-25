@@ -20,6 +20,24 @@ async function fixture() {
   return { service, root, file, configPath }
 }
 describe('user-owned chat execution preferences', () => {
+  it('persists a confirmed model selection and its uncertain replacement per thread', async () => {
+    const { service, file, configPath } = await fixture()
+    await service.recordModelSelection('chat', { providerId: 'provider', model: 'model' })
+    const reopened = await ChatExecutionPreferences.open({ file, configPath, appId: 'codex', profileId: 'default' })
+    services.push(reopened)
+    expect(reopened.read('local', 'chat')?.modelSelection)
+      .toEqual({ status: 'confirmed', providerId: 'provider', model: 'model' })
+    expect(reopened.read('local', 'other')).toBeUndefined()
+    await reopened.observe('chat', { modelProvider: 'new-provider', model: 'new-model' })
+    expect(reopened.read('local', 'chat')?.modelSelection)
+      .toEqual({ status: 'confirmed', providerId: 'new-provider', model: 'new-model' })
+    await reopened.observe('chat', { model: 'unconfirmed-model' })
+    expect(reopened.read('local', 'chat')?.modelSelection).toEqual({ status: 'unknown' })
+    await reopened.recordModelSelection('chat')
+    const recovered = await ChatExecutionPreferences.open({ file, configPath, appId: 'codex', profileId: 'default' })
+    services.push(recovered)
+    expect(recovered.read('local', 'chat')?.modelSelection).toEqual({ status: 'unknown' })
+  })
   it('captures explicit first-turn effort instead of the profile default and keeps nested provider observations', async () => {
     const { service } = await fixture()
     await service.setDefaults({ effort: 'low' }, 0)

@@ -112,7 +112,13 @@ async function channelModelConnectivityProbe(
     try {
       const result = JSON.parse(content) as { status?: unknown; model?: unknown }
       return result.status === 'completed'
-        ? { evidence: result.model === candidate.model ? 'healthy' : 'inconclusive', legacyAvailable: true }
+        ? {
+          evidence: result.model === candidate.model
+              || typeof result.model === 'string' && connection.responseModelAliases?.includes(result.model)
+            ? 'healthy'
+            : 'inconclusive',
+          legacyAvailable: true,
+        }
         : result.status === 'failed'
         ? { evidence: 'unavailable', legacyAvailable: false }
         : { evidence: 'inconclusive', legacyAvailable: true }

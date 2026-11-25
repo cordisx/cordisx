@@ -319,7 +319,12 @@ describe('headless Codex backend', () => {
     expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'available' }))
       .toMatchObject({ status: 'selected' })
     expect(request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread-1', model: 'available' })
-    expect(request).toHaveBeenCalledWith('thread/resume', { threadId: 'thread-1', excludeTurns: true })
+    expect(request).toHaveBeenCalledWith('thread/resume', {
+      threadId: 'thread-1',
+      excludeTurns: true,
+      modelProvider: 'openai',
+      model: 'available',
+    })
     let closed = false
     const codex = createHeadlessCodexOperations({ configPath: '/unused', models: backend.models, closed: () => closed })
     expect(await codex('list', {})).toMatchObject({ status: 'ok', providers: [{ providerId: 'openai' }] })

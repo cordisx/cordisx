@@ -175,6 +175,90 @@ describe('Channel priority and failure notices', () => {
     expect(f.native.start.mock.calls[0]![6]).toEqual({ providerId: 'chosen', model: 'chosen-model' })
     defaults.mockRestore()
   })
+  it.each(['healthy', 'inconclusive', 'unavailable'] as const)(
+    'uses a prioritized configured default unless its probe is explicitly %s',
+    async status => {
+      const f = await fixture()
+      await f.consumer.policySet({ enabled: true }, 0)
+      const evidence = vi.fn(async (candidate: { providerId: string }) =>
+        candidate.providerId === 'first' ? status : 'healthy'
+      )
+      const preflight = vi.fn(async () => true)
+      Object.assign(f.native, { priorityPreflight: preflight, priorityEvidence: evidence })
+      f.consumer.setNativeExtras(() =>
+        ({
+          ...f.native,
+          modelOperation: async () => ({
+            providers: [
+              { providerId: 'first', models: [{ id: 'one' }] },
+              { providerId: 'second', models: [{ id: 'two' }] },
+            ],
+          }),
+          validateTaskConfiguration: async () => {},
+        }) as never
+      )
+      const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+      await store.mutate(state => {
+        state.taskConfig = parseChannelTaskConfig({
+          defaults: { providerId: 'first', model: 'one' },
+          permissions: [{ id: 'allow', effect: 'allow', userIds: ['alice'], fields: ['providerId', 'model'] }],
+        })
+      })
+      await f.consumer.modelPriorityOperation('model-priority-set', {
+        expectedRevision: 0,
+        candidates: [{ providerId: 'first', model: 'one' }, { providerId: 'second', model: 'two' }],
+      })
+      const defaults = vi.spyOn(f.consumer.taskSettings, 'defaults').mockResolvedValue({
+        providerId: 'first',
+        model: 'one',
+      })
+      await f.consumer.receive(`inbox:${status}`, message(`om_${status}`))
+      await settle(f.consumer)
+      expect(f.native.start.mock.calls[0]![6]).toEqual(
+        status === 'unavailable'
+          ? { providerId: 'second', model: 'two' }
+          : { providerId: 'first', model: 'one' },
+      )
+      expect(preflight).toHaveBeenCalledTimes(status === 'unavailable' ? 1 : 0)
+      defaults.mockRestore()
+    },
+  )
+  it('uses priority candidates after an unavailable default that is outside the list', async () => {
+    const f = await fixture()
+    await f.consumer.policySet({ enabled: true }, 0)
+    Object.assign(f.native, {
+      priorityPreflight: vi.fn(async () => true),
+      priorityEvidence: vi.fn(async (candidate: { providerId: string }) =>
+        candidate.providerId === 'default' ? 'unavailable' : 'healthy'
+      ),
+    })
+    f.consumer.setNativeExtras(() =>
+      ({
+        ...f.native,
+        modelOperation: async () => ({ providers: [{ providerId: 'fallback', models: [{ id: 'backup' }] }] }),
+        validateTaskConfiguration: async () => {},
+      }) as never
+    )
+    const store = (f.consumer as unknown as { store: ChannelConversationStore }).store
+    await store.mutate(state => {
+      state.taskConfig = parseChannelTaskConfig({
+        defaults: { providerId: 'default', model: 'primary' },
+        permissions: [{ id: 'allow', effect: 'allow', userIds: ['alice'], fields: ['providerId', 'model'] }],
+      })
+    })
+    await f.consumer.modelPriorityOperation('model-priority-set', {
+      expectedRevision: 0,
+      candidates: [{ providerId: 'fallback', model: 'backup' }],
+    })
+    const defaults = vi.spyOn(f.consumer.taskSettings, 'defaults').mockResolvedValue({
+      providerId: 'default',
+      model: 'primary',
+    })
+    await f.consumer.receive('inbox:outside-default', message('om_outside_default'))
+    await settle(f.consumer)
+    expect(f.native.start.mock.calls[0]![6]).toEqual({ providerId: 'fallback', model: 'backup' })
+    defaults.mockRestore()
+  })
   it('rechecks priority changes made while preflight is in progress', async () => {
     const f = await fixture()
     await f.consumer.policySet({ enabled: true }, 0)

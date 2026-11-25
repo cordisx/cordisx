@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 const execution = vi.hoisted(() => ({
   prepare: vi.fn(async (_method: string, params: unknown) => ({ params, captureId: 'capture' })),
   complete: vi.fn(async () => {}),
   observe: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
+  read: vi.fn(() => undefined),
 }))
 vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
   ChatExecutionPreferences: { open: async () => execution },
@@ -20,6 +24,41 @@ const input = {
   report: () => {},
 }
 describe('headless native authority', () => {
+  it('restores a confirmed selection on resume while preserving a later explicit choice', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-headless-resume-'))
+    const record = {
+      hostId: 'local',
+      threadId: 'thread',
+      revision: 1,
+      appliedRevision: 1,
+      application: 'applied',
+      effective: { modelProvider: 'provider', model: 'model' },
+    }
+    execution.read.mockReturnValue(record as never)
+    const native = await createHeadlessNativeAuthority({ ...input, homeDir: root })
+    const next = vi.fn(async () => ({ thread: { id: 'thread' } }))
+    try {
+      await native.authority.nativeRequest!('thread/resume', { threadId: 'thread' }, next)
+      expect(next).toHaveBeenLastCalledWith({ threadId: 'thread', modelProvider: 'provider', model: 'model' })
+      await native.authority.nativeRequest!('thread/resume', {
+        threadId: 'thread',
+        modelProvider: 'new-provider',
+        model: 'new-model',
+      }, next)
+      expect(next).toHaveBeenLastCalledWith({
+        threadId: 'thread',
+        modelProvider: 'new-provider',
+        model: 'new-model',
+      })
+      execution.read.mockReturnValue({ ...record, application: 'unknown' } as never)
+      await native.authority.nativeRequest!('thread/resume', { threadId: 'thread' }, next)
+      expect(next).toHaveBeenLastCalledWith({ threadId: 'thread' })
+    } finally {
+      execution.read.mockReturnValue(undefined)
+      await native.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('does not infer a mode when two writes overlap, even if a notification agrees', () => {
     const evidence = new HeadlessWorkMode(false)
     const first = evidence.begin('thread'), second = evidence.begin('thread')

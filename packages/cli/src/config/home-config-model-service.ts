@@ -15,6 +15,8 @@ export interface HomeConfigModelServiceProvider {
   readonly protocols: readonly HomeConfigProviderProtocol[]
   /** Model ids per app id. */
   readonly models?: Readonly<Record<string, readonly string[]>>
+  /** Exact provider-declared response IDs for a selected Codex model, never inferred by suffix. */
+  readonly responseModelAliases?: Readonly<Record<string, readonly string[]>>
   /** App ids this service is projected into. Omitted means every app it has a protocol for. */
   readonly appliesTo?: readonly string[]
   readonly enabled?: boolean
@@ -85,6 +87,36 @@ function parseModels(
   return Object.freeze(result)
 }
 
+function parseResponseModelAliases(
+  value: unknown,
+  models: Readonly<Record<string, readonly string[]>> | undefined,
+  label: string,
+  context: ModelServiceParseContext,
+): Readonly<Record<string, readonly string[]>> | undefined {
+  if (value === undefined) return undefined
+  const source = context.record(value, label), allowed = new Set(models?.codex ?? [])
+  if (Object.keys(source).length > 512) throw new Error(`${label} contains too many models`)
+  const owners = new Map<string, string>(), result: Record<string, readonly string[]> = Object.create(null)
+  for (const [model, aliases] of Object.entries(source)) {
+    if (!allowed.has(model) || !Array.isArray(aliases) || aliases.length === 0 || aliases.length > 16) {
+      throw new Error(`${label} contains an invalid model mapping`)
+    }
+    const parsed: string[] = []
+    for (const alias of aliases) {
+      if (
+        typeof alias !== 'string' || !alias.trim() || alias.length > 512 || /[\u0000-\u001f\u007f]/u.test(alias)
+        || allowed.has(alias) && alias !== model || owners.has(alias) || parsed.includes(alias)
+      ) {
+        throw new Error(`${label} contains an invalid or ambiguous response model`)
+      }
+      owners.set(alias, model)
+      parsed.push(alias)
+    }
+    result[model] = Object.freeze(parsed)
+  }
+  return Object.freeze(result)
+}
+
 export function parseModelServiceProvider(
   value: unknown,
   label: string,
@@ -99,6 +131,7 @@ export function parseModelServiceProvider(
     'apiKeyEnv',
     'protocols',
     'models',
+    'responseModelAliases',
     'appliesTo',
     'enabled',
     'timeoutMs',
@@ -115,6 +148,12 @@ export function parseModelServiceProvider(
   }
   const protocols = parseProtocols(provider.protocols, `${label}.protocols`)
   const models = parseModels(provider.models, `${label}.models`, context)
+  const responseModelAliases = parseResponseModelAliases(
+    provider.responseModelAliases,
+    models,
+    `${label}.responseModelAliases`,
+    context,
+  )
   let appliesTo: readonly string[] | undefined
   if (provider.appliesTo !== undefined) {
     if (!Array.isArray(provider.appliesTo) || provider.appliesTo.length === 0) {
@@ -145,6 +184,7 @@ export function parseModelServiceProvider(
     protocols: Object.freeze(protocols),
     ...(runtimeOptions === undefined ? {} : { runtimeOptions }),
     ...(models === undefined ? {} : { models }),
+    ...(responseModelAliases === undefined ? {} : { responseModelAliases }),
     ...(appliesTo === undefined ? {} : { appliesTo }),
     ...(provider.enabled === undefined ? {} : { enabled: provider.enabled }),
     ...(provider.timeoutMs === undefined ? {} : { timeoutMs: provider.timeoutMs as number }),

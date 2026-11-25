@@ -121,6 +121,13 @@ function declaration(
     protocols: [...input.protocols],
     ...(runtimeOptions === undefined ? {} : { runtimeOptions }),
     ...(Object.keys(models).length === 0 ? {} : { models }),
+    ...(previous?.responseModelAliases && previous.baseUrl === input.baseUrl && input.apiKey === undefined
+      ? {
+        responseModelAliases: Object.fromEntries(
+          Object.entries(previous.responseModelAliases).filter(([id]) => input.codexModels.includes(id)),
+        ),
+      }
+      : {}),
     ...(previous?.appliesTo === undefined ? {} : { appliesTo: [...previous.appliesTo] }),
     ...(previous?.timeoutMs === undefined ? {} : { timeoutMs: previous.timeoutMs }),
     ...(input.enabled ? {} : { enabled: false }),

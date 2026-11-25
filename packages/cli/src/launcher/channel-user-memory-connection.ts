@@ -37,7 +37,13 @@ export function channelMemoryServiceConnection(
       if (!value?.trim()) throw new Error('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
       headers[name] = value
     }
-    return { baseUrl: service.baseUrl, headers, protocols: service.protocols, dispose() {} }
+    return {
+      baseUrl: service.baseUrl,
+      headers,
+      protocols: service.protocols,
+      ...(service.responseModelAliases?.[model] ? { responseModelAliases: service.responseModelAliases[model] } : {}),
+      dispose() {},
+    }
   }
 }
 

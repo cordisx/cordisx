@@ -12,6 +12,8 @@ export interface ModelApiConnection {
   readonly baseUrl: string
   readonly headers: Readonly<Record<string, string>>
   readonly protocols?: readonly string[]
+  /** Exact response identifiers bound to the selected provider/model by the operator. */
+  readonly responseModelAliases?: readonly string[]
   dispose(): void
 }
 

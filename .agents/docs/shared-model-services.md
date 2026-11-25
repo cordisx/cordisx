@@ -48,6 +48,16 @@ entries start nothing; they describe a vendor:
   app's configuration.
 - `baseUrl` must be HTTPS, or HTTP on loopback.
 
+For Channel health probes, a declaration may additionally set
+`responseModelAliases` in the home config. Map an exact configured Codex model
+ID to the exact `response.model` IDs verified for that endpoint and credential,
+for example `"responseModelAliases": { "route/model": ["upstream/model"] }`.
+An unlisted response ID remains inconclusive; matching a suffix is not proof of
+the selected model. The mapping is only for health evidence, not model
+capability discovery. Saving a different endpoint or replacement key through
+Model Services removes the old mapping. Reverify it after any credential or
+gateway change made outside that editor.
+
 The manager's **Model services** page lists these declarations under
 **Model services for Codex and Claude** and adds, edits, and deletes them as
 one compare-and-swap edit. A key typed there is stored in

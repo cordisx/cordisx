@@ -116,6 +116,36 @@ it('distinguishes a completed real probe from unsupported or malformed responses
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
 })
 
+it('accepts only an exact provider-bound response alias, never a matching model-name suffix', async () => {
+  const routed = { providerId: 'provider', model: 'tenant/route/model' }
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose() {},
+    responseModelAliases: ['verified/upstream/model'],
+  })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({
+        status: 'completed',
+        model: 'verified/upstream/model',
+      }))
+    ),
+  )
+  expect(await channelModelConnectivityEvidence(connect, routed)).toBe('healthy')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({
+        status: 'completed',
+        model: 'unverified/upstream/model',
+      }))
+    ),
+  )
+  expect(await channelModelConnectivityEvidence(connect, routed)).toBe('inconclusive')
+})
+
 it('does not interpret cancellation, a revoked fence or an unknown fetch error as service failure', async () => {
   const connect: ChannelMemoryModelConnection = async () => ({
     baseUrl: 'https://example.test',

@@ -1,4 +1,5 @@
 import { channelNativeFailureCode } from './channel-native-failure.js'
+import { channelModelSelectionView } from './channel-model-selection-view.js'
 import { channelNativeExists, channelNativeLabel } from './channel-native-metadata.js'
 import type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
 export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
@@ -197,6 +198,7 @@ export class ChannelNativeSessions {
     await this.input.execution?.settled()
     const live = await this.input.sourceConfiguration?.(threadId).catch(() => undefined)
     const record = this.input.execution?.read('local', threadId)
+    if (!live && record?.modelSelection?.status === 'unknown') return undefined
     if (!record || record.application !== 'applied' || !this.input.execution?.observationConfirmed(threadId)) {
       return undefined
     }
@@ -266,7 +268,7 @@ export class ChannelNativeSessions {
       const resumed = object(
         await native.nativeRequest(
           'thread/resume',
-          fence.allowOwned('thread/resume', destination, { threadId: destination }),
+          fence.allowOwned('thread/resume', destination, { threadId: destination, excludeTurns: true }),
         ),
       )
       if (
@@ -445,10 +447,8 @@ export class ChannelNativeSessions {
     if (metadata?.id !== threadId) throw new Error('SESSION_NOT_FOUND')
     const live = await this.input.sourceConfiguration?.(threadId).catch(() => undefined)
     const record = this.input.execution?.read('local', threadId)
-    const provider = live?.providerId ?? metadata.modelProvider
     const effective = record?.effective
-    const model = live?.model ?? metadata.model
-      ?? (effective?.modelProvider === undefined || effective.modelProvider === provider ? effective?.model : undefined)
+    const { provider, model } = channelModelSelectionView(live, metadata, record)
     const coherentEffective = effective !== undefined && effective.modelProvider === provider
       && effective.model === model
     const effort = live?.reasoningEffort ?? metadata.reasoningEffort
