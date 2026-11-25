@@ -5,6 +5,8 @@ import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import { continuationRoutine } from './channel-continuation-approval.js'
 import { sameChannelPrincipal } from './channel-source-principal.js'
+import { channelMemoryAdministrator } from './channel-memory-recall.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
 
 /** Resolve authority from a real dispatch, never from an Agent-supplied actor or name. */
 export class ChannelAgentAccess {
@@ -72,6 +74,29 @@ export class ChannelAgentAccess {
     })
     if (matches.length !== 1) return undefined
     return matches[0]!.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  }
+  memoryAdministrator(metadata: unknown, sourceAdministrator = false): boolean {
+    const source = this.caller(metadata)?.source
+    const state = this.state(), policy = state.policy
+    const records = Object.values(state.inputs ?? {}).filter(record =>
+      source && sameChannelPrincipal(record.input.source.event, source)
+    )
+    const selected = records.find(record => record.input.source.event.messageId === source?.messageId)
+    if (selected && records.some(record => record.sequence > selected.sequence)) return false
+    return !!source && !!policy && channelMemoryAdministrator(policy, source, sourceAdministrator)
+  }
+  userMemoryAllowed(metadata: unknown): boolean {
+    const source = this.caller(metadata)?.source, state = this.state()
+    if (
+      !source?.actor || !state.policy.enabled || source.actor.adapterId !== source.adapterId
+      || source.actor.accountId !== source.accountId || source.actor.tenantId !== source.tenantId
+    ) return false
+    const record = Object.values(state.inputs).find(record =>
+      record.input.source.event.messageId === source.messageId
+      && sameChannelPrincipal(record.input.source.event, source)
+    )
+    return !!record?.accepted && record.routed && channelDispatchAllowed(state, source)
+      && channelPolicyAllows(state.policy, 'send', source)
   }
   routine(command: unknown, threadId: string, turnId: string): boolean {
     const operation = this.native()?.cliApprovalOperation?.(command)

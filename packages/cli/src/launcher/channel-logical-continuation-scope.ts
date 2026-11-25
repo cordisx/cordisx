@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import type { ChannelConversationState } from './channel-conversation-store.js'
+import { channelIdlePriorityUncertain } from './channel-idle-priority-status.js'
 
 /**
  * A deliberately narrow first boundary: the event must be authenticated by the Channel transport,
@@ -44,6 +45,7 @@ export function channelLogicalContinuationAdmitted(
     Object.values(state.jobs).some(job =>
       job.sessionId === sourceSessionId
       && !['queued', 'completed', 'failed', 'cancelled'].includes(job.state)
+      && !channelIdlePriorityUncertain(state, job)
     )
     || Object.values(state.taskRequests).some(request =>
       request.threadId === sourceSessionId

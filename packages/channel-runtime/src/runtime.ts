@@ -1,6 +1,8 @@
 import { appendAudit, auditRecord } from './runtime-audit.js'
-import { isEligibleOutbox } from './outbound-enqueue.js'
+import { canApplyOutboxDecision, isEligibleOutbox } from './outbound-enqueue.js'
+import { cancelOutboundDelivery } from './outbound-cancel.js'
 import { ChannelDeliveryObservers } from './delivery-observers.js'
+import { type ActiveConnection, isEligibleInbox, RUNTIME_DEFAULTS } from './runtime-state.js'
 export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { runtimeSnapshot, visibleConnections } from './runtime-snapshot.js'
@@ -32,7 +34,13 @@ import type {
 } from '@cordisx/protocol/channel-outbound/v1'
 import type { ChannelAdapterDefinitionV2 } from '@cordisx/protocol/channel-runtime/v2'
 import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
-import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
+import {
+  confirmedGroupDeliveryText,
+  deliverySnapshot,
+  inputsSince,
+  latestInputCursor,
+  ownsPlainCard,
+} from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
   accountKey,
@@ -71,23 +79,6 @@ import type {
   ChannelThreadRef,
 } from './types.js'
 export { ChannelIntegrityError } from './runtime-validation.js'
-
-const DEFAULT_MAX_ATTEMPTS = 5
-const DEFAULT_LEASE_MS = 30_000
-const DEFAULT_RETRY_BASE_MS = 1_000
-
-const SYSTEM_CLOCK: ChannelClock = Object.freeze({ now: () => new Date() })
-
-interface ActiveConnection {
-  readonly generation: number
-  readonly connection: Awaited<ReturnType<ChannelAdapterDefinition['start']>>
-}
-
-function isEligibleInbox(record: StoredInboxRecord, now: number): boolean {
-  if (record.status === 'queued') return true
-  if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
-  return record.status === 'processing' && Date.parse(record.leaseExpiresAt ?? '') <= now
-}
 
 export class ChannelRuntime {
   readonly #permissions: ChannelRuntimeOptions['permissions']
@@ -128,10 +119,10 @@ export class ChannelRuntime {
     this.#prepareOutbound = options.prepareOutbound
     this.#resolveOutboundMedia = options.resolveOutboundMedia
     this.#store = store
-    this.#clock = options.clock ?? SYSTEM_CLOCK
-    this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
-    this.#leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
-    this.#retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+    this.#clock = options.clock ?? RUNTIME_DEFAULTS.clock
+    this.#maxAttempts = options.maxAttempts ?? RUNTIME_DEFAULTS.maxAttempts
+    this.#leaseMs = options.leaseMs ?? RUNTIME_DEFAULTS.leaseMs
+    this.#retryBaseMs = options.retryBaseMs ?? RUNTIME_DEFAULTS.retryBaseMs
     if (this.#maxAttempts < 1) throw new RangeError('maxAttempts must be at least 1')
     if (this.#leaseMs < 1) throw new RangeError('leaseMs must be positive')
     if (this.#retryBaseMs < 1) throw new RangeError('retryBaseMs must be positive')
@@ -320,6 +311,11 @@ export class ChannelRuntime {
     return this.#enqueueNotification(notification, caller, deliveryId)
   }
 
+  /** Host-only send whose claimed effect must never be retried after uncertainty. */
+  async notifyTerminalOnce(notification: ChannelNotification, caller: ChannelPluginIdentity, deliveryId: string) {
+    return this.#enqueueNotification(notification, caller, deliveryId, undefined, true)
+  }
+
   async sendTyped(
     request: ChannelMessageSendV1,
     caller: ChannelPluginIdentity,
@@ -431,6 +427,7 @@ export class ChannelRuntime {
     caller: ChannelPluginIdentity,
     deliveryId: string,
     questionCard?: ChannelQuestionCard,
+    terminalDelivery = false,
   ): Promise<ChannelDeliveryHandle> {
     return enqueueOutbound(
       {
@@ -451,6 +448,7 @@ export class ChannelRuntime {
       caller,
       deliveryId,
       questionCard,
+      terminalDelivery,
     )
   }
 
@@ -461,6 +459,19 @@ export class ChannelRuntime {
 
   deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
     return deliverySnapshot(this.#store.snapshot(), id, caller)
+  }
+  /** Launcher-only exact receipt lookup, never exposed to plugins. */
+  confirmedGroupDeliveryText(
+    id: string,
+    caller: ChannelPluginIdentity,
+    target: import('./types.js').ChannelConversationRef,
+  ) {
+    this.#assertRuntimeActive()
+    return confirmedGroupDeliveryText(this.#store.snapshot(), id, caller, target)
+  }
+  ownsPlainCard(target: import('./types.js').ChannelConversationRef, messageId: string): boolean {
+    this.#assertRuntimeActive()
+    return ownsPlainCard(this.#store.snapshot(), target, messageId)
   }
   latestInputCursor(): string {
     return latestInputCursor(this.#store.snapshot())
@@ -736,7 +747,10 @@ export class ChannelRuntime {
       if (decision !== 'allow') {
         await this.#store.transaction(state => {
           const current = state.outbox[next.deliveryId]
-          if (current === undefined) return
+          // Another drain may have claimed or completed the delivery while permission was checked.
+          if (
+            !canApplyOutboxDecision(current, next, generation, state.adapters[key]?.generation, nowMs, this.#leaseMs)
+          ) return
           state.outbox[next.deliveryId] = {
             ...current,
             status: 'dead-letter',
@@ -796,6 +810,7 @@ export class ChannelRuntime {
         continue
       }
 
+      let effectStarted = false
       try {
         if (claimed.content && claimed.effectiveType !== 'text') {
           await validateMentionDispatch(claimed.target, claimed.content, active.connection)
@@ -806,6 +821,7 @@ export class ChannelRuntime {
         if (claimed.media && active.connection.supportsOutboundMedia !== true) {
           throw new ChannelIntegrityError('Channel adapter media support is unavailable')
         }
+        effectStarted = true
         const result = await active.connection.send({
           deliveryId: claimed.deliveryId,
           target: claimed.target,
@@ -834,8 +850,9 @@ export class ChannelRuntime {
           const current = state.outbox[claimed.deliveryId]
           if (current?.generation !== generation || current.status !== 'processing') return
           if (state.adapters[current.accountKey]?.generation !== generation) return
+          const { terminalDelivery: _terminalDelivery, ...confirmed } = current
           state.outbox[claimed.deliveryId] = {
-            ...current,
+            ...confirmed,
             status: 'sent',
             externalMessageId: result.externalMessageId,
             ...(result.recallHandle === undefined ? {} : { recallHandle: result.recallHandle }),
@@ -870,8 +887,13 @@ export class ChannelRuntime {
           const current = state.outbox[claimed.deliveryId]
           if (current?.generation !== generation || current.status !== 'processing') return
           if (state.adapters[current.accountKey]?.generation !== generation) return
-          const retry = error instanceof RetryableChannelError && current.attempts < this.#maxAttempts
-          const status = error instanceof UncertainChannelSendError ? 'unknown' : retry ? 'retrying' : 'dead-letter'
+          const retry = !current.terminalDelivery && error instanceof RetryableChannelError
+            && current.attempts < this.#maxAttempts
+          const status = error instanceof UncertainChannelSendError || current.terminalDelivery && effectStarted
+            ? 'unknown'
+            : retry
+            ? 'retrying'
+            : 'dead-letter'
           state.outbox[claimed.deliveryId] = {
             ...current,
             status,
@@ -901,29 +923,7 @@ export class ChannelRuntime {
   }
 
   async #cancelDelivery(deliveryId: string): Promise<'cancelled' | 'irreversible' | 'not-found'> {
-    const now = this.#now()
-    return this.#store.transaction(state => {
-      const current = state.outbox[deliveryId]
-      if (current === undefined) return 'not-found'
-      if (current.status === 'processing' || current.status === 'sent' || current.status === 'unknown') {
-        return 'irreversible'
-      }
-      if (current.status !== 'queued' && current.status !== 'retrying') return 'not-found'
-      state.outbox[deliveryId] = { ...current, status: 'cancelled', updatedAt: now }
-      appendAudit(
-        state,
-        auditRecord({
-          caller: current.caller,
-          recordedAt: now,
-          accountKey: current.accountKey,
-          generation: current.generation,
-          operationId: deliveryId,
-          action: 'channel.delivery.cancel',
-          outcome: 'cancelled-before-claim',
-        }),
-      )
-      return 'cancelled'
-    })
+    return cancelOutboundDelivery(this.#store, deliveryId, this.#now())
   }
 
   async #publishInput(

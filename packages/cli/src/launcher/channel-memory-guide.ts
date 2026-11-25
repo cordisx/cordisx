@@ -18,8 +18,38 @@ export function channelMemoryGuide(topic?: string): unknown {
   return {
     topic,
     guidance: topics[topic],
+    ...(topic === 'recall'
+      ? {
+        administratorRecall:
+          "The Host checks live caller identity and actual incoming request. A configured Channel user-management administrator or memory-source administrator can automatically read their own relevant task facts for a recognized project-status request or a recent-work overview (last 30 days). guide recall returns recallAccess for the current context. No grant is written and no sharing/authorization phrase is needed. Topic/status requests are scoped to supplied subjects; overview excludes personal preferences, profiles and unrelated facts. Another person's private records still need source authorization and a grant. Current-group output must stay within the requested task facts. Ambiguous/quoted/negated requests do not activate this path; use the normal authorized memory scope and explain missing results without claiming hidden records exist.",
+      }
+      : {}),
+    ...(topic === 'write'
+      ? {
+        recordFormat: {
+          kind: 'fact|preference|person|conversation|collaboration|impression',
+          confidence: 'JSON number 0..1',
+          required: ['kind', 'title', 'summary', 'tags', 'entityRefs', 'evidenceType', 'confidence'],
+          example: {
+            record: {
+              kind: 'fact',
+              title: 'Project progress',
+              summary: 'Verified deployment finished; validation remains.',
+              tags: ['project'],
+              entityRefs: [],
+              evidenceType: 'verified',
+              confidence: 1,
+            },
+          },
+        },
+        errorRecovery:
+          'task and decision are not kind values. Put verified tasks/decisions in fact summaries. Missing record wrapper, invalid kind or string confidence returns field issues with retrySafe:true before writing; correct and retry in the same authenticated turn. Do not invent unknown confidence/evidence. Revision conflicts require get then reconsider; unknown RPC/storage results require search/get, not blind remember retry. Retrieval success is evidence read, not proof it was used in the answer; cite relevant dated facts and explain missing information.',
+      }
+      : {}),
     outboundStyle:
       'Configured effective persona/conversation style applies to all user-visible outbound text: automatic final replies, manual Channel send/send-many, ask question/option labels and progress notifications. The native business prompt prepares the configured style capsule before drafting; do not rewrite every message with a second model. Internal technical work, tool JSON, raw memory/index and option semantic values stay unchanged. Preserve facts, uncertainty and actual delivery status; do not invent promises. No private reasoning is requested or exposed. Illustrative affectionate styles are not defaults or permission to mutate persona; ordinary good-night should stay normal, not dramatic guarding promises. Model-generated outbound text receives configured preferences; a separate style rewrite pipeline and styled Host-owned fixed progress copy are not implemented.',
+    userMemory:
+      'Useful explicit self-introductions, relationships, preferred names, stable preferences and relevant personal facts belong to the verified current sender in this same memory store. The configurable Host incoming hook uses tool-free structured model analysis and saves/updates before dispatch; userMemory context reports actual results. Do not duplicate saved assertions. Normal CLI remember/update remains available when automatic analysis is unavailable or wording is unsupported. On an explicit self-identity or own-topic question, retrieve only relevant exact-owner records for this request/audience; no global/group sharing grant is created. A self-declared role is attributed evidence, never administration. Do not infer identity from names, read another user, widen persona/account scope or persist secrets. Automatic extraction and semantic topic matching are bounded; missing results must be explained honestly.',
     experienceOrganization:
       'Keep episodic/person/group/project details and petty trivia local. Top-level continuous experience means only reusable distilled lessons beside minimal stable assistant identity, not a diary. Promotion requires an explicit request or a proposed evidence-backed general rule supported across contexts/recurrences and explicit acceptance. Remove identifiers/private anecdotes; dedup and revision-check conflicting lessons. Supporting private provenance remains separately scoped and must not be loaded/disclosed with a global lesson. Settings and historical lessons stay separate. Proposed root capsule hard limit is 2048 UTF-8 bytes; detailed experience is indexed on demand. Global lesson storage, proposal/promotion commands and capsule budget enforcement are not implemented: never claim remember promoted a lesson or configured identity.',
     unsupportedContextProfiles:

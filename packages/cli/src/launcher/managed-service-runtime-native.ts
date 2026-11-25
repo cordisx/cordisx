@@ -67,6 +67,7 @@ export class ManagedServiceRuntimeNative {
         aliases: published.projection.catalog.routes.map(route => ({
           alias: route.alias,
           gatewayModelId: route.gatewayModelId,
+          ...(route.contextWindow === undefined ? {} : { contextWindow: route.contextWindow }),
           ...(() => {
             const reasoningCapabilities = parseModelReasoningCapabilities(
               'reasoningCapabilities' in route ? route.reasoningCapabilities : undefined,

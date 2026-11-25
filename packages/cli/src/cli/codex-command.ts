@@ -73,7 +73,7 @@ export async function runCodexCommand(
   if (command.operation.startsWith('review:')) {
     const callerThreadId = command.sourceSession ?? process.env.CODEX_THREAD_ID
     const result = await createApprovalReviewConfiguration({ configPath, profileId })(
-      command.operation.slice(6),
+      command.operation.slice('review:'.length),
       command.input,
       {
         ...(callerThreadId ? { 'openai/threadId': callerThreadId } : {}),

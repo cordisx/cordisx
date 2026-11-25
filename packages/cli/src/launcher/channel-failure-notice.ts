@@ -1,0 +1,67 @@
+import type { ChannelEventRef, ChannelThreadRef } from '@cordisx/channel-runtime'
+import type { ChannelConversationStore } from './channel-conversation-store.js'
+import type { ChannelConversationAccess } from './channel-conversation-tools.js'
+import { channelDispatchAllowed } from './channel-group-access.js'
+import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { sameConversation } from './channel-conversation-refs.js'
+import { channelAutoReplyTarget, channelCommandReplyTarget, channelReplyDefaults } from './channel-reply-routing.js'
+
+/** Only these fixed codes have a safe, unambiguous public description. */
+const FAILURE_TEXT = new Map([
+  ['NATIVE_MODEL_AUTH_FAILED', '模型服务认证或访问被拒绝，请联系管理员。'],
+  ['NATIVE_MODEL_RATE_LIMITED', '模型服务限流或额度不足，请联系管理员。'],
+  ['NATIVE_MODEL_CONNECTION_FAILED', '模型服务连接失败，请联系管理员。'],
+  ['NATIVE_MODEL_SERVICE_UNAVAILABLE', '模型服务暂不可用，请联系管理员。'],
+  ['MODEL_PRIORITY_UNAVAILABLE', '模型选择暂不可用，请联系管理员。'],
+  ['NATIVE_BACKEND_UNAVAILABLE', '任务服务暂不可用，请联系管理员。'],
+  ['CONTINUATION_PERSONA_UNAVAILABLE', '任务上下文暂不可用，请联系管理员。'],
+])
+
+/** Reserve a generic notice once before calling the stable outbox. */
+export async function channelFailureNotice(
+  store: ChannelConversationStore,
+  jobId: string,
+  access: ChannelConversationAccess | undefined,
+  reply: (operation: string, event: ChannelEventRef, text: string, target?: ChannelThreadRef) => Promise<string>,
+  report?: (code: string) => void,
+): Promise<void> {
+  const reserved = await store.mutate(state => {
+    const job = state.jobs[jobId], record = job && state.inputs[job.recordId]
+    if (!job || !record || job.failureNotice !== 'pending') return undefined
+    if (!['failed', 'reconciliation-required'].includes(job.state)) {
+      job.failureNotice = 'attempted'
+      return undefined
+    }
+    const event = record.input.source.event
+    const binding = job.bindingId ? state.bindings[job.bindingId] : undefined
+    const defaults = job.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
+    job.failureNotice = 'attempted'
+    if (
+      !state.failureNotices.enabled || !state.policy.enabled
+      || !channelDispatchAllowed(state, event) || !channelPolicyAllows(state.policy, 'send', event)
+      || job.bindingId && (binding?.state !== 'active' || binding.mode !== 'deliver'
+          || binding.sessionId !== job.sessionId || binding.channel.kind !== event.kind
+          || !sameConversation(binding.channel, event))
+    ) return undefined
+    try {
+      const target = job.replyTarget ?? channelAutoReplyTarget(event, defaults, job.replyMode)
+        ?? channelCommandReplyTarget(event, access?.replyCapabilities?.(event))
+      return {
+        event,
+        target,
+        text: job.state === 'reconciliation-required'
+          ? '任务状态暂时无法确认，请联系管理员核查。'
+          : FAILURE_TEXT.get(job.code ?? '') ?? '任务处理失败，请联系管理员。',
+      }
+    } catch {
+      return undefined
+    }
+  })
+  if (!reserved || !store.snapshot().failureNotices.enabled) return
+  try {
+    await reply(`${jobId}:failure`, reserved.event, reserved.text, reserved.target)
+  } catch {
+    // A delivery with an unknown receipt is never blindly sent again.
+    report?.('CHANNEL_FAILURE_NOTICE_UNKNOWN')
+  }
+}

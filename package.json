@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.76",
+  "version": "0.1.0-beta.81",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -95,7 +95,7 @@
     "test:integration": "vitest run --project integration",
     "test:browser": "vitest run --project browser",
     "test:all": "vitest run",
-    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-ci-dynamic-bundle-tests.mjs scripts/test-ci-filter-dynamic-bundle-tests.mjs scripts/test-test-projects.mjs scripts/test-ci-release-candidate.mjs scripts/test-native-helper-artifact.mjs scripts/test-install-git-hooks.mjs scripts/test-pre-commit-format.mjs",
+    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-ci-dynamic-bundle-tests.mjs scripts/test-ci-filter-dynamic-bundle-tests.mjs scripts/test-test-projects.mjs scripts/test-ci-release-candidate.mjs scripts/test-native-helper-artifact.mjs scripts/test-check-installed-cli-proxy.mjs scripts/test-install-git-hooks.mjs scripts/test-pre-commit-format.mjs",
     "test:release": "npm run check:release:entry && vitest run tests/release-version.test.ts tests/npm-pack-report.test.ts tests/release-manifest.test.ts tests/registry-release-propagation.test.ts tests/release-publication.test.ts tests/release-recovery-state.test.ts",
     "validate:marketplace-artifact": "tsx packages/cli/scripts/validate-marketplace-artifact.ts"
   },
@@ -103,7 +103,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6046773b7b1cfadfe8b6dce571003d4b852725fe",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#54aa3ad0ed4f63eb9ecd550392843c76d42ab256",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -150,7 +150,7 @@
   },
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#9ba6e842a5c82314335ad12b005b61c10fd434f7",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#25ff53db12e51e66b304f9f2139c706af0b0c761"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",

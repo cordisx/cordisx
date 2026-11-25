@@ -1,6 +1,10 @@
 import { CHANNEL_FORWARD_HELP } from './channel-forward-help.js'
 
 const HELP: Readonly<Record<string, string>> = {
+  'input-ack':
+    'Active incoming --context required, input {}. Acknowledge receipt by this Agent caller of this exact latest message. This is a cooperative acknowledgment, not proof of semantic understanding or successful work. No account, actor or other session is accepted.',
+  'input-status':
+    'Active incoming --context required, input {}. Inspect the latest message acknowledgment monitor. awaiting-agent/unconfirmed is not proof the model has not consumed it. No monitoring after stop, confirmed reply or process restart.',
   ...CHANNEL_FORWARD_HELP,
   'media-prepare':
     'Candidate three-step Host upload; installed support is not implied. Use media-prepare begin|chunk|commit [--profile <id>] [--context <incoming-context>] --input <JSON>. begin: {account,target,operationId,type:"image"|"audio"|"file"|"video",format,filename?,mediaType?,durationMs?,size,sha256}. Formats: image png/jpeg, audio opus, file pdf/binary, video mp4. filename required for file/video; optional mediaType must match format, name is a consistent filename alias. chunk: {uploadId,offset,bytesBase64}; offset is a byte offset, each decoded chunk is 1..65536 bytes, canonical base64 only. commit: {uploadId}. Returned Host result is printed unchanged; preserve its uploadId and committed media handle. Host binds caller/context/target, verifies size/hash, and judges platform capability. No Host path reads, CLI file reads, SDK sends, caller-claimed grants or automatic retries. Each complete RPC must be under 256 KiB. Use media: handle in send payload; inspect uncertain outcomes before retrying.',
@@ -62,6 +66,26 @@ const HELP: Readonly<Record<string, string>> = {
     'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
+  'message-capabilities':
+    'Discover implemented operations, restrictions and permission alternatives, not permission success. Input: {account,conversationId,kind}.',
+  'message-operation-receipt':
+    'Read a durable operation without replay. Input: {account,conversationId,kind,operationId}. null is not proof of no effect; unknown writes must not be blindly repeated with new IDs.',
+  'message-edit':
+    'Edit an owned text/post message with the same type. Input: {account,conversationId,kind,messageId,operationId,content:{type:"text",text}|{type:"richtext",blocks:[{text,style}]}}. Stable operationId; platform edit window and count apply.',
+  'message-recall':
+    'Recall only this bot’s message, not local history deletion. Input: {account,conversationId,kind,messageId,operationId}. Platform recall window applies. Unknown effects are not replayed.',
+  'pin-add':
+    'Pin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Requires platform pin permission; preserve operationId.',
+  'pin-remove':
+    'Unpin a visible exact-conversation message. Input: {account,conversationId,kind,messageId,operationId}. Preserve operationId; not message deletion.',
+  'pin-list':
+    'Read one group pin page. Input: {account,conversationId,kind:"group",pageSize?:1..50,pageToken?,startTime?,endTime?}. Times are decimal milliseconds; no automatic traversal.',
+  'read-users':
+    'Read one page for this bot’s own message, at most 7 days old. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?}. Reading is not approval or completion.',
+  'reaction-list':
+    'Read one reaction page; Channel callers may only inspect their incoming source message. Input: {account,conversationId,kind,messageId,pageSize?:1..50,pageToken?,emojiType?}. Existing reaction add/remove remains separate.',
+  'card-update':
+    'Update an owned plain notice/status card, never an approval/question control card. Input: {account,conversationId,kind,messageId,operationId,card:{template:"notice"|"status",title,body,status?:"pending"|"running"|"completed"|"failed"}}. Status template requires status; no raw vendor JSON or generic card actions.',
   listen:
     'Wait for messages in multiple conversations. Input: {account,conversationIds:[string],afterCursor?:string,timeoutSeconds?:0..60}.',
   send:
@@ -87,6 +111,11 @@ const HELP: Readonly<Record<string, string>> = {
   docs:
     'List or read packaged plugin documentation. Input: {pluginId?:string,id?:string,locale?:string}. Select pluginId to disambiguate a document ID. Read-only; never loads credential files.',
   'model-list': 'Read admitted providers/models and supported efforts. Input: {}.',
+  'model-priority': 'Read the local Channel model priority and revision. Input: {}.',
+  'failure-notices': 'Read the Channel failure notice setting and revision. Input: {}.',
+  'failure-notices-set': 'Set Channel failure notices. Input: {expectedRevision,enabled:boolean}.',
+  'model-priority-set':
+    'Replace the local Channel model priority. Input: {expectedRevision,candidates:[{providerId,model}]}.',
   'task-settings':
     'Read one Channel task model settings. Input: {sessionId?}. Incoming tasks retain --context from the prompt.',
   'task-settings-set':
@@ -102,12 +131,15 @@ export function channelCliHelp(operation?: string): string {
     return 'cordisx channel memory guide --context <incoming-context> --input {"topic":"write"}\nOmit topic for navigation; topics: write, organize, recall. Describes implemented operations and missing organization/provider capabilities only.'
   }
   if (operation === 'memory') {
-    return 'cordisx channel memory guide|navigate|search-page|batch|remember|get|search|update|forget|index|grant|revoke|grant-list|identity-challenge|identity-confirm|identity-unbind --context <incoming-context> [--profile <id>] --input <JSON>\nStart with guide {}. navigate/search-page support cursor,limit,maxBytes; batch uses ids,maxBytes. Records: {record:{kind,title,summary,tags,entityRefs,evidenceType,confidence,expiresAt?,observedAt?}}. Changes require id/revision. grant input {grant:{source:string,target:{kind:"conversation",id:string},expiresAt?,recordIds?}} uses configured authority and explicit incoming request. identity-challenge {target:accountUserTuple}; identity-confirm {challenge} requires the actual second account request. Actor/admin/intent are never accepted from input.'
+    return 'cordisx channel memory guide|navigate|search-page|batch|remember|get|search|update|forget|index|grant|revoke|grant-list|identity-challenge|identity-confirm|identity-unbind --context <incoming-context> [--profile <id>] --input <JSON>\nStart with guide {}. navigate/search-page support cursor,limit,maxBytes; batch uses ids,maxBytes. Records require {record:{kind,title,summary,tags,entityRefs,evidenceType,confidence,expiresAt?,observedAt?}}. kind=fact|preference|person|conversation|collaboration|impression (not task/decision); confidence is numeric 0..1; tags/entityRefs arrays. retrySafe validation errors occur before writing: correct reported issues and retry in the same turn. Unknown writes require search/get, never blind retry. Changes require id/revision. grant input {grant:{source:string,target:{kind:"conversation",id:string},expiresAt?,recordIds?}} uses configured authority and explicit incoming request. identity-challenge {target:accountUserTuple}; identity-confirm {challenge} requires the actual second account request. guide recall reports Host-verified recallAccess. Recognized administrator project/recent-work requests admit only their own relevant task records in this context, without a persistent group grant. Actor/admin/intent are never accepted from input.'
   }
   if (operation && HELP[operation]) {
+    const terminalHelp = operation === 'send'
+      ? ' For a terminal result in the current source conversation, add terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming operationId>"}. Omit for progress. Only sent confirms delivery; uncertain terminal receipts remain fenced for reconciliation, never retry as a new send. Unsupported Hosts reject this field.'
+      : ''
     return `cordisx channel ${operation} [--profile <id>] [--context <incoming-context>] [--input <JSON>]\n${
       HELP[operation]
-    }`
+    }${terminalHelp}`
   }
   if (operation) throw new Error('INVALID_CHANNEL_OPERATION')
   return `cordisx channel <operation> [--profile <id>] [--input <JSON>]\n${

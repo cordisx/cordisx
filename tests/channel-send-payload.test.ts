@@ -54,6 +54,32 @@ describe('configured Channel send payload boundary', () => {
       .toEqual({ targets: [{ id: 'one' }, { id: 'two' }], text })
   })
 
+  it('accepts only a versioned, single-target terminal intent', () => {
+    const terminal = {
+      contract: 'cordisx.channel-terminal-intent/v1',
+      schemaVersion: 1,
+      inputOperationId: 'channel:one',
+    }
+    const target = { id: 'oc_chat', kind: 'group' }
+    const request = { target, operationId: 'send-once', content: { type: 'text', text: 'answer' }, terminal }
+    expect(prepareChannelSendInput(request)).toEqual(request)
+    for (
+      const invalid of [
+        null,
+        { ...terminal, schemaVersion: 2 },
+        { ...terminal, inputOperationId: '' },
+        { ...terminal, inputOperationId: 'bad\nvalue' },
+        { ...terminal, claimedSent: true },
+      ]
+    ) {
+      expect(() => prepareChannelSendInput({ ...request, terminal: invalid })).toThrow('INVALID_CHANNEL_PAYLOAD')
+    }
+    expect(() => prepareChannelSendInput({ ...request, target: undefined, targets: [target] }))
+      .toThrow('INVALID_CHANNEL_PAYLOAD')
+    expect(channelCliHelp('send')).toContain('cordisx.channel-terminal-intent/v1')
+    expect(channelCliHelp('send-many')).not.toContain('cordisx.channel-terminal-intent/v1')
+  })
+
   it.each(['image', 'audio', 'video', 'file'] as const)(
     'validates %s opaque handles but does not enable sending',
     type => {

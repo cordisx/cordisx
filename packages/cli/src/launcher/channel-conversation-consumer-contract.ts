@@ -13,7 +13,20 @@ export interface ChannelConversationConsumerInput {
   readonly native: () =>
     | (
       & Pick<ChannelNativeSessions, 'exists' | 'start' | 'completion' | 'reconcile'>
-      & Partial<Pick<ChannelNativeSessions, 'liveTurnControl' | 'steer' | 'steerObserved' | 'progressReminder'>>
+      & Partial<
+        Pick<
+          ChannelNativeSessions,
+          | 'liveTurnControl'
+          | 'steer'
+          | 'steerObserved'
+          | 'progressReminder'
+          | 'analyzeUserMemory'
+          | 'taskSelection'
+          | 'creationSelection'
+          | 'priorityPreflight'
+          | 'priorityEvidence'
+        >
+      >
     )
     | undefined
   readonly report?: (code: string) => void

@@ -252,18 +252,32 @@ export function resolveManagerTwoPaneSeat(document: Document): ManagerTwoPaneSea
       if (aside === null || !aside.contains(rail)) return []
       const resizers = [...aside.children]
         .filter((child): child is HTMLElement => child instanceof ElementClass)
-        .filter(wrapper => {
-          if (navigation.contains(wrapper) || rail.contains(wrapper)) return false
-          const wrapped = wrapper.querySelector(':scope > [role="separator"][aria-orientation="vertical"]') !== null
+        .flatMap(wrapper => {
+          if (navigation.contains(wrapper) || rail.contains(wrapper)) return []
+          const separators = wrapper.querySelectorAll<HTMLElement>(
+            ':scope > [role="separator"][aria-orientation="vertical"]',
+          )
           // 26.1111 puts the separator semantics on the aside's direct resize strip.
           const direct = wrapper.matches('[role="separator"][aria-orientation="vertical"]')
             && wrapper.children.length === 1 && wrapper.firstElementChild?.getAttribute('aria-hidden') === 'true'
-          if (!wrapped && !direct) {
-            return false
+          if (separators.length !== 1 && !direct) return []
+          const matchesResizeStrip = (node: HTMLElement) => {
+            const rect = node.getBoundingClientRect()
+            return rect.width >= 6 && rect.width <= 24 && rect.height >= navRect.height * 0.8
+              && Math.abs((rect.left + rect.right) / 2 - navRect.right) <= 8
           }
-          const rect = wrapper.getBoundingClientRect()
-          return rect.width >= 6 && rect.width <= 24 && rect.height >= navRect.height * 0.8
-            && Math.abs((rect.left + rect.right) / 2 - navRect.right) <= 8
+          if (matchesResizeStrip(wrapper)) return [wrapper]
+          // 26.1120 wraps the actual strip in a full-width pointer-transparent layer.
+          const separator = separators[0]
+          const wrapperRect = wrapper.getBoundingClientRect()
+          const asideRect = aside.getBoundingClientRect()
+          return separator !== undefined && wrapper.children.length === 1
+              && document.defaultView?.getComputedStyle(wrapper).pointerEvents === 'none'
+              && near(wrapperRect.left, asideRect.left) && near(wrapperRect.right, asideRect.right)
+              && separator.children.length === 1 && separator.firstElementChild?.getAttribute('aria-hidden') === 'true'
+              && matchesResizeStrip(separator)
+            ? [separator]
+            : []
         })
       if (resizers.length !== 1) return []
       return [{ navigation, native, navRect, resizer: resizers[0]! }]

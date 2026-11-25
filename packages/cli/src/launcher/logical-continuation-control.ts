@@ -9,6 +9,12 @@ import type { ContinuationConfiguration } from './channel-continuation-config.js
 import type { LogicalHistoryCategory } from './logical-continuation-history.js'
 import type { LogicalSessionRef } from './logical-continuation-reader.js'
 import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { type ChannelIdlePriorityGrant, parseChannelIdlePriorityGrants } from './channel-idle-priority-grant.js'
+import {
+  type ChannelGroupHistoryProjection,
+  channelGroupProjectionVersion,
+  parseChannelGroupHistoryProjection,
+} from './channel-group-history-projection.js'
 
 export type LogicalContinuationRequest = ConversationContinuationRequestV1
 /** The owning Host constructs this from a verified user action or authenticated Channel dispatch. */
@@ -31,6 +37,7 @@ export interface LogicalContinuationIntent {
   readonly evidence: LogicalContinuationEvidence
   /** Separately authenticated participant in a jointly approved linked migration. */
   channelHistoryActor?: LogicalContinuationActor
+  groupProjection?: ChannelGroupHistoryProjection
   state: 'creating' | 'unknown' | 'rejected' | 'applied'
   destination?: LogicalSessionRef
   code?: string
@@ -46,6 +53,7 @@ export interface LogicalContinuationState {
   relations: Record<string, LogicalContinuationRelation>
   preferences?: Record<string, ConversationContinuationPreferenceV1>
   preferenceRevisions?: Record<string, number>
+  idlePriorityGrants?: Record<string, ChannelIdlePriorityGrant>
 }
 /** Call during store recovery before any dispatch; an interrupted effect is never replayed. */
 export function recoverLogicalContinuations(state: LogicalContinuationState): void {
@@ -239,10 +247,12 @@ function relation(
 /** Validate durable intent and relation pairs before an owning store resumes dispatch. */
 export function parseLogicalContinuationState(value: unknown): LogicalContinuationState {
   if (
-    !record(value) || !exact(value, ['revision', 'intents', 'relations', 'preferences', 'preferenceRevisions'])
+    !record(value)
+    || !exact(value, ['revision', 'intents', 'relations', 'preferences', 'preferenceRevisions', 'idlePriorityGrants'])
     || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0
     || !record(value.intents) || !record(value.relations)
   ) throw new Error('INVALID_LOGICAL_CONTINUATION_STORE')
+  if (value.idlePriorityGrants !== undefined) parseChannelIdlePriorityGrants(value.idlePriorityGrants)
   if (value.preferenceRevisions !== undefined) {
     if (!record(value.preferenceRevisions)) throw new Error('INVALID_LOGICAL_CONTINUATION_STORE')
     for (const [key, revision] of Object.entries(value.preferenceRevisions)) {
@@ -284,6 +294,7 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
         'actor',
         'evidence',
         'channelHistoryActor',
+        'groupProjection',
         'state',
         'destination',
         'code',
@@ -297,6 +308,9 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
     const actor = raw.actor as unknown as LogicalContinuationActor
     const evidence = raw.evidence as unknown as LogicalContinuationEvidence
     const destination = raw.destination as LogicalSessionRef | undefined
+    const groupProjection = raw.groupProjection === undefined
+      ? undefined
+      : parseChannelGroupHistoryProjection(raw.groupProjection)
     if (
       id !== request.operationId || !validRequest(request) || !text(actor.principal) || !text(actor.scope)
       || !exact(actor, ['principal', 'scope']) || !validEvidence(request, evidence)
@@ -304,6 +318,8 @@ export function parseLogicalContinuationState(value: unknown): LogicalContinuati
           || !exact(raw.channelHistoryActor, ['principal', 'scope'])
           || !text(raw.channelHistoryActor.principal) || !text(raw.channelHistoryActor.scope)
           || request.mode !== 'linked' || raw.state !== 'applied')
+      || groupProjection !== undefined && (request.mode !== 'linked' || raw.state !== 'applied'
+          || channelGroupProjectionVersion(groupProjection) !== evidence.sourceHistoryVersion)
       || typeof raw.state !== 'string' || !['creating', 'unknown', 'rejected', 'applied'].includes(raw.state)
       || raw.code !== undefined && !text(raw.code, 128)
       || raw.handoffJobId !== undefined

@@ -64,10 +64,23 @@ export function resolveManager1117WorkspaceFrame(anchor: HTMLElement): HTMLEleme
   ) return undefined
   const nativeChildren = children.filter(child => !child.hasAttribute('data-cordisx-react-manager'))
   const frame = nativeChildren[0]
-  const inner = frame?.firstElementChild
+  const frameChildren = [...frame?.children ?? []]
+  // 26.1120 may retain an empty window slot above the main content.
+  // Accept only the measured, non-interactive zero-height placeholder.
+  const placeholder = frameChildren.length === 2 ? frameChildren[0] : undefined
+  const frameRect = frame?.getBoundingClientRect()
+  const placeholderRect = placeholder?.getBoundingClientRect()
+  const emptyWindowSlot = placeholder instanceof ElementClass && frameRect !== undefined
+    && placeholder.tagName === 'DIV' && placeholder.getAttribute('class') === 'shrink-0'
+    && placeholder.attributes.length === 1 && placeholder.childNodes.length === 0
+    && placeholderRect !== undefined && placeholderRect.height === 0
+    && Math.abs(placeholderRect.left - frameRect.left) <= 2
+    && Math.abs(placeholderRect.width - frameRect.width) <= 2
+    && Math.abs(placeholderRect.top - frameRect.top) <= 2
+  const inner = frameChildren.length === 1 ? frameChildren[0] : emptyWindowSlot ? frameChildren[1] : undefined
   if (
     nativeChildren.length !== 1 || !(frame instanceof ElementClass)
-    || frame.hasAttribute('data-app-shell-thread-edge-divider') || frame.children.length !== 1
+    || frame.hasAttribute('data-app-shell-thread-edge-divider')
     || !(inner instanceof ElementClass) || inner.children.length !== 2
     || inner.firstElementChild?.getAttribute('aria-hidden') !== 'true'
     || inner.lastElementChild?.getAttribute('data-app-shell-focus-area') !== 'main'

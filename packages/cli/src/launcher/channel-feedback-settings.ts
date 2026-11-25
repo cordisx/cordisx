@@ -21,6 +21,7 @@ export interface ChannelFeedbackSettings {
     quietSeconds?: number
     repeatSeconds?: number
     finishSeconds?: number
+    ackTimeoutSeconds?: number
   }
 }
 export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
@@ -39,6 +40,7 @@ export const DEFAULT_CHANNEL_FEEDBACK: ChannelFeedbackSettings = {
     quietSeconds: 5,
     repeatSeconds: 30,
     finishSeconds: 10,
+    ackTimeoutSeconds: 60,
     delaySeconds: 30,
     text: '已收到，正在处理，请稍候。',
   },
@@ -67,7 +69,17 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
         .includes(key)
     )
     || Object.keys(wait).some(key =>
-      !['enabled', 'delaySeconds', 'text', 'texts', 'mode', 'quietSeconds', 'repeatSeconds', 'finishSeconds'].includes(
+      ![
+        'enabled',
+        'delaySeconds',
+        'text',
+        'texts',
+        'mode',
+        'quietSeconds',
+        'repeatSeconds',
+        'finishSeconds',
+        'ackTimeoutSeconds',
+      ].includes(
         key,
       )
     )
@@ -113,6 +125,8 @@ export function parseChannelFeedbackSettings(value: unknown): ChannelFeedbackSet
       || Number(result.wait[key as keyof typeof result.wait]) < 1
       || Number(result.wait[key as keyof typeof result.wait]) > 86400
     )
+    || !Number.isSafeInteger(result.wait.ackTimeoutSeconds) || Number(result.wait.ackTimeoutSeconds) < 0
+    || Number(result.wait.ackTimeoutSeconds) > 86400
     || result.wait.delaySeconds < 1 || result.wait.delaySeconds > 86400 || !text(result.wait.text)
     || result.wait.texts !== undefined && (!Array.isArray(result.wait.texts) || result.wait.texts.length < 1
         || result.wait.texts.length > 50 || !result.wait.texts.every(text))

@@ -42,6 +42,8 @@ export interface StoredInboxRecord {
 }
 
 export interface StoredOutboxRecord extends ChannelOutboundDelivery {
+  /** Host-only terminal fence: once claimed, an uncertain effect is never re-dispatched. */
+  readonly terminalDelivery?: true
   /** Launcher-owned volatile guard must be live; process restart never sends an old reminder. */
   readonly guardedDelivery?: boolean
   readonly accountKey: string
@@ -74,7 +76,7 @@ export interface StoredAuditRecord {
 
 export interface ChannelStoreState {
   contract: 'cordisx.channel-store/v1'
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   revision: number
   adapters: Record<string, StoredAdapterState>
   inbox: Record<string, StoredInboxRecord>
@@ -102,7 +104,7 @@ function isState(value: unknown): value is ChannelStoreState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const state = value as Partial<ChannelStoreState>
   return state.contract === 'cordisx.channel-store/v1'
-    && state.schemaVersion === 1
+    && (state.schemaVersion === 1 || state.schemaVersion === 2)
     && Number.isInteger(state.revision)
     && state.adapters !== null && typeof state.adapters === 'object'
     && state.inbox !== null && typeof state.inbox === 'object'
@@ -140,6 +142,13 @@ export class JsonChannelStore {
     try {
       const parsed: unknown = JSON.parse(await readFile(store.#file, 'utf8'))
       if (!isState(parsed)) throw new Error('Channel store has an unsupported contract or malformed root')
+      const terminal = Object.values(parsed.outbox).filter(record => record.terminalDelivery !== undefined)
+      if (
+        terminal.some(record => record.terminalDelivery !== true)
+        || (terminal.length > 0) !== (parsed.schemaVersion === 2)
+      ) {
+        throw new Error('Channel store has an unsupported terminal delivery fence')
+      }
       for (const record of Object.values(parsed.outbox)) {
         if (record.content !== undefined) {
           const content = validateOutboundContent(record.content)
@@ -169,6 +178,26 @@ export class JsonChannelStore {
         outbox: parsed.outbox,
         audit: parsed.audit,
       }
+      // An interrupted external effect is ambiguous; never reclaim it after restart.
+      let recovered = false
+      for (const record of Object.values(store.#state.outbox)) {
+        if (
+          record.terminalDelivery && (['processing', 'retrying'].includes(record.status)
+            || record.status === 'queued' && record.attempts > 0)
+        ) {
+          store.#state.outbox[record.deliveryId] = {
+            ...record,
+            status: 'unknown',
+            errorCode: 'TERMINAL_EFFECT_UNCERTAIN',
+            updatedAt: new Date().toISOString(),
+          }
+          recovered = true
+        }
+      }
+      if (recovered) {
+        store.#state.revision += 1
+        await store.#persist(store.#state)
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       await store.#persist(store.#state)
@@ -188,6 +217,7 @@ export class JsonChannelStore {
       const draft = clone(this.#state)
       try {
         result = await mutate(draft)
+        draft.schemaVersion = Object.values(draft.outbox).some(record => record.terminalDelivery) ? 2 : 1
         const committed = { ...draft, revision: draft.revision + 1 }
         await this.#persist(committed)
         this.#state = committed

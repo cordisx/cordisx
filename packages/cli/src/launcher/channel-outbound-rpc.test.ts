@@ -50,6 +50,8 @@ function fixture() {
     commandAllowed,
     sendAllowed,
     trackProgressDelivery: vi.fn(),
+    claimDeliveryIds: () => () => {},
+    profileLogicalOwner: () => ({ store: { snapshot: () => ({ jobs: {} }) } }),
   }
   const receipts = new Map<string, { state: string }>()
   const notifyOnce = vi.fn(async (_notification: unknown, _caller: unknown, id: string) => {

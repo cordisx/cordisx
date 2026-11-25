@@ -87,7 +87,7 @@ describe('CLIProxy provider plugin renderer', () => {
     }
     expect(manifest).toMatchObject({
       name: '@cordisx/plugin-cli-proxy-api',
-      version: '0.1.1',
+      version: '0.1.3',
       exports: { './extensions/v1': { default: './dist/extensions.mjs' } },
     })
     expect(externalEntry).toBe(path.join(externalPackageRoot, 'dist', 'runtime', 'module.js'))

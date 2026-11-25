@@ -27,6 +27,47 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('checks the model priority fence immediately before starting the native effect', async () => {
+    const call = vi.fn()
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      cwd: '/tmp',
+      nativeRequest: async () => ({}),
+      models: async () => ({ providers: [{ providerId: 'provider', models: [{ id: 'model' }] }] }),
+    })
+    const result = await sessions.start(
+      'fenced',
+      input,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { providerId: 'provider', model: 'model' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => false,
+    )
+    expect(result).toMatchObject({ state: 'busy' })
+    expect(call).not.toHaveBeenCalled()
+  })
+  it('uses the real bridge dry run without creating a native thread or turn', async () => {
+    const nativeRequest = vi.fn(async () => ({}))
+    const handler = createCodexBridgeHandler({
+      catalog: async () => [{ providerId: 'available', models: [{ id: 'model' }] }],
+      nativeRequest,
+    } as never, '/tmp')
+    const sessions = new ChannelNativeSessions({
+      bridge: () =>
+        ({ call: (_app: string, operation: string, value: unknown) => handler(operation, value) }) as AgentBridge,
+      cwd: '/tmp',
+      nativeRequest,
+    })
+    expect(await sessions.priorityPreflight({ providerId: 'missing', model: 'model' })).toBe(false)
+    expect(await sessions.priorityPreflight({ providerId: 'available', model: 'model' })).toBe(true)
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
   it('does not attribute another turn to a Channel dispatch before its native acknowledgement', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     let finish!: (value: unknown) => void
@@ -366,6 +407,32 @@ describe('Channel native task delivery', () => {
     live = undefined as never
     expect(await sessions.taskSelection('chat')).toEqual({ providerId: 'two', model: 'new' })
   })
+  it('uses confirmed persisted model selection over stale metadata, but honors live selection', async () => {
+    let live: { providerId: string; model: string; reasoningEffort: 'low'; serviceTier: null } | undefined
+    const record: {
+      application: string
+      effective: { modelProvider: string; model: string }
+      modelSelection?: object
+    } = {
+      application: 'applied',
+      effective: { modelProvider: 'saved-provider', model: 'saved-model' },
+    }
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      nativeRequest: async () => ({
+        thread: { id: 'chat', status: { type: 'notLoaded' }, modelProvider: 'old-provider', model: 'old-model' },
+      }),
+      cwd: '/tmp',
+      execution: { read: () => record } as never,
+      sourceConfiguration: async () => live,
+    })
+    expect(await sessions.taskSelection('chat')).toMatchObject({ providerId: 'saved-provider', model: 'saved-model' })
+    live = { providerId: 'new-provider', model: 'new-model', reasoningEffort: 'low', serviceTier: null }
+    expect(await sessions.taskSelection('chat')).toMatchObject({ providerId: 'new-provider', model: 'new-model' })
+    live = undefined
+    record.modelSelection = { status: 'unknown' }
+    await expect(sessions.taskSelection('chat')).rejects.toThrow('MODEL_SELECTION_UNCONFIRMED')
+  })
   it('passes captured reply defaults and the exact incoming operation to the model without sending', async () => {
     const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
     const nativeRequest = vi.fn(async () => ({}))
@@ -383,7 +450,9 @@ describe('Channel native task delivery', () => {
     expect(prompt).toContain('channel_reply_mode')
     expect(prompt).toContain('"operationId":"incoming-operation"')
     expect(prompt).toContain('"fallbackMode":"reply"')
-    expect(prompt).toContain('Only after an explicit manual terminal result has a confirmed sent receipt, select none')
+    expect(prompt).toContain('send the useful answer naturally through the configured Channel CLI')
+    expect(prompt).toContain('cordisx.channel-terminal-intent/v1')
+    expect(prompt).toContain('Host reconciles the exact receipt and fences automatic delivery while uncertain')
     expect(prompt).toContain('A progress message must NOT select none')
     expect(prompt).toContain('Multiple sends in one turn are allowed')
     expect(prompt).not.toContain('first select none')
@@ -436,6 +505,7 @@ describe('Channel native task delivery', () => {
             { turnId: 'turn', item: { type: 'reasoning', text: 'private summary' } },
             { turnId: 'turn', item: { type: 'commandExecution', output: 'private tool output' } },
           ],
+          nextCursor: null,
         }
     )
     const sessions = new ChannelNativeSessions({
@@ -449,29 +519,25 @@ describe('Channel native task delivery', () => {
     )
   })
   it('falls back on old app-servers only for a missing item method and the exact completed turn', async () => {
-    const nativeRequest = vi.fn(async (method: string) => {
-      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: 'completed' }] }
-      if (method === 'thread/items/list') throw Object.assign(new Error('missing'), { rpcCode: -32601 })
-      if (method === 'thread/read') {
+    const nativeRequest = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'thread/items/list') {
+        throw Object.assign(new Error('thread/items/list is not supported yet'), { rpcCode: -32601 })
+      }
+      if (method === 'thread/turns/list') {
         return {
-          thread: {
-            id: 'chat',
-            turns: [
-              {
-                id: 'other',
-                status: 'completed',
-                items: [{ type: 'agentMessage', phase: 'final_answer', text: 'wrong' }],
-              },
-              {
-                id: 'turn',
-                status: 'completed',
+          data: [{
+            id: 'turn',
+            status: 'completed',
+            ...(params.itemsView === 'full'
+              ? {
+                itemsView: 'full',
                 items: [
                   { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
                   { type: 'agentMessage', phase: 'final_answer', text: 'correct' },
                 ],
-              },
-            ],
-          },
+              }
+              : {}),
+          }],
         }
       }
       throw new Error('unexpected')
@@ -482,7 +548,13 @@ describe('Channel native task delivery', () => {
       cwd: '/tmp',
     })
     await expect(sessions.completion('chat', 'turn', true)).resolves.toEqual({ state: 'completed', text: 'correct' })
-    expect(nativeRequest).toHaveBeenCalledWith('thread/read', { threadId: 'chat', includeTurns: true })
+    expect(nativeRequest).toHaveBeenCalledWith('thread/turns/list', {
+      threadId: 'chat',
+      limit: 1,
+      sortDirection: 'desc',
+      itemsView: 'full',
+    })
+    expect(nativeRequest.mock.calls.some(([method]) => method === 'thread/read')).toBe(false)
     nativeRequest.mockImplementationOnce(async () => ({ data: [{ id: 'turn', status: 'completed' }] }))
     nativeRequest.mockImplementationOnce(async () => {
       throw Object.assign(new Error('denied'), { rpcCode: -32000 })

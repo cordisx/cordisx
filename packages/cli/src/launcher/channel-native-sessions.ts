@@ -1,4 +1,12 @@
+import { channelNativeFailureCode } from './channel-native-failure.js'
+import { channelModelSelectionView } from './channel-model-selection-view.js'
+import { channelNativeExists, channelNativeLabel } from './channel-native-metadata.js'
+import type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
+export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from './channel-native-result.js'
+import { channelDispatchFence, channelModelPriorityProbes } from './channel-model-preflight.js'
 import { readChannelCompletion } from './channel-legacy-completion.js'
+import { channelPersonaTask } from './channel-memory-personas.js'
+import { type ChannelMemoryModelConnection, channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash, randomBytes } from 'node:crypto'
 import { channelAttachmentTicket } from './channel-inbound-resources.js'
@@ -50,16 +58,6 @@ import { logicalPresentation, placeLogicalDestination } from './logical-continua
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-export interface ChannelNativeTurnResult {
-  readonly state: 'running' | 'busy' | 'failed' | 'reconciliation-required'
-  readonly sessionId?: string
-  readonly turnId?: string
-  readonly code?: string
-}
-export type ChannelNativeReconciliationResult = Omit<ChannelNativeTurnResult, 'state'> & {
-  readonly state: 'running' | 'reconciliation-required'
-}
-
 /** Uses the launch's authenticated native backend and existing provider/credential preparation. */
 export class ChannelNativeSessions {
   readonly logicalHandoffPermits = new ChannelLogicalHandoffPermits()
@@ -107,6 +105,7 @@ export class ChannelNativeSessions {
       readonly logicalOwnerIdentity?: () => Promise<string | undefined>
       readonly providerId?: string
       readonly model?: string
+      readonly memoryConnect?: ChannelMemoryModelConnection | undefined
       readonly cli?: ChannelNativeCliContext
       readonly execution?: ChatExecutionPreferences
       readonly configuration?: import('./codex-chat-configuration.js').CodexChatConfiguration
@@ -199,6 +198,7 @@ export class ChannelNativeSessions {
     await this.input.execution?.settled()
     const live = await this.input.sourceConfiguration?.(threadId).catch(() => undefined)
     const record = this.input.execution?.read('local', threadId)
+    if (!live && record?.modelSelection?.status === 'unknown') return undefined
     if (!record || record.application !== 'applied' || !this.input.execution?.observationConfirmed(threadId)) {
       return undefined
     }
@@ -268,7 +268,7 @@ export class ChannelNativeSessions {
       const resumed = object(
         await native.nativeRequest(
           'thread/resume',
-          fence.allowOwned('thread/resume', destination, { threadId: destination }),
+          fence.allowOwned('thread/resume', destination, { threadId: destination, excludeTurns: true }),
         ),
       )
       if (
@@ -438,19 +438,19 @@ export class ChannelNativeSessions {
       }),
     }
   }
-  async idle(threadId: string) {
-    return (await channelNativeIdle(this.input, threadId)) !== undefined
+  async idle(threadId: string, requireObservedIdle = false) {
+    const thread = await channelNativeIdle(this.input, threadId)
+    return thread !== undefined && (!requireObservedIdle || object(thread.status).type !== 'notLoaded')
   }
   async taskSelection(threadId: string): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
     const metadata = await codexThreadMetadata(this.input, threadId)
     if (metadata?.id !== threadId) throw new Error('SESSION_NOT_FOUND')
     const live = await this.input.sourceConfiguration?.(threadId).catch(() => undefined)
     const record = this.input.execution?.read('local', threadId)
-    const provider = live?.providerId ?? metadata.modelProvider
     const effective = record?.effective
-    const model = live?.model ?? metadata.model
-      ?? (effective?.modelProvider === undefined || effective.modelProvider === provider ? effective?.model : undefined)
-    const coherentEffective = effective !== undefined && effective.modelProvider === provider
+    const { provider, model } = channelModelSelectionView(live, metadata, record)
+    const coherentEffective = (record?.application === 'applied' || record?.modelSelection?.status === 'confirmed')
+      && effective !== undefined && effective.modelProvider === provider
       && effective.model === model
     const effort = live?.reasoningEffort ?? metadata.reasoningEffort
       ?? (coherentEffective ? effective?.reasoningEffort : undefined)
@@ -504,6 +504,7 @@ export class ChannelNativeSessions {
     }
     return selection
   }
+  readonly analyzeUserMemory = channelUserMemoryAnalyzer(() => this.input, () => this.modelOperation('list', {}))
   projects(caller?: string) {
     return this.input.configuration?.projects(caller) ?? Promise.reject(new Error('PROJECT_AUTHORITY_UNAVAILABLE'))
   }
@@ -736,17 +737,8 @@ export class ChannelNativeSessions {
   contextFor(token: string) {
     return [...this.sources.values()].find(entry => entry.token === token)
   }
-  async label(sessionId: string) {
-    const metadata = await codexThreadMetadata(this.input, sessionId)
-    return typeof metadata?.name === 'string' ? metadata.name : 'Codex 对话'
-  }
-  async exists(sessionId: string): Promise<boolean> {
-    try {
-      return (await codexThreadMetadata(this.input, sessionId))?.id === sessionId
-    } catch {
-      return false
-    }
-  }
+  label = (sessionId: string) => channelNativeLabel(this.input, sessionId)
+  exists = (sessionId: string) => channelNativeExists(this.input, sessionId)
   private contextOperations() {
     return channelNativeContextOperations({
       sources: this.sources,
@@ -761,6 +753,13 @@ export class ChannelNativeSessions {
     this.contextOperations().progress(...args)
   steerObserved(operationId: string, sessionId: string, turnId: string) {
     return channelSteerObserved(this.input.nativeRequest, operationId, sessionId, turnId)
+  }
+
+  get priorityPreflight() {
+    return channelModelPriorityProbes(this.input).preflight
+  }
+  get priorityEvidence() {
+    return channelModelPriorityProbes(this.input).evidence
   }
 
   async start(
@@ -780,9 +779,10 @@ export class ChannelNativeSessions {
       },
       logicalHistory?: boolean,
       logicalHandoff?: string,
+      beforeDispatch?: () => Promise<boolean>,
     ]
   ): Promise<ChannelNativeTurnResult> {
-    const [continuation, logicalHistory = false, logicalHandoff] = continuationOptions
+    const [continuation, logicalHistory = false, logicalHandoff, beforeDispatch] = continuationOptions
     if (signal?.aborted) return { state: 'failed', code: 'CANCELLED' }
     const bridge = this.input.bridge()
     if (!bridge) return { state: 'failed', code: 'NATIVE_BACKEND_UNAVAILABLE' }
@@ -791,7 +791,7 @@ export class ChannelNativeSessions {
       if (metadata?.status && object(metadata.status).type === 'active') return { state: 'busy' }
     }
     const event = message.source.event
-    const personaTask = sessionId ?? `dispatch-${createHash('sha256').update(operationId).digest('hex')}`
+    const personaTask = channelPersonaTask(operationId, sessionId)
     const capsule = this.personaRegistry && await this.personaRegistry.taskConfigured(personaTask, event)
       ? await this.personaRegistry.bootstrap(personaTask, event, event.conversationId)
       : undefined
@@ -868,11 +868,16 @@ export class ChannelNativeSessions {
         this.sources.delete(operationId)
         return { state: 'failed', code: 'CANCELLED' }
       }
+      const attachmentTicket = await channelAttachmentTicket(message)
+      if (!await channelDispatchFence(beforeDispatch, attachmentTicket)) {
+        this.sources.delete(operationId)
+        return { state: 'busy' }
+      }
       const result = object(
         await bridge.call('codex', sessionId === undefined ? 'start_session' : 'send_message', {
           operationId: continuation?.operationId ?? operationId,
           prompt,
-          channelAttachmentTicket: await channelAttachmentTicket(message),
+          channelAttachmentTicket: attachmentTicket,
           ...(sessionId === undefined
             ? {
               cwd: continuation?.configuration.cwd ?? this.input.cwd,
@@ -988,7 +993,7 @@ export class ChannelNativeSessions {
     for (const [id, entry] of this.sources) {
       if (entry.threadId === sessionId && entry.turnId === turnId) this.sources.delete(id)
     }
-    if (turn.status !== 'completed') return { state: 'failed', code: 'NATIVE_TURN_FAILED' }
+    if (turn.status !== 'completed') return { state: 'failed', code: channelNativeFailureCode(turn) }
     if (!includeFinal) return { state: 'completed' }
     return readChannelCompletion(this.input.nativeRequest, sessionId, turnId)
   }

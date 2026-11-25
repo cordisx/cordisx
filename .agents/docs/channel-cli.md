@@ -1,6 +1,9 @@
 # Channel CLI and chat bindings
 
 For independently authorized original-message forwarding, see [single/merge forwarding](channel-forward.md). It is not `send`, reply/thread sending, or Agent SDK fallback.
+See [scoped message operations](channel-message-operations.md) for candidate
+edit/recall, pin, read-user/reaction pagination, restricted card updates and
+operation-level capability discovery. These are not generic vendor API access.
 
 See [media and reactions](channel-media-reactions.md) for candidate reaction CLI
 arguments, completion semantics, capability boundaries and unavailable media APIs.
@@ -128,6 +131,28 @@ takes `query` and optional `entity`; update takes `id`, `revision`, `record`;
 forget takes `id`, `revision`; index takes `{}` and rebuilds only the caller's
 current-conversation records. Read `cordisx channel help memory` for details.
 
+For a verified task milestone or decision, `kind` is `fact`; `task` and `decision`
+are not supported kind values. `confidence` is a JSON number from 0 to 1, not
+`"high"` or a numeric string. Keep all record fields inside the `record` wrapper:
+
+```sh
+cordisx channel memory remember --context <incoming-context> --input '{"record":{"kind":"fact","title":"Cedar progress","summary":"Deployment verified; validation remains","tags":["Cedar"],"entityRefs":[],"evidenceType":"verified","confidence":1}}'
+```
+
+Accepted kinds are `fact`, `preference`, `person`, `conversation`, `collaboration`
+and `impression`; an impression also requires `observedAt` in UTC ISO format with
+milliseconds. `memory guide --input '{"topic":"write"}'` returns a complete example.
+Invalid record fields return `MEMORY_INVALID_RECORD`, field-level `issues`, and
+`retrySafe:true` only when validation rejected the request before writing.
+The Agent should correct those fields and retry once in the same authenticated turn,
+without inventing missing evidence. If still rejected, read the write guide and
+report unresolved failure rather than looping. Confirm `status:"ok"` before saying it saved
+anything. Revision conflicts require a fresh `get` and reconsideration; storage
+or transport failures do not authorize blind retries. Search/get first when the
+effect is unknown. Corrupt stored data does not receive the retry-safe flag.
+Successful retrieval proves authorized readback, not that a model used the fact
+in its answer; relevant answers should refer to the returned dated evidence.
+
 This is selective model-driven maintenance, not automatic transcript ingestion
 or platform history access. It never configures a persona or widens sharing.
 Direct-chat own
@@ -141,6 +166,66 @@ use verified second-account requests with expiry/replay checks. Caller
 actor/admin claims are rejected. See the
 [memory design and delivery ledger](channel-memory-design.md) for tested
 boundaries, identity confirmation gaps and production gates.
+
+### User-scoped introductions and recall
+
+Channel reuses the existing memory store for explicit self-introductions, preferred names, relationships, stable preferences, and useful personal facts. Before starting or steering a business turn, the Host analyzes an eligible first-person text message using tool-free structured Responses inference and saves or updates individual records. This does not depend on the business Agent choosing to call a memory tool. Record owner and provenance come from the verified adapter/account/tenant/user tuple, never from a display name or model claim. A self-declared relationship is attributed evidence, not management authority. Task admission, send denials, and persona separation still apply.
+
+On an explicit self-question, the Host retrieves a bounded set of relevant exact-owner records from the effective persona space and supplies them in `messageContext.userMemory`. For example, a private introduction followed by “认识我是谁吗？” in another addressed group can recall the same sender's name and relationship; “我的名字是什么？” supplies only name records. Explicit own-topic questions can recall matching preferences or facts. The existing scoped memory CLI can also search and get these records. No permanent group grant is created, and another person, bot account, tenant, or persona does not gain access. The Agent must use relevant returned evidence and keep the current audience and uncertainty in view. A read result is not proof of model consumption.
+
+Local operators can place `channel-user-memory.json` beside the profile's `channel-conversations.json` (under `apps/codex/profiles/<profile>`):
+
+```json
+{
+  "enabled": true,
+  "remember": true,
+  "recall": true,
+  "groupRecall": true,
+  "timeoutMs": 5000
+}
+```
+
+These are the defaults. `providerId` and `model` may be set together to an already admitted Responses model service for extraction; otherwise, the task's selected provider/model is used. Shared model services work in headless mode; Desktop also supports Host-managed plugin gateways. Official account-only models without a plain Responses connection cannot run automatic extraction; the business Agent retains the normal memory CLI. The analysis request contains only this message, has no tools, requests structured JSON, and disables provider storage. It adds one bounded model request to eligible introductions. The timeout range is 100–10,000 ms. Timeout, invalid output, or unavailable inference reports a bounded diagnostic and continues ordinary task dispatch; it never claims a successful save. Settings are read for each eligible message.
+
+This is selective extraction of Chinese/English first-person statements, not transcript ingestion or universal semantic search. Quoted/unsupported text, secrets, and speculative or sensitive profiles are excluded. Topic matching is lexical; arbitrary paraphrases may require a shorter supplied keyword through the existing CLI. Corrections use a stable model-extracted topic key and revisioned records; a changed key may require normal CLI deduplication. Disabling the feature stops new automatic actions without deleting existing records. Existing `update`/`forget` remain available. No stored-data migration or automatic platform history import occurs.
+
+### Automatic request-local recall for an administrator
+
+For a direct project-status request such as “青杉项目现在进度是什么？” or a
+recent-work question such as “你记得自己最近都做了什么吗？”, the Host can admit
+the requesting administrator's own relevant task records automatically. The Agent
+should first read `memory guide --context <incoming-context> --input '{"topic":"recall"}'`.
+Its `recallAccess` reports the verified administrator, recognized request scope and
+current audience. Then use `search-page` with the supplied project name, or
+`navigate {}` for a recent-work overview, and `get`/`batch` for selected cards.
+No sharing phrase or repeated grant request is needed for records already admitted.
+
+The Host derives this role from effective `allow-user`, `deny-user` and `reset-user`
+management grants at the actual source, or configured memory-source administrator
+authority. It verifies adapter, account, tenant and user identity; a claimed role
+or platform group-admin title is insufficient. Disabled policy and explicit
+dispatch/send/management denials block this additional path. Memory-source
+administration does not confer authority to read another person's private data.
+
+This access is recomputed for each authenticated incoming request, creates no
+persistent grant and does not open the records to other group members. It covers
+exact-owner `fact`, `conversation` and `collaboration` records relevant to the
+supplied topic. Recent-work overview additionally requires a task/work keyword and
+an update within the last 30 days. Preferences, profiles, impressions, unrelated
+personal facts, expired records, other accounts and unconfirmed linked identities
+are excluded from this new path. Existing explicit own-topic and grant rules
+retain their separate behavior. A following unrelated request receives only its
+ordinary authorized scope.
+
+The request made in a group authorizes an answer about these selected task facts
+to that current audience, not disclosure of the private archive. Candidate matching
+and permission checks happen inside the Host before cards/content reach the model;
+no hidden record count, denied source title or other-person existence is returned.
+The model must answer only the requested task facts and preserve their dates and
+uncertainty. Quoted, negated, ambiguous or unsupported wording does not activate
+this path; the normal authorized scope still applies. A broad assistant work
+overview across all users/personas is not implemented. This does not merge persona
+spaces, create global knowledge or change group task admission.
 
 Local operator-only operations, rejected with Agent/Channel metadata:
 `memory-authority-set` (account user tuple,scopes,expectedRevision),
@@ -197,7 +282,8 @@ Configure `channel-feedback.json` beside the selected profile's
     "mode": "agent",
     "quietSeconds": 5,
     "repeatSeconds": 30,
-    "finishSeconds": 10
+    "finishSeconds": 10,
+    "ackTimeoutSeconds": 60
   }
 }
 ```
@@ -218,6 +304,61 @@ does not offer a separate system-message role. CLI progress sends should include
 the notice's `progressToken`; stale tokens reject and queued guarded sends are
 cancelled before transport if new input arrives or a reply was confirmed. Ordinary
 business sends retain their existing behavior. The token changes no permissions.
+
+### Short waits and cooperative input acknowledgment
+
+The scoped prompt asks the parent Agent to continue independent work while its
+delegates run, check new input between bounded waits, and send meaningful progress
+through Channel CLI. Where the installed tool schema permits, use explicit
+10–30 second waits, with no wait longer than 60 seconds unless the user needs it.
+A timeout is a status check; it must not restart a healthy delegate or cause tight
+polling or repeated unchanged updates.
+
+Codex CLI 0.149.1's original `wait_agent` has a fixed 30-second default and a
+one-hour maximum. Its timeout bounds are not configurable. That version also
+supports an opt-in v2 tool implementation with configurable bounds:
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 10000
+default_wait_timeout_ms = 30000
+max_wait_timeout_ms = 60000
+```
+
+These are native Codex settings in the selected Codex configuration, not Channel
+feedback fields. The Host does not silently enable v2 or rewrite existing native
+settings. Check the installed version and generated schema before using them;
+v2 settings do not affect the original implementation. In
+[the 0.149.1 implementation](https://github.com/openai/codex/blob/rust-v0.149.1/codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs),
+v2 waits subscribe to input-queue activity and can return early on steered input.
+This is native-source evidence, not a guarantee that every blocking tool returns
+or that the model has consumed the input.
+
+When it begins handling the latest input, the Agent can run:
+
+```sh
+cordisx channel input-ack --context <incoming-context> --input '{}'
+cordisx channel input-status --context <incoming-context> --input '{}'
+```
+
+Both require the live scoped caller and accept no target, actor or session override.
+`awaiting-agent` with `consumption:"unconfirmed"` means there is no cooperative
+acknowledgment; it does not prove the input was unconsumed. `agent-acknowledged`
+with `consumption:"acknowledged-by-caller"` confirms the caller's explicit receipt,
+not understanding or task completion. An older input cannot acknowledge the newer
+one. In Agent feedback mode, `wait.ackTimeoutSeconds` records
+`CHANNEL_INPUT_ACK_OVERDUE` once when queued/dispatching/active/uncertain work has
+not acknowledged the latest input. It accepts integer seconds 0–86400; 0 disables
+this diagnostic. New input resets it; confirmed reply, stopped work or process
+restart ends this process-local monitor. Disabled/fixed feedback is not monitored.
+
+The supported native protocol has `turn/steer` and whole-turn `turn/interrupt`,
+but no cancellation of only a blocking tool and no reliable semantic consumption
+notification. An overdue acknowledgment therefore never automatically interrupts,
+restarts or replays a turn. Existing progress reminders still use the exact active
+turn. Their acceptance alone does not prove timely consumption during a long tool
+wait; reliable tool-only interruption remains unavailable.
 
 Legacy `wait.delaySeconds`, `wait.text` and `wait.texts` select `mode:"fixed"` when
 no mode is explicitly set; this preserves existing deployments. To switch, add
@@ -627,11 +768,12 @@ while the turn runs. With forwarding disabled, completion reads only exact-turn
 status and does not fetch assistant items. Old pending turns without a captured
 opt-in are not converted into automatic replies. An already enqueued outbound
 message retains its durable receipt and cannot be unsent by a later toggle.
-For a completed turn, explicitly marked final messages take precedence. If the
-provider omits message phases, forwarding accepts an unphased message only
-when the whole exact turn was read, it is the sole assistant message, and it is
-the last item. Explicit commentary, multiple assistant messages, later tool
-items, and incomplete pagination remain unavailable for automatic delivery.
+For a completed turn, consecutive final messages are forwarded in order only
+when they end the fully read turn. If the provider omits message phases, the
+existing fallback accepts an unphased message only when the whole exact turn
+was read, it is the sole assistant message, and it is the last item. Explicit
+commentary, multiple unphased messages, later items, summary views, and incomplete
+or malformed pagination remain unavailable for automatic delivery.
 
 The Host “Messages and commands” form exposes [reply policy v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/reply-routing-v2.md).
 Set the profile default, its fallback, and optional platform/account/tenant/
@@ -646,29 +788,37 @@ The incoming native prompt includes its `operationId` and captured reply
 defaults. `channel_reply_mode({operationId, mode})`, or CLI
 `cordisx channel reply-mode --input '{"sessionId":"<chat>","operationId":"<incoming-operation>","mode":"thread"}'`,
 selects that exact running automatic-final turn’s route without sending anything.
-Only with forwarding explicitly enabled does the Agent leave its external
-reply in the final response for one consumer delivery.
-Agent guidance prefers meaningful explicit progress and completion sends, with
-multiple sends allowed. Each intended message uses its own stable operationId;
+Automatic final forwarding is opt-in. When a reply is needed, the Agent should
+send it naturally through the Channel CLI, including when forwarding is enabled.
+Multiple sends are allowed. Each intended message uses its own stable operationId;
 receipt queries keep that same ID. Progress never disables final fallback.
-Only after a manual terminal result has a confirmed `sent` receipt should the
-Agent select `none` for the incoming operation to avoid a duplicate final.
-Failed, pending, missing, partial, or unknown receipts retain fallback: inspect
-the receipt, never blindly resend through a new ID or route. Explicit user
-silence/manual-only requests may select `none` without changing profile settings.
-MCP defaults the chat from native caller
-metadata, checks the turn when available, and cannot choose another chat’s job.
-Finished/reserved jobs reject late choices. Policy changes and retries preserve
-an already reserved outbox target and delivery ID rather than retargeting it.
+To send an explicit terminal result to the source conversation, add
+`terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming-operation>"}`
+to a single-target `send` request. Omit it for progress updates or other destinations;
+`send-many` cannot carry this intent. The Host reserves the intent before the
+send and reconciles the original receipt. A follow-up steer must settle first; use
+the latest accepted input's operation ID for the terminal result. A later input
+is queued for a new turn once the terminal send is reserved.
+Only `sent` confirms delivery. While
+the result is pending, missing, failed, or unknown, the automatic final stays
+fenced; never resend under a new ID. The status command exposes the unresolved
+job code and send/delivery IDs for diagnosis. Automatic or operator resolution
+of an ambiguous outcome is not yet provided.
 
-This is guidance using existing public send, receipt, and per-turn reply-mode
-capabilities, not atomic terminal-send detection. Manual delivery IDs are derived
-from caller/account/send operationId; consumer final deliveries use the incoming
-job/event. There is no public progress/terminal field or receipt-to-job terminal
-link. A confirmed manual result followed by a failed/late `none` selection can
-still duplicate the final. Automatic receipt-linked suppression needs a Protocol
-owner contract before implementation; the Host does not infer intent from text
-or suppress a final merely because any manual send exists.
+For a legacy send without terminal intent, select `none` only after a confirmed
+`sent` terminal receipt; an uncertain legacy send can still duplicate an
+automatic final. Explicit user silence or manual-only requests may select `none`
+without changing profile settings. MCP defaults the chat from native caller
+metadata, checks the turn when available, and cannot choose another chat’s job.
+Finished or reserved jobs reject late choices. Policy changes and retries preserve
+an already reserved outbox target and delivery ID rather than retargeting them.
+
+Terminal intent is explicit: the Host never infers it from text or an
+ordinary send. A confirmed legacy manual result followed by a failed or late
+`none` selection can still duplicate the final. On a steered follow-up, `none`
+applies to the original final-delivery owner, while other reply modes must be selected
+on that owner's operation; `bind-status` exposes `replyOwnerOperationId` on the
+follow-up. A reserved automatic delivery cannot be retargeted or suppressed.
 
 Only agent-selected outward text is sent; private reasoning, tool output, and
 commentary are not indiscriminately forwarded. Background notification requires
@@ -825,6 +975,115 @@ by a currently eligible user from the source conversation. Agent tool calls
 cannot provide that user's approval. Rights and configuration are rechecked
 before the native change.
 
+`model-priority` reads the profile's ordered creation candidates and revision.
+The local user can replace them with `model-priority-set --input` containing
+`{"expectedRevision":0,"candidates":[{"providerId":"first","model":"one"},{"providerId":"second","model":"two"}]}`.
+Read the current revision first; an empty list disables the policy. The sender
+must have the existing exact provider and model grants for each eligible choice.
+Scoped provider/model defaults are tried first. A healthy or inconclusive probe
+keeps that default; only a confirmed failure allows later authorized candidates
+with successful probes. If the default is not listed, candidates are tried from
+the start. Existing chats are unchanged unless the user separately enables the
+bounded idle continuation described below.
+Before a new task starts, the Host checks each permitted candidate in order using
+a dry run that verifies its catalog entry and declared key. Catalog validation
+and local dry runs each have a five-second timeout. Where a direct
+Responses connection is available, it also sends a synthetic request with a
+15-second timeout per candidate
+without user messages or tools; this may incur model usage. Probe HTTP 401/403,
+408/429, server errors, network failures, a failed managed connection and timeout
+move to the next candidate. A
+connection type or response that cannot be probed falls back to the local check,
+so its login and service health remain unknown. A successful probe only reflects
+that moment. An unsupported task-model effort or Fast setting excludes that
+candidate rather than changing the requested setting. Inherited execution
+defaults remain unchanged and may still be rejected by the selected model. After native dispatch,
+authentication failures, network errors and timeouts cannot safely trigger a
+replay: an uncertain outcome remains subject to reconciliation. This policy does
+not automatically transfer conversation history between providers.
+
+For an idle existing chat with one active direct binding, the Channel user can
+request a single automatic linked continuation to the immediately following
+authorized candidate in the local priority list:
+
+```text
+/continue-provider auto-suggest first one second two
+```
+
+The reply names both models, explains that the target service may receive the
+approved user and assistant text on demand, and provides a one-time confirmation
+command. Confirmation expires after ten minutes; the resulting authorization
+expires after 24 hours and can be revoked with `/continue-provider auto-off`.
+The Host moves only undispatched messages from the same authorized sender after
+the current model's real synthetic probe fails and the target probe succeeds.
+It checks the binding, model grants, source selection, project and native safety
+settings again. Changed permissions or selections invalidate the authorization;
+changing or removing the binding revokes it.
+Group, multiple-binding and providers without a supported direct probe are not
+eligible. A successful target probe must report the exact configured model ID;
+an absent or different reported ID is inconclusive. An unloaded source does not
+establish that it is idle. A probe can incur model
+usage. Running turns and tool waits are not
+interrupted, and an earlier failed or uncertain turn is never replayed. If native
+target creation is uncertain, the input remains fenced for administrator review.
+See [Idle Channel model priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v1.md).
+
+In a group with one active binding, an administrator with `allow-user`,
+`continue-provider` and the applicable model permissions can request a
+same-provider rule with `/continue-provider group-auto-suggest first one`.
+The returned disclosure lists the compatible later models and a one-time
+confirmation command. The rule lasts 24 hours, applies to eligible senders in
+that exact group and can be revoked with `/continue-provider group-auto-off`.
+The administrator must have model-change permission; each queued sender needs
+dispatch permission and explicit model denies remain effective. The current model stays selected when healthy or when its
+probe is inconclusive. After confirmed unavailability, the Host probes the
+disclosed same-provider models in order and changes the existing idle native
+conversation only after durable reservation and confirmation. An uncertain
+selection blocks the input for administrator reconciliation. This rule does not
+transfer history to another provider and stops at a cross-provider candidate.
+See [Group Channel idle model priority v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/group-idle-priority-v2.md).
+
+For an explicitly authorized cross-provider group continuation, an eligible
+administrator can request `/continue-provider group-linked-suggest first one`.
+The disclosure lists the exact eligible later candidates and provides a
+one-time confirmation command. It explains that the destination can read only
+text inputs from at most 16 recent previously dispatched, accepted group tasks and matching
+confirmed final replies, each capped at 4,096 characters. Unrecorded history,
+unconfirmed replies, agent-initiated messages, attachments, tools and reasoning
+are omitted; this is not the native conversation's full history. The rule
+expires after 24 hours and `/continue-provider group-auto-off` revokes both the
+rule and its group-history access. The source native history is never read for
+this projection. The external group and authorized queued inputs retain their
+binding when a confirmed linked destination replaces the local session. If
+creation is uncertain, the input remains fenced for reconciliation. See
+[Group-scoped linked priority v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/group-linked-priority-v1.md).
+
+To authorize one idle continuation across several later candidates in their
+configured order, request a disclosure instead with:
+
+```text
+/continue-provider auto-suggest-list first one
+```
+
+The disclosure lists the exact candidates allowed for the sender and compatible
+with the current settings. Confirm using the returned one-time command; it
+authorizes at most one migration in 24 hours. If the current model's real probe
+fails, the Host checks the disclosed candidates in order and selects the first
+with a successful real probe. An unavailable or unprobeable candidate is not
+selected. Changed priorities, permissions, actor, binding or source settings
+invalidate the grant. If the current model is confirmed unavailable and no
+authorized target passes, the input is not dispatched. This does not authorize group history or migration of an already
+started turn. See [Idle Channel model priority v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/idle-model-priority-v2.md).
+
+Failed or uncertain tasks can send a fixed notice asking the user to contact an
+administrator, independently of automatic final replies. `failure-notices`
+reads the setting and revision; the local user can disable it with
+`failure-notices-set --input '{"expectedRevision":0,"enabled":false}'` using
+the current revision. The notice follows the original conversation and send
+permissions and does not expose provider errors. Known failure codes use fixed
+safe categories; unknown failures and uncertain effects use generic wording.
+Unknown delivery results are not blindly repeated.
+
 Common profile creation settings are the base layer. Channel defaults, matching
 conversation/user rules and explicit selections override that layer; explicit
 Fast `false` remains meaningful. Enabling Fast requires catalog support. A
@@ -884,10 +1143,22 @@ confirms that change; an unsupported switch is rejected. Catalog availability
 permits new conversations with the requested provider, not cross-provider replay
 of an existing conversation.
 
-Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
-response, final-message delivery reads the exact completed turn with
-`thread/read`. This compatibility path loads the complete thread and can hit
-transport limits for very long histories; other read errors do not trigger it.
+Some Codex 0.149.1 app-servers advertise `thread/items/list` but return method-not-found
+or “not supported yet”. On a first-page `-32601` only, final-message delivery uses
+`thread/turns/list` metadata pages (`itemsView:"notLoaded"`, descending, one turn
+per page) to locate the exact original turn, then requests that same page with
+`itemsView:"full"`. The returned ID and completed status must still match. It does
+not load the whole thread or forward another turn's answer. Scanning is limited
+to 64 metadata pages, with no further page scheduled after a 45-second scan budget
+(an in-flight RPC retains its transport timeout); repeated/invalid cursors and malformed responses fail
+closed. Other errors and a later-page `-32601` do not trigger this fallback.
+
+One native turn can still exceed the transport's 2 MiB line limit. A recognized
+oversize error reports `NATIVE_COMPLETION_PAGE_TOO_LARGE`; page/deadline exhaustion
+reports `NATIVE_COMPLETION_PAGE_LIMIT`. These are failures, not completion or
+delivery evidence. The fallback bounds loaded turn count, not native single-turn
+bytes, and does not change the transport cap. Final delivery retains its original
+stable outbox ID; unknown send receipts are not automatically replayed.
 
 ## Model-service continuation (experimental)
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { type CodexCreationSettings, parseCodexCreationSettings } from '../codex-creation-settings.js'
@@ -26,6 +27,8 @@ export interface ChatExecutionRecord {
   submittedSettings?: ChatExecutionSettings
   application: 'saved' | 'submitted' | 'applied' | 'restricted' | 'unknown'
   effective?: Record<string, unknown>
+  /** Native readback of an explicit model selection; uncertainty must survive a restart. */
+  modelSelection?: { status: 'confirmed'; providerId: string; model: string } | { status: 'unknown' }
   appliedRevision?: number
   turnId?: string
   code?: string
@@ -176,6 +179,40 @@ export class ChatExecutionPreferences {
     if (!identity(hostId) || !identity(threadId)) throw new Error('INVALID_THREAD')
     const current = this.records.records[key(hostId, threadId)]
     return current === undefined ? undefined : structuredClone(current)
+  }
+  async recordModelSelection(
+    threadId: string,
+    selection?: { providerId: string; model: string } | null,
+    expected?: { value: ChatExecutionRecord['modelSelection'] },
+  ) {
+    if (
+      !identity(threadId) || selection && (
+          !identity(selection.providerId) || !selection.model.trim() || selection.model.length > 512
+          || /[\u0000-\u001f\u007f]/u.test(selection.model)
+        )
+    ) {
+      throw new Error('INVALID_MODEL_SELECTION')
+    }
+    return this.mutate(() => {
+      const id = key('local', threadId)
+      const record = this.records.records[id] ?? {
+        hostId: 'local',
+        threadId,
+        capturedDefaults: {},
+        defaultsRevision: 0,
+        revision: 0,
+        application: 'unknown' as const,
+      }
+      if (expected && !isDeepStrictEqual(record.modelSelection, expected.value)) {
+        throw new Error('MODEL_SELECTION_CHANGED')
+      }
+      if (selection === null) delete record.modelSelection
+      else record.modelSelection = selection ? { status: 'confirmed', ...selection } : { status: 'unknown' }
+      if (selection) {
+        record.effective = { ...record.effective, modelProvider: selection.providerId, model: selection.model }
+      }
+      this.records.records[id] = record
+    })
   }
   async settled() {
     await this.tail
@@ -421,6 +458,16 @@ export class ChatExecutionPreferences {
       if (native.reasoningEffort !== undefined) effective.reasoningEffort = native.reasoningEffort
       if (object(native.collaborationMode).mode) effective.workMode = object(native.collaborationMode).mode
       record.effective = effective
+      if (record.modelSelection && (native.model !== undefined || native.modelProvider !== undefined)) {
+        if (typeof native.model === 'string' && typeof native.modelProvider === 'string') {
+          record.modelSelection = { status: 'confirmed', providerId: native.modelProvider, model: native.model }
+        } else if (
+          record.modelSelection.status === 'confirmed' && (
+            native.model !== undefined && native.model !== record.modelSelection.model
+            || native.modelProvider !== undefined && native.modelProvider !== record.modelSelection.providerId
+          )
+        ) record.modelSelection = { status: 'unknown' }
+      }
       if (!record.override) {
         record.capturedDefaults = { ...record.capturedDefaults, ...observedExecutionSettings(effective) }
       }

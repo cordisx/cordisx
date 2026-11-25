@@ -22,8 +22,10 @@ import { startHeadlessCodexBackend } from '../launcher/headless-codex-backend.js
 import type { AgentBridge } from '../launcher/agent-bridge.js'
 import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
+import { headlessModelSelection } from '../launcher/headless-model-selection.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
+import { channelMemoryServiceConnection } from '../launcher/channel-user-memory-connection.js'
 import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../launcher/headless-static-catalog.js'
 import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
 import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
@@ -273,6 +275,7 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
+    const models = headlessModelSelection(backend.models, () => authority.execution)
     const workspace = input.environment.CORDISX_CHANNEL_WORKSPACE
     const headlessProjects = workspace ? await HeadlessProjectCatalog.open(workspace) : undefined
     const chatConfiguration = await CodexChatConfiguration.open({
@@ -286,7 +289,7 @@ export async function startHeadlessService(input: {
         }
         : {}),
       file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'codex-chat-configuration.json'),
-      catalog: async () => (await backend.models('list', {})).providers ?? [],
+      catalog: async () => (await models('list', {})).providers ?? [],
       request: (method, params) => backend.nativeRequest(method, params),
       guard: async (operation, args, metadata) => {
         if (
@@ -298,11 +301,12 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => chatConfiguration.close())
     native = new ChannelNativeSessions({
+      memoryConnect: channelMemoryServiceConnection(homeConfig, backendEnvironment),
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
       logicalOwnerIdentity: () => backend.nativeOwnerIdentity(),
       logicalHandoffWriteGuardReady: () => guardNativeHandoff !== undefined,
-      models: backend.models,
+      models,
       configuration: chatConfiguration,
       cwd: workspace || input.cwd,
       nativeVersion: version,
@@ -348,7 +352,7 @@ export async function startHeadlessService(input: {
       projectsAvailable: headlessProjects !== undefined,
       configPath: input.configPath,
       environment: input.environment,
-      models: backend.models,
+      models,
       ...(authority.execution
         ? { native: { executionPreferences: () => authority.execution, exists: id => native!.exists(id) } }
         : {}),

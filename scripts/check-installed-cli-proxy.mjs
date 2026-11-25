@@ -2,8 +2,24 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CLI_PROXY_COMMIT = 'aa4fd159502704c2645fd5ce47aa135464578b8e'
+const CLI_PROXY_COMMIT = '25ff53db12e51e66b304f9f2139c706af0b0c761'
 const CLI_PROXY_DEPENDENCY = `github:cordisx/plugin-cli-proxy-api#${CLI_PROXY_COMMIT}`
+
+export function installedCliProxyBridge(resources, platform = process.platform, architecture = process.arch) {
+  const target = platform === 'linux' && architecture === 'x64'
+    ? './runtime/cli-proxy-plugins/linux/amd64/cordisx-gateway-bridge.so'
+    : platform === 'darwin' && architecture === 'arm64'
+    ? './runtime/cli-proxy-plugins/darwin/arm64/cordisx-gateway-bridge.dylib'
+    : undefined
+  if (target === undefined) return undefined
+  const matches = resources.filter(resource => resource.path === target)
+  const resource = matches[0]
+  if (
+    matches.length !== 1 || resource.mode !== 'executable'
+    || !resource.platforms?.includes(platform) || !resource.architectures?.includes(architecture)
+  ) throw new Error('installed CLIProxy bridge does not match native discovery')
+  return resource
+}
 
 /** Verify the installed convenience alias and its sibling service artifact. */
 export async function verifyInstalledCliProxy(input) {
@@ -51,6 +67,15 @@ export async function verifyInstalledCliProxy(input) {
       )
     ))
   ) throw new Error('installed CLIProxy package-v14 permission artifact is invalid')
+  const resources = runtimeManifest.services.find(service => service.id === 'gateway-runtime').runtimeResources
+  const nativeBridge = installedCliProxyBridge(resources)
+  if (nativeBridge !== undefined) {
+    const bytes = await readFile(path.join(packageRoot, nativeBridge.path))
+    if (
+      bytes.length !== nativeBridge.byteLength
+      || `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== nativeBridge.digest
+    ) throw new Error('installed CLIProxy bridge integrity mismatch')
+  }
   await Promise.all(runtimeManifest.services.map(service => access(path.join(packageRoot, service.entry))))
   const artwork = await readFile(path.join(packageRoot, 'assets', 'icon.png'))
   if (

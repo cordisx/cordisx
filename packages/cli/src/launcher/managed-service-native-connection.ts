@@ -20,6 +20,7 @@ export interface NativeManagedGatewayConnection {
       readonly alias: string
       readonly gatewayModelId: string
       readonly reasoningCapabilities?: ModelReasoningCapabilities
+      readonly contextWindow?: number
     }[]
   }
   readonly cleanup: { readonly authorityId: string }
@@ -78,6 +79,8 @@ export function createNativeManagedGatewayConnection(input: {
       !catalogText(item.alias, 256) || !catalogText(item.gatewayModelId, 512)
       || item.reasoningCapabilities !== undefined
         && parseModelReasoningCapabilities(item.reasoningCapabilities) === undefined
+      || item.contextWindow !== undefined
+        && (!Number.isSafeInteger(item.contextWindow) || item.contextWindow < 1)
     )
   ) throw new Error('selected managed service model snapshot is invalid')
   let disposed = false
