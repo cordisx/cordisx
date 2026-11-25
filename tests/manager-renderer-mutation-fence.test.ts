@@ -65,13 +65,20 @@ it('waits for renderer cleanup before acknowledging revocation or admitting anot
     const duplicate = authority.revoke(gateway, browserSessionId)
     await vi.waitFor(() => expect(waitForRetirement).toHaveBeenCalledOnce())
     expect(authority.hasLiveRenderers()).toBe(true)
-    expect(await authority.open(gateway, secret())).toBeUndefined()
+    let opened = false
+    const opening = authority.open(gateway, secret()).then(value => {
+      opened = true
+      return value
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(opened).toBe(false)
     expect(await authority.call(second, 'fixture', 'read')).toEqual({ status: 'ok', value: 'read' })
     expect(await authority.call(second, 'fixture', 'write')).toEqual({ status: 'unavailable' })
     await expect(authority.suspendMutations()).rejects.toThrow('renderer-mutation-fence-unavailable')
     cleanup.resolve(true)
     expect(await first).toBe(true)
     expect(await duplicate).toBe(true)
+    expect(await opening).toBeDefined()
     expect(await authority.call(second, 'fixture', 'write')).toEqual({ status: 'ok', value: 'written' })
     expect(await authority.open(gateway, secret())).toBeDefined()
   } finally {
@@ -262,10 +269,17 @@ it('does not acknowledge retirement while a dispatched write is unresolved', asy
     await new Promise<void>(resolve => setImmediate(resolve))
     expect(closed).toBe(false)
     expect(await authority.call(second, 'fixture', {})).toEqual({ status: 'unavailable' })
-    expect(await open()).toBeUndefined()
+    let opened = false
+    const opening = open().then(value => {
+      opened = true
+      return value
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(opened).toBe(false)
     pending.resolve('possibly committed')
     expect(await write).toEqual({ status: 'unknown' })
     expect(await closing).toBe(false)
+    expect(await opening).toBeUndefined()
     expect(await open()).toBeUndefined()
   } finally {
     pending.resolve(undefined)
@@ -304,10 +318,17 @@ it('does not acknowledge retirement while a dispatched read still owns resources
     })
     await new Promise<void>(resolve => setImmediate(resolve))
     expect(closed).toBe(false)
-    expect(await authority.open(gateway, secret())).toBeUndefined()
+    let opened = false
+    const opening = authority.open(gateway, secret()).then(value => {
+      opened = true
+      return value
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(opened).toBe(false)
     pending.resolve('read complete')
     expect(await reading).toEqual({ status: 'unavailable' })
     expect(await closing).toBe(true)
+    expect(await opening).toBeDefined()
     expect(await authority.open(gateway, secret())).toBeDefined()
   } finally {
     pending.resolve(undefined)

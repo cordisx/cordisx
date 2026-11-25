@@ -75,6 +75,8 @@ interface Session {
 }
 
 const MAX_LONG_LIVED_READS = 32
+// Match the sidecar's retirement deadline while staying below its client request timeout.
+const OPEN_RETIREMENT_WAIT_MS = 15_000
 
 // Only an owner-side channel can mark a bounded rejection as having performed
 // no write. The marker never crosses the RPC or browser boundary.
@@ -117,6 +119,7 @@ export class ManagerRendererSessions {
     { gateway: ManagerRendererGatewayProof; result: Promise<boolean> }
   >()
   private readonly pendingRetirements = new Set<Promise<boolean>>()
+  private readonly pendingOpens = new Set<string>()
   private readonly retirementWaiters = new Set<() => void>()
   private readonly channels: ReadonlyMap<string, ManagerRendererChannel>
   private readonly writeLifetimes: ManagerRendererWriteLifetimes
@@ -187,7 +190,8 @@ export class ManagerRendererSessions {
 
   /** Owner-only check before a sidecar action can discard a renderer's drafts. */
   hasLiveRenderers(): boolean {
-    return this.pendingRetirements.size > 0 || this.retirementUncertain
+    // A waiting open may become a peer after retirement, so it also needs coordination.
+    return this.pendingRetirements.size > 0 || this.pendingOpens.size > 0 || this.retirementUncertain
       || [...this.sessions.values()].some(session => this.current(session))
   }
 
@@ -296,6 +300,25 @@ export class ManagerRendererSessions {
   ): Promise<ManagerRendererHandle | undefined> {
     if (typeof browserSessionId !== 'string' || !/^[a-f0-9]{64}$/u.test(browserSessionId)) return undefined
     if (!await this.authenticated(gateway)) return undefined
+    if (this.pendingOpens.has(browserSessionId)) return undefined
+    if (this.pendingRetirements.size > 0) {
+      if (
+        this.pendingOpens.size >= Math.min(this.input.maxSessions ?? 16, 16)
+        || this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
+        || this.sessions.size >= (this.input.maxSessions ?? 16)
+        || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
+        || this.retirementUncertain
+      ) return undefined
+      this.pendingOpens.add(browserSessionId)
+      try {
+        // Admission still requires a confirmed retirement and a current gateway.
+        if (!await this.waitForRetirements(OPEN_RETIREMENT_WAIT_MS) || !await this.authenticated(gateway)) {
+          return undefined
+        }
+      } finally {
+        this.pendingOpens.delete(browserSessionId)
+      }
+    }
     // All admission checks are synchronous after authentication, so concurrent
     // opens cannot create two renderer identities for one browser session.
     if (

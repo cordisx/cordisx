@@ -185,3 +185,74 @@ it('rejects an owner participant whose renderer identity does not match the auth
     authority.dispose()
   }
 })
+
+it('waits for the old page retirement before completing another page open', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture-start', instanceToken: secret() }
+  let release!: (value: boolean) => void
+  const retired = new Promise<boolean>(resolve => release = resolve)
+  const authenticate = vi.fn(async () => true)
+  const waitForRetirement = vi.fn(async () => await retired)
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: authenticate,
+    waitForRetirement,
+    channels: new Map([['plugin-management', {
+      prepare: () => {
+        throw new Error('unused')
+      },
+    }]]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const exchange = async (link: string) => {
+    const response = await fetch(`${origin}/api/session`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: new URL(link).hash.slice(1) }),
+    })
+    expect(response.status).toBe(200)
+    return (await response.json() as { token: string }).token
+  }
+  const post = async (token: string, route: string) => {
+    const response = await fetch(`${origin}/api/renderer/${route}`, {
+      method: 'POST',
+      headers: { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    return { status: response.status, body: await response.json() }
+  }
+  let closing: ReturnType<typeof post> | undefined
+  let opening: ReturnType<typeof post> | undefined
+  try {
+    const first = await exchange(web.url)
+    const second = await exchange(web.issueUrl())
+    expect(await post(first, 'open')).toMatchObject({ status: 200, body: { status: 'ok' } })
+    closing = post(first, 'close')
+    await vi.waitFor(() => expect(waitForRetirement).toHaveBeenCalledOnce())
+    let settled = false
+    opening = post(second, 'open').then(value => {
+      settled = true
+      return value
+    })
+    await vi.waitFor(() => expect(authenticate).toHaveBeenCalledTimes(3))
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(settled).toBe(false)
+    release(true)
+    expect(await closing).toMatchObject({ status: 200, body: { closed: true } })
+    expect(await opening).toMatchObject({ status: 200, body: { status: 'ok' } })
+    expect(await post(first, 'open')).toMatchObject({ status: 401 })
+  } finally {
+    release(true)
+    await Promise.allSettled([closing, opening])
+    authority.dispose()
+    await web.close()
+  }
+})
