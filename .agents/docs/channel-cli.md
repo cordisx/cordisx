@@ -788,10 +788,9 @@ The incoming native prompt includes its `operationId` and captured reply
 defaults. `channel_reply_mode({operationId, mode})`, or CLI
 `cordisx channel reply-mode --input '{"sessionId":"<chat>","operationId":"<incoming-operation>","mode":"thread"}'`,
 selects that exact running automatic-final turn’s route without sending anything.
-Only with forwarding explicitly enabled does the Agent leave its external
-reply in the final response for one consumer delivery.
-Agent guidance prefers meaningful explicit progress and completion sends, with
-multiple sends allowed. Each intended message uses its own stable operationId;
+Automatic final forwarding is opt-in. When a reply is needed, the Agent should
+send it naturally through the Channel CLI, including when forwarding is enabled.
+Multiple sends are allowed. Each intended message uses its own stable operationId;
 receipt queries keep that same ID. Progress never disables final fallback.
 To send an explicit terminal result to the source conversation, add
 `terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming-operation>"}`
