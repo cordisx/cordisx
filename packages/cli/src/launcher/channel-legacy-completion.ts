@@ -10,8 +10,15 @@ type Completion = { state: 'completed' | 'failed'; text?: string; code?: string;
 function completionFromItems(items: readonly Record<string, unknown>[], complete: boolean): Completion {
   if (!complete) return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
   const last = items.at(-1)
-  if (last?.type === 'agentMessage' && last.phase === 'final_answer' && typeof last.text === 'string') {
-    return { state: 'completed', text: last.text }
+  if (last?.type === 'agentMessage' && last.phase === 'final_answer') {
+    const parts: string[] = []
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index]!
+      if (item.type !== 'agentMessage' || item.phase !== 'final_answer') break
+      if (typeof item.text !== 'string') return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
+      parts.unshift(item.text)
+    }
+    return { state: 'completed', text: parts.join('\n') }
   }
   const messages = items.filter(item => item.type === 'agentMessage')
   const candidate = messages.at(-1)
@@ -120,9 +127,12 @@ export async function readChannelCompletion(
       items.unshift(object(row.item))
     }
     if (complete) break
-    if (typeof result.nextCursor !== 'string') {
+    if (result.nextCursor === null) {
       complete = true
       break
+    }
+    if (typeof result.nextCursor !== 'string' || !result.nextCursor) {
+      return { state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' }
     }
     if (result.nextCursor === cursor) break
     cursor = result.nextCursor

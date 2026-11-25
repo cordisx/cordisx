@@ -68,6 +68,30 @@ describe('Channel completion for unphased native messages', () => {
     })
   })
 
+  it('preserves consecutive final parts while excluding earlier unrelated output', async () => {
+    const request = readTurn([
+      agent('earlier', 'final_answer'),
+      { type: 'commandExecution' },
+      agent('first', 'final_answer'),
+      agent('second', 'final_answer'),
+    ])
+    await expect(legacyChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
+      state: 'completed',
+      text: 'first\nsecond',
+    })
+    await expect(legacyChannelCompletion(
+      readTurn([
+        { type: 'agentMessage', phase: 'final_answer' },
+        agent('second', 'final_answer'),
+      ]),
+      'chat',
+      'turn',
+    )).resolves.toEqual({
+      state: 'failed',
+      code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE',
+    })
+  })
+
   it.each([agent('later output'), { type: 'commandExecution' }, { type: 'userMessage' }])(
     'does not forward an explicit final followed by a later turn item',
     async later => {
@@ -116,12 +140,24 @@ describe('Channel completion for unphased native messages', () => {
     })
   })
 
+  it.each([undefined, 7, {}, ''])('rejects a missing or invalid terminal cursor', async cursor => {
+    const request = vi.fn(async () => ({
+      data: [{ turnId: 'turn', item: agent('partial', 'final_answer') }],
+      ...(cursor === undefined ? {} : { nextCursor: cursor }),
+    }))
+    await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
+      state: 'failed',
+      code: 'NATIVE_ITEMS_UNAVAILABLE',
+    })
+  })
+
   it('does not select an unphased message when a later item in the turn exists', async () => {
     const request = vi.fn(async () => ({
       data: [
         { turnId: 'turn', item: { type: 'commandExecution' } },
         { turnId: 'turn', item: agent('progress') },
       ],
+      nextCursor: null,
     }))
     await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
       state: 'failed',

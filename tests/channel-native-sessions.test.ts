@@ -477,6 +477,7 @@ describe('Channel native task delivery', () => {
             { turnId: 'turn', item: { type: 'reasoning', text: 'private summary' } },
             { turnId: 'turn', item: { type: 'commandExecution', output: 'private tool output' } },
           ],
+          nextCursor: null,
         }
     )
     const sessions = new ChannelNativeSessions({
