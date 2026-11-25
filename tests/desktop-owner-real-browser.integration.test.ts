@@ -53,8 +53,11 @@ import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 import {
   desktopConfiguredFixtures,
   desktopConfiguredPolicies,
+  stageDesktopUnsupportedInstalled,
+  verifyDesktopActivationViews,
   verifyDesktopConfiguredNavigation,
   verifyDesktopConfiguredPlugins,
+  waitForDesktopRetirement,
 } from './suites/desktop-configured-plugin-browser.js'
 import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 import {
@@ -107,6 +110,7 @@ async function exerciseDesktopOwner(
   const profileId = 'default'
   const generation = 'desktop-owner-browser-fixture'
   const extras = await desktopConfiguredFixtures(root, extraConfiguredFixture)
+  const coordinateLifecycle = lifecycleFixture || extras !== undefined
   const initialConfig = {
     ...createDefaultHomeConfig(),
     plugins: [
@@ -171,6 +175,7 @@ async function exerciseDesktopOwner(
     cdp.setBrowserGraphBootstrapRefresh(async () => {})
   }
   const store = new PluginActivationStore(homeDir, profileId, generation)
+  if (extras) await stageDesktopUnsupportedInstalled({ root, homeDir, profileId, generation })
   const fixtureSecret = 'synthetic-desktop-config-secret'
   const fixtureLabel = 'synthetic-desktop-config-label'
   const configStore = new PackagePluginConfigStore(homeDir, profileId, generation)
@@ -209,7 +214,7 @@ async function exerciseDesktopOwner(
     attach: false,
     configuredPlugins: configured.plugins,
     codex: async (operation, request) => await dispatchCodexSettings(settings, operation, request),
-    ...(lifecycleFixture ? { management: () => composition } : {}),
+    ...(coordinateLifecycle ? { management: () => composition } : {}),
   })
   if (!owner) throw new Error('fixture Desktop owner is unavailable')
   const managed = createProductionManagedServiceLifecycle({
@@ -227,7 +232,7 @@ async function exerciseDesktopOwner(
     profileId,
     runtimeGeneration: generation,
     permissionPolicies: policies,
-    runtime: lifecycleFixture ? owner.coordinateLifecycle(managed) : managed,
+    runtime: coordinateLifecycle ? owner.coordinateLifecycle(managed) : managed,
     pluginGenerationArtifactServer: artifactServer,
   })
   let web: { url: string; issueUrl(): string; close(): Promise<void> } | undefined
@@ -258,10 +263,10 @@ async function exerciseDesktopOwner(
     await writeSupervisorState(paths, state)
     expect(await coordinator.prepareRecovery()).toHaveLength(0)
     const active = await store.bindRuntimeGeneration()
-    owner.initialize(active, false, lifecycleFixture ? managed : undefined)
+    owner.initialize(active, false, coordinateLifecycle ? managed : undefined)
     await (await managed.initialize(active)).coreReady
     if (writeFixture) expect(owner.enablePackageConfigWrites(generation)).toBe(true)
-    const nativePlugins = configFixture ? await loadPluginComposition(store, active) : []
+    const nativePlugins = configFixture || extras ? await loadPluginComposition(store, active) : []
     if (archive !== undefined) {
       channel = await createRendererChannelComposition({
         composition: configured,
@@ -554,13 +559,7 @@ async function exerciseDesktopOwner(
       if (archive !== undefined) await openConfiguredChannel(first)
       return
     }
-    const snapshot = async (page: CdpClient) =>
-      await page.evaluate(`({
-        active: globalThis.__cordisxRuntime.activePluginGeneration(),
-        registryEpoch: globalThis.__cordisxRuntime.pluginRegistryEpoch()
-      })`)
-    expect(await snapshot(first)).toEqual(await snapshot(second))
-    expect(await snapshot(first)).toEqual(await snapshot(desktop))
+    await verifyDesktopActivationViews([first, second, desktop], extras !== undefined)
     if (extras) await verifyDesktopConfiguredPlugins([first, second], extras)
     if (configFixture) {
       for (const page of [first, second]) {
@@ -855,8 +854,9 @@ async function exerciseDesktopOwner(
     await desktop.send('Target.closeTarget', { targetId: secondTarget.targetId })
     await second.close().catch(() => {})
     second = undefined
-    // A new Desktop seat permits a new Manager session; the old one stays revoked.
+    if (coordinateLifecycle) await waitForDesktopRetirement(() => composition?.lifecycleParticipants?.hasLive())
     unregister = cdp.register(desktop as never)
+    await vi.waitFor(() => expect(() => owner.lifecycle.snapshot()).not.toThrow(), { timeout: 15_000 })
     const thirdTarget = await desktop.send('Target.createTarget', { url: 'about:blank' }) as {
       targetId: string
     }
@@ -976,7 +976,7 @@ const channelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 const channelFixtureAvailable = chrome !== undefined && channelArchive !== undefined
   && (process.platform === 'darwin' || process.platform === 'linux')
 it.skipIf(!channelFixtureAvailable)(
-  'keeps verified configured plugins and Channel available in two Desktop Manager pages',
+  'isolates an unsupported Desktop package while keeping configured pages and Channel available',
   async () => await exerciseDesktopOwner(channelArchive, false, false, false, false, true),
   180_000,
 )

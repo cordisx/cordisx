@@ -10,6 +10,7 @@ import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activ
 import { startPluginGenerationArtifactServer } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { configuredManagerPlugin } from './fixtures/configured-manager-plugin.js'
+import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   'admits verified configured archives together while retaining the private configuration boundary',
@@ -68,6 +69,51 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
       ).toBeUndefined()
     } finally {
       await owner?.close()
+      await artifactServer.close()
+      const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
+      await Promise.all(
+        digests.filter(digest => /^[a-f0-9]{64}$/u.test(digest)).map(async digest =>
+          await removeStagedPluginPackage(homeDir, `sha256:${digest}`)
+        ),
+      )
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+  45_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'does not omit an unsupported installed plugin that owns a managed service',
+  async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-desktop-managed-unsafe-'))
+    const homeDir = path.join(root, 'home')
+    await mkdir(homeDir)
+    const configPath = path.join(homeDir, 'config.json')
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    const profileId = 'default'
+    const generation = 'desktop-managed-unsafe-fixture'
+    const artifactServer = await startPluginGenerationArtifactServer()
+    try {
+      await stageServiceModePlugin(root, homeDir, profileId, true, 'https://example.test/fixtures', undefined, {
+        version: 16,
+        channelExact: true,
+      })
+      expect(
+        await createDesktopManagerOwnerIfEligible({
+          homeDir,
+          configPath,
+          appId: 'codex',
+          profileId,
+          generation,
+          cdp: new CdpPluginLifecycleRuntime(),
+          artifactServer,
+          store: new PluginActivationStore(homeDir, profileId, generation),
+          ownerVerified: true,
+          attach: false,
+          configuredPlugins: [],
+        }),
+      ).toBeUndefined()
+    } finally {
       await artifactServer.close()
       const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
       await Promise.all(

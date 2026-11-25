@@ -330,7 +330,7 @@ it('attaches the real management composition to one existing Desktop owner and r
 }, 90_000)
 
 it.each([false, true])(
-  'admits an existing Desktop package only when its browser graph is supported: capability %s',
+  'admits an existing Desktop owner when a service-free package needs isolation: capability %s',
   async requiredCapability => {
     const root = await mkdtemp('/tmp/cx-desktop-owner-package-')
     const homeDir = path.join(root, 'home')
@@ -376,7 +376,8 @@ it.each([false, true])(
         attach: false,
         configuredPlugins: [],
       })
-      expect(Boolean(owner)).toBe(!requiredCapability)
+      const canIsolate = process.platform === 'darwin' || process.platform === 'linux'
+      expect(Boolean(owner)).toBe(!requiredCapability || canIsolate)
     } finally {
       await owner?.close()
       await artifactServer.close()

@@ -13,8 +13,8 @@ import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import {
   createServiceRendererProjector,
+  inspectServiceRendererInitialPackage,
   loadServiceConfiguredChannelArchive,
-  loadServiceRendererInitialPackage,
 } from './service-renderer-projection.js'
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { createManagerRendererModelServicesChannel } from './manager-renderer-model-services.js'
@@ -291,9 +291,11 @@ export async function createDesktopManagerOwnerIfEligible(
   const active = await input.store.loadActive()
   try {
     for (const plugin of active.plugins) {
-      const staged = await loadServiceRendererInitialPackage(input.homeDir, plugin)
+      const inspected = await inspectServiceRendererInitialPackage(input.homeDir, plugin)
+      if (!inspected.supported && !inspected.safeToOmit) return undefined
+      const staged = inspected.staged
       if (
-        (staged.manifest.runtimeManifest.capabilities.length > 0
+        (!inspected.supported || staged.manifest.runtimeManifest.capabilities.length > 0
           || staged.manifest.runtimeManifest.schemaVersion === 15
           || staged.manifest.runtimeManifest.schemaVersion === 16)
         && process.platform !== 'darwin' && process.platform !== 'linux'
