@@ -1,3 +1,5 @@
+import { isManagerBrowserOrigin } from './manager-browser-origin.js'
+
 const workerScript = '/manager-resource-worker.js'
 const sessionTokenPattern = /^[a-f0-9]{64}$/u
 
@@ -88,7 +90,7 @@ async function send(
 
 /**
  * One instance per browser document. The token remains in memory and is sent
- * only to the fixed local worker; it must not be placed in an import URL.
+ * only to the fixed same-origin worker; it must not be placed in an import URL.
  */
 export function createManagerResourceAuthClient(input: {
   readonly window: Window
@@ -100,7 +102,7 @@ export function createManagerResourceAuthClient(input: {
     throw new Error('manager-resource-session-invalid')
   }
   const origin = new URL(input.window.location.href)
-  if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || origin.port === '') {
+  if (!isManagerBrowserOrigin(origin.origin)) {
     throw new Error('manager-resource-origin-invalid')
   }
   const expectedUrl = new URL(workerScript, origin.origin).href

@@ -1,11 +1,11 @@
 import { expect, it, vi } from 'vitest'
 import { createManagerResourceAuthClient } from '../packages/cli/src/independent-manager/resource-auth-client.js'
 
-function fixture() {
+function fixture(origin = 'http://127.0.0.1:43124') {
   const messages: Array<Record<string, unknown>> = []
   const register = vi.fn(async () => ({}))
   const worker = {
-    scriptURL: 'http://127.0.0.1:43124/manager-resource-worker.js',
+    scriptURL: origin + '/manager-resource-worker.js',
     postMessage(message: Record<string, unknown>, ports: MessagePort[]) {
       messages.push(message)
       ports[0]!.postMessage({ version: 1, ok: true })
@@ -18,7 +18,7 @@ function fixture() {
     ready: Promise.resolve({}),
   }
   const target = {
-    location: { href: 'http://127.0.0.1:43124/' },
+    location: { href: origin + '/' },
     navigator: { serviceWorker: container },
   } as unknown as Window
   return { target, messages, register, worker }
@@ -149,7 +149,7 @@ it('distinguishes an invalid worker health response from a confirmed missing bin
   expect(await client.isBound()).toBeUndefined()
 })
 
-it('never sends a session token to another controlling worker or a non-loopback origin', async () => {
+it('never sends a session token to an unrelated controlling worker or an opaque origin', async () => {
   const { target, worker, messages } = fixture()
   worker.scriptURL = 'http://127.0.0.1:43124/unrelated-worker.js'
   const client = createManagerResourceAuthClient({
@@ -159,9 +159,25 @@ it('never sends a session token to another controlling worker or a non-loopback 
   })
   expect(await client.start()).toBe(false)
   expect(messages).toEqual([])
-  const remote = { location: { href: 'https://example.test/' }, navigator: {} } as unknown as Window
+  const opaque = { location: { href: 'file:///manager.html' }, navigator: {} } as unknown as Window
   expect(() =>
-    createManagerResourceAuthClient({ window: remote, sessionToken: 'e'.repeat(64), isSessionCurrent: () => true })
+    createManagerResourceAuthClient({ window: opaque, sessionToken: 'e'.repeat(64), isSessionCurrent: () => true })
   )
     .toThrow('manager-resource-origin-invalid')
+})
+
+it('binds a remote Manager only to its own fixed worker', async () => {
+  const { target, worker, messages } = fixture('https://manager.example.test')
+  const client = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'f'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  worker.scriptURL = 'https://other.example.test/manager-resource-worker.js'
+  expect(await client.start()).toBe(false)
+  expect(messages).toEqual([])
+  worker.scriptURL = 'https://manager.example.test/manager-resource-worker.js'
+  expect(await client.start()).toBe(true)
+  expect(messages).toEqual([{ version: 1, kind: 'bind', token: 'f'.repeat(64), sequence: 2 }])
+  expect(await client.revokeLocal()).toBe(true)
 })

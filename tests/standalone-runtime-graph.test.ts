@@ -91,6 +91,30 @@ it('accepts only owner-issued graph values matching the active package and manag
   expect(composition.source).toContain(descriptor.entryUrl)
   expect(composition.source).not.toContain('cordisx-plugin-artifacts')
   expect(owner.isCurrent).toHaveBeenCalledTimes(2)
+  const publicOrigin = 'https://manager.example.test'
+  const publicBase = baseUrl.replace(origin, publicOrigin)
+  const publicDescriptor = {
+    ...descriptor,
+    baseUrl: publicBase,
+    entryUrl: publicBase + 'module.js',
+    initialStyleUrls: [publicBase + 'style.css'],
+  }
+  const publicGraph = createStandaloneRuntimeGraph(publicDescriptor, publicOrigin)
+  const publicComposition = await buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...plugin, runtimeGraph: publicGraph }],
+  }, {
+    ...options,
+    standaloneOwner: { ...owner, managerOrigin: publicOrigin },
+  })
+  expect(publicComposition.source).toContain(publicDescriptor.entryUrl)
+  await expect(buildRendererCompositionSource({
+    ...config,
+    plugins: [{ ...plugin, runtimeGraph: publicGraph }],
+  }, {
+    ...options,
+    standaloneOwner: { ...owner, managerOrigin: 'https://other.example.test' },
+  })).rejects.toThrow('plugin graph projection is unavailable')
   const { runtimeGraph: _runtimeGraph, ...metadata } = plugin
   void _runtimeGraph
   const unavailable = {

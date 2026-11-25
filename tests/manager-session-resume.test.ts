@@ -11,6 +11,24 @@ const deferred = () => {
 }
 afterEach(() => vi.useRealTimers())
 
+it('marks issued, retried and deleted recovery cookies secure for an HTTPS Manager', async () => {
+  const grants = new ManagerSessionResumeGrants(true)
+  const token = 'a'.repeat(64)
+  const issued = grants.issue(token)
+  grants.park(token, Promise.resolve(true))
+  const exchanged = await grants.exchange(
+    issued.id,
+    cookie(issued.cookie),
+    'b'.repeat(64),
+    async () => true,
+    async () => true,
+    async () => ({ token: 'c'.repeat(64), resumeId: 'd'.repeat(64), cookie: 'fixture' }),
+  )
+  expect(issued.cookie).toContain('; Secure')
+  expect(typeof exchanged === 'object' && exchanged.retryCookie).toContain('; Secure')
+  expect(grants.deleteCookie(issued.id)).toContain('; Secure')
+})
+
 it('requires a separate cookie, confirmed retirement, and a single-use tab handle', async () => {
   const grants = new ManagerSessionResumeGrants()
   const token = 'a'.repeat(64)

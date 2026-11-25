@@ -1,7 +1,11 @@
-import type { ChildProcess } from 'node:child_process'
+import { type ChildProcess, execFile } from 'node:child_process'
+import { createHash, X509Certificate } from 'node:crypto'
 import { accessSync, constants } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { readServiceConfigState } from '../packages/cli/src/config/service-config.js'
 import { dispatchManagerRendererOperation } from '../packages/cli/src/cli/manager-renderer-rpc.js'
@@ -11,6 +15,7 @@ import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-lau
 
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 const managerPackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+const exec = promisify(execFile)
 const chrome = [
   process.env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -25,9 +30,14 @@ const chrome = [
   }
 })
 
-it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux')(
-  'saves a private credential through the actual Manager form and owner handoff',
-  async () => {
+it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin' && process.platform !== 'linux').each(
+  [
+    'local',
+    'https',
+  ] as const,
+)(
+  'saves a private credential through the actual Manager form and owner handoff over %s',
+  async mode => {
     if (!path.isAbsolute(managerPackage!)) throw new Error('fixture package must be absolute')
     const f = await fixture({
       channelArchive: archive,
@@ -40,11 +50,52 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
     let web: Awaited<ReturnType<typeof import('../packages/cli/src/cli/manager-web.js')['startManagerWeb']>> | undefined
+    let ingress:
+      | Awaited<
+        ReturnType<typeof import('../packages/cli/src/cli/manager-public-ingress.js')['startManagerPublicIngress']>
+      >
+      | undefined
     try {
       expect(await f.sessions.close(f.invocation)).toBe(true)
       const manager = await import(
         pathToFileURL(path.join(managerPackage!, 'dist/src/cli/manager-web.js')).href
       ) as typeof import('../packages/cli/src/cli/manager-web.js')
+      let publicOrigin: string | undefined
+      let listener: { host: string; port: number; tls: { certificate: Buffer; privateKey: Buffer } } | undefined
+      const browserArguments: string[] = []
+      if (mode === 'https') {
+        const certificateFile = path.join(f.root, 'certificate.pem')
+        const privateKeyFile = path.join(f.root, 'key.pem')
+        await exec('openssl', [
+          'req',
+          '-x509',
+          '-newkey',
+          'rsa:2048',
+          '-nodes',
+          '-days',
+          '1',
+          '-subj',
+          '/CN=127.0.0.1',
+          '-keyout',
+          privateKeyFile,
+          '-out',
+          certificateFile,
+        ], { timeout: 15_000 })
+        const certificate = await readFile(certificateFile)
+        const privateKey = await readFile(privateKeyFile)
+        const publicKey = new X509Certificate(certificate).publicKey.export({ type: 'spki', format: 'der' })
+        browserArguments.push(
+          '--ignore-certificate-errors-spki-list=' + createHash('sha256').update(publicKey).digest('base64'),
+        )
+        const reservation = createServer()
+        await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve))
+        const address = reservation.address()
+        if (!address || typeof address === 'string') throw new Error('fixture port unavailable')
+        const port = address.port
+        await new Promise<void>(resolve => reservation.close(() => resolve()))
+        publicOrigin = 'https://127.0.0.1:' + port
+        listener = { host: '127.0.0.1', port, tls: { certificate, privateKey } }
+      }
       web = await manager.startManagerWeb({
         appId: 'codex',
         profileId: f.profileId,
@@ -54,10 +105,19 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
           operation.kind === 'manager-renderer'
             ? await dispatchManagerRendererOperation(f.sessions, operation)
             : { status: 'unavailable' },
-      }, { rendererGateway: f.gateway })
+      }, { rendererGateway: f.gateway, ...(publicOrigin === undefined ? {} : { publicOrigin }) })
+      if (listener && publicOrigin) {
+        const network = await import(
+          pathToFileURL(path.join(managerPackage!, 'dist/src/cli/manager-public-ingress.js')).href
+        ) as typeof import('../packages/cli/src/cli/manager-public-ingress.js')
+        ingress = await network.startManagerPublicIngress({
+          manager: { publicOrigin, localOrigin: web.localOrigin },
+          listeners: [listener],
+        })
+      }
       const url = new URL(web.url)
       url.searchParams.set('host', '1')
-      const launched = launchChrome(chrome!, path.join(f.root, 'browser'))
+      const launched = launchChrome(chrome!, path.join(f.root, 'browser'), browserArguments)
       browser = launched.browser
       page = await CdpClient.connect(await waitForChromeTarget(path.join(f.root, 'browser'), browser, launched.stderr))
       await page.send('Runtime.enable')
@@ -67,6 +127,9 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       const openConnection = async () => {
         await expect.poll(() => active.evaluate('document.documentElement.dataset.cordisxReady'), { timeout: 60_000 })
           .toBe('true')
+        await expect.poll(() => active.evaluate('document.documentElement.dataset.cordisxManagerReady'), {
+          timeout: 60_000,
+        }).toBe('true')
         await expect.poll(() =>
           active.evaluate(
             'Boolean(document.querySelector("[data-settings-navigation-item^=channel]"))',
@@ -83,9 +146,7 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
         })()`), { timeout: 15_000 }).toBe(true)
         await expect.poll(
           () => active.evaluate('Boolean(document.querySelector("#channel-credential-secret input"))'),
-          {
-            timeout: 15_000,
-          },
+          { timeout: 15_000 },
         ).toBe(true)
       }
       await openConnection()
@@ -160,10 +221,22 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       expect(uncertain).toMatchObject({ revision: 3, lastGoodRevision: 3 })
       expect([...f.credentialValues.values()].some(value => value === 'synthetic-second-value')).toBe(true)
     } finally {
-      await page?.close().catch(() => {})
-      if (browser) await stopChrome(browser)
-      await web?.close()
-      await f.close()
+      const failures: unknown[] = []
+      const cleanup = async (action: () => Promise<void>) => {
+        try {
+          await action()
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      await cleanup(async () => await page?.close())
+      await cleanup(async () => {
+        if (browser) await stopChrome(browser)
+      })
+      await cleanup(async () => await ingress?.close())
+      await cleanup(async () => await web?.close())
+      await cleanup(async () => await f.close({ preserveRoot: failures.length > 0 }))
+      if (failures.length) throw new AggregateError(failures, 'Channel browser fixture cleanup failed')
     }
   },
   120_000,

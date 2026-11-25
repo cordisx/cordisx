@@ -1,6 +1,7 @@
 import { presentation, type ShortcutPresentation } from '../shortcuts/presentation.js'
 import { chmod, rm } from 'node:fs/promises'
 import { connect, createServer, type Server, type Socket } from 'node:net'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 
 const MAX_LINE = 8 * 1024
 // A refresh may run five bounded native helper calls (15 s each), followed by
@@ -82,7 +83,18 @@ export async function startSupervisorControlServer(input: {
     server.once('error', reject)
     server.listen(input.socketPath, () => resolve())
   })
-  await chmod(input.socketPath, 0o600)
+  try {
+    await chmod(input.socketPath, 0o600)
+  } catch (error) {
+    // A failed publication must not leave the listener keeping its owner alive.
+    for (const socket of connections) socket.destroy()
+    try {
+      await new Promise<void>((resolve, reject) => server.close(failure => failure ? reject(failure) : resolve()))
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'Supervisor control publication and cleanup failed')
+    }
+    throw error
+  }
   return {
     async close(): Promise<void> {
       // Presentation must never hold supervisor shutdown behind its deadline.
@@ -119,7 +131,11 @@ export async function requestManagerEntry(socketPath: string, token: string): Pr
 }
 
 /** Only the profile-scoped private control socket may mint an ephemeral browser link. */
-export async function requestManagerLink(socketPath: string, token: string): Promise<string | undefined> {
+export async function requestManagerLink(
+  socketPath: string,
+  token: string,
+  expectedOrigin?: string,
+): Promise<string | undefined> {
   return await new Promise(resolve => {
     const socket = connect(socketPath)
     let response = ''
@@ -133,8 +149,14 @@ export async function requestManagerLink(socketPath: string, token: string): Pro
     socket.once('close', () => {
       try {
         const value = JSON.parse(response) as { url?: unknown }
+        if (typeof value.url !== 'string') return resolve(undefined)
+        const url = new URL(value.url)
+        const expected = expectedOrigin === undefined
+          ? url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port !== ''
+          : isManagerBrowserOrigin(expectedOrigin) && url.origin === expectedOrigin
         resolve(
-          typeof value.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/#[a-f0-9]{64}$/u.test(value.url)
+          expected && url.href === value.url && url.pathname === '/' && url.search === ''
+            && !url.username && !url.password && /^#[a-f0-9]{64}$/u.test(url.hash)
             ? value.url
             : undefined,
         )

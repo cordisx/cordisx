@@ -29,9 +29,10 @@ export async function openManagerBrowser(
 /** The manager sidecar is separate from, and never stops or replaces, the profile owner. */
 export async function runManagerCommand(args: readonly string[]): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: cordisx manager [open|start|status|stop] [--profile <id>] [--print-url]')
+    console.log('Usage: cordisx manager [open|start|status|stop] [--profile <id>] [--deployment <file>] [--print-url]')
     console.log('Open or control the independent manager for an existing running profile owner.')
     console.log('--print-url prints a private one-time URL locally instead of opening the browser.')
+    console.log('--deployment selects an explicit LAN or remote ingress configuration when starting the Manager.')
     return
   }
   let action = 'open'
@@ -42,16 +43,18 @@ export async function runManagerCommand(args: readonly string[]): Promise<void> 
   }
   if (!['open', 'start', 'status', 'stop', '__serve'].includes(action)) throw new Error('INVALID_MANAGER_ARGUMENTS')
   let profile: string | undefined
+  let deployment: string | undefined
   let printUrl = false
   for (let i = offset; i < args.length; i++) {
     if (args[i] === '--print-url' && !printUrl) printUrl = true
     else if (args[i] === '--profile' && profile === undefined && args[i + 1]) profile = args[++i]
+    else if (args[i] === '--deployment' && deployment === undefined && args[i + 1]) deployment = args[++i]
     else throw new Error('INVALID_MANAGER_ARGUMENTS')
   }
   if (printUrl && action !== 'open') throw new Error('INVALID_MANAGER_ARGUMENTS')
   if (action === '__serve') {
     if (!profile) throw new Error('MANAGER_CHILD_NOT_AUTHORIZED')
-    return await serveManager(profile)
+    return await serveManager(profile, deployment)
   }
   if (action === 'status') {
     console.log(JSON.stringify(await managerStatus(profile)))
@@ -62,16 +65,16 @@ export async function runManagerCommand(args: readonly string[]): Promise<void> 
     return
   }
   if (action === 'start') {
-    const { state } = await ensureManager(profile)
+    const { state } = await ensureManager(profile, deployment)
     console.log(JSON.stringify({ status: 'running', profile: state.profileId }))
     return
   }
   if (printUrl) {
-    const link = await managerLink(profile)
-    console.log(`Private one-time manager URL (do not share): ${link}`)
+    const link = await managerLink(profile, deployment)
+    console.log(`Private one-time manager URL (share only with the device being authorized): ${link}`)
     return
   }
-  const entry = await managerEntry(profile)
+  const entry = await managerEntry(profile, deployment)
   await openManagerBrowser(entry)
   console.log('Requested the default browser to open CordisX manager.')
 }

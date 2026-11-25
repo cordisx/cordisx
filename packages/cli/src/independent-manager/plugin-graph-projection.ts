@@ -4,6 +4,7 @@ import {
   type PluginGenerationArtifactServer,
   type PluginGenerationGraphLease,
 } from '../launcher/plugin-generation-artifact-server.js'
+import { isManagerBrowserOrigin } from './manager-browser-origin.js'
 
 const GRAPH_PREFIX = '/api/renderer/graphs/'
 const ID = /^[a-f0-9]{64}$/u
@@ -132,7 +133,9 @@ export function createSessionPluginGraphProjection(input: {
   readonly fetch?: typeof fetch
 }): SessionPluginGraphProjection {
   const origin = input.artifactServer.origin
-  if (!validOrigin(input.managerOrigin) || !validOrigin(origin)) throw new Error('plugin-graph-origin-invalid')
+  if (!isManagerBrowserOrigin(input.managerOrigin) || !validOrigin(origin)) {
+    throw new Error('plugin-graph-origin-invalid')
+  }
   const fetchArtifact = input.fetch ?? fetch
   const entries = new Map<string, RecordEntry>()
   const byLease = new Map<PluginGenerationGraphLease, RecordEntry>()

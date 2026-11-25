@@ -1,4 +1,5 @@
 import { parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import type { CordisXConfigPlugin } from './config.js'
 
 type RuntimeGraph = NonNullable<CordisXConfigPlugin['runtimeGraph']>
@@ -10,10 +11,7 @@ const issued = new WeakMap<RuntimeGraph, Readonly<{ origin: string; pluginId: st
  * browser-supplied source string or a serialized owner lease.
  */
 export function createStandaloneRuntimeGraph(descriptor: unknown, origin: string): RuntimeGraph {
-  const url = new URL(origin)
-  if (url.origin !== origin || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port === '') {
-    throw new Error('Standalone Manager graph origin is invalid')
-  }
+  if (!isManagerBrowserOrigin(origin)) throw new Error('Standalone Manager graph origin is invalid')
   const graph = parseManagerRendererGraph(descriptor, origin)
   const registry = 'globalThis.__cordisxPluginGenerationResourcesV1'
   const stage = JSON.stringify({ id: graph.leaseId, baseUrl: graph.baseUrl, initialStyles: graph.initialStyleUrls })

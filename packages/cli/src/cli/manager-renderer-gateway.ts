@@ -68,7 +68,7 @@ export function createManagerRendererGatewayAuthenticator(input: {
   const ping = input.ping ?? requestSupervisorPing
   const matches = (state: SupervisorState, proof: ManagerRendererGatewayProof): boolean =>
     state.appId === 'manager' && state.profileId === input.profileId && state.phase === 'ready'
-    && state.effectiveConfig === expectedConfig && state.pid === proof.pid
+    && (state.managerOwnerFingerprint ?? state.effectiveConfig) === expectedConfig && state.pid === proof.pid
     && state.processStartedAt === proof.processStartedAt && tokenMatches(state.instanceToken, proof.instanceToken)
 
   return async proof => {

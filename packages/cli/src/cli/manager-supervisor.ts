@@ -6,6 +6,8 @@ import { managerRendererGatewayPaths } from './manager-renderer-gateway.js'
 import { createManagerEntry, recoverManagerEntries, validateManagerEntry } from './manager-entry.js'
 import { openManagerOwner, resolveManagerProfile } from './manager-owner.js'
 import { startManagerWeb } from './manager-web.js'
+import { loadManagerDeploymentConfig, type ManagerDeploymentConfig } from './manager-deployment-config.js'
+import { startManagerPublicIngress } from './manager-public-ingress.js'
 import {
   requestManagerEntry,
   requestManagerLink,
@@ -27,6 +29,20 @@ import {
 } from './supervisor-state.js'
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/** Attempt every startup cleanup and retain both the original and cleanup errors. */
+async function rejectManagerStartup(error: unknown, actions: readonly (() => Promise<void>)[]): Promise<never> {
+  const failures = [error]
+  for (const action of actions) {
+    try {
+      await action()
+    } catch (cleanupError) {
+      failures.push(cleanupError)
+    }
+  }
+  if (failures.length > 1) throw new AggregateError(failures, 'MANAGER_STARTUP_CLEANUP_FAILED')
+  throw error
+}
 
 /** The manager is only an RPC client and must not inherit model credentials. */
 export function managerChildEnvironment(environment: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
@@ -91,8 +107,15 @@ async function managerPaths(profile?: string): Promise<{ paths: SupervisorPaths;
   }
 }
 
-function fingerprint(owner: Awaited<ReturnType<typeof openManagerOwner>>): string {
-  return effectiveConfigFingerprint({ appId: owner.appId, generation: owner.generation })
+function fingerprint(
+  owner: Awaited<ReturnType<typeof openManagerOwner>>,
+  deployment?: ManagerDeploymentConfig,
+): string {
+  return effectiveConfigFingerprint({
+    appId: owner.appId,
+    generation: owner.generation,
+    ...(deployment === undefined ? {} : { deployment: deployment.revision }),
+  })
 }
 
 async function inspectActiveState(
@@ -124,23 +147,38 @@ async function waitForManagerExit(state: SupervisorState, timeoutMs: number): Pr
 }
 
 /** Start or reuse exactly one private manager for the currently selected profile owner. */
-export async function ensureManager(profile?: string): Promise<{ paths: SupervisorPaths; state: SupervisorState }> {
+export async function ensureManager(
+  profile?: string,
+  deploymentFile?: string,
+): Promise<{ paths: SupervisorPaths; state: SupervisorState }> {
   if (process.platform === 'win32') throw new Error('MANAGER_PRIVATE_ENTRY_UNSUPPORTED')
   const { paths, profileId } = await managerPaths(profile)
+  const deploymentPath = deploymentFile === undefined ? undefined : path.resolve(deploymentFile)
   let handoffs = 0
   for (;;) {
     const release = await lock(paths)
     let retiring: SupervisorState | undefined
     try {
       const owner = await openManagerOwner(profileId)
+      const deployment = deploymentPath === undefined
+        ? undefined
+        : await loadManagerDeploymentConfig(deploymentPath, owner.managerConsoleOrigins?.length ?? 0)
+      const ownerFingerprint = fingerprint(owner)
+      const requestedFingerprint = fingerprint(owner, deployment)
       const active = await inspectActiveState(paths)
       const existing = active?.state
       if (existing) {
         if (existing.phase !== 'ready') throw new Error('MANAGER_NOT_READY')
-        if (existing.effectiveConfig === fingerprint(owner)) {
+        if (
+          existing.effectiveConfig === requestedFingerprint
+          || deploymentPath === undefined && existing.managerOwnerFingerprint === ownerFingerprint
+        ) {
           if (!active?.reachable) throw new Error('MANAGER_CONTROL_UNAVAILABLE')
           return { paths, state: existing }
         }
+        if (
+          existing.effectiveConfig === ownerFingerprint || existing.managerOwnerFingerprint === ownerFingerprint
+        ) throw new Error('MANAGER_DEPLOYMENT_MISMATCH')
         if (
           handoffs !== 0 || existing.appId !== 'manager' || existing.profileId !== profileId
           || !await owner.isCurrent()
@@ -165,6 +203,7 @@ export async function ensureManager(profile?: string): Promise<{ paths: Supervis
           '__serve',
           '--profile',
           profileId,
+          ...(deploymentPath === undefined ? [] : ['--deployment', deploymentPath]),
         ], {
           detached: true,
           stdio: 'ignore',
@@ -180,7 +219,7 @@ export async function ensureManager(profile?: string): Promise<{ paths: Supervis
         const deadline = Date.now() + 12_000
         while (Date.now() < deadline) {
           const state = await activeState(paths)
-          if (state?.phase === 'ready' && state.pid === child.pid && state.effectiveConfig === fingerprint(owner)) {
+          if (state?.phase === 'ready' && state.pid === child.pid && state.effectiveConfig === requestedFingerprint) {
             return { paths, state }
           }
           if (spawnFailed || child.exitCode !== null || child.signalCode !== null) {
@@ -200,7 +239,7 @@ export async function ensureManager(profile?: string): Promise<{ paths: Supervis
 }
 
 /** The parent startup lock fences this entry; its short-lived key is private and single-use. */
-export async function serveManager(profile: string): Promise<void> {
+export async function serveManager(profile: string, deploymentFile?: string): Promise<void> {
   const { paths, profileId } = await managerPaths(profile)
   const key = process.env.CORDISX_MANAGER_CHILD_KEY
   delete process.env.CORDISX_MANAGER_CHILD_KEY
@@ -209,6 +248,9 @@ export async function serveManager(profile: string): Promise<void> {
   }
   await rm(paths.bootstrapToken)
   const owner = await openManagerOwner(profileId)
+  const deployment = deploymentFile === undefined
+    ? undefined
+    : await loadManagerDeploymentConfig(deploymentFile, owner.managerConsoleOrigins?.length ?? 0)
   const entryDirectory = path.join(paths.directory, 'entries')
   await recoverManagerEntries(entryDirectory)
   const startedAt = await processStartIdentity(process.pid)
@@ -218,10 +260,22 @@ export async function serveManager(profile: string): Promise<void> {
   // socket are published; it never crosses the browser HTTP boundary.
   const web = await startManagerWeb(owner, {
     rendererGateway: { pid: process.pid, processStartedAt: startedAt, instanceToken },
+    ...(deployment === undefined ? {} : { publicOrigin: deployment.publicOrigin }),
+    ...(deployment?.publicConsoleOriginTemplates?.length
+      ? { publicConsoleOriginTemplates: deployment.publicConsoleOriginTemplates }
+      : {}),
   })
   let finish!: () => void
   const stopped = new Promise<void>(resolve => {
     finish = resolve
+  })
+  const ingress = deployment === undefined ? undefined : await startManagerPublicIngress({
+    manager: { publicOrigin: web.origin, localOrigin: web.localOrigin },
+    ...(web.consoleMapping === undefined ? {} : { consoles: web.consoleMapping }),
+    listeners: deployment.listeners,
+    onUnavailable: finish,
+  }).catch(async error => {
+    return await rejectManagerStartup(error, [async () => await web.close()])
   })
   const state: SupervisorState = {
     schemaVersion: 1,
@@ -233,7 +287,9 @@ export async function serveManager(profile: string): Promise<void> {
     instanceToken,
     createdAt: new Date().toISOString(),
     version: 'manager-v1',
-    effectiveConfig: fingerprint(owner),
+    effectiveConfig: fingerprint(owner, deployment),
+    managerOwnerFingerprint: fingerprint(owner),
+    managerPublicOrigin: web.origin,
   }
   const control = await startSupervisorControlServer({
     socketPath: paths.socket,
@@ -248,8 +304,12 @@ export async function serveManager(profile: string): Promise<void> {
       return await createManagerEntry(entryDirectory, web)
     },
   }).catch(async error => {
-    await web.close()
-    throw error
+    return await rejectManagerStartup(error, [
+      async () => {
+        await ingress?.close()
+      },
+      async () => await web.close(),
+    ])
   })
   const onSignal = () => finish()
   process.once('SIGINT', onSignal)
@@ -266,8 +326,15 @@ export async function serveManager(profile: string): Promise<void> {
     clearInterval(watchdog)
     process.off('SIGINT', onSignal)
     process.off('SIGTERM', onSignal)
-    await control.close()
-    await web.close()
+    try {
+      await control.close()
+    } finally {
+      try {
+        await ingress?.close()
+      } finally {
+        await web.close()
+      }
+    }
     const release = await lock(paths)
     try {
       const current = await readSupervisorState(paths)
@@ -284,16 +351,16 @@ export async function managerStatus(profile?: string): Promise<{ status: 'runnin
   return { status: state?.phase === 'ready' ? 'running' : 'stopped', profile: profileId }
 }
 
-export async function managerLink(profile?: string): Promise<string> {
-  const { paths, state } = await ensureManager(profile)
-  const link = await requestManagerLink(paths.socket, state.instanceToken)
+export async function managerLink(profile?: string, deploymentFile?: string): Promise<string> {
+  const { paths, state } = await ensureManager(profile, deploymentFile)
+  const link = await requestManagerLink(paths.socket, state.instanceToken, state.managerPublicOrigin)
   if (!link) throw new Error('MANAGER_LINK_UNAVAILABLE')
   return link
 }
 
 /** Return a private HTML filename, whose content is retired on exchange or expiry. */
-export async function managerEntry(profile?: string): Promise<string> {
-  const { paths, state } = await ensureManager(profile)
+export async function managerEntry(profile?: string, deploymentFile?: string): Promise<string> {
+  const { paths, state } = await ensureManager(profile, deploymentFile)
   const entry = await requestManagerEntry(paths.socket, state.instanceToken)
   if (!entry || !await validateManagerEntry(entry, path.join(paths.directory, 'entries'))) {
     throw new Error('MANAGER_ENTRY_UNAVAILABLE')

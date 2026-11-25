@@ -5,7 +5,7 @@ acceptance are separate gates. The existing injected Manager remains unchanged.
 The candidate supports macOS and Linux; it cannot yet start on Windows because
 user-private entry-file ACLs have not been implemented or verified there.
 
-The independent manager is a local browser client of one existing profile owner.
+The independent manager is a browser client of one existing profile owner.
 It uses the same management RPC for plugin/source operations and shared model
 service configuration, with revision checks and write-only model credentials.
 When exactly one admitted App renderer is available, plugin configuration and
@@ -161,12 +161,68 @@ unavailable while the fence is held, except for the coordinated Desktop subset
 described above. The separate, explicitly coordinated configured-Channel
 service update retains its existing owner and receipt checks.
 
-The sidecar listens only on loopback and communicates with the owner through its
-private management socket. Managed console origins are also loopback-only. Each
-Manager page permits its owner-issued console origins in `frame-src`; the gateway
-retains the service's `frame-ancestors` and `X-Frame-Options` restrictions. CORS
-and iframe embedding are separate browser policies. Remote proxy and cross-device
-access have not been implemented or validated.
+By default, the sidecar and managed console gateways listen only on loopback.
+The sidecar communicates with the owner through its private management socket.
+An optional deployment file adds explicitly configured browser-facing listeners.
+This network mode remains a candidate; it has not been verified on a remote device.
+
+## Optional network deployment
+
+Start the existing profile owner first. For an HTTPS reverse proxy, a deployment
+file can route the public Manager and console hostnames to one loopback listener:
+
+```json
+{
+  "publicOrigin": "https://manager.example.test",
+  "consoleOrigins": { "template": "https://{view}.console.example.test" },
+  "listeners": [{ "host": "127.0.0.1", "port": 8787 }]
+}
+```
+
+```bash
+cordisx manager start --profile default --deployment ./manager-deployment.json
+cordisx manager open --profile default --print-url
+```
+
+Configure wildcard DNS, the proxy's TLS certificate, and forwarding for the
+Manager and console hostnames. The proxy must preserve the browser's `Host`
+(including its port) and `Origin` headers. The `{view}` placeholder is a
+fresh hostname label for each console view. The optional `{slot}` placeholder
+selects an owner console slot. An explicit array of templates may be used
+instead, with exactly one per owner slot. If `consoleOrigins` is omitted, the
+Manager remains available but embedded service consoles are unavailable.
+
+For direct TLS, bind the chosen address and supply certificate and private-key
+files in the deployment file. Relative file paths are resolved from that file:
+
+```json
+{
+  "publicOrigin": "https://manager.example.test:8443",
+  "consoleOrigins": { "template": "https://{view}.console.example.test:8443" },
+  "listeners": [{ "host": "0.0.0.0", "port": 8443 }],
+  "tls": { "certificateFile": "cert.pem", "privateKeyFile": "key.pem" }
+}
+```
+
+Templates may also use `{port}` and `firstPort`; listeners can similarly
+specify `firstPort` and `count`. The certificate must cover the Manager and
+the wildcard console hostnames. A Manager can use an IP address, but embedded
+consoles currently require DNS names that provide a fresh hostname per view.
+Browsers require a secure context for the Manager's Service Worker, so a
+non-loopback HTTP URL may not work without browser-specific trust configuration.
+
+The configured Manager and each console use distinct origins. The Manager's
+`frame-src` permits the configured console origins; the gateway preserves the
+service's `frame-ancestors` and `X-Frame-Options` restrictions. Service
+cookies stay in the ingress; each browser view gets a separate origin-scoped
+credential. Configure the service to permit the Manager origin
+when needed. CORS and iframe embedding are separate browser policies.
+
+A running Manager is reused when no deployment file is specified. Starting it
+with a different explicit deployment fails until that Manager is stopped; this
+does not stop the profile owner.
+
+## Browser sessions
 
 Each browser opening obtains a 60-second bootstrap
 in the URL fragment; it is exchanged for a separate session token and removed
@@ -219,8 +275,8 @@ exchange, expiration or shutdown. This protects against other OS users, not
 malicious processes running as the same user. A successful opener command does
 not prove the file was opened in a browser or redeemed. On a trusted local
 terminal without a graphical launcher, an operator may run
-`cordisx manager open --print-url`; that URL is a temporary credential and must
-not be shared. Closing the tab clears its browser storage but does not itself stop
+`cordisx manager open --print-url`; that URL is a temporary credential and should
+be transferred only to the device being authorized. Closing the tab clears its browser storage but does not itself stop
 the sidecar; use `manager stop` to stop it.
 
 The Manager reuses the existing model-service and Marketplace pages. The

@@ -2,8 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 
 type ManagerWeb = {
+  readonly origin: string
   issueUrl(retire?: () => Promise<void>): string
   revokeUrl(url: string): Promise<void>
 }
@@ -34,7 +36,14 @@ export async function createManagerEntry(directory: string, web: ManagerWeb): Pr
     await rm(file, { force: true })
   }
   const url = web.issueUrl(clean)
-  if (!/^http:\/\/127\.0\.0\.1:\d+\/#[a-f0-9]{64}$/u.test(url)) {
+  let valid = false
+  try {
+    const entry = new URL(url)
+    valid = isManagerBrowserOrigin(web.origin) && entry.origin === web.origin && entry.pathname === '/'
+      && entry.search === ''
+      && !entry.username && !entry.password && /^#[a-f0-9]{64}$/u.test(entry.hash)
+  } catch { /* An invalid URL cannot be opened. */ }
+  if (!valid) {
     await web.revokeUrl(url)
     throw new Error('MANAGER_ENTRY_URL_INVALID')
   }

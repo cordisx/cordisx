@@ -24,6 +24,12 @@ export class ManagerSessionResumeGrants {
   private readonly grants = new Map<string, Grant>()
   private readonly sessions = new Map<string, string>()
 
+  constructor(private readonly secure = false) {}
+
+  private cookie(value: string): string {
+    return this.secure ? value + '; Secure' : value
+  }
+
   private forget(grant: Grant): void {
     if (this.grants.get(grant.id) === grant) this.grants.delete(grant.id)
     if (this.sessions.get(grant.session) === grant.id) this.sessions.delete(grant.session)
@@ -66,7 +72,9 @@ export class ManagerSessionResumeGrants {
     this.sessions.set(session, grant.id)
     return {
       id: grant.id,
-      cookie: `${cookieName}=${grant.secret}; Path=/api/session/resume/${grant.id}; HttpOnly; SameSite=Strict`,
+      cookie: this.cookie(
+        `${cookieName}=${grant.secret}; Path=/api/session/resume/${grant.id}; HttpOnly; SameSite=Strict`,
+      ),
     }
   }
 
@@ -142,10 +150,11 @@ export class ManagerSessionResumeGrants {
       grant.issued = { token: issued.token, resumeId: issued.resumeId }
       return {
         ...issued,
-        retryCookie:
+        retryCookie: this.cookie(
           `${cookieName}=${grant.secret}; Path=/api/session/resume/${grant.id}; HttpOnly; SameSite=Strict; Max-Age=${
             graceMs / 1_000
           }`,
+        ),
         ...(previous === undefined ? {} : { previousResumeId: previous.resumeId }),
       }
     } catch (error) {
@@ -169,7 +178,7 @@ export class ManagerSessionResumeGrants {
 
   deleteCookie(id: string): string {
     if (!idPattern.test(id)) throw new Error('manager-resume-invalid')
-    return `${cookieName}=; Path=/api/session/resume/${id}; HttpOnly; SameSite=Strict; Max-Age=0`
+    return this.cookie(`${cookieName}=; Path=/api/session/resume/${id}; HttpOnly; SameSite=Strict; Max-Age=0`)
   }
 
   close(): void {

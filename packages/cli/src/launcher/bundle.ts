@@ -19,6 +19,7 @@ import { readPluginDocuments } from './plugin-documents.js'
 import { resolveOwningPackageVersion } from './package-version.js'
 import { resourceRegistryInstallSource } from './plugin-generation-artifact-server.js'
 import { isStandaloneRuntimeGraph } from './standalone-runtime-graph.js'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import { createStandaloneMarketplaceTrustFilter } from './standalone-marketplace-trust.js'
 import type { StandaloneRuntimeBundleCache } from './standalone-runtime-bundle.js'
@@ -131,17 +132,11 @@ async function assertStandaloneOwner(
     throw new Error('Standalone Manager runtime is not yet available outside the isolated UI Playground')
   }
   const activation = options.pluginActivation
-  let managerOriginValid = false
-  try {
-    const origin = new URL(owner.managerOrigin)
-    managerOriginValid = origin.origin === owner.managerOrigin && origin.protocol === 'http:'
-      && origin.hostname === '127.0.0.1' && origin.port !== ''
-  } catch { /* invalid origins cannot admit a renderer */ }
   if (
     !/^[a-f0-9]{64}$/u.test(owner.rendererId)
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(owner.profileId)
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(owner.generation)
-    || typeof owner.isCurrent !== 'function' || !managerOriginValid
+    || typeof owner.isCurrent !== 'function' || !isManagerBrowserOrigin(owner.managerOrigin)
     || options.profileId !== owner.profileId || options.generation !== owner.generation
     || options.permission?.profileId !== owner.profileId
     || options.permission.policies.some(policy => policy.key.profileId !== owner.profileId)

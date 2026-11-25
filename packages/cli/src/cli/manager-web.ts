@@ -14,6 +14,12 @@ import { ManagerObservationPolls } from './manager-observation-polls.js'
 import type { ManagerLifecyclePolls } from './manager-lifecycle-polls.js'
 import { handleManagerRendererLifecycleHttp } from './manager-renderer-lifecycle-http.js'
 import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
+import { canonicalManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
+import {
+  createManagerPublicConsoleMapping,
+  parseManagerPublicConsoleRequest,
+  projectManagerPublicConsoleResult,
+} from './manager-public-console.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 // Renderer retirement may have to drain active reads and release graph leases.
@@ -112,6 +118,10 @@ function observationRequestId(channel: string, payload: string): string | undefi
 export async function startManagerWeb(owner: ManagerOwner, options: {
   /** Private supervisor identity; it must never be supplied by the browser. */
   readonly rendererGateway?: ManagerRendererGatewayProof
+  /** Browser-facing origin when a separately configured ingress is used. */
+  readonly publicOrigin?: string
+  /** Browser-facing hostname templates corresponding to the owner's local console listeners. */
+  readonly publicConsoleOriginTemplates?: readonly string[]
 } = {}) {
   type BrowserSession = {
     id: string
@@ -133,13 +143,27 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     observations?: ManagerObservationPolls
     lifecyclePolls?: ManagerLifecyclePolls
   }
+  const publicOrigin = options.publicOrigin === undefined
+    ? undefined
+    : canonicalManagerBrowserOrigin(options.publicOrigin)
   const sessions = new Map<string, BrowserSession>()
-  const resumes = new ManagerSessionResumeGrants()
+  const resumes = new ManagerSessionResumeGrants(publicOrigin?.startsWith('https://') === true)
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
-  const consoleOrigins = owner.managerConsoleOrigins === undefined
+  let managerOrigin = ''
+  const ownerConsoleOrigins = owner.managerConsoleOrigins === undefined
     ? undefined
     : canonicalManagedConsoleBrowserOrigins(owner.managerConsoleOrigins)
+  if (
+    options.publicConsoleOriginTemplates !== undefined
+    && (!publicOrigin || !Array.isArray(options.publicConsoleOriginTemplates))
+  ) {
+    throw new Error('MANAGER_CONSOLE_MAPPING_INVALID')
+  }
+  const publicConsoles = options.publicConsoleOriginTemplates === undefined
+    ? undefined
+    : createManagerPublicConsoleMapping(publicOrigin!, ownerConsoleOrigins, options.publicConsoleOriginTemplates)
+  const consoleOrigins = publicOrigin === undefined ? ownerConsoleOrigins : publicConsoles?.origins
   let bootstraps!: ManagerBootstrapEntries
   const retireSession = async (
     token: string,
@@ -206,7 +230,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     return await retired
   }
   bootstraps = new ManagerBootstrapEntries(async token => await retireSession(token, false, true))
-  const issueUrl = (onRetire?: () => Promise<void>) => `http://${authority}/#${bootstraps.issue(onRetire)}`
+  const issueUrl = (onRetire?: () => Promise<void>) => `${managerOrigin}/#${bootstraps.issue(onRetire)}`
   const revokeUrl = async (url: string) => await bootstraps.revoke(new URL(url).hash.slice(1))
   const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
     const previous = sessions.get(token)
@@ -255,7 +279,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     )
     if (request.headers.host !== authority) return json(response, 403, { error: 'INVALID_HOST' })
     const origin = request.headers.origin
-    if (origin !== undefined && origin !== `http://${authority}`) {
+    if (origin !== undefined && origin !== managerOrigin) {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
     const target = request.url ?? '/'
@@ -264,8 +288,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     }
     let url: URL
     try {
-      url = new URL(target, `http://${authority}`)
-      if (url.origin !== `http://${authority}`) return json(response, 400, { error: 'INVALID_REQUEST' })
+      url = new URL(target, managerOrigin)
+      if (url.origin !== managerOrigin) return json(response, 400, { error: 'INVALID_REQUEST' })
     } catch {
       return json(response, 400, { error: 'INVALID_REQUEST' })
     }
@@ -292,7 +316,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     if (!url.pathname.startsWith('/api/')) return json(response, 404, { error: 'NOT_FOUND' })
     if (url.pathname === '/api/session') {
       if (
-        request.method !== 'POST' || origin !== `http://${authority}`
+        request.method !== 'POST' || origin !== managerOrigin
         || !request.headers['content-type']?.startsWith('application/json')
       ) return json(response, 403, { error: 'INVALID_ORIGIN' })
       try {
@@ -331,7 +355,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     const resumeMatch = /^\/api\/session\/resume\/([a-f0-9]{64})$/u.exec(url.pathname)
     if (resumeMatch) {
       if (
-        request.method !== 'POST' || origin !== `http://${authority}`
+        request.method !== 'POST' || origin !== managerOrigin
         || !request.headers['content-type']?.startsWith('application/json')
       ) return json(response, 403, { error: 'INVALID_ORIGIN' })
       try {
@@ -359,7 +383,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     if (previousSession === undefined || previousSession.deadline <= Date.now()) {
       if (
         previousSession === undefined && request.method === 'POST' && url.pathname === '/api/renderer/close'
-        && origin === `http://${authority}` && (closedSessions.get(token)?.deadline ?? 0) > Date.now()
+        && origin === managerOrigin && (closedSessions.get(token)?.deadline ?? 0) > Date.now()
         && request.headers['content-type']?.startsWith('application/json')
       ) {
         const input = object(await body(request).catch(() => undefined))
@@ -376,7 +400,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       return json(response, 401, { error: 'UNAUTHORIZED' })
     }
     const session = touchSession(token, previousSession.id, previousSession.managedServicesUsed)
-    if (request.method === 'POST' && origin !== `http://${authority}`) {
+    if (request.method === 'POST' && origin !== managerOrigin) {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
     bootstraps.finalizeSession(token)
@@ -525,7 +549,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             session.rendererChannels = [...result.channels] as string[]
             if (session.rendererCommands) {
               session.graphs = createManagerRendererGraphSession({
-                managerOrigin: `http://${authority}`,
+                managerOrigin,
                 profileId: owner.profileId,
                 generation: owner.generation,
                 rendererId: privateHandle.rendererId,
@@ -535,7 +559,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               session.rendererBootstrap = createManagerRendererBootstrap({
                 owner,
                 invocation: { gateway, browserSessionId: session.id, handle: privateHandle },
-                managerOrigin: `http://${authority}`,
+                managerOrigin,
                 projection: session.graphs,
                 isCurrent: async () => activeSession() && await owner.isCurrent().catch(() => false) && activeSession(),
                 signal: session.controller.signal,
@@ -642,6 +666,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
         let accountToggle = false
+        let consoleRequest: ReturnType<typeof parseManagerPublicConsoleRequest>
         if (input.channel === 'service-config') {
           try {
             const envelope = object(JSON.parse(input.payload))
@@ -657,6 +682,11 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           try {
             const envelope = object(JSON.parse(input.payload))
             accountToggle = envelope?.operation === 'toggleAccount'
+            if (envelope?.operation === 'consoleBrowser') {
+              consoleRequest = parseManagerPublicConsoleRequest(envelope, session.id, session.controller.signal)
+              if (!consoleRequest) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+              if (consoleRequest.action === 'retire') publicConsoles?.retire(consoleRequest.view)
+            }
             rendererWrite = envelope?.operation === 'authenticate' || envelope?.operation === 'logout' || accountToggle
           } catch {
             return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
@@ -668,8 +698,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             if (!response.writableFinished) void retireSession(token).catch(() => false)
           })
         }
-        // The owner applies its own strict channel parser and capability
-        // checks. A browser cannot choose a handle, gateway, or session ID.
+        // The owner validates channels; the browser cannot choose its private session handle.
         const operation: PluginManagementRpcOperation = {
           kind: 'manager-renderer',
           action: 'call',
@@ -718,6 +747,13 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           }
         }
         if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+        if (publicOrigin !== undefined && consoleRequest) {
+          try {
+            return scopedReply(projectManagerPublicConsoleResult(result.value, publicConsoles, consoleRequest))
+          } catch {
+            return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+          }
+        }
         return scopedReply(result.value)
       }
       if (url.pathname === '/api/channel-credentials') {
@@ -942,12 +978,18 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   })
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('MANAGER_LISTEN_FAILED')
-  authority = `127.0.0.1:${address.port}`
+  const localOrigin = `http://127.0.0.1:${address.port}`
+  managerOrigin = publicOrigin ?? localOrigin
+  authority = new URL(managerOrigin).host
   return {
     url: issueUrl(),
+    origin: managerOrigin,
+    localOrigin,
+    consoleMapping: publicConsoles,
     issueUrl,
     revokeUrl,
     async close() {
+      publicConsoles?.close()
       await bootstraps.close()
       await Promise.allSettled([...sessions.keys()].map(token => retireSession(token)))
       resumes.close()

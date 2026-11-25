@@ -104,8 +104,14 @@ describe('independent renderer plugin graph projection', () => {
     ).toThrow('plugin-graph-lease-invalid')
     expect(() =>
       createSessionPluginGraphProjection({
-        managerOrigin: 'http://example.com:8000',
+        managerOrigin: 'http://example.com:8000/path',
         artifactServer: input.server,
+      })
+    ).toThrow('plugin-graph-origin-invalid')
+    expect(() =>
+      createSessionPluginGraphProjection({
+        managerOrigin: 'https://manager.example.test',
+        artifactServer: { origin: 'https://external.example.test' },
       })
     ).toThrow('plugin-graph-origin-invalid')
     expect(input.server.requestTrace()).toEqual([])

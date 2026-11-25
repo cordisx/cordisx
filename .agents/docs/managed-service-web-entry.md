@@ -72,8 +72,9 @@ The service must permit the Manager origin as a frame ancestor. The gateway
 preserves the service's `Content-Security-Policy`, `X-Frame-Options`, and
 `Cross-Origin-Resource-Policy` headers; conflicting restrictions can still
 block the frame. CORS controls cross-origin requests, not frame admission. The
-standalone Manager and its console origins are loopback-only and do not
-constitute a remote deployment endpoint.
+standalone Manager and its console gateways remain loopback-only by default.
+An explicitly configured ingress can map owner-issued console origins for a
+network deployment; see [independent manager](independent-manager.md#optional-network-deployment).
 
 The gateway also relays authorization cookies issued by the verified service
 after console authentication. These cookies must be HttpOnly, Secure,

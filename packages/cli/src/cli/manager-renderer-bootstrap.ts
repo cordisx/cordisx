@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererInvocation } from './manager-renderer-sessions.js'
 import { decodeManagerRendererBundle } from './manager-renderer-bundle-codec.js'
@@ -28,11 +29,7 @@ export function createManagerRendererBootstrap(input: {
   readonly signal: AbortSignal
   readonly forbiddenSecrets: readonly string[]
 }) {
-  const origin = new URL(input.managerOrigin)
-  if (
-    origin.origin !== input.managerOrigin || origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1'
-    || origin.port === ''
-  ) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
+  if (!isManagerBrowserOrigin(input.managerOrigin)) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
   let started = false
   const current = async () => !input.signal.aborted && await input.isCurrent() && !input.signal.aborted
   const call = async (payload: unknown, ownerStatus = false) => {

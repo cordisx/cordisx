@@ -5,6 +5,7 @@ import type { ManagerRendererGraph } from '../independent-manager/graph-stage-lo
 import { normalizeProjection as normalizeChannelProjection } from '../renderer/channel-manager-projection.js'
 import { isStandaloneConfigOperations } from '../renderer/standalone-desktop-package-config-binding.js'
 import { parseStandalonePolicyHandoff } from '../independent-manager/standalone-policy-handoff.js'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import { parseManagedServiceAccountAdoption } from '../managed-service-account-adoption.js'
 import {
   createSessionPluginGraphProjection,
@@ -141,15 +142,9 @@ export function createManagerRendererGraphSession(input: {
   readonly isCurrent: () => boolean
   readonly forbiddenSecrets: readonly string[]
 }) {
-  let manager: URL
-  try {
-    manager = new URL(input.managerOrigin)
-  } catch {
-    throw invalid()
-  }
   if (
-    manager.origin !== input.managerOrigin || manager.protocol !== 'http:' || manager.hostname !== '127.0.0.1'
-    || manager.port === '' || !identifier.test(input.profileId) || !identifier.test(input.generation)
+    !isManagerBrowserOrigin(input.managerOrigin) || !identifier.test(input.profileId)
+    || !identifier.test(input.generation)
     || !secret.test(input.rendererId) || typeof input.isCurrent !== 'function'
     || input.forbiddenSecrets.length > 16 || input.forbiddenSecrets.some(value => !secret.test(value))
   ) throw invalid()

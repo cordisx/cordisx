@@ -1,6 +1,7 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { RendererPluginMutation } from '../renderer/runtime-shared.js'
 import type { ManagerRendererLoadedStage, ManagerRendererStageLoader } from './lifecycle-client.js'
+import { isManagerBrowserOrigin } from './manager-browser-origin.js'
 
 /** Public-to-this-renderer projection; graph paths are never bearer credentials. */
 export interface ManagerRendererGraph {
@@ -141,8 +142,7 @@ export function createManagerRendererGraphLoader(input: {
   /** Override only in isolated tests; production uses the browser's native ESM loader. */
   readonly importModule?: (url: string) => Promise<CordisXPluginModule>
 }): ManagerRendererStageLoader {
-  const url = new URL(input.origin)
-  if (url.origin !== input.origin || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port === '') {
+  if (!isManagerBrowserOrigin(input.origin)) {
     throw new Error('renderer-graph-origin-invalid')
   }
   const importModule = input.importModule ?? (async (entry: string) => await import(/* @vite-ignore */ entry))

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import path from 'node:path'
@@ -23,6 +24,10 @@ export interface SupervisorState {
   readonly createdAt: string
   readonly version: string
   readonly effectiveConfig: string
+  /** Manager owner identity, independent of an optional deployment choice. */
+  readonly managerOwnerFingerprint?: string
+  /** Browser-facing Manager origin, separate from its local owner listener. */
+  readonly managerPublicOrigin?: string
   /** Separate detached group launched by the supervisor, when Host startup reached spawn. */
   readonly hostPid?: number
   readonly hostProcessStartedAt?: string
@@ -147,6 +152,10 @@ function validState(value: unknown): value is SupervisorState {
     && typeof item.createdAt === 'string'
     && typeof item.version === 'string'
     && typeof item.effectiveConfig === 'string'
+    && (item.managerOwnerFingerprint === undefined
+      || typeof item.managerOwnerFingerprint === 'string' && /^[a-f0-9]{64}$/u.test(item.managerOwnerFingerprint))
+    && (item.managerPublicOrigin === undefined
+      || typeof item.managerPublicOrigin === 'string' && isManagerBrowserOrigin(item.managerPublicOrigin))
     && (item.hostPid === undefined || (Number.isSafeInteger(item.hostPid) && (item.hostPid as number) > 0))
     && (item.hostProcessStartedAt === undefined || typeof item.hostProcessStartedAt === 'string')
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')

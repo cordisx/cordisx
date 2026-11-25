@@ -15,6 +15,7 @@ import { createManagerRendererLifecycleClient, type ManagerRendererStageLoader }
 import { startManagerRendererLifecyclePump } from './lifecycle-pump.js'
 import { createManagerResourceAuthClient, type ManagerResourceAuthClient } from './resource-auth-client.js'
 import { createStandalonePermissionSigner, type StandalonePermissionSigner } from './standalone-permission-signer.js'
+import { isManagerBrowserOrigin } from './manager-browser-origin.js'
 
 const tokenPattern = /^[a-f0-9]{64}$/u
 const scopePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -422,7 +423,7 @@ export function startStandaloneManager(input: {
   const ready = (async (): Promise<boolean> => {
     try {
       const url = new URL(browser.location.href)
-      if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port === '' || url.pathname !== '/') {
+      if (!isManagerBrowserOrigin(url.origin) || url.pathname !== '/') {
         throw new Error('manager-origin-invalid')
       }
       const entryToken = url.hash.slice(1)

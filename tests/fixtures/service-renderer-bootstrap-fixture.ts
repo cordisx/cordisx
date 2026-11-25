@@ -597,7 +597,7 @@ export async function fixture(
     setCredentialCommitUnknown(value: boolean) {
       credentialCommitUnknown = value
     },
-    async close() {
+    async close(options: { readonly preserveRoot?: boolean } = {}) {
       releaseLease.resolve()
       sessions.dispose()
       await bootstrap.close()
@@ -609,9 +609,11 @@ export async function fixture(
       await lifecycle.close()
       await managed.dispose()
       await configuredChannel?.service.dispose()
-      const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
-      await Promise.all(digests.map(async digest => await removeStagedPluginPackage(homeDir, `sha256:${digest}`)))
-      await rm(root, { recursive: true, force: true })
+      if (!options.preserveRoot) {
+        const digests = await readdir(path.join(homeDir, 'packages', 'sha256')).catch(() => [])
+        await Promise.all(digests.map(async digest => await removeStagedPluginPackage(homeDir, `sha256:${digest}`)))
+        await rm(root, { recursive: true, force: true })
+      }
     },
   }
 }

@@ -586,7 +586,8 @@ describe('supervisor management commands', () => {
   it.each(['completed', 'failed', 'unconfirmed', 'replaced', 'bad-completion', 'legacy', 'legacy-failed'] as const)(
     'reports the service cleanup receipt when it is %s',
     async outcome => {
-      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-stop-receipt-'))
+      // Unix socket paths have a small platform limit; keep this fixture root short.
+      const root = await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'cx-stop-receipt-'))
       const paths = supervisorPaths(root, 'codex', 'default')
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
       const token = 'a'.repeat(64)

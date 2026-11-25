@@ -5,7 +5,7 @@ import { waitForChromeDebugPort } from './chrome-debug-port.js'
 import { launchObservedChrome, observeChromeReadiness } from './chrome-launch-diagnostics.js'
 
 /** Shared isolated browser policy keeps native fixtures equivalent on macOS and Linux CI. */
-function chromeLaunchArguments(profile: string): string[] {
+function chromeLaunchArguments(profile: string, extraArgs: readonly string[]): string[] {
   return [
     '--headless=new',
     '--no-first-run',
@@ -20,12 +20,13 @@ function chromeLaunchArguments(profile: string): string[] {
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
+    ...extraArgs,
     'about:blank',
   ]
 }
 
-export function launchChrome(executable: string, profile: string) {
-  return launchObservedChrome(executable, chromeLaunchArguments(profile))
+export function launchChrome(executable: string, profile: string, extraArgs: readonly string[] = []) {
+  return launchObservedChrome(executable, chromeLaunchArguments(profile, extraArgs))
 }
 
 export async function waitForChromeTarget(

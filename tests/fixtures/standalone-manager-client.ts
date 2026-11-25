@@ -36,6 +36,7 @@ export function deferred<T>() {
 }
 
 export function fixture(input: {
+  readonly browserOrigin?: string
   readonly invalidSessionAt?: number
   readonly sessionTransportFailuresAt?: readonly number[]
   readonly unauthorizedSessionAt?: number
@@ -69,6 +70,9 @@ export function fixture(input: {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: `${origin}/?host=1${input.resume ? '' : `#${entryToken}`}`,
   })
+  if (input.browserOrigin) {
+    dom.reconfigure({ url: input.browserOrigin + '/?host=1' + (input.resume ? '' : '#' + entryToken) })
+  }
   const win = dom.window
   if (input.permissionPolicy) Object.defineProperty(win.crypto, 'subtle', { value: webcrypto.subtle })
   if (input.resumeAttemptUnavailable) {

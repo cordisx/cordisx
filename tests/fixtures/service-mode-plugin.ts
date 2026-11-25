@@ -15,6 +15,7 @@ import {
 } from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 import { declaration, definition } from '../managed-service-runtime-fixture.js'
+import { consoleBackend, consoleExports, consoleOperations } from './managed-public-console-plugin.js'
 
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 export const backend = String.raw`#!/usr/bin/env node
@@ -99,6 +100,7 @@ export async function stageServiceModePlugin(
     readonly authentication?: boolean
     readonly logout?: boolean
     readonly nodeConfig?: boolean
+    readonly browserConsole?: boolean
   } = {},
 ) {
   const id = withService ? 'fixture-service' : 'fixture-desktop'
@@ -120,8 +122,11 @@ export async function stageServiceModePlugin(
       { exitCode: 1, state: 'authentication-required' as const },
     ],
   })
+  const serviceDefinition = definition('gateway')
+  const backendSource = options.browserConsole ? consoleBackend : backend
   const value = {
-    ...definition('gateway'),
+    ...serviceDefinition,
+    ...(options.browserConsole ? { operations: [...serviceDefinition.operations, ...consoleOperations] } : {}),
     ...(options.authentication
       ? {
         authentication: {
@@ -165,7 +170,7 @@ apply.inject = ['managedServices']
     ? `export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture',
         validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { marker: { type: 'string' } } }) }`
     : ''
-  const service = !progressive ? registration : `${nodeConfig}
+  const service = (!progressive ? registration : `${nodeConfig}
 ${registration}
 export async function prepare(ctx, input) {
   const ready = await input.registration.ensureReady({ signal: input.signal })
@@ -183,7 +188,7 @@ export async function prepare(ctx, input) {
   })
   if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
 }
-`
+`) + (options.browserConsole ? consoleExports : '')
   const runtimeSchema = version === 16
     ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V16
     : version === 15
@@ -214,8 +219,8 @@ export async function prepare(ctx, input) {
           {
             path: './server.mjs',
             mode: 'executable',
-            byteLength: Buffer.byteLength(backend),
-            digest: digest(backend),
+            byteLength: Buffer.byteLength(backendSource),
+            digest: digest(backendSource),
           },
           ...(options.authentication
             ? [{
@@ -258,7 +263,7 @@ export async function prepare(ctx, input) {
       browserSource,
     ),
     writeFile(path.join(dir, 'gateway.mjs'), service),
-    writeFile(path.join(dir, 'server.mjs'), backend, { mode: 0o755 }),
+    writeFile(path.join(dir, 'server.mjs'), backendSource, { mode: 0o755 }),
     ...(options.authentication ? [writeFile(path.join(dir, 'auth.mjs'), authHelper, { mode: 0o755 })] : []),
     writeFile(path.join(dir, 'runtime.json'), runtime),
     writeFile(

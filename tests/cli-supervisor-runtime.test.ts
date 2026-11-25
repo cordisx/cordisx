@@ -264,32 +264,34 @@ describe('background supervisor publication handshake', () => {
   it.each(['completed', 'failed', 'replaced'] as const)(
     'publishes a generation-bound service cleanup receipt when %s',
     async outcome => {
-      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-cleanup-runtime-'))
+      // Unix socket paths have a small platform limit; keep this fixture root short.
+      const root = await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'cx-cleanup-'))
       const paths = supervisorPaths(root, 'codex', 'work')
       const token = '7'.repeat(64)
-      await mkdir(paths.directory, { recursive: true })
-      await writeFile(paths.bootstrapToken, token, { mode: 0o600 })
-      await writeSupervisorState(paths, {
-        schemaVersion: 1,
-        mode: 'service',
-        appId: 'codex',
-        profileId: 'work',
-        phase: 'starting',
-        pid: process.pid,
-        processStartedAt: (await processStartIdentity(process.pid))!,
-        instanceToken: token,
-        createdAt: new Date().toISOString(),
-        version: 'test',
-        effectiveConfig: 'service',
-      })
-      const runtime = await createSupervisorRuntime({
-        CORDISX_SUPERVISOR_HOME: root,
-        CORDISX_SUPERVISOR_APP: 'codex',
-        CORDISX_SUPERVISOR_PROFILE: 'work',
-        CORDISX_SUPERVISOR_FINGERPRINT: 'service',
-        CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
-      }, { platform: 'linux' })
+      let runtime: Awaited<ReturnType<typeof createSupervisorRuntime>> | undefined
       try {
+        await mkdir(paths.directory, { recursive: true })
+        await writeFile(paths.bootstrapToken, token, { mode: 0o600 })
+        await writeSupervisorState(paths, {
+          schemaVersion: 1,
+          mode: 'service',
+          appId: 'codex',
+          profileId: 'work',
+          phase: 'starting',
+          pid: process.pid,
+          processStartedAt: (await processStartIdentity(process.pid))!,
+          instanceToken: token,
+          createdAt: new Date().toISOString(),
+          version: 'test',
+          effectiveConfig: 'service',
+        })
+        runtime = await createSupervisorRuntime({
+          CORDISX_SUPERVISOR_HOME: root,
+          CORDISX_SUPERVISOR_APP: 'codex',
+          CORDISX_SUPERVISOR_PROFILE: 'work',
+          CORDISX_SUPERVISOR_FINGERPRINT: 'service',
+          CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+        }, { platform: 'linux' })
         await runtime.markServiceReady('http://127.0.0.1:12345', new AbortController().signal)
         const ready = await readSupervisorState(paths)
         expect(ready).toMatchObject({ phase: 'ready', serviceCleanup: 'pending' })
@@ -315,7 +317,7 @@ describe('background supervisor publication handshake', () => {
           expect(await runtime.markServiceCleanup({ ok: true })).toBe(false)
         }
       } finally {
-        await runtime.close()
+        await runtime?.close()
         await rm(root, { recursive: true, force: true })
       }
     },
