@@ -9,7 +9,7 @@ it('keeps same-tab recovery when renderer opening is temporarily unavailable', a
     const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
     expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
-    expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('refresh')
+    expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('open-refused')
     expect(test.importBundle).not.toHaveBeenCalled()
   } finally {
     await test.manager.close()

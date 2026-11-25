@@ -61,9 +61,9 @@ const fixtureBundle = [
   '}',
 ].join(String.fromCharCode(10))
 
-it.skipIf(chrome === undefined)(
-  'refreshes a temporarily refused renderer through the actual Manager session authority',
-  async () => {
+it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as const)(
+  'recovers a temporarily refused renderer through the Manager session authority: %s',
+  async mode => {
     const built = await build({
       entryPoints: ['packages/cli/src/independent-manager/standalone-entry.ts'],
       bundle: true,
@@ -128,6 +128,7 @@ it.skipIf(chrome === undefined)(
     })
     const fence = await authority.suspendMutations()
     let released = false
+    let opens = 0
     let web: Awaited<ReturnType<typeof startManagerWeb>> | undefined
     let proxy: ReturnType<typeof createServer> | undefined
     let profile: string | undefined
@@ -139,7 +140,21 @@ it.skipIf(chrome === undefined)(
         profileId: 'work',
         generation: 'owner-1',
         isCurrent: async () => true,
-        request: async operation => await dispatchManagerRendererOperation(authority, operation),
+        request: async operation => {
+          const result = await dispatchManagerRendererOperation(authority, operation)
+          if (operation.kind === 'manager-renderer' && operation.action === 'open') {
+            opens++
+            if (mode !== 'manual' && opens === 1) {
+              expect(result).toEqual({ status: 'unavailable' })
+              expect(fence.release()).toBe(true)
+              released = true
+            }
+          }
+          if (mode === 'unconfirmed' && operation.kind === 'manager-renderer' && operation.action === 'revoke') {
+            return { status: 'unavailable' }
+          }
+          return result
+        },
       }, { rendererGateway: gateway })
       const target = new URL(web.url)
       const managerOrigin = target.origin
@@ -185,24 +200,39 @@ it.skipIf(chrome === undefined)(
       await page.send('Runtime.enable')
       await page.send('Page.enable')
       await page.send('Page.navigate', { url: target.href })
-      await vi.waitFor(async () => {
-        const state = await page!.evaluate<{ text: string; resume: boolean }>(
-          "({ text: document.querySelector('.cxr-standalone-unavailable')?.textContent ?? '', "
-            + "resume: !!sessionStorage.getItem('cordisx-manager-resume-id') })",
-        )
-        expect(state.text).toContain('刷新页面重试')
-        expect(state.resume).toBe(true)
-      }, { timeout: 20_000 })
-      expect(fence.release()).toBe(true)
-      released = true
-      await page.send('Page.reload')
+      if (mode === 'unconfirmed') {
+        await vi.waitFor(async () => {
+          const text = await page!.evaluate(
+            "document.querySelector('.cxr-standalone-unavailable')?.textContent ?? ''",
+          )
+          expect(text).toContain('连接不可用')
+        }, { timeout: 20_000 })
+        expect(opens).toBe(1)
+        expect(await page.evaluate("document.querySelector('[data-fixture-manager]') !== null")).toBe(false)
+        return
+      }
+      if (mode === 'manual') {
+        await vi.waitFor(async () => {
+          const state = await page!.evaluate<{ text: string; resume: boolean }>(
+            "({ text: document.querySelector('.cxr-standalone-unavailable')?.textContent ?? '', "
+              + "resume: !!sessionStorage.getItem('cordisx-manager-resume-id') })",
+          )
+          expect(state.text).toContain('刷新页面重试')
+          expect(state.resume).toBe(true)
+        }, { timeout: 20_000 })
+        expect(opens).toBe(2)
+        expect(fence.release()).toBe(true)
+        released = true
+        await page.send('Page.reload')
+      }
       await vi.waitFor(async () => {
         const state = await page!.evaluate<{ ready: boolean; view: boolean }>(
           "({ ready: document.documentElement.dataset.cordisxManagerReady === 'true', "
             + "view: document.querySelector('[data-fixture-manager]') !== null })",
         )
         expect(state).toEqual({ ready: true, view: true })
-      }, { timeout: 30_000 })
+      }, { timeout: mode === 'automatic' ? 8_000 : 30_000 })
+      if (mode === 'automatic') expect(opens).toBe(2)
     } finally {
       if (!released) fence.release()
       const failures: unknown[] = []

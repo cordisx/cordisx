@@ -133,7 +133,7 @@ function verifyInitialGraphs(
  */
 export function startStandaloneManager(input: {
   readonly window: Window
-  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh' | 'insecure-context') => void
+  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh' | 'insecure-context' | 'open-refused') => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
   readonly importBundle?: (url: string) => Promise<Composition>
@@ -381,19 +381,28 @@ export function startStandaloneManager(input: {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
       || interruptedTransport && removeBindings?.canRecoverAfterTransport() === false
+    // No plugin runtime or user operation exists when the owner refuses an
+    // initial renderer open. Retirement still has to be confirmed on resume.
+    const retryableOpen = !uncertain && resumeId !== undefined && openUnavailable && sessionToken !== undefined
+      && !admissionConfirmed && lifecycle === undefined && removeBindings === undefined && runtime === undefined
     const refresh = !uncertain && resumeId !== undefined && (
       interruptedTransport && admissionConfirmed
         && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
-      // No plugin runtime or user operation exists when the owner refuses an
-      // initial renderer open. Retirement still has to be confirmed on resume.
-      || openUnavailable && sessionToken !== undefined && !admissionConfirmed
-        && lifecycle === undefined && removeBindings === undefined && runtime === undefined
+      || retryableOpen
     )
     if (!notified) {
       notified = true
       try {
         input.onUnavailable?.(
-          uncertain ? 'result-unknown' : reason === 'insecure-context' ? reason : refresh ? 'refresh' : undefined,
+          uncertain
+            ? 'result-unknown'
+            : reason === 'insecure-context'
+            ? reason
+            : retryableOpen
+            ? 'open-refused'
+            : refresh
+            ? 'refresh'
+            : undefined,
         )
       } catch { /* presentation cannot keep an invalid session alive */ }
     }

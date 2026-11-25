@@ -235,6 +235,9 @@ the previous session must retire before a replacement is issued. The Manager
 keeps its session token in memory. On refresh, a tab-local handle and an
 HttpOnly cookie can authorize a new session after the owner confirms retirement
 of the old renderer.
+If the initial renderer open is temporarily unavailable before any user
+operation, the page makes one recovery attempt after confirmed retirement. If
+it remains unavailable, the page offers a refresh.
 If the browser loses the unload request, the authenticated replacement requests
 that retirement itself. If recovery is interrupted before the replacement makes
 its first authenticated request, the same tab can retry briefly; the owner must
