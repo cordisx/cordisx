@@ -28,7 +28,7 @@ export function channelLogicalTransactionStore(
           delete value.logicalContinuations
         } else {
           value.logicalContinuations = parseLogicalContinuationState(value.logicalContinuations)
-          value.schemaVersion = 2
+          if (value.schemaVersion !== 3) value.schemaVersion = 2
         }
         return result
       }),

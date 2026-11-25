@@ -29,7 +29,12 @@ export function channelSteerParent(state: ChannelConversationState, jobId: strin
   const takeover = state.liveTakeovers[sessionId]
   if (takeover && !['finished', 'abandoned'].includes(takeover.state)) return undefined
   const siblings = Object.values(state.jobs).filter(other => other.sessionId === sessionId && other.id !== jobId)
-  if (siblings.some(other => other.state === 'dispatching' || other.state === 'reconciliation-required')) {
+  if (
+    siblings.some(other =>
+      other.state === 'dispatching' || other.state === 'reconciliation-required'
+        && channelJobBlocks(state, other)
+    )
+  ) {
     return undefined
   }
   const earlier = siblings.some(other =>
@@ -41,7 +46,8 @@ export function channelSteerParent(state: ChannelConversationState, jobId: strin
   const active = siblings.filter(other => other.state === 'running' && !other.steeredInto && !!other.turnId)
   if (active.length !== 1 || siblings.some(other => other.state === 'replying')) return undefined
   const parent = active[0]!, original = state.inputs[parent.recordId]?.input.source.event
-  if (job.steerRejectedTurn === parent.turnId) return undefined
+  // Once the turn has reserved its final reply, later inputs belong to a new turn.
+  if (parent.terminalDelivery || job.steerRejectedTurn === parent.turnId) return undefined
   if (
     !original || !sameChannelPrincipal(original, event)
   ) return undefined
@@ -67,9 +73,15 @@ export function claimChannelSteer(state: ChannelConversationState, jobId: string
 }
 
 export function channelJobBlocks(state: ChannelConversationState, job: ChannelConversationJob): boolean {
+  if (
+    job.state === 'reconciliation-required'
+    && ['CHANNEL_TERMINAL_DELIVERY_UNRESOLVED', 'CHANNEL_STEER_FINAL_UNRESOLVED'].includes(job.code ?? '')
+  ) return false
   if (!['dispatching', 'running', 'replying', 'reconciliation-required'].includes(job.state)) return false
-  return !(job.steeredInto && job.state === 'reconciliation-required' && job.steerParent
-    && ['completed', 'failed', 'cancelled'].includes(state.jobs[job.steerParent]?.state ?? ''))
+  const parent = job.steerParent && state.jobs[job.steerParent]
+  return !(job.steeredInto && job.state === 'reconciliation-required' && parent
+    && (['completed', 'failed', 'cancelled'].includes(parent.state)
+      || parent.state === 'reconciliation-required' && parent.code === 'CHANNEL_STEER_FINAL_UNRESOLVED'))
 }
 
 export async function reconcileChannelJob(

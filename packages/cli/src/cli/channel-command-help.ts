@@ -134,9 +134,12 @@ export function channelCliHelp(operation?: string): string {
     return 'cordisx channel memory guide|navigate|search-page|batch|remember|get|search|update|forget|index|grant|revoke|grant-list|identity-challenge|identity-confirm|identity-unbind --context <incoming-context> [--profile <id>] --input <JSON>\nStart with guide {}. navigate/search-page support cursor,limit,maxBytes; batch uses ids,maxBytes. Records require {record:{kind,title,summary,tags,entityRefs,evidenceType,confidence,expiresAt?,observedAt?}}. kind=fact|preference|person|conversation|collaboration|impression (not task/decision); confidence is numeric 0..1; tags/entityRefs arrays. retrySafe validation errors occur before writing: correct reported issues and retry in the same turn. Unknown writes require search/get, never blind retry. Changes require id/revision. grant input {grant:{source:string,target:{kind:"conversation",id:string},expiresAt?,recordIds?}} uses configured authority and explicit incoming request. identity-challenge {target:accountUserTuple}; identity-confirm {challenge} requires the actual second account request. guide recall reports Host-verified recallAccess. Recognized administrator project/recent-work requests admit only their own relevant task records in this context, without a persistent group grant. Actor/admin/intent are never accepted from input.'
   }
   if (operation && HELP[operation]) {
+    const terminalHelp = operation === 'send'
+      ? ' For a terminal result in the current source conversation, add terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming operationId>"}. Omit for progress. Only sent confirms delivery; uncertain terminal receipts remain fenced for reconciliation, never retry as a new send. Unsupported Hosts reject this field.'
+      : ''
     return `cordisx channel ${operation} [--profile <id>] [--context <incoming-context>] [--input <JSON>]\n${
       HELP[operation]
-    }`
+    }${terminalHelp}`
   }
   if (operation) throw new Error('INVALID_CHANNEL_OPERATION')
   return `cordisx channel <operation> [--profile <id>] [--input <JSON>]\n${
