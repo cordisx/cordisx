@@ -25,22 +25,30 @@ export function headlessModelSelection<T extends Handler>(
     try {
       const execution = getExecution()
       if (!execution) return { status: 'rejected', reason: 'native-selection-persistence-unavailable' }
-      if (beforeEffect && !await beforeEffect()) return { status: 'rejected', reason: 'selection-changed' }
       const prior = execution.read('local', thread)?.modelSelection
-      try {
-        // Persist uncertainty before the native effect so a crash cannot restore stale state.
-        await execution.recordModelSelection(thread, undefined, { value: prior })
-      } catch {
-        return { status: 'rejected', reason: 'native-selection-persistence-unavailable' }
+      let marked = false
+      const fence = async () => {
+        if (beforeEffect && !await beforeEffect()) return false
+        if (!marked) {
+          // The backend calls this after permission validation but before native effects.
+          await execution.recordModelSelection(thread, undefined, { value: prior })
+          marked = true
+        }
+        return true
       }
       let result: object
       try {
-        result = await backend(operation, value, beforeEffect)
+        result = await backend(operation, value, fence)
       } catch (error) {
-        await execution.recordModelSelection(thread).catch(() => {})
+        if (marked) await execution.recordModelSelection(thread).catch(() => {})
         throw error
       }
       const status = (result as { status?: unknown }).status
+      if (!marked && status === 'rejected') return result
+      if (!marked) {
+        await execution.recordModelSelection(thread).catch(() => {})
+        return { status: 'reconciliation-required', reason: 'native-selection-fence-unavailable' }
+      }
       try {
         const observed = execution.read('local', thread)?.modelSelection
         if (status === 'selected' && typeof target.providerId === 'string' && typeof target.model === 'string') {
