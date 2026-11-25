@@ -35,6 +35,39 @@ it('probes only synthetic input without tools and disposes the credential lease'
   expect(dispose).toHaveBeenCalledOnce()
 })
 
+it('uses a fresh synthetic session for each probe without changing configured headers', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: { authorization: 'Bearer fixture' },
+    dispose: () => {},
+  })
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'model' })))
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  const headers = fetch.mock.calls.map(call => new Headers((call as unknown as [string, RequestInit])[1].headers))
+  const first = headers[0]!.get('x-session-id')
+  const second = headers[1]!.get('x-session-id')
+  expect(first).toMatch(/^cordisx-probe-[a-f0-9]{32}$/u)
+  expect(second).toMatch(/^cordisx-probe-[a-f0-9]{32}$/u)
+  expect(second).not.toBe(first)
+  expect(headers.map(header => header.get('authorization'))).toEqual(['Bearer fixture', 'Bearer fixture'])
+})
+
+it('preserves a session header explicitly configured by the model service', async () => {
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: { 'Session-Id': 'configured-session' },
+    dispose: () => {},
+  })
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ status: 'completed', model: 'model' })))
+  vi.stubGlobal('fetch', fetch)
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('healthy')
+  const headers = new Headers((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].headers)
+  expect(headers.get('session-id')).toBe('configured-session')
+  expect(headers.has('x-session-id')).toBe(false)
+})
+
 it.each([401, 403, 408, 429, 500, 503])('skips a candidate on probe HTTP %s', async status => {
   const dispose = vi.fn()
   const connect: ChannelMemoryModelConnection = async () => ({ baseUrl: 'https://example.test', headers: {}, dispose })
