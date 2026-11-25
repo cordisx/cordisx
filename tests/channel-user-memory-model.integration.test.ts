@@ -22,6 +22,10 @@ it(
       for await (const chunk of req) body += chunk
       requests.push(JSON.parse(body))
       const request = requests.at(-1), text = request.input[0].content[0].text
+      if (!request.prompt_cache_key) {
+        res.writeHead(460).end()
+        return
+      }
       const assertions = text.includes('青杉')
         ? [{ key: 'name', category: 'name', title: '称呼', value: '青杉', evidence: '我叫青杉' }]
         : text.includes('搭档')
@@ -179,6 +183,10 @@ it(
       expect(prompts[2]).toContain('我叫青杉')
       expect(prompts[2]).toContain('我是你的搭档')
       expect(requests).toHaveLength(2)
+      expect(requests[0].prompt_cache_key).toMatch(/^[0-9a-f-]{36}$/u)
+      expect(requests[1].prompt_cache_key).toMatch(/^[0-9a-f-]{36}$/u)
+      expect(requests[0].prompt_cache_key).not.toBe(requests[1].prompt_cache_key)
+      expect(requests[0].prompt_cache_key).not.toContain(account.userId)
       for (const request of requests) {
         expect(request).toMatchObject({
           model: 'fixture',

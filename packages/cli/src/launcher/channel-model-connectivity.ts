@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ChannelMemoryModelConnection } from './channel-user-memory-model.js'
 import type { ChannelModelCandidate } from './channel-model-priority.js'
 import { ChannelManagedConnectionUnavailable } from './channel-user-memory-connection.js'
@@ -73,6 +74,8 @@ async function channelModelConnectivityProbe(
       headers: { ...connection.headers, 'content-type': 'application/json' },
       body: JSON.stringify({
         model: candidate.model,
+        // A probe is a synthetic request, never a reusable conversation session.
+        prompt_cache_key: randomUUID(),
         instructions: 'Reply with OK. Do not call tools.',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'Connectivity check.' }] }],
         tools: [],
