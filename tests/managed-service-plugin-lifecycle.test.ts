@@ -342,6 +342,25 @@ describe('managed service plugin lifecycle participant', () => {
   })
 })
 
+it('does not acknowledge a managed service cleanup that failed', async () => {
+  const current = fleet('one', 'authenticated')
+  current.dispose.mockRejectedValue(new Error('fixture cleanup failed'))
+  const runtime = new ManagedServicePluginLifecycleRuntime({
+    runtime: new BaseRuntime(),
+    profileId: 'work',
+    runtimeGeneration: 'runtime-1',
+    activate: async () => current.value,
+  })
+  await runtime.initialize(activation(1, 'one'))
+
+  await Promise.all([
+    expect(runtime.dispose()).rejects.toThrow('fixture cleanup failed'),
+    expect(runtime.dispose()).rejects.toThrow('fixture cleanup failed'),
+  ])
+  await expect(runtime.dispose()).rejects.toThrow('fixture cleanup failed')
+  expect(current.dispose).toHaveBeenCalledOnce()
+})
+
 it('returns an observed v15 session and owner capability while base adoption is pending', async () => {
   let finish!: () => void
   const adopting = new Promise<void>(resolve => {

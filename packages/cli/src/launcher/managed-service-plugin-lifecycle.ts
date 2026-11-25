@@ -105,6 +105,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private stopUISources: (() => void) | undefined
   private nativeRevision = 0
   private mutation: Promise<unknown> = Promise.resolve()
+  private disposal: Promise<void> | undefined
   private disposed = false
   private uiFenceEpoch = 0
   private uiFenceBusy = 0
@@ -660,15 +661,16 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async dispose(): Promise<void> {
+    if (this.disposal !== undefined) return await this.disposal
+    const disposal = this.mutation.then(() => this.disposeNow())
+    this.disposal = disposal
+    this.mutation = disposal.catch(() => undefined)
+    this.disposed = true
     this.advanceUIFence()
     this.uiFenceFailed = true
     this.uiContinuity.dispose()
     this.managerServiceAuth.close()
-    if (this.disposed) return await this.mutation.then(() => undefined)
-    this.disposed = true
     this.lifecycle.abort(new Error('managed service lifecycle disposed'))
-    const disposal = this.mutation.then(() => this.disposeNow())
-    this.mutation = disposal.catch(() => undefined)
     return await disposal
   }
 
@@ -686,11 +688,17 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.routesByToken.clear()
     const routes = new Set([...fleets].flatMap(fleet => [...fleet.routes.values()]))
     const groups = new Set([...fleets].flatMap(fleet => fleet.leases.map(lease => lease.activation)))
-    await Promise.allSettled([...routes].map(async route => await route.handler.dispose()))
-    await Promise.allSettled([...groups].map(async group => await group.dispose()))
+    const results = [
+      ...await Promise.allSettled([...routes].map(async route => await route.handler.dispose())),
+      ...await Promise.allSettled([...groups].map(async group => await group.dispose())),
+    ]
     this.changedNativeProviders()
     this.nativeProviderListeners.clear()
     this.startup.dispose()
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map(result => result.reason)
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'managed service cleanup failed')
   }
 
   private async createFleet(
