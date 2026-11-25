@@ -8,7 +8,9 @@ import {
 const agent = (text: string, phase: string | null = null) => ({ type: 'agentMessage', phase, text })
 const readTurn = (items: unknown[], status = 'completed') =>
   vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => ({
-    data: params.threadId === 'chat' ? [{ id: 'turn', status, ...(params.itemsView === 'full' ? { items } : {}) }] : [],
+    data: params.threadId === 'chat'
+      ? [{ id: 'turn', status, ...(params.itemsView === 'full' ? { items, itemsView: 'full' } : {}) }]
+      : [],
   }))
 
 describe('Channel completion for unphased native messages', () => {
@@ -53,6 +55,38 @@ describe('Channel completion for unphased native messages', () => {
     })
   })
 
+  it('preserves consecutive final parts while excluding earlier unrelated output', async () => {
+    const request = readTurn([
+      agent('earlier', 'final_answer'),
+      { type: 'commandExecution' },
+      agent('first', 'final_answer'),
+      agent('second', 'final_answer'),
+    ])
+    await expect(legacyChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
+      state: 'completed',
+      text: 'first\nsecond',
+    })
+    await expect(legacyChannelCompletion(
+      readTurn([
+        { type: 'agentMessage', phase: 'final_answer' },
+        agent('second', 'final_answer'),
+      ]),
+      'chat',
+      'turn',
+    )).resolves.toEqual({
+      state: 'failed',
+      code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE',
+    })
+  })
+
+  it.each([agent('later output'), { type: 'commandExecution' }, { type: 'userMessage' }])(
+    'does not forward an explicit final followed by a later turn item',
+    async later => {
+      await expect(legacyChannelCompletion(readTurn([agent('earlier', 'final_answer'), later]), 'chat', 'turn'))
+        .resolves.toEqual({ state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' })
+    },
+  )
+
   it('reassembles only the exact paginated turn before considering an unphased answer', async () => {
     const request = vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) =>
       params.cursor === undefined
@@ -81,12 +115,35 @@ describe('Channel completion for unphased native messages', () => {
     })
   })
 
+  it('does not forward even an explicit final from an incomplete paginated turn', async () => {
+    const request = vi.fn(async () => ({
+      data: [{ turnId: 'turn', item: agent('partial', 'final_answer') }],
+      nextCursor: 'same',
+    }))
+    await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
+      state: 'failed',
+      code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE',
+    })
+  })
+
+  it.each([undefined, 7, {}, ''])('rejects a missing or invalid terminal cursor', async cursor => {
+    const request = vi.fn(async () => ({
+      data: [{ turnId: 'turn', item: agent('partial', 'final_answer') }],
+      ...(cursor === undefined ? {} : { nextCursor: cursor }),
+    }))
+    await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
+      state: 'failed',
+      code: 'NATIVE_ITEMS_UNAVAILABLE',
+    })
+  })
+
   it('does not select an unphased message when a later item in the turn exists', async () => {
     const request = vi.fn(async () => ({
       data: [
         { turnId: 'turn', item: { type: 'commandExecution' } },
         { turnId: 'turn', item: agent('progress') },
       ],
+      nextCursor: null,
     }))
     await expect(readChannelCompletion(request, 'chat', 'turn')).resolves.toEqual({
       state: 'failed',
@@ -101,7 +158,7 @@ describe('Channel completion for unphased native messages', () => {
         data: [{
           id: 'turn',
           status: 'completed',
-          ...(params.itemsView === 'full' ? { items: [agent('correct', 'final_answer')] } : {}),
+          ...(params.itemsView === 'full' ? { items: [agent('correct', 'final_answer')], itemsView: 'full' } : {}),
         }],
       }
     })
@@ -109,7 +166,7 @@ describe('Channel completion for unphased native messages', () => {
     expect(request.mock.calls.filter(([, params]) => params.itemsView === 'full')).toHaveLength(1)
     expect(request.mock.calls).toHaveLength(3)
   })
-  it.each(['wrong-id', 'in-progress', 'duplicate', 'missing-items'])(
+  it.each(['wrong-id', 'in-progress', 'duplicate', 'missing-items', 'summary', 'missing-view'])(
     'rejects changed or malformed full target: %s',
     async shape => {
       const request = vi.fn(async (_method: string, params: Readonly<Record<string, unknown>>) => {
@@ -117,6 +174,7 @@ describe('Channel completion for unphased native messages', () => {
         const turn = {
           id: shape === 'wrong-id' ? 'other' : 'turn',
           status: shape === 'in-progress' ? 'inProgress' : 'completed',
+          ...(shape === 'missing-view' ? {} : { itemsView: shape === 'summary' ? 'summary' : 'full' }),
           ...(shape === 'missing-items' ? {} : { items: [agent('unsafe', 'final_answer')] }),
         }
         return { data: shape === 'duplicate' ? [turn, turn] : [turn] }
