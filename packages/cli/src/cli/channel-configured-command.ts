@@ -49,6 +49,7 @@ const OPERATIONS = [
   'reply-mode',
   'history',
   'remote-history',
+  'thread-history',
   'message-get',
   'message-capabilities',
   'message-operation-receipt',

@@ -64,6 +64,8 @@ const HELP: Readonly<Record<string, string>> = {
     'Retrieve accepted messages from all the chat bindings. Input: {sessionId,afterSequence?:number,limit?:number}.',
   'remote-history':
     'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
+  'thread-history':
+    'Read one remote thread page, including sibling replies. Input: {account,conversationId,kind,threadId,anchorMessageId,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. The anchor must belong to this conversation and report this threadId. No time filters; hasMore/pageToken describe continuation, not full-thread completeness. Requires history policy and platform message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
   'message-capabilities':

@@ -1,4 +1,5 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
+import { channelThreadHistory } from './channel-thread-history.js'
 import { channelMessageRead } from './channel-message-read.js'
 import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
 import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
@@ -613,6 +614,8 @@ export function createLocalChannelService(input: {
           })),
         conversations: ref => current.directory.conversations(ref),
         remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
+        threadHistory: (ref, request, authorize) =>
+          channelThreadHistory(ref, request, current.directory.channel(ref), authorize),
         readMessage: async (event, messageId) => {
           const channel = current.directory.channel(event)
           const result = await channelMessageRead(event, messageId, channel)
