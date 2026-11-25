@@ -5,6 +5,7 @@ import {
 } from '../packages/cli/src/launcher/channel-model-connectivity.js'
 import type { ChannelMemoryModelConnection } from '../packages/cli/src/launcher/channel-user-memory-model.js'
 import { channelMemoryRuntimeConnection } from '../packages/cli/src/launcher/channel-user-memory-connection.js'
+import { channelMemoryServiceConnection } from '../packages/cli/src/launcher/channel-user-memory-connection.js'
 
 const candidate = { providerId: 'provider', model: 'model' }
 afterEach(() => {
@@ -74,6 +75,24 @@ it('skips a managed provider whose connection preparation fails', async () => {
     environment: {},
   })
   expect(await channelModelConnectivity(connect, candidate)).toBe(false)
+})
+
+it('distinguishes an absent configured credential from an unknown provider', async () => {
+  const connect = channelMemoryServiceConnection({
+    providers: [{
+      id: 'provider',
+      kind: 'model-service',
+      displayName: 'Fixture',
+      baseUrl: 'https://example.test/v1',
+      apiKeyEnv: 'FIXTURE_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['model'] },
+    }],
+    environmentVariables: [],
+  }, {})
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
+  expect(await channelModelConnectivityEvidence(connect, { providerId: 'unknown', model: 'model' }))
+    .toBe('inconclusive')
 })
 
 it('bounds a stalled connection and disposes a lease that arrives after the timeout', async () => {
