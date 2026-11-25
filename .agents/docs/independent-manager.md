@@ -38,7 +38,11 @@ does not drain adapter work or synchronize policies by itself, and it is not
 connected to real Codex or Claude adapter startup.
 
 The manager entry loads the existing Host Manager and its registered plugin
-pages. Eligible service and Desktop owners can project initial
+pages. While the owner connection is starting, primary browse pages show a
+disabled search control and loading results. Navigation remains usable; search
+becomes available after the owner admits the page.
+
+Eligible service and Desktop owners can project initial
 capability-free v1 package graphs and host-owned v14/v15 managed backends whose
 only declared renderer capability is UI extension rendering. These packages
 must have no durable documents or entity templates and must have a verified

@@ -230,9 +230,17 @@ it.skipIf(chrome === undefined)(
       }).toBe(true)
       await expect.poll(() => releaseFirstEntry !== undefined).toBe(true)
       expect(await first.evaluate("document.body.textContent.includes('正在连接 CordisX')")).toBe(false)
+      expect(
+        await first.evaluate("document.querySelector('[data-cordisx-manager-startup] input[type=search]')?.disabled"),
+      )
+        .toBe(true)
       await first.evaluate("document.querySelector('[data-cordisx-manager-startup] [data-tab=model-services]').click()")
       await expect.poll(() => first.evaluate("document.querySelector('.cxr-heading')?.textContent"))
         .toBe('模型服务')
+      expect(
+        await first.evaluate("document.querySelector('[data-cordisx-manager-startup] input[type=search]')?.disabled"),
+      )
+        .toBe(true)
       expect(events.some(event => event.path === '/api/renderer/open')).toBe(false)
       releaseFirstEntry!()
       await expect.poll(

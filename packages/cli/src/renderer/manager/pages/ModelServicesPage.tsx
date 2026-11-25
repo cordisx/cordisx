@@ -10,7 +10,7 @@ import { IconButton } from '../../host-ui/IconButton.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { HostMenuSurface } from '../../host-ui/HostMenu.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 import { ProviderAction } from '../../model-provider-actions.js'
 import { modelProviderCopy } from '../../model-provider-copy.js'
 import css from '../../model-providers.css?inline'
@@ -152,13 +152,11 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
       >
         <EmptyStateIllustrationStyles />
         <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
-        <SearchToolbar
-          toolbarLabel={t('catalog.tools')}
-          clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        <ManagerBrowseSearch
+          kind="model-services"
+          locale={locale}
           value={query}
           onChange={setQuery}
-          aria-label={copy.search}
-          placeholder={copy.search}
           actions={
             <>
               <CatalogFilterMenu

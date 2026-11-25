@@ -5,6 +5,11 @@ import { HostThemeProjection } from '../renderer/host-theme.js'
 import type { ManagerSnapshot } from '../renderer/manager.js'
 import { ManagerFrame } from '../renderer/manager/components/ManagerFrame.js'
 import { ManagerHeader } from '../renderer/manager/components/ManagerHeader.js'
+import { ManagerBrowseResults } from '../renderer/manager/components/ManagerBrowseResults.js'
+import {
+  ManagerBrowseSearch,
+  type ManagerBrowseSearchKind,
+} from '../renderer/manager/components/ManagerBrowseSearch.js'
 import { Navigation } from '../renderer/manager/components/Navigation.js'
 import { useManagerRouter } from '../renderer/manager/hooks/useManagerRouter.js'
 import type { ManagerRoute } from '../renderer/manager/model/routes.js'
@@ -15,6 +20,20 @@ import {
 } from '../renderer/manager/standalone-startup-contract.js'
 
 type State = 'loading' | 'unavailable' | 'result-unknown' | 'refresh'
+
+const browsePages = new Set<ManagerBrowseSearchKind>([
+  'plugins',
+  'model-services',
+  'marketplace',
+  'extension-points',
+  'routes',
+])
+
+function startingBrowsePage(route: ManagerRoute): ManagerBrowseSearchKind | undefined {
+  return route.kind === 'primary' && browsePages.has(route.page as ManagerBrowseSearchKind)
+    ? route.page as ManagerBrowseSearchKind
+    : undefined
+}
 
 function startupSnapshot(document: Document): ManagerSnapshot {
   return {
@@ -56,20 +75,29 @@ function StartingManager({ document, state, reportRoute }: {
   const locale = snapshot.localization.locale
   const zh = locale.toLowerCase().startsWith('zh')
   useLayoutEffect(() => reportRoute(router.route), [reportRoute, router.route])
+  const skeleton = (
+    <div
+      className="cxr-standalone-loading"
+      role="status"
+      aria-label={zh ? '正在加载页面' : 'Loading page'}
+      aria-busy="true"
+      data-manager-starting="true"
+    >
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+    </div>
+  )
+  const browsePage = startingBrowsePage(router.route)
   const content = state === 'loading'
-    ? (
-      <div
-        className="cxr-standalone-loading"
-        role="status"
-        aria-label={zh ? '正在加载页面' : 'Loading page'}
-        aria-busy="true"
-        data-manager-starting="true"
-      >
-        <span aria-hidden="true" />
-        <span aria-hidden="true" />
-        <span aria-hidden="true" />
-      </div>
-    )
+    ? browsePage === undefined
+      ? skeleton
+      : (
+        <section className="cxr-page cxr-browse-page" data-manager-starting-page={browsePage}>
+          <ManagerBrowseSearch kind={browsePage} locale={locale} value="" disabled onChange={() => {}} />
+          <ManagerBrowseResults className="cxr-list">{skeleton}</ManagerBrowseResults>
+        </section>
+      )
     : (
       <p className="cxr-standalone-unavailable" role="status">
         {state === 'result-unknown'

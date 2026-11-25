@@ -1,7 +1,7 @@
 import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { managerCopy } from '../../ui-copy.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 import { useMemo, useState } from 'react'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import type { MarketplaceModel } from '../../marketplace.js'
@@ -23,8 +23,6 @@ import { usePluginManagementActions } from '../model/use-plugin-management-actio
 
 const COPY = {
   'zh-CN': {
-    tools: '搜索和筛选商店插件',
-    search: '搜索插件…',
     officialOnly: '仅官方',
     officialOn: '已启用官方插件筛选',
     officialOff: '仅显示官方插件',
@@ -55,8 +53,6 @@ const COPY = {
     empty: '没有匹配的插件',
   },
   en: {
-    tools: 'Search and filter Marketplace plugins',
-    search: 'Search plugins…',
     officialOnly: 'Official only',
     officialOn: 'Official-only filter is enabled',
     officialOff: 'Show Official plugins only',
@@ -162,12 +158,10 @@ export function MarketplacePage(
   }
   return (
     <section className="cxr-page cxr-browse-page cxr-marketplace" data-marketplace-discovery-page="true">
-      <SearchToolbar
-        toolbarLabel={copy.tools}
-        aria-label={copy.search}
-        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+      <ManagerBrowseSearch
+        kind="marketplace"
+        locale={snapshot.localization.locale}
         value={query}
-        placeholder={copy.search}
         onChange={setQuery}
         actions={
           <>
