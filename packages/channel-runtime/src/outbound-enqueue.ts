@@ -37,6 +37,7 @@ export async function enqueueOutbound(
   caller: ChannelPluginIdentity,
   deliveryId: string,
   questionCard?: ChannelQuestionCard,
+  terminalDelivery = false,
 ): Promise<ChannelDeliveryHandle> {
   context.assertActive()
   const target = sanitizedThread(notification.target)
@@ -149,6 +150,7 @@ export async function enqueueOutbound(
         || prior.idempotencyKey !== notification.idempotencyKey
         || canonical(prior.media ?? null) !== canonical(media ?? null)
         || canonical(prior.questionCard ?? null) !== canonical(questionCard ?? null)
+        || (prior.terminalDelivery === true) !== terminalDelivery
       ) throw new ChannelIntegrityError('Operation conflict')
       return
     }
@@ -169,6 +171,7 @@ export async function enqueueOutbound(
       createdAt: now,
       updatedAt: now,
       status: 'queued',
+      ...(terminalDelivery ? { terminalDelivery: true as const } : {}),
       ...(context.guarded?.(deliveryId) ? { guardedDelivery: true } : {}),
       attempts: 0,
     }
@@ -222,6 +225,7 @@ export async function outboundCapabilitiesPublic(
 }
 
 export function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseMs: number): boolean {
+  if (record.terminalDelivery) return record.status === 'queued' && record.attempts === 0
   if (record.status === 'queued') return true
   if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
   return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now

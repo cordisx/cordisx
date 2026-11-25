@@ -792,24 +792,30 @@ reply in the final response for one consumer delivery.
 Agent guidance prefers meaningful explicit progress and completion sends, with
 multiple sends allowed. Each intended message uses its own stable operationId;
 receipt queries keep that same ID. Progress never disables final fallback.
-Only after a manual terminal result has a confirmed `sent` receipt should the
-Agent select `none` for the incoming operation to avoid a duplicate final.
-Failed, pending, missing, partial, or unknown receipts retain fallback: inspect
-the receipt, never blindly resend through a new ID or route. Explicit user
-silence/manual-only requests may select `none` without changing profile settings.
-MCP defaults the chat from native caller
-metadata, checks the turn when available, and cannot choose another chat’s job.
-Finished/reserved jobs reject late choices. Policy changes and retries preserve
-an already reserved outbox target and delivery ID rather than retargeting it.
+To send an explicit terminal result to the source conversation, add
+`terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming-operation>"}`
+to a single-target `send` request. Omit it for progress updates or other destinations;
+`send-many` cannot carry this intent. The Host reserves the intent before the
+send and reconciles the original receipt. Only `sent` confirms delivery. While
+the result is pending, missing, failed, or unknown, the automatic final stays
+fenced; never resend under a new ID. The status command exposes the unresolved
+job code and send/delivery IDs for diagnosis. Automatic or operator resolution
+of an ambiguous outcome is not yet provided.
 
-This is guidance using existing public send, receipt, and per-turn reply-mode
-capabilities, not atomic terminal-send detection. Manual delivery IDs are derived
-from caller/account/send operationId; consumer final deliveries use the incoming
-job/event. There is no public progress/terminal field or receipt-to-job terminal
-link. A confirmed manual result followed by a failed/late `none` selection can
-still duplicate the final. Automatic receipt-linked suppression needs a Protocol
-owner contract before implementation; the Host does not infer intent from text
-or suppress a final merely because any manual send exists.
+For a legacy send without terminal intent, select `none` only after a confirmed
+`sent` terminal receipt; an uncertain legacy send can still duplicate an
+automatic final. Explicit user silence or manual-only requests may select `none`
+without changing profile settings. MCP defaults the chat from native caller
+metadata, checks the turn when available, and cannot choose another chat’s job.
+Finished or reserved jobs reject late choices. Policy changes and retries preserve
+an already reserved outbox target and delivery ID rather than retargeting them.
+
+Terminal intent is explicit: the Host never infers it from text or an
+ordinary send. A confirmed legacy manual result followed by a failed or late
+`none` selection can still duplicate the final. On a steered follow-up, `none`
+applies to the original final-delivery owner, while other reply modes must be selected
+on that owner's operation; `bind-status` exposes `replyOwnerOperationId` on the
+follow-up. A reserved automatic delivery cannot be retargeted or suppressed.
 
 Only agent-selected outward text is sent; private reasoning, tool output, and
 commentary are not indiscriminately forwarded. Background notification requires

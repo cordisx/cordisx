@@ -26,7 +26,7 @@ export function channelStatusReadback(state: ChannelConversationState, sessionId
       sessionId === undefined || binding.sessionId === sessionId
     ),
     jobs: Object.values(state.jobs).filter(job => sessionId === undefined || job.sessionId === sessionId)
-      .map(({ id, state, sessionId, turnId, code, replyDefaults, replyMode }) => ({
+      .map(({ id, state, sessionId, turnId, code, replyDefaults, replyMode, terminalDelivery, steerParent }) => ({
         id,
         state,
         sessionId,
@@ -34,6 +34,15 @@ export function channelStatusReadback(state: ChannelConversationState, sessionId
         code,
         replyDefaults,
         replyMode,
+        ...(steerParent ? { replyOwnerOperationId: steerParent } : {}),
+        ...(terminalDelivery
+          ? {
+            terminalDelivery: {
+              operationId: terminalDelivery.sendOperationId,
+              deliveryId: terminalDelivery.deliveryId,
+            },
+          }
+          : {}),
       })),
   }
 }

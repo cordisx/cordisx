@@ -29,7 +29,12 @@ export function channelSteerParent(state: ChannelConversationState, jobId: strin
   const takeover = state.liveTakeovers[sessionId]
   if (takeover && !['finished', 'abandoned'].includes(takeover.state)) return undefined
   const siblings = Object.values(state.jobs).filter(other => other.sessionId === sessionId && other.id !== jobId)
-  if (siblings.some(other => other.state === 'dispatching' || other.state === 'reconciliation-required')) {
+  if (
+    siblings.some(other =>
+      other.state === 'dispatching' || other.state === 'reconciliation-required'
+        && other.code !== 'CHANNEL_TERMINAL_DELIVERY_UNRESOLVED'
+    )
+  ) {
     return undefined
   }
   const earlier = siblings.some(other =>
@@ -67,6 +72,7 @@ export function claimChannelSteer(state: ChannelConversationState, jobId: string
 }
 
 export function channelJobBlocks(state: ChannelConversationState, job: ChannelConversationJob): boolean {
+  if (job.state === 'reconciliation-required' && job.code === 'CHANNEL_TERMINAL_DELIVERY_UNRESOLVED') return false
   if (!['dispatching', 'running', 'replying', 'reconciliation-required'].includes(job.state)) return false
   return !(job.steeredInto && job.state === 'reconciliation-required' && job.steerParent
     && ['completed', 'failed', 'cancelled'].includes(state.jobs[job.steerParent]?.state ?? ''))
