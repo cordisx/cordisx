@@ -797,6 +797,70 @@ it('keeps a live renderer after one interrupted read-only session check', async 
   }
 })
 
+it('retains same-tab recovery after idle heartbeat transport failures', async () => {
+  vi.useFakeTimers()
+  const test = fixture({ issueResume: true, sessionTransportFailuresAt: [4, 5] })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_200)
+    expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('refresh')
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not retain heartbeat recovery while a dispatched write is unresolved', async () => {
+  vi.useFakeTimers()
+  const test = fixture({
+    issueResume: true,
+    sessionTransportFailuresAt: [4, 5],
+    holdBindings: true,
+    pluginManagement: true,
+  })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPluginManagementReceiveV1 = vi.fn()
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/binding')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(15_200)
+    expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('result-unknown')
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({})
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/binding')).toHaveLength(1)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not retain heartbeat recovery after an explicit owner rejection', async () => {
+  vi.useFakeTimers()
+  for (const options of [{ unauthorizedSessionAt: 4 }, { invalidSessionAt: 4 }]) {
+    const test = fixture({ issueResume: true, ...options })
+    try {
+      expect(await test.manager.ready).toBe(true)
+      await vi.advanceTimersByTimeAsync(15_200)
+      expect(test.unavailable).toHaveBeenCalledExactlyOnceWith(undefined)
+      const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+      expect(JSON.parse(String(close[1].body))).toEqual({})
+      expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    } finally {
+      await test.manager.close()
+      test.dom.window.close()
+    }
+  }
+})
+
 it('retires the renderer when the retried session check is still unavailable or no longer current', async () => {
   vi.useFakeTimers()
   for (

@@ -232,7 +232,7 @@ it.skipIf(chrome === undefined)(
         attributePosition: 'static',
         scriptRan: false,
       })
-      const priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
+      let priorResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(priorResume).toMatch(/^[a-f0-9]{64}$/u)
       const migrationComplete = async () => {
         const config = JSON.parse(await readFile(path.join(homeDir, 'config.json'), 'utf8')) as {
@@ -279,6 +279,34 @@ it.skipIf(chrome === undefined)(
         expect(state.available).toBe(true)
       }, { timeout: 25_000 })
       await first.evaluate('globalThis.__fixtureRestoreSessionFetch()')
+      // If both read-only heartbeat attempts lose transport while idle, the
+      // same tab may resume only after the owner retires its old renderer.
+      await first.evaluate(`(() => {
+        const previous = window.fetch
+        const state = globalThis.__fixtureHeartbeatFailures = { count: 0 }
+        window.fetch = function(request, options) {
+          if (request === '/api/renderer/session' && state.count < 2) {
+            state.count++
+            return Promise.reject(new TypeError('controlled temporary network failure'))
+          }
+          return previous.call(this, request, options)
+        }
+      })()`)
+      await vi.waitFor(async () => {
+        const state = await first!.evaluate<{ count: number; status: string }>(`({
+          count: globalThis.__fixtureHeartbeatFailures.count,
+          status: document.querySelector('p[role=status]')?.textContent ?? ''
+        })`)
+        expect(state.count).toBe(2)
+        expect(state.status).toMatch(/Connection interrupted|连接中断/u)
+      }, { timeout: 25_000 })
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).toBe(priorResume)
+      await first.send('Page.reload')
+      await ready(first)
+      const recoveredResume = await first.evaluate<string>("sessionStorage.getItem('cordisx-manager-resume-id')")
+      expect(recoveredResume).toMatch(/^[a-f0-9]{64}$/u)
+      expect(recoveredResume).not.toBe(priorResume)
+      priorResume = recoveredResume
       // Browsers may drop an unload keepalive. The authenticated replacement
       // must still retire the old owner session before joining.
       await first.evaluate("sessionStorage.setItem('fixture-drop-close', '1')")

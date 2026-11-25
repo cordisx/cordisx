@@ -361,11 +361,11 @@ export function startStandaloneManager(input: {
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
-  const fail = (reason?: 'result-unknown', interruptedPoll = false) => {
+  const fail = (reason?: 'result-unknown', interruptedTransport = false) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
-      || interruptedPoll && removeBindings?.canRecoverAfterTransport() === false
-    const refresh = interruptedPoll && !uncertain && admissionConfirmed && resumeId !== undefined
+      || interruptedTransport && removeBindings?.canRecoverAfterTransport() === false
+    const refresh = interruptedTransport && !uncertain && admissionConfirmed && resumeId !== undefined
       && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
     if (!notified) {
       notified = true
@@ -466,7 +466,7 @@ export function startStandaloneManager(input: {
       ) throw new Error('manager-owner-unavailable')
       const scope = { rendererId: opened.rendererId, generation: opened.generation, profileId: opened.profileId }
       const token = sessionToken
-      const isSessionCurrent = async (): Promise<boolean> => {
+      const checkSession = async (): Promise<'current' | 'transport' | 'unavailable'> => {
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             const state = record(await post('/api/renderer/session', {}, token), [
@@ -475,20 +475,24 @@ export function startStandaloneManager(input: {
               'generation',
             ])
             return state.current === true && state.rendererId === scope.rendererId
-              && state.generation === scope.generation
+                && state.generation === scope.generation
+              ? 'current'
+              : 'unavailable'
           } catch (error) {
             // Only this read-only check may be retried. An explicit rejection,
             // invalid response, or mismatched owner remains immediately fatal.
-            if (!(error instanceof ManagerSessionTransportError) || attempt !== 0 || closed) return false
+            if (!(error instanceof ManagerSessionTransportError) || closed) return 'unavailable'
+            if (attempt !== 0) return 'transport'
             try {
               await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
             } catch {
-              return false
+              return 'unavailable'
             }
           }
         }
-        return false
+        return 'unavailable'
       }
+      const isSessionCurrent = async (): Promise<boolean> => await checkSession() === 'current'
       const verifyReviewSession = async (): Promise<boolean> => {
         if (!await rendererAdmission || closed || !resourceAuth || lifecycle?.canResume() !== true) return false
         if (await resourceAuth.isBound() !== true) {
@@ -513,7 +517,10 @@ export function startStandaloneManager(input: {
         void (async () => {
           const bound = await resourceAuth!.isBound()
           if (bound === true) {
-            if (!await isSessionCurrent()) fail()
+            const current = await checkSession()
+            // A lost read-only check can use the existing idle recovery path.
+            // Explicit owner rejection must still revoke the session.
+            if (current !== 'current') fail(undefined, current === 'transport')
             return
           }
           if (bound !== false) {
