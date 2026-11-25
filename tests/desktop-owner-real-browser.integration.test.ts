@@ -50,6 +50,12 @@ import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-p
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
+import {
+  desktopConfiguredFixtures,
+  desktopConfiguredPolicies,
+  verifyDesktopConfiguredNavigation,
+  verifyDesktopConfiguredPlugins,
+} from './suites/desktop-configured-plugin-browser.js'
 import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 import {
   draftDesktopConfig,
@@ -90,6 +96,7 @@ async function exerciseDesktopOwner(
   configFixture = false,
   writeFixture = false,
   lifecycleFixture = false,
+  extraConfiguredFixture = false,
 ) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
@@ -99,10 +106,11 @@ async function exerciseDesktopOwner(
   await mkdir(homeDir, { mode: 0o700 })
   const profileId = 'default'
   const generation = 'desktop-owner-browser-fixture'
+  const extras = await desktopConfiguredFixtures(root, extraConfiguredFixture)
   const initialConfig = {
     ...createDefaultHomeConfig(),
-    ...(archive === undefined ? {} : {
-      plugins: [{
+    plugins: [
+      ...(archive === undefined ? [] : [{
         id: 'channel',
         entry: archive,
         services: {
@@ -112,26 +120,28 @@ async function exerciseDesktopOwner(
             },
           },
         },
-      }],
-    }),
+      }]),
+      ...(extras?.entries ?? []),
+    ],
   }
   await writeFile(configPath, JSON.stringify(initialConfig), { mode: 0o600 })
   const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
-  const configuredPlugin = configured.plugins[0]
-  const policies = archive === undefined || review || !configuredPlugin?.source
+  const configuredChannel = configured.plugins.find(plugin => plugin.id === 'channel')
+  const policies = archive === undefined || review || !configuredChannel?.source
     ? []
     : exactDomPermissionPolicies(profileId, [{
       id: 'channel',
-      entry: configuredPlugin.entry,
+      entry: configuredChannel.entry,
       pointIds: ['manager.settings.navigation-items', 'manager.content'],
     }]).map(policy => ({
       ...policy,
-      key: { ...policy.key, identity: { ...policy.key.identity, source: configuredPlugin.source! } },
+      key: { ...policy.key, identity: { ...policy.key.identity, source: configuredChannel.source! } },
     }))
   if (archive !== undefined && !review) {
-    expect(configuredPlugin?.source).toBeDefined()
-    await persistPermissionPolicies({ configPath }, policies)
+    expect(configuredChannel?.source).toBeDefined()
   }
+  if (extras) policies.push(...desktopConfiguredPolicies(profileId, configured.plugins))
+  if (policies.length > 0) await persistPermissionPolicies({ configPath }, policies)
   const processStartedAt = (await processStartIdentity(process.pid))!
   const paths = managerRendererGatewayPaths(homeDir, profileId)
   const state: SupervisorState = {
@@ -551,6 +561,7 @@ async function exerciseDesktopOwner(
       })`)
     expect(await snapshot(first)).toEqual(await snapshot(second))
     expect(await snapshot(first)).toEqual(await snapshot(desktop))
+    if (extras) await verifyDesktopConfiguredPlugins([first, second], extras)
     if (configFixture) {
       for (const page of [first, second]) {
         const projection = await page.evaluate<any>([
@@ -811,6 +822,7 @@ async function exerciseDesktopOwner(
       expect(await first!.evaluate('globalThis.__desktopBeforeReload === undefined')).toBe(true)
     }, { timeout: 15_000 })
     await ready(first)
+    if (extras) await verifyDesktopConfiguredNavigation(first)
     await vi.waitFor(async () => {
       expect(await first!.evaluate('Boolean(document.querySelector("[data-shared-model-service=desktop-fixture]"))'))
         .toBe(true)
@@ -961,25 +973,27 @@ it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platf
 )
 
 const channelArchive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
-it.skipIf(
-  chrome === undefined || channelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
-)(
+const channelFixtureAvailable = chrome !== undefined && channelArchive !== undefined
+  && (process.platform === 'darwin' || process.platform === 'linux')
+it.skipIf(!channelFixtureAvailable)(
+  'keeps verified configured plugins and Channel available in two Desktop Manager pages',
+  async () => await exerciseDesktopOwner(channelArchive, false, false, false, false, true),
+  180_000,
+)
+
+it.skipIf(!channelFixtureAvailable)(
   'projects a configured Channel from the Desktop owner into two Manager pages',
   async () => await exerciseDesktopOwner(channelArchive),
   180_000,
 )
 
-it.skipIf(
-  chrome === undefined || channelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
-)(
+it.skipIf(!channelFixtureAvailable)(
   'keeps a Desktop owner Channel review local to the selected Manager page',
   async () => await exerciseDesktopOwner(channelArchive, true),
   180_000,
 )
 
-it.skipIf(
-  chrome === undefined || channelArchive === undefined || process.platform !== 'darwin' && process.platform !== 'linux',
-)(
+it.skipIf(!channelFixtureAvailable)(
   'keeps the configured Channel available through a multi-Manager Desktop configuration handoff',
   async () => await exerciseDesktopOwner(channelArchive, false, true, true),
   180_000,

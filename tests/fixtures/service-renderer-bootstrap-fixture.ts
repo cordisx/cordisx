@@ -84,6 +84,7 @@ export async function fixture(
     browserManagement?: boolean
     coordinateLifecycle?: boolean
     projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
+    selectedConfiguredPlugins?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['selectedConfiguredPlugins']
   } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
@@ -328,6 +329,9 @@ export async function fixture(
     store,
     managedServiceUI: managedUI,
     protectProfileInputs: options.protectProfileInputs === true,
+    ...(options.selectedConfiguredPlugins === undefined
+      ? {}
+      : { selectedConfiguredPlugins: options.selectedConfiguredPlugins }),
     ...(options.projectPluginConfig === undefined ? {} : { projectPluginConfig: options.projectPluginConfig }),
     ...(options.browserManagement && options.coordinateLifecycle
       ? {

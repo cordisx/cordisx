@@ -325,6 +325,26 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
 )
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'does not admit configured plugins added after the Desktop owner selected its runtime',
+  async () => {
+    const selected: Array<Awaited<ReturnType<typeof loadConfig>>['plugins'][number]> = []
+    const f = await fixture({ protectProfileInputs: true, selectedConfiguredPlugins: selected })
+    try {
+      const plugin = await configuredManagerPlugin(f.root)
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'configured-demo', entry: plugin.archive }],
+      }), f.configPath)
+      selected.push((await loadConfig(f.configPath, { profileId: f.profileId, projectRoot: f.homeDir })).plugins[0]!)
+      expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   'keeps the Manager available without exposing an unsupported configured plugin',
   async () => {
     const f = await fixture({ protectProfileInputs: true })

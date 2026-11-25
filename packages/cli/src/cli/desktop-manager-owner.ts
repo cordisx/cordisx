@@ -25,6 +25,7 @@ import { DesktopPackageConfigWriteGate } from './desktop-package-config-write.js
 import type { ProductionPluginManagementComposition } from './production-plugin-management.js'
 import { reserveServiceOwnerLifecycle } from './service-owner-lifecycle-fence.js'
 import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
+import { inspectServiceRendererConfiguredPlugin } from './service-renderer-configured-plugin.js'
 
 /** Compose the optional Manager inside an already-authorized Desktop owner. */
 export function createDesktopManagerOwner(input: {
@@ -37,6 +38,8 @@ export function createDesktopManagerOwner(input: {
   readonly cdp: CdpPluginLifecycleRuntime
   readonly artifactServer: PluginGenerationArtifactServer
   readonly store: PluginActivationStore
+  /** Exact configured plugins selected before this Desktop owner starts. */
+  readonly selectedConfiguredPlugins?: readonly CordisXConfigPlugin[]
   /** The Desktop owner's current, revision-checked model-service authority. */
   readonly codex?: (operation: string, request: unknown) => Promise<unknown>
   /** Exact configured archive selected before the Desktop service starts. */
@@ -133,6 +136,9 @@ export function createDesktopManagerOwner(input: {
     lifecycle,
     participants,
     store: input.store,
+    ...(input.selectedConfiguredPlugins === undefined
+      ? {}
+      : { selectedConfiguredPlugins: input.selectedConfiguredPlugins }),
     // Empty profiles also project permission and plugin-configuration snapshots.
     protectProfileInputs: process.platform === 'darwin' || process.platform === 'linux',
     projectPluginConfig: configProjection,
@@ -296,23 +302,32 @@ export async function createDesktopManagerOwnerIfEligible(
   } catch {
     return undefined
   }
+  if (input.configuredPlugins.length > 0 && process.platform !== 'darwin' && process.platform !== 'linux') {
+    return undefined
+  }
   let configuredChannel: CordisXConfigPlugin | undefined
-  if (input.configuredPlugins.length !== 0) {
-    const plugin = input.configuredPlugins[0]
-    if (
-      input.configuredPlugins.length !== 1 || !plugin || !supportsReadonlyConfiguredChannel(plugin)
-      || active.plugins.some(item => item.id === plugin.id)
-      || process.platform !== 'darwin' && process.platform !== 'linux'
-    ) return undefined
+  const configuredIds = new Set<string>()
+  for (const plugin of input.configuredPlugins) {
+    if (configuredIds.has(plugin.id) || active.plugins.some(item => item.id === plugin.id)) return undefined
+    configuredIds.add(plugin.id)
+    if (!plugin.enabled) continue
     try {
-      await loadServiceConfiguredChannelArchive(input.homeDir, plugin)
+      if (plugin.id === 'channel') {
+        if (!supportsReadonlyConfiguredChannel(plugin)) return undefined
+        await loadServiceConfiguredChannelArchive(input.homeDir, plugin)
+        configuredChannel = plugin
+      } else {
+        const inspected = await inspectServiceRendererConfiguredPlugin(input.homeDir, plugin)
+        // Installed-package transactions do not coordinate configured dependents yet.
+        if (!inspected || inspected.staged.manifest.dependencies.length !== 0) return undefined
+      }
     } catch {
       return undefined
     }
-    configuredChannel = plugin
   }
   return createDesktopManagerOwner({
     ...input,
+    selectedConfiguredPlugins: input.configuredPlugins,
     ...(configuredChannel === undefined ? {} : { configuredChannel }),
   })
 }

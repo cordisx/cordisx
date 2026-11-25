@@ -4,7 +4,7 @@ import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { StandaloneRuntimeBundleCache } from '../launcher/standalone-runtime-bundle.js'
-import type { CordisXConfig } from '../launcher/config.js'
+import type { CordisXConfig, CordisXConfigPlugin } from '../launcher/config.js'
 import { loadServiceRendererConfig } from './service-renderer-config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
@@ -91,6 +91,7 @@ export class ServiceRendererBootstrap {
   readonly permissionAccess: ServiceRendererPermissionAccess
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
+  private readonly selectedConfiguredPlugins: readonly CordisXConfigPlugin[] | undefined
   private closed = false
   private closing: Promise<boolean> | undefined
 
@@ -107,6 +108,8 @@ export class ServiceRendererBootstrap {
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
+      /** Desktop owner-selected configured graphs; never replaced by a later file edit. */
+      readonly selectedConfiguredPlugins?: readonly CordisXConfigPlugin[]
       /** Fence cooperative Home policy and configured-plugin writers while snapshots are active. */
       readonly protectProfileInputs?: boolean
       /** Service owner may resolve its own bundled Channel archive. */
@@ -151,6 +154,9 @@ export class ServiceRendererBootstrap {
         || !(input.lifecycle instanceof ServiceRendererLifecycle))
     ) throw new Error('renderer-permission-handoff-unavailable')
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
+    this.selectedConfiguredPlugins = input.selectedConfiguredPlugins === undefined
+      ? undefined
+      : structuredClone(input.selectedConfiguredPlugins)
     this.configuredChannel = input.experimentalConfiguredChannel
     this.managedServiceUI = input.managedServiceUI
     this.permissionFence = input.protectProfileInputs
@@ -310,6 +316,10 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
+        if (
+          this.selectedConfiguredPlugins !== undefined
+          && !attachmentEqual(config.plugins, this.selectedConfiguredPlugins)
+        ) return false
         if (entry.managedContext) this.managedServiceUI?.projectInitial(entry.managedContext)
         return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
           && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
@@ -524,6 +534,10 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
+        if (
+          this.selectedConfiguredPlugins !== undefined
+          && !attachmentEqual(config.plugins, this.selectedConfiguredPlugins)
+        ) throw new Error('renderer-bootstrap-plugin-unsupported')
         // Channel requires its live service owner. Other enabled archives are
         // independently checked before their graph can join this projection.
         const activeConfigured = config.plugins.filter(plugin => plugin.enabled)

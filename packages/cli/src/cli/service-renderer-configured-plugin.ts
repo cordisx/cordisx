@@ -13,6 +13,25 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 import { ServiceRendererIdentityProjection } from './service-renderer-identity.js'
 import { loadServiceConfiguredArchive } from './service-renderer-projection.js'
 
+/** Verify the service-free graph without projecting its configuration or granting admission. */
+export async function inspectServiceRendererConfiguredPlugin(homeDir: string, plugin: CordisXConfigPlugin) {
+  if (
+    !plugin.configuredArchiveDigest || !plugin.manifest || !plugin.distributionArtifact
+    || plugin.package !== undefined || plugin.development !== undefined
+  ) return undefined
+  const staged = await loadServiceConfiguredArchive(homeDir, plugin)
+  const manifest = staged.manifest.runtimeManifest
+  const startup = 'startup' in manifest ? manifest.startup : undefined
+  const artifact = staged.browserArtifact
+  if (
+    !artifact || !('services' in manifest) || manifest.services.length !== 0 || manifest.capabilities.length !== 0
+    || staged.serviceModules.length !== 0 || staged.managedServiceResources.length !== 0
+    || staged.entityTemplates.length !== 0 || (staged.documents?.length ?? 0) !== 0
+    || startup !== undefined && (startup.pages.length !== 0 || startup.capabilities.length !== 0)
+  ) return undefined
+  return { staged, artifact }
+}
+
 /** An owner-selected, service-free configured archive with no private configuration. */
 export class ServiceRendererConfiguredPlugin {
   private identity?: ServiceRendererIdentityProjection
@@ -39,19 +58,10 @@ export class ServiceRendererConfiguredPlugin {
     if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
     if (
       value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 0
-      || !input.plugin.configuredArchiveDigest || !input.plugin.manifest || !input.plugin.distributionArtifact
-      || input.plugin.package !== undefined || input.plugin.development !== undefined
     ) return undefined
-    const staged = await loadServiceConfiguredArchive(input.homeDir, input.plugin)
-    const manifest = staged.manifest.runtimeManifest
-    const startup = 'startup' in manifest ? manifest.startup : undefined
-    const artifact = staged.browserArtifact
-    if (
-      !artifact || !('services' in manifest) || manifest.services.length !== 0 || manifest.capabilities.length !== 0
-      || staged.serviceModules.length !== 0 || staged.managedServiceResources.length !== 0
-      || staged.entityTemplates.length !== 0 || (staged.documents?.length ?? 0) !== 0
-      || startup !== undefined && (startup.pages.length !== 0 || startup.capabilities.length !== 0)
-    ) return undefined
+    const inspected = await inspectServiceRendererConfiguredPlugin(input.homeDir, input.plugin)
+    if (!inspected) return undefined
+    const { staged, artifact } = inspected
     if (!input.current()) throw new Error('renderer-configured-plugin-unavailable')
     const lease = await input.server.lease(
       {
