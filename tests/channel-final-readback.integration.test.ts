@@ -8,9 +8,13 @@ import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channe
 import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
 import { JsonLineRpcClient } from '../packages/cli/src/providers/json-line-rpc.js'
 
-it.each(['sent', 'unknown'])(
-  'long native history stays off the RPC connection and three steered inputs produce one %s final delivery',
-  async delivery => {
+it.each([
+  { delivery: 'sent', unphased: false },
+  { delivery: 'unknown', unphased: false },
+  { delivery: 'sent', unphased: true },
+])(
+  'long native history stays off the RPC connection and three steered inputs produce one delivery: %s',
+  async ({ delivery, unphased }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-final-rpc-'))
     const account = { adapterId: 'feishu', accountId: 'fixture', tenantId: 'fixture' }
     const session = '01a10000-0000-7000-8000-000000000001'
@@ -30,8 +34,8 @@ it.each(['sent', 'unknown'])(
       itemsView: 'full',
       items: [
         { type: 'commandExecution', output: 'x'.repeat(55 * 1024) },
-        { type: 'agentMessage', phase: 'commentary', text: 'hidden progress' },
-        { type: 'agentMessage', phase: 'final_answer', text: 'EXACT_FINAL' },
+        { type: 'agentMessage', phase: unphased ? null : 'commentary', text: 'hidden progress' },
+        { type: 'agentMessage', phase: unphased ? null : 'final_answer', text: 'EXACT_FINAL' },
       ],
     }
     const unrelated = {
@@ -146,7 +150,9 @@ it.each(['sent', 'unknown'])(
       await settle()
       await settle()
       expect(send).toHaveBeenCalledOnce()
-      expect(send.mock.calls[0]?.[0]).toMatchObject({ text: 'EXACT_FINAL' })
+      expect(send.mock.calls[0]?.[0]).toMatchObject({
+        text: unphased ? '本轮已结束，最后输出如下（无法确认是否为最终答复）：\n\nEXACT_FINAL' : 'EXACT_FINAL',
+      })
       const jobs = consumer.status().jobs
       expect(jobs).toHaveLength(3)
       expect(jobs.filter(job => job.state === 'replying')).toHaveLength(delivery === 'unknown' ? 1 : 0)
