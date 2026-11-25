@@ -479,6 +479,7 @@ describe('Channel native task delivery', () => {
             { turnId: 'turn', item: { type: 'reasoning', text: 'private summary' } },
             { turnId: 'turn', item: { type: 'commandExecution', output: 'private tool output' } },
           ],
+          nextCursor: null,
         }
     )
     const sessions = new ChannelNativeSessions({
@@ -503,6 +504,7 @@ describe('Channel native task delivery', () => {
             status: 'completed',
             ...(params.itemsView === 'full'
               ? {
+                itemsView: 'full',
                 items: [
                   { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
                   { type: 'agentMessage', phase: 'final_answer', text: 'correct' },
