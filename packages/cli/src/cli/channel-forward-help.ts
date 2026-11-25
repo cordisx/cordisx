@@ -1,4 +1,8 @@
 export const CHANNEL_FORWARD_HELP: Readonly<Record<string, string>> = {
+  'thread-forward':
+    'Forward one native topic envelope, not copied child messages. Input: {account,source:{id,kind:"direct"|"group"},target:{id,kind:"direct"|"group"},threadId,anchorMessageId,operationId}. Same connected account/tenant only. Anchor must report this source chat and topic. Requires independent forward-read and thread-forward grants, not send/forward/merge-forward. Keep operationId stable across retries and later inputs; uncertain effects never replay. Only a sent native receipt with verified destination message ID proves delivery; it does not prove every child was inspected. No topic target or text fallback.',
+  'thread-forward-receipt':
+    'Read the exact original thread-forward input with the same operationId. Reauthorizes source and target and reads the durable caller-session/actor/account/conversation scoped ledger without mutation. A different topic or anchor under the same identity conflicts. Missing/unknown is not delivery and cannot be blindly retried. Stale locks fail closed; never delete them automatically.',
   forward:
     'Forward one original message, independently authorized from send. Input: {account:{adapterId,accountId,tenantId},source:{id:"oc_...",kind:"direct"|"group"},target:{id:"oc_...",kind:"direct"|"group"},messageIds:["om_..."],operationId}. Only the configured official Feishu/Lark adapter is supported; same account/tenant, conversation target only. No reply/thread, cross-account or SDK fallback. The source must be readable and every ID must belong to it. Keep operationId stable; unknown effects are never replayed.',
   'merge-forward':
