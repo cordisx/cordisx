@@ -980,8 +980,11 @@ The local user can replace them with `model-priority-set --input` containing
 `{"expectedRevision":0,"candidates":[{"providerId":"first","model":"one"},{"providerId":"second","model":"two"}]}`.
 Read the current revision first; an empty list disables the policy. The sender
 must have the existing exact provider and model grants for each eligible choice.
-Scoped provider/model defaults take precedence. Existing chats are unchanged
-unless the user separately enables the bounded idle continuation described below.
+Scoped provider/model defaults are tried first. A healthy or inconclusive probe
+keeps that default; only a confirmed failure allows later authorized candidates
+with successful probes. If the default is not listed, candidates are tried from
+the start. Existing chats are unchanged unless the user separately enables the
+bounded idle continuation described below.
 Before a new task starts, the Host checks each permitted candidate in order using
 a dry run that verifies its catalog entry and declared key. Catalog validation
 and local dry runs each have a five-second timeout. Where a direct

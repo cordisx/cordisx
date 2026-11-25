@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import { HeadlessWorkMode } from './headless-work-mode.js'
+import { headlessResumeSelection } from './headless-resume-selection.js'
 import type { HeadlessNativeAuthority } from '../cli/headless-service.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 
@@ -136,6 +137,17 @@ export async function createHeadlessNativeAuthority(input: {
     },
     nativeRequest: async (method, params, next) => {
       const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
+      const canRestore = method === 'thread/resume' && threadId !== undefined
+        && !Object.hasOwn(params, 'modelProvider') && !Object.hasOwn(params, 'model')
+      const profileDirectory = path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId)
+      const saved = canRestore
+        ? await headlessResumeSelection({
+          profileDirectory,
+          threadId: threadId!,
+          execution: execution.read('local', threadId!),
+        })
+        : undefined
+      if (saved) params = { ...params, modelProvider: saved.providerId, model: saved.model }
       if (method === 'thread/resume' && threadId) workMode.forget(threadId)
       const modeChange = threadId && (method === 'turn/start' || method === 'thread/settings/update')
         ? workMode.begin(threadId)
@@ -162,6 +174,16 @@ export async function createHeadlessNativeAuthority(input: {
           prepared = await execution.prepare(method, params, thread)
         }
         if (prepared.contextRequired) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
+        if (saved) {
+          const current = await headlessResumeSelection({
+            profileDirectory,
+            threadId: threadId!,
+            execution: execution.read('local', threadId!),
+          })
+          if (current?.providerId !== saved.providerId || current.model !== saved.model) {
+            throw new Error('RESUME_SELECTION_CHANGED')
+          }
+        }
         const result = await next(prepared.params)
         if (method === 'thread/start') {
           const started = record(record(result).thread).id

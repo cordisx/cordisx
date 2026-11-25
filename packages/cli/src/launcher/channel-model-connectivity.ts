@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ChannelMemoryModelConnection } from './channel-user-memory-model.js'
 import type { ChannelModelCandidate } from './channel-model-priority.js'
-import { ChannelManagedConnectionUnavailable } from './channel-user-memory-connection.js'
+import { ChannelCredentialUnavailable, ChannelManagedConnectionUnavailable } from './channel-user-memory-connection.js'
 
 export type ChannelConnectivityEvidence = 'healthy' | 'unavailable' | 'inconclusive' | 'cancelled'
 type ProbeResult = { evidence: ChannelConnectivityEvidence; legacyAvailable: boolean }
@@ -58,6 +58,7 @@ async function channelModelConnectivityProbe(
     if (parent?.aborted) return result('cancelled', false)
     // A stalled credential/connection setup is not evidence that a model request failed.
     if (timeout.aborted) return result('inconclusive', false)
+    if (error instanceof ChannelCredentialUnavailable) return result('unavailable', false)
     return result('inconclusive', !(error instanceof ChannelManagedConnectionUnavailable))
   }
   let requestStarted = false
@@ -112,7 +113,13 @@ async function channelModelConnectivityProbe(
     try {
       const result = JSON.parse(content) as { status?: unknown; model?: unknown }
       return result.status === 'completed'
-        ? { evidence: result.model === candidate.model ? 'healthy' : 'inconclusive', legacyAvailable: true }
+        ? {
+          evidence: result.model === candidate.model
+              || typeof result.model === 'string' && connection.responseModelAliases?.includes(result.model)
+            ? 'healthy'
+            : 'inconclusive',
+          legacyAvailable: true,
+        }
         : result.status === 'failed'
         ? { evidence: 'unavailable', legacyAvailable: false }
         : { evidence: 'inconclusive', legacyAvailable: true }

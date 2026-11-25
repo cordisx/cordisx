@@ -5,6 +5,7 @@ import {
 } from '../packages/cli/src/launcher/channel-model-connectivity.js'
 import type { ChannelMemoryModelConnection } from '../packages/cli/src/launcher/channel-user-memory-model.js'
 import { channelMemoryRuntimeConnection } from '../packages/cli/src/launcher/channel-user-memory-connection.js'
+import { channelMemoryServiceConnection } from '../packages/cli/src/launcher/channel-user-memory-connection.js'
 
 const candidate = { providerId: 'provider', model: 'model' }
 afterEach(() => {
@@ -76,6 +77,24 @@ it('skips a managed provider whose connection preparation fails', async () => {
   expect(await channelModelConnectivity(connect, candidate)).toBe(false)
 })
 
+it('distinguishes an absent configured credential from an unknown provider', async () => {
+  const connect = channelMemoryServiceConnection({
+    providers: [{
+      id: 'provider',
+      kind: 'model-service',
+      displayName: 'Fixture',
+      baseUrl: 'https://example.test/v1',
+      apiKeyEnv: 'FIXTURE_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['model'] },
+    }],
+    environmentVariables: [],
+  }, {})
+  expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
+  expect(await channelModelConnectivityEvidence(connect, { providerId: 'unknown', model: 'model' }))
+    .toBe('inconclusive')
+})
+
 it('bounds a stalled connection and disposes a lease that arrives after the timeout', async () => {
   let resolve!: (value: Awaited<ReturnType<ChannelMemoryModelConnection>>) => void
   const dispose = vi.fn()
@@ -114,6 +133,36 @@ it('distinguishes a completed real probe from unsupported or malformed responses
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('inconclusive')
   vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 503 })))
   expect(await channelModelConnectivityEvidence(connect, candidate)).toBe('unavailable')
+})
+
+it('accepts only an exact provider-bound response alias, never a matching model-name suffix', async () => {
+  const routed = { providerId: 'provider', model: 'tenant/route/model' }
+  const connect: ChannelMemoryModelConnection = async () => ({
+    baseUrl: 'https://example.test',
+    headers: {},
+    dispose() {},
+    responseModelAliases: ['verified/upstream/model'],
+  })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({
+        status: 'completed',
+        model: 'verified/upstream/model',
+      }))
+    ),
+  )
+  expect(await channelModelConnectivityEvidence(connect, routed)).toBe('healthy')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({
+        status: 'completed',
+        model: 'unverified/upstream/model',
+      }))
+    ),
+  )
+  expect(await channelModelConnectivityEvidence(connect, routed)).toBe('inconclusive')
 })
 
 it('does not interpret cancellation, a revoked fence or an unknown fetch error as service failure', async () => {

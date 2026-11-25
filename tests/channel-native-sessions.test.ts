@@ -407,6 +407,32 @@ describe('Channel native task delivery', () => {
     live = undefined as never
     expect(await sessions.taskSelection('chat')).toEqual({ providerId: 'two', model: 'new' })
   })
+  it('uses confirmed persisted model selection over stale metadata, but honors live selection', async () => {
+    let live: { providerId: string; model: string; reasoningEffort: 'low'; serviceTier: null } | undefined
+    const record: {
+      application: string
+      effective: { modelProvider: string; model: string }
+      modelSelection?: object
+    } = {
+      application: 'applied',
+      effective: { modelProvider: 'saved-provider', model: 'saved-model' },
+    }
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      nativeRequest: async () => ({
+        thread: { id: 'chat', status: { type: 'notLoaded' }, modelProvider: 'old-provider', model: 'old-model' },
+      }),
+      cwd: '/tmp',
+      execution: { read: () => record } as never,
+      sourceConfiguration: async () => live,
+    })
+    expect(await sessions.taskSelection('chat')).toMatchObject({ providerId: 'saved-provider', model: 'saved-model' })
+    live = { providerId: 'new-provider', model: 'new-model', reasoningEffort: 'low', serviceTier: null }
+    expect(await sessions.taskSelection('chat')).toMatchObject({ providerId: 'new-provider', model: 'new-model' })
+    live = undefined
+    record.modelSelection = { status: 'unknown' }
+    await expect(sessions.taskSelection('chat')).rejects.toThrow('MODEL_SELECTION_UNCONFIRMED')
+  })
   it('passes captured reply defaults and the exact incoming operation to the model without sending', async () => {
     const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
     const nativeRequest = vi.fn(async () => ({}))

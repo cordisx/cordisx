@@ -24,6 +24,7 @@ export interface ChannelConversationConsumerInput {
           | 'taskSelection'
           | 'creationSelection'
           | 'priorityPreflight'
+          | 'priorityEvidence'
         >
       >
     )

@@ -10,6 +10,13 @@ export class ChannelManagedConnectionUnavailable extends Error {
   }
 }
 
+/** A configured service cannot authenticate because its declared credential is absent. */
+export class ChannelCredentialUnavailable extends Error {
+  constructor() {
+    super('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
+  }
+}
+
 /** Use enabled shared model services and their existing Host-private credential environment. */
 export function channelMemoryServiceConnection(
   config: Pick<HomeConfig, 'providers' | 'environmentVariables'>,
@@ -27,17 +34,23 @@ export function channelMemoryServiceConnection(
       return saved ? saved.enabled ? saved.value : undefined : environment[name]
     }
     const key = variable(service.apiKeyEnv)
-    if (!key?.trim()) throw new Error('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
+    if (!key?.trim()) throw new ChannelCredentialUnavailable()
     const headers: Record<string, string> = {
       authorization: `Bearer ${key}`,
       ...service.runtimeOptions?.codex?.http_headers,
     }
     for (const [name, reference] of Object.entries(service.runtimeOptions?.codex?.env_http_headers ?? {})) {
       const value = variable(reference)
-      if (!value?.trim()) throw new Error('CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE')
+      if (!value?.trim()) throw new ChannelCredentialUnavailable()
       headers[name] = value
     }
-    return { baseUrl: service.baseUrl, headers, protocols: service.protocols, dispose() {} }
+    return {
+      baseUrl: service.baseUrl,
+      headers,
+      protocols: service.protocols,
+      ...(service.responseModelAliases?.[model] ? { responseModelAliases: service.responseModelAliases[model] } : {}),
+      dispose() {},
+    }
   }
 }
 

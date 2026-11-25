@@ -37,6 +37,32 @@ const input = {
 }
 
 describe('model service store', () => {
+  it('preserves exact response aliases only while the provider endpoint and key remain unchanged', async () => {
+    const provider = {
+      id: input.id,
+      kind: 'model-service',
+      displayName: input.displayName,
+      baseUrl: input.baseUrl,
+      apiKeyEnv: 'TEST_KEY',
+      protocols: [...input.protocols],
+      models: { codex: input.codexModels },
+      responseModelAliases: { 'gpt-6.1-sol': ['fixture/upstream'] },
+    }
+    const configPath = await home({ providers: [provider] })
+    const first = await readModelServices(configPath, {}) as { revision: string }
+    expect(await saveModelServices(configPath, { expectedRevision: first.revision, services: [input] }))
+      .toMatchObject({ status: 'applied' })
+    expect(JSON.parse(await readFile(configPath, 'utf8')).providers[0].responseModelAliases)
+      .toEqual(provider.responseModelAliases)
+    const second = await readModelServices(configPath, {}) as { revision: string }
+    expect(
+      await saveModelServices(configPath, {
+        expectedRevision: second.revision,
+        services: [{ ...input, baseUrl: 'https://other.example/v1' }],
+      }),
+    ).toMatchObject({ status: 'applied' })
+    expect(JSON.parse(await readFile(configPath, 'utf8')).providers[0].responseModelAliases).toBeUndefined()
+  })
   it('adds a service, stores its key write-only, and keeps gateway providers', async () => {
     const configPath = await home({ providers: [gateway] })
     const empty = await readModelServices(configPath, {})
