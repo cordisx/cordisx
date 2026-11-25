@@ -23,6 +23,7 @@ function conversation(value: unknown, account: ChannelTenantRef) {
     kind: input.kind as 'direct' | 'group',
   }
 }
+export { conversation as forwardConversation, identifier as forwardIdentifier, record as forwardRecord }
 
 export async function channelForwardRpc(input: {
   operation: string

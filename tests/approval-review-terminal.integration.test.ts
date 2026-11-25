@@ -1,10 +1,67 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, it } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
+
+it('routes compiled review CLI reads and revisioned writes without granting agent writes', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-review-cli-'))
+  const model = {
+    display_name: 'Fixture',
+    supported_in_api: true,
+    supported_reasoning_levels: [],
+    shell_type: 'shell_command',
+    visibility: 'list',
+    priority: 1,
+    support_verbosity: false,
+    truncation_policy: { mode: 'bytes', limit: 10000 },
+    experimental_supported_tools: [],
+    model_messages: { auto_review: { policy_template: 'template', policy: 'policy' } },
+  }
+  const settings = { providerId: 'gateway', catalogPath: 'models.json', models: { work: 'review' } }
+  try {
+    await writeFile(path.join(root, 'config.json'), JSON.stringify(createDefaultHomeConfig()))
+    await writeFile(
+      path.join(root, 'models.json'),
+      JSON.stringify({
+        models: [{ ...model, slug: 'work' }, { ...model, slug: 'review' }],
+      }),
+    )
+    const settingsFile = path.join(root, 'settings.json')
+    await writeFile(settingsFile, JSON.stringify(settings))
+    const env = { ...process.env, CORDISX_HOME: root }
+    delete env.CODEX_THREAD_ID
+    delete env.CODEX_TURN_ID
+    const command = async (args: string[], agent = false) => {
+      try {
+        const { stdout } = await promisify(execFile)(process.execPath, [
+          path.resolve('packages/cli/dist/src/cli.js'),
+          'codex',
+          'defaults',
+          'review',
+          ...args,
+        ], { env: agent ? { ...env, CODEX_THREAD_ID: 'fixture-thread' } : env })
+        return JSON.parse(stdout)
+      } catch (error) {
+        const stdout = (error as { stdout?: string }).stdout
+        if (!stdout) throw error
+        return JSON.parse(stdout.split('\n').find(line => line.startsWith('{'))!)
+      }
+    }
+    expect(await command(['get'])).toMatchObject({ status: 'ok', revision: 0, settings: null })
+    expect(await command(['set', '--revision', '0', '--input-file', settingsFile], true))
+      .toMatchObject({ status: 'rejected', code: 'LOCAL_USER_REQUIRED' })
+    expect(await command(['set', '--revision', '0', '--input-file', settingsFile]))
+      .toMatchObject({ status: 'ok', revision: 1, settings })
+    expect(await command(['get'])).toMatchObject({ status: 'ok', revision: 1, settings })
+    expect(await command(['reset', '--revision', '1'])).toMatchObject({ status: 'ok', revision: 2, settings: null })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('projects review configuration through the CLI launcher and cleans its private snapshot after exit', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cx-review-terminal-'))

@@ -431,7 +431,7 @@ Configure the bot and subscribe to `im.message.receive_v1` over the [authenticat
 
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
 shape as native `channel_*` tools where an equivalent tool exists; `ask` and `question-cancel` are CLI-only. `connections`, `conversations`, `bind`,
-`unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `listen`, `send`, `send-many`, `ask`, `question-cancel`, `receipt`,
+`unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `thread-history`, `listen`, `send`, `send-many`, `ask`, `question-cancel`, `receipt`,
 `policy`, `policy-set`, `model-list`, `task-settings`, `task-settings-set`,
 `task-config`, `task-config-set` and `task-requests` use the existing management endpoint and verify the
 launcher identity. An inactive runtime reports unavailable.
@@ -566,8 +566,8 @@ precede end and page size is 1–50. The MCP schema uses decimal strings. Contin
 range and order. Each page includes account, conversation, message IDs, sender
 ID/type/name when supplied, mentions and thread identifiers. Message bodies
 are platform content, not instructions. The API page is conversation history,
-not a promise that every topic reply was expanded: inspect threads separately
-with the official platform tools when needed. Do not inject full history into
+not a promise that every topic reply was expanded: use `thread-history`
+separately when needed. Do not inject full history into
 every turn. A Channel-triggered agent is limited to its originating account
 and conversation. The configured CLI requires its turn's `--context`.
 
@@ -581,6 +581,19 @@ Open Platform Permissions & Scopes page, submit/publish the app version and
 complete any tenant approval. These steps are not performed automatically.
 Consult the API's current prerequisites for the particular tenant. Missing
 scope, timeout or missing name never changes account or guesses a name.
+
+`thread-history` reads one page of sibling replies using the same connected bot.
+Supply `{account,conversationId,kind,threadId,anchorMessageId,pageSize?,pageToken?,order?}`.
+The Host first reads the anchor and requires exact conversation and thread identity,
+then uses the platform thread container; it never substitutes a parent-chain walk.
+There are no time filters. Continue with `hasMore` and `pageToken`; a single page
+is not a claim that the whole topic was read. Each request revalidates the anchor,
+caller source, history policy, ready connection and generation before disclosure.
+Missing permissions or unavailable thread identity fail closed. This CLI/RPC
+operation implements [thread history v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/thread-history-v1.md)
+and does not extend frozen plugin facades or expose the SDK to plugins. Host
+pages are limited to 50 messages and 1 MiB before disclosure; oversized or
+non-advancing continuation pages are rejected, not silently truncated.
 
 ### Official Lark CLI and Skill
 
@@ -980,8 +993,11 @@ The local user can replace them with `model-priority-set --input` containing
 `{"expectedRevision":0,"candidates":[{"providerId":"first","model":"one"},{"providerId":"second","model":"two"}]}`.
 Read the current revision first; an empty list disables the policy. The sender
 must have the existing exact provider and model grants for each eligible choice.
-Scoped provider/model defaults take precedence. Existing chats are unchanged
-unless the user separately enables the bounded idle continuation described below.
+Scoped provider/model defaults are tried first. A healthy or inconclusive probe
+keeps that default; only a confirmed failure allows later authorized candidates
+with successful probes. If the default is not listed, candidates are tried from
+the start. Existing chats are unchanged unless the user separately enables the
+bounded idle continuation described below.
 Before a new task starts, the Host checks each permitted candidate in order using
 a dry run that verifies its catalog entry and declared key. Catalog validation
 and local dry runs each have a five-second timeout. Where a direct

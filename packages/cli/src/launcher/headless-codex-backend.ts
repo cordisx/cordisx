@@ -231,7 +231,9 @@ export async function startHeadlessCodexBackend(input: {
         try {
           resumed = await authority.nativeRequest('thread/resume', {
             threadId: selection.threadId,
-            ...(status === 'notLoaded' ? { modelProvider: selection.providerId, model: selection.model } : {}),
+            excludeTurns: true,
+            modelProvider: selection.providerId,
+            model: selection.model,
           }) as typeof resumed
         } catch (error) {
           if (status === 'notLoaded' && providerSwitchRefused(error, observed.modelProvider, selection.providerId)) {

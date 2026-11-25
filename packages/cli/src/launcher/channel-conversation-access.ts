@@ -7,6 +7,9 @@ import type { ChannelReplyCapabilities } from './channel-reply-routing.js'
 import type { ChannelOutboundRpc } from './channel-outbound-rpc.js'
 
 export interface ChannelConversationAccess {
+  readonly threadForward?: ReturnType<
+    typeof import('./channel-thread-forward-service.js').createChannelThreadForwardService
+  >
   readonly forward?: ReturnType<typeof import('./channel-forward-service.js').createChannelForwardService>
   messageOperations?(operation: string, input: Record<string, unknown>, context: {
     source?: import('@cordisx/channel-runtime').ChannelEventRef | undefined
@@ -33,6 +36,11 @@ export interface ChannelConversationAccess {
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
+  threadHistory?(
+    ref: ChannelTenantRef,
+    request: import('./channel-thread-history.js').ChannelThreadHistoryRequest,
+    authorize: () => void,
+  ): Promise<unknown>
   readMessage?(
     event: import('@cordisx/channel-runtime').ChannelEventRef,
     messageId: string,

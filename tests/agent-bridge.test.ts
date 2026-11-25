@@ -227,6 +227,8 @@ describe('Codex side of the agent bridge', () => {
     const codex = fakeCodex()
     await createCodexBridgeHandler(codex)('send_message', { sessionId: 'cold', prompt: 'next' })
     expect(codex.calls.map(call => call.method)).toEqual(['thread/read', 'thread/resume', 'turn/start'])
+    expect(codex.calls.find(call => call.method === 'thread/resume')?.params)
+      .toEqual({ threadId: 'cold', excludeTurns: true })
   })
 })
 

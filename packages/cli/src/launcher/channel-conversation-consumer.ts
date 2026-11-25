@@ -871,6 +871,7 @@ export class ChannelConversationConsumer {
           continuing: !!continuation,
           signal: this.lifetime.signal,
           ...(native.priorityPreflight ? { preflight: native.priorityPreflight.bind(native) } : {}),
+          ...(native.priorityEvidence ? { evidence: native.priorityEvidence.bind(native) } : {}),
         })
         if (selected.state === 'stop') return
         const result = await native.start(

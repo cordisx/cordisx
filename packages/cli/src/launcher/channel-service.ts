@@ -1,4 +1,5 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
+import { channelThreadHistory } from './channel-thread-history.js'
 import { channelMessageRead } from './channel-message-read.js'
 import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
 import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
@@ -28,6 +29,7 @@ import {
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { ChannelOutboundRpc } from './channel-outbound-rpc.js'
 import { createChannelForwardService } from './channel-forward-service.js'
+import { createChannelThreadForwardService } from './channel-thread-forward-service.js'
 import { channelOutboundRuntimeOptions } from './channel-outbound-runtime-options.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
@@ -42,6 +44,7 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly threadForward: ReturnType<typeof createChannelThreadForwardService>
   readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
   readonly messageOperations: ChannelMessageOperationLedger
@@ -344,6 +347,15 @@ export function createLocalChannelService(input: {
         // that account unavailable without preventing the rest of CordisX from
         // starting.
         const current: ActiveRuntime = {
+          threadForward: createChannelThreadForwardService({
+            filename: path.join(input.dataDir, 'thread-forward.json'),
+            channel: request => directory.channel(request.source),
+            active: () => !disposed && active === current,
+            supported: request =>
+              configuration.connections.some(connection =>
+                ['feishu', 'lark'].includes(connection.adapterKind) && key(connection.ref) === key(request.source)
+              ),
+          }),
           forward: createChannelForwardService({
             filename: path.join(input.dataDir, 'forward.json'),
             channel: request => directory.channel(request.source),
@@ -668,6 +680,7 @@ export function createLocalChannelService(input: {
         runtime: current.runtime,
         outbound: current.outbound,
         forward: current.forward,
+        threadForward: current.threadForward,
         messageOperations: (operation, request, context) =>
           channelMessageOperationsRpc(operation, request, {
             ...context,
@@ -688,6 +701,8 @@ export function createLocalChannelService(input: {
           })),
         conversations: ref => current.directory.conversations(ref),
         remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
+        threadHistory: (ref, request, authorize) =>
+          channelThreadHistory(ref, request, current.directory.channel(ref), authorize),
         readMessage: async (event, messageId) => {
           const channel = current.directory.channel(event)
           const result = await channelMessageRead(event, messageId, channel)

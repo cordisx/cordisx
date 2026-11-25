@@ -103,7 +103,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#a67dcbe90a036d5b32dcd8648dc9e54ac4a06541",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#2872fbcf4d173a0e7a4704103028cc78c36b30ff",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",

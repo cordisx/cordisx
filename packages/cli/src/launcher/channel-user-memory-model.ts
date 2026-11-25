@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ModelApiConnection } from './model-api-server.js'
 
 export interface UserMemoryAssertion {
@@ -92,6 +93,8 @@ export function createChannelUserMemoryAnalysis(connect: ChannelMemoryModelConne
         headers: { ...connection.headers, 'content-type': 'application/json' },
         body: JSON.stringify({
           model: selection.model,
+          // Each tool-free extraction has an isolated, anonymous gateway session.
+          prompt_cache_key: randomUUID(),
           instructions,
           input: [{ role: 'user', content: [{ type: 'input_text', text }] }],
           tools: [],

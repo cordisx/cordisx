@@ -51,6 +51,11 @@ export async function selectChannelCreationModel(input: {
     signal?: AbortSignal,
     beforeProbe?: () => Promise<boolean>,
   ) => Promise<boolean>
+  readonly evidence?: (
+    candidate: ChannelModelCandidate,
+    signal?: AbortSignal,
+    beforeProbe?: () => Promise<boolean>,
+  ) => Promise<import('./channel-model-connectivity.js').ChannelConnectivityEvidence>
   readonly signal: AbortSignal
   readonly event: ChannelEventRef
   readonly jobId: string
@@ -63,16 +68,44 @@ export async function selectChannelCreationModel(input: {
   const { store, captured, tasks, event, jobId } = input
   if (!input.autoCreate) return { state: 'ready' }
   const defaults = channelTaskDefaults(captured.taskConfig, captured.policy, event)
-  const priority = !input.continuing && !defaults.providerId && !defaults.model ? captured.modelPriority : undefined
+  const priority = !input.continuing ? captured.modelPriority : undefined
   if (!priority?.candidates.length) return { state: 'ready', settings: await tasks.defaults(event) }
   const fence = {
     priority: priority.revision,
     taskConfig: captured.taskConfigRevision,
     policy: captured.policyRevision,
   }
+  let candidates = priority.candidates
+  let requireHealthyFallback = false
+  if (defaults.providerId || defaults.model) {
+    const initial = await tasks.defaults(event)
+    const position = candidates.findIndex(candidate =>
+      candidate.providerId === initial.providerId && candidate.model === initial.model
+    )
+    if (!input.evidence || !initial.providerId || !initial.model) {
+      return { state: 'ready', settings: initial }
+    }
+    const current = { providerId: initial.providerId, model: initial.model }
+    const evidence = await input.evidence(
+      current,
+      input.signal,
+      async () => channelPriorityFenceCurrent(store, fence, event, jobId),
+    ).catch(() => 'inconclusive' as const)
+    if (!channelPriorityFenceCurrent(store, fence, event, jobId)) {
+      await store.mutate(state => {
+        if (state.jobs[jobId]?.state === 'dispatching') state.jobs[jobId]!.state = 'queued'
+      })
+      return { state: 'stop' }
+    }
+    if (evidence !== 'unavailable') return { state: 'ready', settings: initial, fence }
+    // If a default is absent from the list, it still stays first while healthy;
+    // only an explicit failure permits considering the configured candidates.
+    candidates = position < 0 ? candidates : candidates.slice(position + 1)
+    requireHealthyFallback = true
+  }
   let settings: ChannelTaskPatch | undefined
   try {
-    for (const candidate of priority.candidates) {
+    for (const candidate of candidates) {
       const selection = { ...defaults, ...candidate }
       if (
         channelTaskFields(candidate).some(command => channelCommandDenied(captured.policy, event, command))
@@ -95,6 +128,13 @@ export async function selectChannelCreationModel(input: {
           input.signal,
           async () => channelPriorityFenceCurrent(store, fence, event, jobId),
         )
+      ) continue
+      if (
+        requireHealthyFallback && (!input.evidence || await input.evidence(
+              candidate,
+              input.signal,
+              async () => channelPriorityFenceCurrent(store, fence, event, jobId),
+            ) !== 'healthy')
       ) continue
       settings = selection
       break

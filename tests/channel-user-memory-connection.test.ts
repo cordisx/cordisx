@@ -14,6 +14,7 @@ it('uses only enabled declared models and exact Host credential references', asy
       baseUrl: 'http://127.0.0.1:1/v1',
       apiKeyEnv: 'TEST_KEY',
       models: { codex: ['test'] },
+      responseModelAliases: { test: ['exact/response-id'] },
       protocols: ['openai-responses' as const],
       runtimeOptions: { codex: { env_http_headers: { 'x-test': 'HEADER' } } },
     }],
@@ -30,6 +31,7 @@ it('uses only enabled declared models and exact Host credential references', asy
   config.environmentVariables[0]!.enabled = true
   const connection = await connect('synthetic', 'test', new AbortController().signal)
   expect(connection.headers).toEqual({ authorization: 'Bearer private-fixture', 'x-test': 'header-fixture' })
+  expect(connection.responseModelAliases).toEqual(['exact/response-id'])
   await expect(connect('other', 'test', new AbortController().signal)).rejects.toThrow(
     'CHANNEL_USER_MEMORY_MODEL_UNAVAILABLE',
   )

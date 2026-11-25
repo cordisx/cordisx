@@ -1,8 +1,9 @@
 export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   {
     capability: 'thread-history-pagination',
-    implementation: 'unsupported',
-    reason: 'No complete public thread-page operation.',
+    implementation: 'supported',
+    reason:
+      'CLI/RPC thread-history verifies a same-conversation anchor and reads one bounded topic page; read permission is still required.',
   },
   {
     capability: 'platform-message-search',
@@ -16,8 +17,9 @@ export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   },
   {
     capability: 'thread-forward',
-    implementation: 'not-verified',
-    reason: 'Owned by the forwarding contract and adapter; discover that operation independently.',
+    implementation: 'supported',
+    reason:
+      'Independent CLI/RPC thread-forward uses the native Feishu/Lark topic envelope and durable receipts; source read and topic-forward policy/platform permissions remain required.',
   },
   {
     capability: 'generic-card-actions',

@@ -150,7 +150,7 @@ test('local reviewer changes are revision fenced, idle-only and preserve existin
     threadId: 'chat',
     approvalsReviewer: 'auto_review',
   })
-  expect(f.request).toHaveBeenCalledWith('thread/resume', { threadId: 'chat' })
+  expect(f.request).toHaveBeenCalledWith('thread/resume', { threadId: 'chat', excludeTurns: true })
   expect(f.preferences.read('local', 'chat')?.override).toEqual({ networkAccess: true })
   const fastReadback = await f.service.call('fast', { sessionId: 'chat' })
   expect(fastReadback).not.toHaveProperty('reviewer')

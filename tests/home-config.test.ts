@@ -21,6 +21,28 @@ async function fixturePath(): Promise<{ root: string; configPath: string }> {
 }
 
 describe('CordisX home configuration', () => {
+  it('accepts only unambiguous exact response aliases for declared Codex models', () => {
+    const provider = {
+      id: 'gateway',
+      kind: 'model-service',
+      displayName: 'Gateway',
+      baseUrl: 'https://example.test/v1',
+      apiKeyEnv: 'GATEWAY_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['route/one', 'route/two'] },
+      responseModelAliases: { 'route/one': ['actual/one'] },
+    }
+    const config = (entry: unknown) => parseHomeConfig({ ...createDefaultHomeConfig(), providers: [entry] })
+    expect(config(provider).providers[0]).toMatchObject({ responseModelAliases: { 'route/one': ['actual/one'] } })
+    for (
+      const aliases of [
+        { missing: ['actual/one'] },
+        { 'route/one': ['actual/one'], 'route/two': ['actual/one'] },
+        { 'route/one': ['route/two'] },
+        { 'route/one': [] },
+      ]
+    ) expect(() => config({ ...provider, responseModelAliases: aliases })).toThrow('responseModelAliases')
+  })
   it('validates, normalizes, redacts, and merges Host-private environment variables', () => {
     const parsed = parseHomeConfig({
       ...createDefaultHomeConfig(),

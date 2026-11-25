@@ -196,7 +196,7 @@ or protocol sources. Availability depends on the installed CordisX version.
 - [Local model and Agent API](local-model-api.md) — experimental loopback API candidate.
 
 - [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.
-- [Independent Channel forwarding](channel-forward.md): single/merge operation choice, source/target permissions, platform restrictions and durable receipts.
+- [Independent Channel forwarding](channel-forward.md): single/merge/native-topic operation choice, source/target permissions, platform restrictions and durable receipts.
 - [Channel media and reactions](channel-media-reactions.md): model capability boundaries, bot-owned reaction CLI, completion mapping and event context.
 - [Channel message operations](channel-message-operations.md): scoped lifecycle writes, read-user/reaction pages, restricted card updates and operation discovery.
 - [Channel memory proposal](channel-memory-design.md): scoped directory-backed memory design, partial local CLI implementation and remaining authority gates.
