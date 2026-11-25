@@ -141,6 +141,20 @@ async function fixture() {
 }
 
 describe('steered replies with a real outbox', () => {
+  it('does not forward unverified output after a steered manual final is confirmed', async () => {
+    const f = await fixture()
+    await f.receive('first')
+    const child = await f.receive('second')
+    expect(await f.manual()).toMatchObject({ deliveryState: 'sent' })
+    expect(await f.tools.call('reply-mode', { operationId: child.id, mode: 'none' }, metadata)).toMatchObject({
+      status: 'ok',
+    })
+    f.completion.mockResolvedValue({ state: 'completed', text: 'later output', unverifiedFinal: true } as never)
+    await f.consumer.pump()
+    await f.consumer.pump()
+    expect(f.send).toHaveBeenCalledOnce()
+  })
+
   it.each([1, 2])(
     'suppresses the one automatic final after a confirmed manual final and %i follow-ups',
     async count => {
