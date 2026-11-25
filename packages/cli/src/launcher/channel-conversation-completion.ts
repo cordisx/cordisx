@@ -8,7 +8,11 @@ import { mayFinishChannelJob } from './channel-live-takeover.js'
 import { channelAutoReplyTarget, channelReplyDefaults } from './channel-reply-routing.js'
 import { channelDispatchAllowed } from './channel-group-access.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
-import { reconcileChannelTerminalDelivery } from './channel-terminal-delivery.js'
+import {
+  channelTerminalSchema,
+  channelTurnSteerFence,
+  reconcileChannelTerminalDelivery,
+} from './channel-terminal-delivery.js'
 
 /** Deliver a completed native turn through its captured, authorized reply route. */
 export async function finishChannelJob(
@@ -25,10 +29,17 @@ export async function finishChannelJob(
   const { store, native, signal, reply } = input
   const state = store.snapshot()
   if (!job.sessionId || !job.turnId || !mayFinishChannelJob(state, job)) return
+  const steerFence = channelTurnSteerFence(state, job)
+  if (steerFence.dispatching) return
+  const steerUnchanged = (current: typeof state) => {
+    const fence = channelTurnSteerFence(current, job)
+    return !fence.dispatching && fence.signature === steerFence.signature
+  }
   const binding = job.bindingId === undefined ? undefined : state.bindings[job.bindingId]
   const defaults = job.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
   const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
-  const includeFinal = !job.terminalDelivery && job.finalDeliveryEnabled === true && state.policy.enabled
+  const includeFinal = !steerFence.uncertain && !job.terminalDelivery && job.finalDeliveryEnabled === true
+    && state.policy.enabled
     && state.policy.autoReply
     && binding?.state === 'active' && binding.autoReply && mode !== 'none'
     && channelDispatchAllowed(state, event) && channelPolicyAllows(state.policy, 'send', event)
@@ -46,7 +57,7 @@ export async function finishChannelJob(
   ) return
   if (completion.state === 'failed') {
     await store.mutate(state => {
-      if (!mayFinishChannelJob(state, job) || state.jobs[job.id]!.terminalDelivery) return
+      if (!mayFinishChannelJob(state, job) || !steerUnchanged(state) || state.jobs[job.id]!.terminalDelivery) return
       state.jobs[job.id]!.state = 'failed'
       state.jobs[job.id]!.code = completion.code ?? 'NATIVE_TURN_FAILED'
       state.jobs[job.id]!.failureNotice ??= 'pending'
@@ -54,9 +65,18 @@ export async function finishChannelJob(
     return
   }
   if (signal.aborted) return
+  if (steerFence.uncertain) {
+    await store.mutate(state => {
+      if (!mayFinishChannelJob(state, job) || !steerUnchanged(state) || state.jobs[job.id]!.terminalDelivery) return
+      state.jobs[job.id]!.state = 'reconciliation-required'
+      state.jobs[job.id]!.code = 'CHANNEL_STEER_FINAL_UNRESOLVED'
+      channelTerminalSchema(state)
+    })
+    return
+  }
   if (!includeFinal) {
     await store.mutate(state => {
-      if (!mayFinishChannelJob(state, job) || state.jobs[job.id]!.terminalDelivery) return
+      if (!mayFinishChannelJob(state, job) || !steerUnchanged(state) || state.jobs[job.id]!.terminalDelivery) return
       state.jobs[job.id]!.state = 'completed'
     })
     return
@@ -65,7 +85,7 @@ export async function finishChannelJob(
   const deliveryId = `delivery:${identity([job.id, event])}`
   const existingTarget = access?.runtime.deliverySnapshot(deliveryId, CALLER)?.target
   const target = await store.mutate(state => {
-    if (!mayFinishChannelJob(state, job)) return undefined
+    if (!mayFinishChannelJob(state, job) || !steerUnchanged(state)) return undefined
     const current = state.jobs[job.id]!
     if (current.terminalDelivery) return undefined
     const binding = current.bindingId === undefined ? undefined : state.bindings[current.bindingId]

@@ -796,7 +796,10 @@ To send an explicit terminal result to the source conversation, add
 `terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:"<incoming-operation>"}`
 to a single-target `send` request. Omit it for progress updates or other destinations;
 `send-many` cannot carry this intent. The Host reserves the intent before the
-send and reconciles the original receipt. Only `sent` confirms delivery. While
+send and reconciles the original receipt. A follow-up steer must settle first; use
+the latest accepted input's operation ID for the terminal result. A later input
+is queued for a new turn once the terminal send is reserved.
+Only `sent` confirms delivery. While
 the result is pending, missing, failed, or unknown, the automatic final stays
 fenced; never resend under a new ID. The status command exposes the unresolved
 job code and send/delivery IDs for diagnosis. Automatic or operator resolution

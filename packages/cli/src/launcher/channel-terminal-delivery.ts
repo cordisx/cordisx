@@ -19,13 +19,14 @@ const callerFor = (generation: string): ChannelPluginIdentity => ({
   generation,
 })
 
-/** V3 fences older Hosts only while at least one terminal delivery remains unresolved. */
+/** V3 fences older Hosts while a terminal delivery or a steered final remains unresolved. */
 export function channelTerminalSchema(state: ChannelConversationState): void {
-  state.schemaVersion = Object.values(state.jobs).some(job => job.terminalDelivery)
-    ? 3
-    : state.logicalContinuations
-    ? 2
-    : 1
+  state.schemaVersion =
+    Object.values(state.jobs).some(job => job.terminalDelivery || job.code === 'CHANNEL_STEER_FINAL_UNRESOLVED')
+      ? 3
+      : state.logicalContinuations
+      ? 2
+      : 1
 }
 
 function allowedTarget(source: ChannelEventRef, target: ChannelThreadRef): boolean {
@@ -53,9 +54,27 @@ export function channelTerminalOwner(
   return parent
 }
 
+/** A final readback is stale if a follow-up was claimed or settled during the read. */
+export function channelTurnSteerFence(state: ChannelConversationState, owner: ChannelConversationJob) {
+  const children = Object.values(state.jobs)
+    .filter(job => job.steerParent === owner.id && job.steeredInto === owner.turnId)
+    .sort((a, b) => a.id.localeCompare(b.id))
+  return {
+    dispatching: children.some(job => job.state === 'dispatching'),
+    uncertain: children.some(job => job.state === 'reconciliation-required'),
+    signature: JSON.stringify(children.map(job => [job.id, job.state])),
+  }
+}
+
 export function validateChannelTerminalDeliveries(state: ChannelConversationState): void {
   const owners = Object.values(state.jobs).filter(job => job.terminalDelivery)
-  if ((owners.length > 0) !== (state.schemaVersion === 3)) throw new Error('INVALID_TERMINAL_DELIVERY_STORE')
+  const unresolved = Object.values(state.jobs).filter(job => job.code === 'CHANNEL_STEER_FINAL_UNRESOLVED')
+  if ((owners.length > 0 || unresolved.length > 0) !== (state.schemaVersion === 3)) {
+    throw new Error('INVALID_TERMINAL_DELIVERY_STORE')
+  }
+  if (unresolved.some(job => job.state !== 'reconciliation-required' || !job.sessionId || !job.turnId)) {
+    throw new Error('INVALID_TERMINAL_DELIVERY_STORE')
+  }
   for (const owner of owners) {
     const intent = owner.terminalDelivery!, input = state.jobs[intent.inputOperationId]
     const record = input && state.inputs[input.recordId]
@@ -155,6 +174,14 @@ export async function reserveChannelTerminalDelivery(
       if (!isDeepStrictEqual(existing, intent)) throw new Error('TERMINAL_DELIVERY_CONFLICT')
       return { created: false, deliveryId }
     }
+    const steerFence = channelTurnSteerFence(state, owner)
+    if (steerFence.dispatching || steerFence.uncertain) throw new Error('TERMINAL_STEER_IN_FLIGHT')
+    if (
+      Object.values(state.jobs).some(other =>
+        other.steerParent === owner.id && other.steeredInto === owner.turnId && other.state === 'running'
+        && (state.inputs[other.recordId]?.sequence ?? -1) > record.sequence
+      )
+    ) throw new Error('TERMINAL_INPUT_SUPERSEDED')
     if (owner.state !== 'running' || owner.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
     owner.terminalDelivery = intent
     channelTerminalSchema(state)

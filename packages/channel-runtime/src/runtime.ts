@@ -1,5 +1,5 @@
 import { appendAudit, auditRecord } from './runtime-audit.js'
-import { isEligibleOutbox } from './outbound-enqueue.js'
+import { canApplyOutboxDecision, isEligibleOutbox } from './outbound-enqueue.js'
 import { cancelOutboundDelivery } from './outbound-cancel.js'
 import { ChannelDeliveryObservers } from './delivery-observers.js'
 import { type ActiveConnection, isEligibleInbox, RUNTIME_DEFAULTS } from './runtime-state.js'
@@ -747,7 +747,10 @@ export class ChannelRuntime {
       if (decision !== 'allow') {
         await this.#store.transaction(state => {
           const current = state.outbox[next.deliveryId]
-          if (current === undefined) return
+          // Another drain may have claimed or completed the delivery while permission was checked.
+          if (
+            !canApplyOutboxDecision(current, next, generation, state.adapters[key]?.generation, nowMs, this.#leaseMs)
+          ) return
           state.outbox[next.deliveryId] = {
             ...current,
             status: 'dead-letter',

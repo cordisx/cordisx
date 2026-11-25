@@ -230,3 +230,18 @@ export function isEligibleOutbox(record: StoredOutboxRecord, now: number, leaseM
   if (record.status === 'retrying') return Date.parse(record.nextAttemptAt ?? '') <= now
   return record.status === 'processing' && Date.parse(record.claimedAt ?? '') + leaseMs <= now
 }
+
+/** A permission decision applies only to the same still-claimable delivery snapshot. */
+export function canApplyOutboxDecision(
+  current: StoredOutboxRecord | undefined,
+  selected: StoredOutboxRecord,
+  generation: number,
+  accountGeneration: number | undefined,
+  now: number,
+  leaseMs: number,
+): current is StoredOutboxRecord {
+  return current !== undefined && isEligibleOutbox(current, now, leaseMs) && accountGeneration === generation
+    && current.accountKey === selected.accountKey && current.generation === selected.generation
+    && current.status === selected.status && current.attempts === selected.attempts
+    && current.claimedAt === selected.claimedAt && current.updatedAt === selected.updatedAt
+}

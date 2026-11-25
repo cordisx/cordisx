@@ -94,6 +94,147 @@ it('never reclaims an in-flight terminal delivery after its lease', async () => 
   }
 })
 
+it.each(
+  [
+    ['processing', 'deny'],
+    ['sent', 'ask'],
+  ] as const,
+)('does not overwrite a %s terminal receipt with a delayed %s decision', async (stage, decision) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-permission-race-'))
+  let releaseDecision!: () => void, permissionStarted!: () => void
+  let releaseSend!: () => void, sendStarted!: () => void
+  const permissionGate = new Promise<void>(resolve => {
+    releaseDecision = resolve
+  })
+  const checking = new Promise<void>(resolve => {
+    permissionStarted = resolve
+  })
+  const sendGate = new Promise<void>(resolve => {
+    releaseSend = resolve
+  })
+  const sending = new Promise<void>(resolve => {
+    sendStarted = resolve
+  })
+  const authorize = vi.fn(async (): Promise<'allow' | 'deny' | 'ask'> => 'allow')
+  const send = vi.fn(async () => {
+    sendStarted()
+    await sendGate
+    return { externalMessageId: 'sent' }
+  })
+  const runtime = await ChannelRuntime.open({
+    storePath: path.join(root, 'outbox.json'),
+    permissions: { authorize },
+  })
+  try {
+    const adapter = await runtime.activate({ descriptor, start: async () => ({ send, stop: async () => {} }) }, caller)
+    await runtime.notifyTerminalOnce(notification, caller, 'delivery:terminal')
+    authorize.mockImplementationOnce(async () => {
+      permissionStarted()
+      await permissionGate
+      return decision
+    })
+    const delayed = adapter.drainOutbound(1)
+    await checking
+    const active = adapter.drainOutbound(1)
+    await sending
+    if (stage === 'sent') {
+      releaseSend()
+      await active
+    }
+    releaseDecision()
+    await delayed
+    if (stage === 'processing') {
+      releaseSend()
+      await active
+    }
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(runtime.deliverySnapshot('delivery:terminal', caller)).toMatchObject({
+      state: 'sent',
+      externalMessageId: 'sent',
+    })
+    expect(JSON.parse(await readFile(path.join(root, 'outbox.json'), 'utf8')).schemaVersion).toBe(1)
+  } finally {
+    releaseDecision()
+    releaseSend()
+    await runtime.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('does not apply an old permission decision to a reclaimed ordinary delivery', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'outbound-permission-race-'))
+  let now = Date.now(), releaseDecision!: () => void, permissionStarted!: () => void
+  let releaseFirst!: () => void, releaseSecond!: () => void, firstStarted!: () => void, secondStarted!: () => void
+  const permissionGate = new Promise<void>(resolve => {
+    releaseDecision = resolve
+  })
+  const checking = new Promise<void>(resolve => {
+    permissionStarted = resolve
+  })
+  const firstGate = new Promise<void>(resolve => {
+    releaseFirst = resolve
+  })
+  const secondGate = new Promise<void>(resolve => {
+    releaseSecond = resolve
+  })
+  const firstSending = new Promise<void>(resolve => {
+    firstStarted = resolve
+  })
+  const secondSending = new Promise<void>(resolve => {
+    secondStarted = resolve
+  })
+  const authorize = vi.fn(async (): Promise<'allow' | 'deny'> => 'allow')
+  const send = vi.fn()
+    .mockImplementationOnce(async () => {
+      firstStarted()
+      await firstGate
+      return { externalMessageId: 'first' }
+    })
+    .mockImplementationOnce(async () => {
+      secondStarted()
+      await secondGate
+      return { externalMessageId: 'second' }
+    })
+  const runtime = await ChannelRuntime.open({
+    storePath: path.join(root, 'outbox.json'),
+    permissions: { authorize },
+    clock: { now: () => new Date(now) },
+    leaseMs: 100,
+  })
+  try {
+    const adapter = await runtime.activate({ descriptor, start: async () => ({ send, stop: async () => {} }) }, caller)
+    await runtime.notifyOnce(notification, caller, 'delivery:ordinary')
+    const first = adapter.drainOutbound(1)
+    await firstSending
+    now += 1_000
+    authorize.mockImplementationOnce(async () => {
+      permissionStarted()
+      await permissionGate
+      return 'deny'
+    })
+    const delayed = adapter.drainOutbound(1)
+    await checking
+    const second = adapter.drainOutbound(1)
+    await secondSending
+    releaseDecision()
+    await delayed
+    releaseSecond()
+    await second
+    releaseFirst()
+    await first
+    expect(runtime.deliverySnapshot('delivery:ordinary', caller)).toMatchObject({
+      state: 'sent',
+      externalMessageId: 'second',
+    })
+  } finally {
+    releaseDecision()
+    releaseFirst()
+    releaseSecond()
+    await runtime.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 it.each(['processing', 'retrying', 'queued'])(
   'preserves a previously attempted %s terminal effect as unknown after restart',
   async status => {

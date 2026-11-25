@@ -4,7 +4,8 @@ export function channelReplyGuidance(autoReply: boolean): readonly string[] {
     'Use ordinary conversational language in the outward answer. Explain delivery mechanics only if relevant or requested; do not append routine reliability disclaimers.',
     'Send only deliberately selected outward text. Never forward private reasoning, analysis, tool arguments/results, credentials, or local commentary automatically.',
     'Choose a distinct stable operationId for each intended progress message and terminal result. Keep the same operationId when checking its receipt; do not reuse a progress operationId for completion.',
-    'For an explicit terminal result to this source conversation, use a single-target send with terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:<incoming operationId below>}. Omit terminal for progress, questions and other destinations. The Host fences the exact terminal delivery; do not use send-many for this intent.',
+    'For an explicit terminal result to this source conversation, use a single-target send with terminal:{contract:"cordisx.channel-terminal-intent/v1",schemaVersion:1,inputOperationId:<latest incoming operationId for this turn>}. Omit terminal for progress, questions and other destinations. The Host fences the exact terminal delivery; do not use send-many for this intent.',
+    'If a terminal send is rejected because a follow-up input is still being steered or has superseded the old input, process the latest input and use its context before sending a terminal result.',
     'A successful CLI invocation or queued receipt is not proof of delivery. Confirm deliveryState sent from send or receipt before reporting delivery. On failed, pending, unknown, partial, or missing receipts, inspect the same operationId; never blindly retry or change routes/operationIds to resend an uncertain message.',
     ...(autoReply
       ? [

@@ -32,7 +32,11 @@ import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { channelJobBlocks, reconcileChannelJob, steerChannelQueued } from './channel-conversation-steer.js'
 import { selectChannelReplyMode } from './channel-reply-selection.js'
-import { reconcileChannelTerminalDelivery } from './channel-terminal-delivery.js'
+import {
+  channelTerminalSchema,
+  channelTurnSteerFence,
+  reconcileChannelTerminalDelivery,
+} from './channel-terminal-delivery.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
@@ -735,6 +739,21 @@ export class ChannelConversationConsumer {
     if (job.state === 'reconciliation-required') {
       if (job.code === 'CHANNEL_TERMINAL_DELIVERY_UNRESOLVED') {
         await reconcileChannelTerminalDelivery(this.store, this.input.access(), job.id)
+        return
+      }
+      if (job.code === 'CHANNEL_STEER_FINAL_UNRESOLVED') {
+        const fence = channelTurnSteerFence(this.store.snapshot(), job)
+        if (!fence.dispatching && !fence.uncertain) {
+          await this.store.mutate(state => {
+            const current = state.jobs[job.id]
+            if (current?.state !== 'reconciliation-required' || current.code !== job.code) return
+            const latest = channelTurnSteerFence(state, current)
+            if (latest.dispatching || latest.uncertain) return
+            current.state = 'running'
+            delete current.code
+            channelTerminalSchema(state)
+          })
+        }
         return
       }
       if (job.code === 'IDLE_PRIORITY_MIGRATION_UNCERTAIN' || job.code === 'GROUP_PRIORITY_EFFECT_UNCERTAIN') return

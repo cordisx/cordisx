@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChannelRuntime, UncertainChannelSendError } from '../packages/channel-runtime/src/runtime.js'
 import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channel-conversation-consumer.js'
 import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-conversation-tools.js'
+import { finishChannelJob } from '../packages/cli/src/launcher/channel-conversation-completion.js'
 import { channelLogicalTransactionStore } from '../packages/cli/src/launcher/channel-logical-continuation-store.js'
 import { configuredChannelManagementToolHandler } from '../packages/cli/src/cli/channel-consumer-composition.js'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
@@ -66,17 +67,19 @@ async function fixture() {
     },
   }
   let activeEvent = event('first')
-  const completion = vi.fn(async () => ({ state: 'running' as const }))
+  let activeTurn = 'turn'
+  const completion = vi.fn(async (_sessionId?: string, _turnId?: string) => ({ state: 'running' as const }))
   const native = {
     contextObservations: () => undefined,
     hasPreparation: () => false,
     isPreparing: () => false,
     exists: async () => true,
-    start: async () => ({ state: 'running' as const, sessionId: session, turnId: 'turn' }),
-    steer: async () => ({ state: 'accepted' as const }),
+    start: vi.fn(async () => ({ state: 'running' as const, sessionId: session, turnId: 'turn' })),
+    steer: vi.fn(async () => ({ state: 'accepted' as const })),
+    steerObserved: vi.fn(async () => false),
     completion,
     sourceFor: () => event('first'),
-    contextFor: () => ({ threadId: session, turnId: 'turn', source: activeEvent }),
+    contextFor: () => ({ threadId: session, turnId: activeTurn, source: activeEvent }),
     reconcile: async () => ({ state: 'reconciliation-required' as const }),
   }
   const openConsumer = () =>
@@ -150,6 +153,13 @@ async function fixture() {
     manual,
     finish,
     completion,
+    native,
+    setActiveTurn: (turn: string) => {
+      activeTurn = turn
+    },
+    setActiveEvent: (id: string) => {
+      activeEvent = event(id)
+    },
     root,
     drain: () => adapter.drainOutbound(10),
     settle,
@@ -261,6 +271,189 @@ describe('steered replies with a real outbox', () => {
     expect(f.send).toHaveBeenCalledTimes(1)
     expect(f.consumer.profileLogicalOwner().store.snapshot().schemaVersion).toBe(1)
     expect(f.consumer.status(session).jobs.every(job => job.state === 'completed')).toBe(true)
+  })
+  it('queues a new input after a terminal send until the prior turn ends', async () => {
+    const f = await fixture()
+    const first = await f.receive('first')
+    expect(await f.manual(terminal(first.id))).toMatchObject({ deliveryState: 'sent' })
+    const second = await f.receive('second')
+    expect(second).toMatchObject({ state: 'queued' })
+    expect(second.steeredInto).toBeUndefined()
+
+    f.native.start.mockResolvedValueOnce({ state: 'running', sessionId: session, turnId: 'turn-2' })
+    f.completion.mockImplementation(async (_sessionId, turnId) =>
+      (turnId === 'turn' ? { state: 'completed' } : { state: 'running' }) as never
+    )
+    await f.settle()
+    const next = f.consumer.profileLogicalOwner().store.snapshot().jobs[second.id]!
+    expect(next).toMatchObject({ state: 'running', turnId: 'turn-2' })
+    f.setActiveTurn('turn-2')
+    expect(
+      await f.tools.call('send', {
+        account,
+        target: { id: 'oc_fixture', kind: 'direct', replyMode: 'conversation' },
+        operationId: 'second-terminal',
+        text: 'second reply',
+        terminal: terminal(second.id),
+      }, { ...metadata, 'x-codex-turn-metadata': { thread_id: session, turn_id: 'turn-2' } }),
+    )
+      .toMatchObject({ deliveryState: 'sent' })
+    f.completion.mockResolvedValue({ state: 'completed' } as never)
+    await f.settle()
+    expect(f.consumer.status(session).jobs.every(job => job.state === 'completed')).toBe(true)
+    expect(f.send).toHaveBeenCalledTimes(2)
+  })
+  it('does not reserve a terminal send while a follow-up steer is in flight', async () => {
+    const f = await fixture()
+    const first = await f.receive('first')
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const started = new Promise<void>(resolve => {
+      entered = resolve
+    })
+    f.native.steer.mockImplementationOnce(async () => {
+      entered()
+      await gate
+      return { state: 'accepted' }
+    })
+    const arriving = f.receive('second')
+    try {
+      await started
+      const reply = vi.fn(async () => 'sent')
+      await finishChannelJob(
+        {
+          store: f.consumer.profileLogicalOwner().store,
+          native: { completion: async () => ({ state: 'completed', text: 'old final' }) as never },
+          signal: new AbortController().signal,
+          access: () => f.access as never,
+          reply,
+        },
+        first,
+        event('first'),
+      )
+      expect(reply).not.toHaveBeenCalled()
+      f.setActiveEvent('first')
+      expect(await f.manual(terminal(first.id))).toMatchObject({
+        status: 'rejected',
+        code: 'TERMINAL_STEER_IN_FLIGHT',
+      })
+    } finally {
+      f.setActiveEvent('second')
+      release()
+    }
+    const second = await arriving
+    expect(second).toMatchObject({ state: 'running', steeredInto: 'turn' })
+    f.setActiveEvent('first')
+    expect(await f.manual(terminal(first.id))).toMatchObject({
+      status: 'rejected',
+      code: 'TERMINAL_INPUT_SUPERSEDED',
+    })
+    f.setActiveEvent('second')
+    expect(await f.manual(terminal(second.id))).toMatchObject({ deliveryState: 'sent' })
+    await f.finish()
+    expect(f.send).toHaveBeenCalledTimes(1)
+  })
+  it('does not reserve a terminal send while a steer result remains unknown', async () => {
+    const f = await fixture()
+    const first = await f.receive('first')
+    f.native.steer.mockResolvedValueOnce({ state: 'reconciliation-required' } as never)
+    const second = await f.receive('second')
+    expect(second).toMatchObject({ state: 'reconciliation-required', steeredInto: 'turn' })
+    f.setActiveEvent('first')
+    expect(await f.manual(terminal(first.id))).toMatchObject({
+      status: 'rejected',
+      code: 'TERMINAL_STEER_IN_FLIGHT',
+    })
+    const reply = vi.fn(async () => 'sent')
+    await finishChannelJob(
+      {
+        store: f.consumer.profileLogicalOwner().store,
+        native: { completion: async () => ({ state: 'completed', text: 'old final' }) as never },
+        signal: new AbortController().signal,
+        access: () => f.access as never,
+        reply,
+      },
+      first,
+      event('first'),
+    )
+    expect(reply).not.toHaveBeenCalled()
+    expect(f.consumer.profileLogicalOwner().store.snapshot().jobs[first.id]).toMatchObject({
+      state: 'reconciliation-required',
+      code: 'CHANNEL_STEER_FINAL_UNRESOLVED',
+    })
+    expect(f.consumer.profileLogicalOwner().store.snapshot().schemaVersion).toBe(3)
+    const legacyRoot = process.env.CORDISX_TEST_LEGACY_PACKAGE
+    if (legacyRoot) {
+      const legacy = await import(
+        /* @vite-ignore */ pathToFileURL(path.join(legacyRoot, 'dist/src/launcher/channel-conversation-store.js')).href
+      )
+      await expect(legacy.ChannelConversationStore.open(f.file)).rejects.toThrow('INVALID_CONVERSATION_STORE')
+    }
+    await f.reopen()
+    expect(f.consumer.profileLogicalOwner().store.snapshot().jobs[first.id]).toMatchObject({
+      state: 'reconciliation-required',
+      code: 'CHANNEL_STEER_FINAL_UNRESOLVED',
+    })
+    f.native.start.mockResolvedValueOnce({ state: 'running', sessionId: session, turnId: 'turn-2' })
+    const later = await f.receive('third')
+    expect(later).toMatchObject({ state: 'running', turnId: 'turn-2' })
+
+    f.native.steerObserved.mockResolvedValue(true)
+    await f.consumer.profileLogicalOwner().store.mutate(state => {
+      delete state.jobs[second.id]!.steerReadbackAt
+    })
+    await f.settle()
+    f.completion.mockImplementation(async (_sessionId, turnId) =>
+      (turnId === 'turn' ? { state: 'completed', text: 'recovered final' } : { state: 'running' }) as never
+    )
+    await f.settle()
+    await f.settle()
+    expect(f.consumer.profileLogicalOwner().store.snapshot().jobs[first.id]!.state).toBe('completed')
+    expect(f.consumer.profileLogicalOwner().store.snapshot().schemaVersion).toBe(1)
+    expect(f.send.mock.calls.some(([request]) => (request as { text?: string }).text === 'recovered final')).toBe(true)
+  })
+  it('discards automatic final readback if a steer was accepted during the read', async () => {
+    const f = await fixture()
+    const first = await f.receive('first')
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const started = new Promise<void>(resolve => {
+      entered = resolve
+    })
+    const reply = vi.fn(async () => 'sent')
+    const finishing = finishChannelJob(
+      {
+        store: f.consumer.profileLogicalOwner().store,
+        native: {
+          completion: async () => {
+            entered()
+            await gate
+            return { state: 'completed', text: 'stale final' } as never
+          },
+        },
+        signal: new AbortController().signal,
+        access: () => f.access as never,
+        reply,
+      },
+      first,
+      event('first'),
+    )
+    try {
+      await started
+      const second = await f.receive('second')
+      expect(second).toMatchObject({ state: 'running', steeredInto: 'turn' })
+    } finally {
+      release()
+    }
+    await finishing
+    expect(reply).not.toHaveBeenCalled()
+    expect(f.consumer.profileLogicalOwner().store.snapshot().jobs[first.id]!.state).toBe('running')
+    await f.finish()
+    expect(f.send).toHaveBeenCalledTimes(1)
   })
   it('keeps an unknown terminal send fenced across continuation updates and a Host restart', async () => {
     const f = await fixture()
