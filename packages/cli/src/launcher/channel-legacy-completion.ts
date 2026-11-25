@@ -6,18 +6,28 @@ const object = (value: unknown): Record<string, unknown> =>
 
 type Completion = { state: 'completed' | 'failed'; text?: string; code?: string }
 
-/** Only use an unphased answer when the complete turn leaves no commentary ambiguity. */
+/** Keep the legacy unphased fallback distinct from a native final-answer marker. */
 function completionFromItems(items: readonly Record<string, unknown>[], complete: boolean): Completion {
-  const finals = items
-    .filter(item => item.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.text === 'string')
-    .map(item => String(item.text))
-  if (finals.length) return { state: 'completed', text: finals.join('\n') }
+  if (!complete) return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
+  const last = items.at(-1)
+  if (last?.type === 'agentMessage' && last.phase === 'final_answer') {
+    const parts: string[] = []
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index]!
+      if (item.type !== 'agentMessage' || item.phase !== 'final_answer') break
+      if (typeof item.text !== 'string') return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
+      parts.unshift(item.text)
+    }
+    return { state: 'completed', text: parts.join('\n') }
+  }
   const messages = items.filter(item => item.type === 'agentMessage')
   const candidate = messages[0]
   if (
-    complete && messages.length === 1 && candidate !== undefined && candidate === items.at(-1)
+    messages.length === 1 && candidate !== undefined && candidate === items.at(-1)
     && candidate.phase == null && typeof candidate.text === 'string' && candidate.text.trim().length > 0
-  ) return { state: 'completed', text: candidate.text }
+  ) {
+    return { state: 'completed', text: candidate.text }
+  }
   return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
 }
 
@@ -46,7 +56,10 @@ export async function legacyChannelCompletion(
         const full = object(await request('thread/turns/list', { ...params, itemsView: 'full' }))
         const matching = Array.isArray(full.data) && full.data.length === 1 ? object(full.data[0]) : undefined
         // A changed page or turn must not substitute another final answer after metadata lookup.
-        if (matching?.id !== turnId || matching.status !== 'completed' || !Array.isArray(matching.items)) {
+        if (
+          matching?.id !== turnId || matching.status !== 'completed' || matching.itemsView !== 'full'
+          || !Array.isArray(matching.items)
+        ) {
           return { state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' }
         }
         return completionFromItems(matching.items.map(object), true)
@@ -109,9 +122,12 @@ export async function readChannelCompletion(
       items.unshift(object(row.item))
     }
     if (complete) break
-    if (typeof result.nextCursor !== 'string') {
+    if (result.nextCursor === null) {
       complete = true
       break
+    }
+    if (typeof result.nextCursor !== 'string' || !result.nextCursor) {
+      return { state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' }
     }
     if (result.nextCursor === cursor) break
     cursor = result.nextCursor

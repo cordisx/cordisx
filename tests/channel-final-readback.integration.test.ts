@@ -27,6 +27,7 @@ it.each(['sent', 'unknown'])(
     const target = {
       id: 'target',
       status: 'completed',
+      itemsView: 'full',
       items: [
         { type: 'commandExecution', output: 'x'.repeat(55 * 1024) },
         { type: 'agentMessage', phase: 'commentary', text: 'hidden progress' },
