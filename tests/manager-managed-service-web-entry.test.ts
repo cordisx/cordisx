@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createManagerManagedServiceUIBridge } from '../packages/cli/src/cli/manager-managed-service-ui.js'
 import type { ManagerRendererChannelContext } from '../packages/cli/src/cli/manager-renderer-sessions.js'
+import { installIndependentHostBindings } from '../packages/cli/src/independent-manager/host-bindings.js'
 
 const ownerToken = 'owner-private-' + 'a'.repeat(64)
 const consoleOrigin = `http://console-${'a'.repeat(32)}.cordisx-console.localhost:12345`
@@ -271,7 +272,7 @@ describe('standalone Manager managed web entry', () => {
     }
   })
 
-  it('waits for an in-flight issue before an explicit console retirement', async () => {
+  it('returns a cancellation when an in-flight console issue is retired', async () => {
     const f = fixture()
     const context = f.context('1')
     const token = f.bridge.projectInitial(context)[0]!.token
@@ -299,7 +300,7 @@ describe('standalone Manager managed web entry', () => {
         binding,
         request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
       })
-    const issue = f.bridge.channel.prepare(browser('issue'), context).dispatch().then(() => true, () => false)
+    const issue = f.bridge.channel.prepare(browser('issue'), context).dispatch().catch(error => ({ error }))
     let retirement: Promise<unknown> | undefined
     try {
       await vi.waitFor(() => expect(release).toBeDefined())
@@ -312,7 +313,7 @@ describe('standalone Manager managed web entry', () => {
       ).toHaveLength(0)
       release!()
       expect(await retirement).toMatchObject({ ok: true, value: { status: 'unavailable', reason: 'cancelled' } })
-      expect(await issue).toBe(false)
+      expect(await issue).toMatchObject({ ok: true, value: { status: 'unavailable', reason: 'cancelled' } })
       expect(
         f.handle.mock.calls.map(call => JSON.parse(call[0])).filter(call =>
           call.operation === 'consoleBrowser' && call.request.action === 'retire'
@@ -327,6 +328,191 @@ describe('standalone Manager managed web entry', () => {
       f.bridge.dispose()
     }
   })
+
+  it('keeps the Manager available when a console issue is cancelled during navigation', async () => {
+    const f = fixture()
+    const context = f.context('1')
+    const token = f.bridge.projectInitial(context)[0]!.token
+    await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+    let release: (() => void) | undefined
+    f.handle.mockImplementationOnce(async raw => {
+      const input = JSON.parse(raw)
+      return await new Promise(resolve => {
+        release = () =>
+          resolve({
+            requestId: input.requestId,
+            ok: true,
+            value: {
+              status: 'available',
+              binding,
+              serviceGeneration: 'service-1',
+              origin: consoleOrigin,
+              url: consoleOrigin + '/auth/browser?ticket=' + ticket,
+            },
+          })
+      })
+    })
+    const receive = vi.fn()
+    const lost = vi.fn()
+    const fetch = vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body)).payload
+      try {
+        return new Response(JSON.stringify(await f.bridge.channel.prepare(payload, context).dispatch()))
+      } catch {
+        return new Response('{}', { status: 503 })
+      }
+    })
+    const target = { fetch, __cordisxManagedServiceUIReceiveV1: receive } as unknown as Window & Record<string, any>
+    const dispose = installIndependentHostBindings({
+      window: target,
+      sessionToken: 'a'.repeat(64),
+      channels: ['managed-service-ui'],
+      rendererAdmission: Promise.resolve(true),
+      onSessionLost: lost,
+    })
+    const send = (action: 'issue' | 'retire') => {
+      const request = JSON.parse(f.request(token, 'consoleBrowser', {
+        binding,
+        request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+      }))
+      request.requestId = action
+      target.__cordisxManagedServiceUIRequestV1(JSON.stringify(request))
+    }
+    try {
+      send('issue')
+      await vi.waitFor(() => expect(release).toBeDefined())
+      send('retire')
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+      release!()
+      await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(2))
+      expect(receive.mock.calls.map(([payload]) => JSON.parse(payload))).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          requestId: 'issue',
+          ok: true,
+          value: { status: 'unavailable', reason: 'cancelled' },
+        }),
+        expect.objectContaining({
+          requestId: 'retire',
+          ok: true,
+          value: { status: 'unavailable', reason: 'cancelled' },
+        }),
+      ]))
+      expect(lost).not.toHaveBeenCalled()
+      expect(dispose.canQuiesce()).toBe(true)
+    } finally {
+      release?.()
+      dispose()
+      f.bridge.retire(context)
+      await f.bridge.waitForRetirement(context.rendererId)
+      f.bridge.dispose()
+    }
+  })
+
+  it.each(['lost', 'rejected'])(
+    'does not confirm a superseded console issue when retirement is %s',
+    async mode => {
+      const f = fixture()
+      const context = f.context('1')
+      const token = f.bridge.projectInitial(context)[0]!.token
+      await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+      let release: (() => void) | undefined
+      f.handle.mockImplementationOnce(async raw => {
+        const input = JSON.parse(raw)
+        return await new Promise(resolve => {
+          release = () =>
+            resolve({
+              requestId: input.requestId,
+              ok: true,
+              value: {
+                status: 'available',
+                binding,
+                serviceGeneration: 'service-1',
+                origin: consoleOrigin,
+                url: consoleOrigin + '/auth/browser?ticket=' + ticket,
+              },
+            })
+        })
+      })
+      f.handle.mockImplementationOnce(async raw => {
+        if (mode === 'lost') throw new Error('retirement reply lost')
+        return { requestId: JSON.parse(raw).requestId, ok: false, code: 'owner-unavailable' }
+      })
+      const browser = (action: 'issue' | 'retire') =>
+        f.request(token, 'consoleBrowser', {
+          binding,
+          request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+        })
+      const issue = f.bridge.channel.prepare(browser('issue'), context).dispatch().then(() => true, () => false)
+      let retirement: Promise<boolean> | undefined
+      try {
+        await vi.waitFor(() => expect(release).toBeDefined())
+        retirement = f.bridge.channel.prepare(browser('retire'), context).dispatch().then(() => true, () => false)
+        release!()
+        expect(await retirement).toBe(false)
+        expect(await issue).toBe(false)
+        f.bridge.retire(context)
+        expect(await f.bridge.waitForRetirement(context.rendererId)).toBe(false)
+      } finally {
+        release?.()
+        await retirement
+        await issue
+        f.bridge.dispose()
+      }
+    },
+  )
+
+  it.each(['rejected', 'binding', 'origin'])(
+    'still rejects a %s console issue when its retirement succeeds',
+    async mode => {
+      const f = fixture()
+      const context = f.context('1')
+      const token = f.bridge.projectInitial(context)[0]!.token
+      await f.bridge.channel.prepare(f.request(token, 'get'), context).dispatch()
+      let release: (() => void) | undefined
+      f.handle.mockImplementationOnce(async raw => {
+        const input = JSON.parse(raw)
+        return await new Promise(resolve => {
+          release = () =>
+            resolve(
+              mode === 'rejected'
+                ? { requestId: input.requestId, ok: false, code: 'owner-unavailable' }
+                : {
+                  requestId: input.requestId,
+                  ok: true,
+                  value: {
+                    status: 'available',
+                    binding: mode === 'binding' ? { ...binding, bindingId: 'other-service' } : binding,
+                    serviceGeneration: 'service-1',
+                    origin: mode === 'origin' ? 'http://127.0.0.1:9' : consoleOrigin,
+                    url: consoleOrigin + '/auth/browser?ticket=' + ticket,
+                  },
+                },
+            )
+        })
+      })
+      const browser = (action: 'issue' | 'retire') =>
+        f.request(token, 'consoleBrowser', {
+          binding,
+          request: { action, viewId: 'view-1', serviceGeneration: 'service-1' },
+        })
+      const issue = f.bridge.channel.prepare(browser('issue'), context).dispatch().then(() => true, () => false)
+      let retirement: Promise<boolean> | undefined
+      try {
+        await vi.waitFor(() => expect(release).toBeDefined())
+        retirement = f.bridge.channel.prepare(browser('retire'), context).dispatch().then(() => true, () => false)
+        release!()
+        expect(await retirement).toBe(true)
+        expect(await issue).toBe(false)
+      } finally {
+        release?.()
+        await retirement
+        await issue
+        f.bridge.retire(context)
+        await f.bridge.waitForRetirement(context.rendererId)
+        f.bridge.dispose()
+      }
+    },
+  )
 
   it('waits for cleanup after a rejected console issue when its renderer closes', async () => {
     const f = fixture()

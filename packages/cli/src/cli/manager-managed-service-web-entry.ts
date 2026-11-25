@@ -312,27 +312,34 @@ export class ManagerManagedServiceWebEntry {
       if (this.closed) throw unavailable()
       if (result.ok === false) throw unavailable()
       const value = object(result.value)
-      if (
-        value.status === 'unavailable' && exact(value, ['status', 'reason'])
+      const isUnavailable = value.status === 'unavailable' && exact(value, ['status', 'reason'])
         && typeof value.reason === 'string' && consoleReasons.has(value.reason)
-      ) {
-        if (this.views.get(viewKey) === view) this.views.delete(viewKey)
-        return { requestId: request.requestId, ok: true, value }
+      if (!isUnavailable) {
+        if (
+          !exact(value, ['status', 'binding', 'serviceGeneration', 'origin', 'url'])
+          || value.status !== 'available' || !isDeepStrictEqual(value.binding, entry.parentBinding)
+          || value.serviceGeneration !== entry.owner.serviceGeneration || typeof value.origin !== 'string'
+          || !this.input.consoleOrigins.includes(value.origin)
+          || typeof value.url !== 'string'
+        ) throw unavailable()
+        const url = new URL(value.url)
+        if (
+          url.origin !== value.origin || url.username || url.password || url.hash
+          || [...url.searchParams.keys()].join(',') !== 'ticket'
+          || !/^[A-Za-z0-9_-]{32}$/u.test(url.searchParams.get('ticket') ?? '')
+        ) throw unavailable()
       }
-      if (
-        this.views.get(viewKey) !== view || view.retirement !== undefined
-        || !exact(value, ['status', 'binding', 'serviceGeneration', 'origin', 'url'])
-        || value.status !== 'available' || !isDeepStrictEqual(value.binding, entry.parentBinding)
-        || value.serviceGeneration !== entry.owner.serviceGeneration || typeof value.origin !== 'string'
-        || !this.input.consoleOrigins.includes(value.origin)
-        || typeof value.url !== 'string'
-      ) throw unavailable()
-      const url = new URL(value.url)
-      if (
-        url.origin !== value.origin || url.username || url.password || url.hash
-        || [...url.searchParams.keys()].join(',') !== 'ticket'
-        || !/^[A-Za-z0-9_-]{32}$/u.test(url.searchParams.get('ticket') ?? '')
-      ) throw unavailable()
+      // A superseded issue is safe to cancel only after its owner confirms the
+      // same view's retirement. Still validate the issue's identity and result.
+      if (view.retirement !== undefined) {
+        if (!await this.retireView(view)) throw unavailable()
+        this.input.assertCurrent()
+        if (this.closed) throw unavailable()
+        if (this.views.get(viewKey) === view) this.views.delete(viewKey)
+        return { requestId: request.requestId, ok: true, value: { status: 'unavailable', reason: 'cancelled' } }
+      }
+      if (isUnavailable && this.views.get(viewKey) === view) this.views.delete(viewKey)
+      if (!isUnavailable && this.views.get(viewKey) !== view) throw unavailable()
       return { requestId: request.requestId, ok: true, value }
     } catch (error) {
       finishIssue()
