@@ -1,8 +1,9 @@
 export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   {
     capability: 'thread-history-pagination',
-    implementation: 'unsupported',
-    reason: 'No complete public thread-page operation.',
+    implementation: 'supported',
+    reason:
+      'CLI/RPC thread-history verifies a same-conversation anchor and reads one bounded topic page; read permission is still required.',
   },
   {
     capability: 'platform-message-search',
