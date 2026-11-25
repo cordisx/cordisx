@@ -449,7 +449,8 @@ export class ChannelNativeSessions {
     const record = this.input.execution?.read('local', threadId)
     const effective = record?.effective
     const { provider, model } = channelModelSelectionView(live, metadata, record)
-    const coherentEffective = effective !== undefined && effective.modelProvider === provider
+    const coherentEffective = (record?.application === 'applied' || record?.modelSelection?.status === 'confirmed')
+      && effective !== undefined && effective.modelProvider === provider
       && effective.model === model
     const effort = live?.reasoningEffort ?? metadata.reasoningEffort
       ?? (coherentEffective ? effective?.reasoningEffort : undefined)

@@ -15,6 +15,5 @@ export function channelModelSelectionView(
   const provider = live?.providerId ?? explicit?.providerId
     ?? (confirmed ? effective.modelProvider : metadata.modelProvider)
   const model = live?.model ?? explicit?.model ?? (confirmed ? effective.model : metadata.model)
-    ?? (effective?.modelProvider === undefined || effective.modelProvider === provider ? effective?.model : undefined)
   return { provider, model }
 }

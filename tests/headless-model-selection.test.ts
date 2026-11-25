@@ -16,7 +16,7 @@ it('persists uncertainty before native selection and serializes later choices fo
     release = resolve
   })
   const order: string[] = []
-  const backend = async (_operation: string, value: unknown) => {
+  const backend = async (_operation: string, value: unknown, _beforeEffect?: () => Promise<boolean>) => {
     const model = (value as { model: string }).model
     expect(execution.read('local', 'thread')?.modelSelection).toEqual({ status: 'unknown' })
     order.push(model)
@@ -29,6 +29,10 @@ it('persists uncertainty before native selection and serializes later choices fo
   const request = (model: string) => select('select', { threadId: 'thread', providerId: 'provider', model })
   try {
     await execution.recordModelSelection('thread', { providerId: 'provider', model: 'old' })
+    expect(await select('select', { threadId: 'thread', providerId: 'provider', model: 'blocked' }, async () => false))
+      .toEqual({ status: 'rejected', reason: 'selection-changed' })
+    expect(execution.read('local', 'thread')?.modelSelection)
+      .toEqual({ status: 'confirmed', providerId: 'provider', model: 'old' })
     const first = request('first'), second = request('second')
     await vi.waitFor(() => expect(order).toEqual(['first']))
     release()

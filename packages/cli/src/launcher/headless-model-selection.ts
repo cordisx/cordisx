@@ -25,6 +25,7 @@ export function headlessModelSelection<T extends Handler>(
     try {
       const execution = getExecution()
       if (!execution) return { status: 'rejected', reason: 'native-selection-persistence-unavailable' }
+      if (beforeEffect && !await beforeEffect()) return { status: 'rejected', reason: 'selection-changed' }
       const prior = execution.read('local', thread)?.modelSelection
       try {
         // Persist uncertainty before the native effect so a crash cannot restore stale state.
