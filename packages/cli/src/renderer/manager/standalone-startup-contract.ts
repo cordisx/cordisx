@@ -1,6 +1,6 @@
 import type { ManagerRoute } from './model/routes.js'
 
-export type StandaloneStartupFailure = 'result-unknown' | 'refresh' | undefined
+export type StandaloneStartupFailure = 'result-unknown' | 'refresh' | 'insecure-context' | undefined
 
 /** Host-private handoff from the unprivileged starting surface to the admitted Manager. */
 export interface StandaloneStartupSurface {

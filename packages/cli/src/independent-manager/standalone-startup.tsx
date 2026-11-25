@@ -19,7 +19,7 @@ import {
   type StandaloneStartupWindow,
 } from '../renderer/manager/standalone-startup-contract.js'
 
-type State = 'loading' | 'unavailable' | 'result-unknown' | 'refresh'
+type State = 'loading' | 'unavailable' | 'result-unknown' | 'refresh' | 'insecure-context'
 
 const browsePages = new Set<ManagerBrowseSearchKind>([
   'plugins',
@@ -108,6 +108,10 @@ function StartingManager({ document, state, reportRoute }: {
           ? zh
             ? '连接中断，请刷新页面重试。'
             : 'Connection interrupted. Refresh the page to retry.'
+          : state === 'insecure-context'
+          ? zh
+            ? '浏览器需要安全连接，请使用 HTTPS 或本机地址打开管理页面。'
+            : 'This browser requires a secure connection. Open the Manager over HTTPS or on this device.'
           : zh
           ? 'CordisX 连接不可用，请重新打开管理页面。'
           : 'CordisX connection unavailable. Reopen the Manager.'}

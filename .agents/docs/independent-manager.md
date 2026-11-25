@@ -210,6 +210,9 @@ the wildcard console hostnames. A Manager can use an IP address, but embedded
 consoles currently require DNS names that provide a fresh hostname per view.
 Browsers require a secure context for the Manager's Service Worker, so a
 non-loopback HTTP URL may not work without browser-specific trust configuration.
+When the browser is not in a secure context and does not provide a Service
+Worker, the Manager explains how to use HTTPS or a local address before
+exchanging a one-time entry or recovery grant.
 
 The configured Manager and each console use distinct origins. The Manager's
 `frame-src` permits the configured console origins; the gateway preserves the

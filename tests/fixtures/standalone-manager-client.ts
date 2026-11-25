@@ -37,6 +37,8 @@ export function deferred<T>() {
 
 export function fixture(input: {
   readonly browserOrigin?: string
+  readonly secureContext?: boolean
+  readonly noServiceWorker?: boolean
   readonly invalidSessionAt?: number
   readonly sessionTransportFailuresAt?: readonly number[]
   readonly unauthorizedSessionAt?: number
@@ -74,6 +76,9 @@ export function fixture(input: {
     dom.reconfigure({ url: input.browserOrigin + '/?host=1' + (input.resume ? '' : '#' + entryToken) })
   }
   const win = dom.window
+  if (input.secureContext !== undefined) {
+    Object.defineProperty(win, 'isSecureContext', { value: input.secureContext })
+  }
   if (input.permissionPolicy) Object.defineProperty(win.crypto, 'subtle', { value: webcrypto.subtle })
   if (input.resumeAttemptUnavailable) {
     Object.defineProperty(win.crypto, 'getRandomValues', {
@@ -94,7 +99,7 @@ export function fixture(input: {
   })
   if (input.resume) win.sessionStorage.setItem('cordisx-manager-resume-id', 'e'.repeat(64))
   const serviceWorker = new win.EventTarget()
-  Object.defineProperty(win.navigator, 'serviceWorker', { value: serviceWorker })
+  if (!input.noServiceWorker) Object.defineProperty(win.navigator, 'serviceWorker', { value: serviceWorker })
   const unavailable = vi.fn()
   const registry = { stage: vi.fn(), publish: vi.fn(), retire: vi.fn(), dispose: vi.fn() }
   const runtime = {

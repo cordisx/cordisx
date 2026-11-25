@@ -129,6 +129,28 @@ it('prompts for a refresh when an idle interrupted connection can be recovered',
   }
 })
 
+it.each([
+  ['zh-CN', '浏览器需要安全连接'],
+  ['en', 'This browser requires a secure connection'],
+])('explains an insecure context in %s', async (locale, message) => {
+  const fixture = reactManagerFixture()
+  fixture.document.documentElement.lang = locale
+  let startup: ReturnType<typeof createStandaloneStartup> | undefined
+  try {
+    await act(async () => {
+      startup = createStandaloneStartup(fixture.document)
+      startup.unavailable('insecure-context')
+    })
+    const text = fixture.element('[data-cordisx-manager-startup] p[role=status]').textContent
+    expect(text).toContain(message)
+    expect(text).toContain('HTTPS')
+    expect(fixture.document.querySelector('[data-tab=plugins]')).not.toBeNull()
+  } finally {
+    await act(async () => startup?.dispose())
+    await fixture.dispose()
+  }
+})
+
 it.each(
   [
     {

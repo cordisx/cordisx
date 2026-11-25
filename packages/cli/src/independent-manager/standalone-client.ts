@@ -133,7 +133,7 @@ function verifyInitialGraphs(
  */
 export function startStandaloneManager(input: {
   readonly window: Window
-  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh') => void
+  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh' | 'insecure-context') => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
   readonly importBundle?: (url: string) => Promise<Composition>
@@ -373,7 +373,11 @@ export function startStandaloneManager(input: {
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
-  const fail = (reason?: 'result-unknown', interruptedTransport = false, openUnavailable = false) => {
+  const fail = (
+    reason?: 'result-unknown' | 'insecure-context',
+    interruptedTransport = false,
+    openUnavailable = false,
+  ) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
       || interruptedTransport && removeBindings?.canRecoverAfterTransport() === false
@@ -388,7 +392,9 @@ export function startStandaloneManager(input: {
     if (!notified) {
       notified = true
       try {
-        input.onUnavailable?.(uncertain ? 'result-unknown' : refresh ? 'refresh' : undefined)
+        input.onUnavailable?.(
+          uncertain ? 'result-unknown' : reason === 'insecure-context' ? reason : refresh ? 'refresh' : undefined,
+        )
       } catch { /* presentation cannot keep an invalid session alive */ }
     }
     // An interrupted exchange has not dispatched a new session operation. The
@@ -425,6 +431,12 @@ export function startStandaloneManager(input: {
       const url = new URL(browser.location.href)
       if (!isManagerBrowserOrigin(url.origin) || url.pathname !== '/') {
         throw new Error('manager-origin-invalid')
+      }
+      if (browser.isSecureContext === false && !workerContainer) {
+        // Do not consume a one-time entry or recovery grant in a browser that
+        // cannot install the worker required for authenticated resources.
+        fail('insecure-context')
+        return false
       }
       const entryToken = url.hash.slice(1)
       const isEntry = tokenPattern.test(entryToken)
