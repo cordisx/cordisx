@@ -32,8 +32,21 @@ import { createHeadlessCodexOperations } from '../launcher/headless-codex-operat
 import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
 import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
 import { availableHeadlessModelServices, prepareHeadlessModelServices } from '../launcher/headless-model-services.js'
-import { declarationCatalogEntry, projectModelServicesToCodex } from '../launcher/model-service-projection.js'
+import {
+  declarationCatalogEntry,
+  modelServicesOf,
+  projectModelServicesToCodex,
+} from '../launcher/model-service-projection.js'
 import { modelServiceRuntimeEnvironment } from '../launcher/model-service-runtime.js'
+import type { ManagedServiceNativeActivation } from '../launcher/managed-service-plugin-lifecycle.js'
+import type { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
+import { createHeadlessManagedProviders } from '../launcher/headless-managed-providers.js'
+import { headlessManagedWorkerEnvironment } from '../launcher/headless-managed-worker-environment.js'
+import { prepareHeadlessManagedBaseCatalog } from '../launcher/headless-managed-base-catalog.js'
+import { HeadlessManagedCatalogBindings } from '../launcher/headless-managed-catalog-bindings.js'
+import { codexConfigModelProviders } from '../launcher/codex-config-model-providers.js'
+import { lstat } from 'node:fs/promises'
+import type { ManagedNativeCatalogResolver } from '../providers/codex-app-server.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -66,6 +79,8 @@ export async function startHeadlessService(input: {
   readonly cwd: string
   readonly environment: NodeJS.ProcessEnv
   readonly generation: string
+  readonly nativeActivation?: ManagedServiceNativeActivation
+  readonly managedComposition?: ManagedCatalogComposition
   readonly report: (code: string) => void
 }) {
   const cleanup: (() => Promise<void>)[] = []
@@ -159,6 +174,62 @@ export async function startHeadlessService(input: {
         throw new Error('HEADLESS_MODEL_SERVICE_PROJECTION_FAILED')
       }
     }
+    const fixedReservedProviderIds = [
+      'openai',
+      ...modelServices.services.map(service => service.id),
+      ...[input.environment.CORDISX_HEADLESS_PROVIDER_ID, input.environment.CORDISX_HEADLESS_EXTRA_PROVIDER]
+        .filter((id): id is string => typeof id === 'string'),
+    ]
+    const reservedProviderIds = new Set(fixedReservedProviderIds)
+    const refreshProviderScope = async () => {
+      const nativeConfig = await codexConfigModelProviders(input.codexHome)
+      if (!nativeConfig.sourceAvailable) {
+        const absent = await lstat(path.join(input.codexHome, 'config.toml'))
+          .then(() => false)
+          .catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT')
+        if (!absent) {
+          input.report('HEADLESS_NATIVE_CONFIG_UNAVAILABLE')
+          return false
+        }
+      }
+      reservedProviderIds.clear()
+      for (const id of [...fixedReservedProviderIds, ...nativeConfig.providerIds]) reservedProviderIds.add(id)
+      return true
+    }
+    let resolveManagedCatalog: ManagedNativeCatalogResolver | undefined
+    const managedBindings = input.nativeActivation
+      ? new HeadlessManagedCatalogBindings(path.join(
+        input.homeDir,
+        'apps',
+        input.appId,
+        'profiles',
+        input.profileId,
+        'managed-native-catalog-bindings.json',
+      ))
+      : undefined
+    if (managedBindings) cleanup.push(() => managedBindings.close())
+    const managedProviders = input.nativeActivation && managedBindings
+      ? createHeadlessManagedProviders({
+        activation: input.nativeActivation,
+        ...(input.managedComposition === undefined ? {} : { managed: input.managedComposition }),
+        reservedProviderIds,
+        readThreadCatalog: threadId => managedBindings.read(threadId),
+        recordThreadCatalog: (threadId, binding) => managedBindings.record(threadId, binding),
+        refreshProviderScope,
+        verifyNativeProviderScope: (providerId, cwd) => backend.verifyManagedProviderScope(providerId, cwd),
+        verifyManagedCatalogRevision: async (providerId, revision) => {
+          const candidate = await resolveManagedCatalog?.(providerId)
+          if (!candidate || candidate.status !== 'ready') return false
+          try {
+            return candidate.revision === revision
+          } finally {
+            await candidate.close()
+          }
+        },
+        report: input.report,
+      })
+      : undefined
+    if (managedProviders) cleanup.push(() => managedProviders.close())
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
@@ -223,14 +294,88 @@ export async function startHeadlessService(input: {
     let logicalHistory: ((params: unknown) => Promise<unknown>) | undefined
     let guardNativeSource: ((method: string, params: Readonly<Record<string, unknown>>) => () => void) | undefined
     let guardNativeHandoff: ((method: string, params: Readonly<Record<string, unknown>>) => void) | undefined
+    const declaresManagedProvider = plugins.some(item =>
+      item.enabled && item.manifest && 'startup' in item.manifest
+      && item.manifest.startup.capabilities.some(capability => capability.kind === 'provider')
+    )
+    const managedBase = managedProviders && !reviewCatalog && !catalog
+        && (declaresManagedProvider || (await managedProviders.catalog()).length > 0)
+      ? await prepareHeadlessManagedBaseCatalog({
+        nativeVersion: version.replace(/^codex-cli\s+/u, ''),
+        executable: input.codexExecutable,
+        codexHome: input.codexHome,
+        userHome: input.userHome,
+        environment: backendEnvironment,
+      })
+      : undefined
+    if (managedBase) cleanup.push(managedBase.close)
+    const trustedCatalog = reviewCatalog ?? catalog ?? managedBase
+    let verifiedCatalogBase:
+      | ((catalog: { path: string; bytes: Uint8Array; sha256: string }) => Promise<Uint8Array | undefined>)
+      | undefined
+    const managedCatalog = managedProviders
+      ? async (providerId: string) => {
+        if (!await refreshProviderScope()) {
+          return managedProviders.claimed(providerId)
+            ? { status: 'unavailable' as const, reason: 'native-config-unavailable' }
+            : undefined
+        }
+        if (!managedProviders.claimed(providerId)) return undefined
+        try {
+          const baseBytes = trustedCatalog && await verifiedCatalogBase?.(trustedCatalog)
+          if (!baseBytes) {
+            input.report('HEADLESS_MANAGED_CATALOG_UNAVAILABLE')
+            return { status: 'unavailable' as const, reason: 'native-catalog-unavailable' }
+          }
+          const snapshot = await managedProviders.snapshot(providerId)
+          const asset = '../../assets/launcher/native-managed-startup-catalog.mjs'
+          const { prepareNativeManagedStartupCatalog } = await import(asset) as {
+            prepareNativeManagedStartupCatalog(value: Record<string, unknown>): Promise<
+              | { status: 'ready'; path: string; sha256: string; revision: string; close(): void | Promise<void> }
+              | { status: 'unavailable'; reason: string }
+            >
+          }
+          const result = await prepareNativeManagedStartupCatalog({
+            ...snapshot,
+            nativeVersion: version.replace(/^codex-cli\s+/u, ''),
+            baseBytes,
+          })
+          if (result.status !== 'ready') input.report('HEADLESS_MANAGED_CATALOG_UNAVAILABLE')
+          return result
+        } catch {
+          input.report('HEADLESS_MANAGED_CATALOG_UNAVAILABLE')
+          return { status: 'unavailable' as const, reason: 'native-catalog-unavailable' }
+        }
+      }
+      : undefined
+    resolveManagedCatalog = managedCatalog
     const backend = await startHeadlessCodexBackend({
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
       environment: backendEnvironment,
-      declaredProviders: availableServices.map(service => declarationCatalogEntry(service, 'codex')),
+      declaredProviders: managedProviders
+        ? async () => [
+          ...availableServices.map(service => declarationCatalogEntry(service, 'codex')),
+          ...await managedProviders.catalog(),
+        ]
+        : availableServices.map(service => declarationCatalogEntry(service, 'codex')),
+      ...(managedCatalog === undefined ? {} : {
+        managedCatalog,
+        readThreadCatalog: (threadId: string) => managedBindings!.read(threadId),
+        recordThreadCatalog: (threadId: string, binding: { providerId: string; revision: string }) =>
+          managedBindings!.record(threadId, binding),
+        workerEnvironment: (id: string) =>
+          headlessManagedWorkerEnvironment(
+            { ...backendEnvironment, HOME: input.userHome, CODEX_HOME: input.codexHome },
+            modelServicesOf(homeConfig.providers),
+            id,
+            homeConfig.environmentVariables.map(entry => entry.name),
+          ),
+      }),
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
       ...(reviewCatalog ? { modelCatalogPath: reviewCatalog.path, modelCatalogPreserveProvider: true } : {}),
+      ...(managedBase ? { modelCatalogPath: managedBase.path, modelCatalogPreserveProvider: true } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
       contextObserver,
       onRequest: (method, params, id) =>
@@ -254,8 +399,18 @@ export async function startHeadlessService(input: {
             effectPossible = true
             return next(prepared)
           }
-          const result =
-            await (authority.nativeRequest ? authority.nativeRequest(method, params, guarded) : guarded(params))
+          const withManaged = (prepared: Readonly<Record<string, unknown>>) =>
+            managedProviders
+              ? managedProviders.request(
+                method,
+                prepared,
+                guarded,
+                threadId => backend.nativeRequest('thread/read', { threadId, includeTurns: false }),
+              )
+              : guarded(prepared)
+          const result = await (authority.nativeRequest
+            ? authority.nativeRequest(method, params, withManaged)
+            : withManaged(params))
           settled = true
           return result
         } catch (error) {
@@ -270,8 +425,15 @@ export async function startHeadlessService(input: {
           if (settled) release?.()
         }
       },
-      ...(authority.notification ? { onNotification: authority.notification } : {}),
+      onNotification: (method, params) => {
+        if (method === 'thread/closed' && params && typeof params === 'object' && 'threadId' in params) {
+          const threadId = params.threadId
+          if (typeof threadId === 'string') managedProviders?.forget(threadId)
+        }
+        authority.notification?.(method, params)
+      },
     })
+    verifiedCatalogBase = value => backend.verifiedCatalogBase(value)
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
     const workspace = input.environment.CORDISX_CHANNEL_WORKSPACE

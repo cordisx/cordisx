@@ -1,6 +1,10 @@
 import { headlessConfiguredProviders } from './headless-configured-providers.js'
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from './agent-bridge.js'
-import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/codex-app-server.js'
+import {
+  type CodexAppServerRpc,
+  type ManagedNativeCatalogResolver,
+  startLocalCodexAppServer,
+} from '../providers/codex-app-server.js'
 import { JsonLineRpcError } from '../providers/json-line-rpc.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { channelNativeIdle } from './channel-native-idle.js'
@@ -10,6 +14,9 @@ import { HeadlessContextCapture } from './headless-context-capture.js'
 import { HeadlessSettingsObserver } from './headless-settings-observer.js'
 import { nativeOwnerIdentity } from '../../assets/launcher/native-owner-account.mjs'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { headlessManagedCatalogRequirements } from './headless-managed-base-catalog.js'
 
 /** A native preflight refusal is safe to report; transport failures remain uncertain. */
 function providerSwitchRefused(error: unknown, current: unknown, requested: string): boolean {
@@ -38,7 +45,13 @@ export async function startHeadlessCodexBackend(input: {
   readonly home: string
   readonly timeoutMs?: number
   readonly environment?: NodeJS.ProcessEnv
-  readonly declaredProviders?: readonly NativeModelProviderCatalogEntry[]
+  readonly declaredProviders?:
+    | readonly NativeModelProviderCatalogEntry[]
+    | (() => Promise<readonly NativeModelProviderCatalogEntry[]>)
+  readonly managedCatalog?: ManagedNativeCatalogResolver
+  readonly workerEnvironment?: (providerId: string) => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
+  readonly readThreadCatalog?: (threadId: string) => Promise<{ providerId: string; revision: string } | undefined>
+  readonly recordThreadCatalog?: (threadId: string, binding: { providerId: string; revision: string }) => Promise<void>
   readonly modelCatalogPath?: string
   readonly modelCatalogPreserveProvider?: boolean
   readonly staticCatalog?: {
@@ -74,6 +87,10 @@ export async function startHeadlessCodexBackend(input: {
     experimentalApi: true,
     ...(input.modelCatalogPath ? { modelCatalogPath: input.modelCatalogPath } : {}),
     ...(input.modelCatalogPreserveProvider ? { modelCatalogPreserveProvider: true } : {}),
+    ...(input.managedCatalog ? { managedCatalog: input.managedCatalog } : {}),
+    ...(input.workerEnvironment ? { workerEnvironment: input.workerEnvironment } : {}),
+    ...(input.readThreadCatalog ? { readThreadCatalog: input.readThreadCatalog } : {}),
+    ...(input.recordThreadCatalog ? { recordThreadCatalog: input.recordThreadCatalog } : {}),
   })
   try {
     const catalogReceipt = input.staticCatalog && server.requestWithReceipt
@@ -177,7 +194,7 @@ export async function startHeadlessCodexBackend(input: {
       const configuredProviders = headlessConfiguredProviders(
         input.environment ?? process.env,
         catalog,
-        input.declaredProviders,
+        typeof input.declaredProviders === 'function' ? await input.declaredProviders() : input.declaredProviders,
         defaults.length === 1 ? defaults[0]!.model as string : undefined,
       )
       if (operation === 'list' && configuredProviders) return { providers: configuredProviders }
@@ -255,6 +272,40 @@ export async function startHeadlessCodexBackend(input: {
     return {
       ...(catalogReceipt ? { catalogReceipt } : {}),
       nativeRequest: authority.nativeRequest,
+      async verifyManagedProviderScope(providerId: string, cwd?: string) {
+        try {
+          const result = await server.request<{ config?: Record<string, unknown> }>(
+            'config/read',
+            { cwd: cwd ?? input.codexHome, includeLayers: false },
+          )
+          const providers = result.config?.model_providers
+          return providers !== null && typeof providers === 'object' && !Array.isArray(providers)
+            && !Object.hasOwn(providers, providerId)
+        } catch {
+          return false
+        }
+      },
+      async verifiedCatalogBase(
+        catalog: { readonly path: string; readonly bytes: Uint8Array; readonly sha256: string },
+      ) {
+        try {
+          const config = await server.request<{ config?: Record<string, unknown> }>(
+            'config/read',
+            { cwd: input.codexHome, includeLayers: false },
+          )
+          const requirements = await server.request<{ requirements?: unknown }>('configRequirements/read', {})
+          const bytes = await readFile(catalog.path)
+          if (
+            config.config?.model_catalog_json !== catalog.path
+            || !headlessManagedCatalogRequirements(requirements.requirements)
+            || createHash('sha256').update(bytes).digest('hex') !== catalog.sha256
+            || !bytes.equals(Buffer.from(catalog.bytes))
+          ) return undefined
+          return bytes
+        } catch {
+          return undefined
+        }
+      },
       async nativeOwnerIdentity() {
         try {
           const first = nativeOwnerIdentity(

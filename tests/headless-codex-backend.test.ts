@@ -5,6 +5,71 @@ import { createHeadlessCodexOperations } from '../packages/cli/src/launcher/head
 import { JsonLineRpcError } from '../packages/cli/src/providers/json-line-rpc.js'
 
 describe('headless Codex backend', () => {
+  it('rejects managed provider collisions or unreadable configuration at the requested cwd', async () => {
+    const request = vi.fn(async (_method: string, params: { cwd?: string }) => {
+      if (params.cwd === '/unavailable') throw new Error('unavailable')
+      return { config: { model_providers: params.cwd === '/collision' ? { managed: {} } : {} } }
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => ({ request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      expect(await backend.verifyManagedProviderScope('managed', '/safe')).toBe(true)
+      expect(await backend.verifyManagedProviderScope('managed', '/collision')).toBe(false)
+      expect(await backend.verifyManagedProviderScope('managed', '/unavailable')).toBe(false)
+      expect(request).toHaveBeenCalledWith('config/read', { cwd: '/collision', includeLayers: false })
+    } finally {
+      await backend.close()
+    }
+  })
+  it('re-reads managed provider declarations rather than caching a stale plugin catalog', async () => {
+    let providers = [{
+      providerId: 'fixture',
+      pluginId: 'plugin',
+      models: [{ id: 'first', label: 'First', aliases: [] }],
+    }]
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') {
+        return { data: [{ id: 'builtin', model: 'builtin', hidden: false, isDefault: true }] }
+      }
+      throw new Error('unexpected request')
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      declaredProviders: async () => providers,
+      startServer: async () => ({ request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      expect(await backend.models('list', {})).toMatchObject({
+        providers: [
+          { providerId: 'openai', models: [{ id: 'builtin' }] },
+          { providerId: 'fixture', models: [{ id: 'first' }] },
+        ],
+      })
+      providers = [{
+        providerId: 'fixture',
+        pluginId: 'plugin',
+        models: [{ id: 'second', label: 'Second', aliases: [] }],
+      }]
+      expect(await backend.models('list', {})).toMatchObject({
+        providers: [
+          { providerId: 'openai' },
+          { providerId: 'fixture', models: [{ id: 'second' }] },
+        ],
+      })
+      providers = []
+      expect(await backend.models('list', {})).toMatchObject({ providers: [{ providerId: 'openai' }] })
+    } finally {
+      await backend.close()
+    }
+  })
   it('checks the native owner twice and returns only a digest', async () => {
     let userId = 'user'
     const request = vi.fn(async (method: string) => {

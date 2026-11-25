@@ -33,7 +33,6 @@ export function nativeManagedModelList(options: {
       ids.add(model.id)
       const capabilities = parseModelReasoningCapabilities(model.reasoningCapabilities)
       const defaultEffort = capabilities?.defaultEffort
-        ?? (capabilities?.efforts.length === 1 ? capabilities.efforts[0] : undefined)
       if (!capabilities || !defaultEffort || !capabilities.efforts.includes(defaultEffort)) return undefined
       rows.push({
         id: model.id,

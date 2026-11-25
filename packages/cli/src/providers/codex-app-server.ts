@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
+import type { Readable, Writable } from 'node:stream'
 import type { CliProxyProviderConfig, LocalCodexProviderConfig } from './contracts.js'
 import { JsonLineRpcClient } from './json-line-rpc.js'
 
@@ -15,6 +16,29 @@ export interface CodexAppServerOptions {
   readonly modelCatalogPreserveProvider?: boolean
   /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
   readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
+  /** Optional Host-owned routing; the callback must reject unknown or untrusted catalogs. */
+  readonly managedCatalog?: ManagedNativeCatalogResolver
+  readonly workerEnvironment?: (providerId: string) => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
+  readonly readThreadCatalog?: (threadId: string) => Promise<{ providerId: string; revision: string } | undefined>
+  readonly recordThreadCatalog?: (threadId: string, binding: { providerId: string; revision: string }) => Promise<void>
+}
+
+export type ManagedNativeCatalogResolver = (providerId: string) => Promise<
+  | {
+    readonly status: 'ready'
+    readonly path: string
+    readonly sha256: string
+    readonly revision: string
+    close(): void | Promise<void>
+  }
+  | { readonly status: 'unavailable'; readonly reason: string }
+  | undefined
+>
+
+interface CodexProviderTransport {
+  readonly stdin: Writable
+  readonly stdout: Readable
+  close(): void
 }
 
 export interface CodexAppServerRpc {
@@ -86,11 +110,15 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>
   >()
 
-  constructor(private readonly child: ChildProcessWithoutNullStreams, timeoutMs: number) {
+  constructor(
+    private readonly child: ChildProcessWithoutNullStreams,
+    timeoutMs: number,
+    private readonly transport?: CodexProviderTransport,
+  ) {
     child.stderr.resume()
     this.rpc = new JsonLineRpcClient({
-      input: child.stdout,
-      output: child.stdin,
+      input: transport?.stdout ?? child.stdout,
+      output: transport?.stdin ?? child.stdin,
       timeoutMs,
       onNotification: (method, params) => {
         for (const listener of this.notifications) listener(method, params)
@@ -148,6 +176,7 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     if (this.closed) return
     this.closed = true
     this.rpc.close()
+    this.transport?.close()
     this.notifications.clear()
     this.requests.clear()
     if (this.child.exitCode !== null || this.child.signalCode !== null) return
@@ -172,17 +201,47 @@ export async function startLocalCodexAppServer(
   const environment = options.environment ?? process.env
   await mkdir(config.codexHome, { recursive: true, mode: 0o700 })
   const launch = options.spawnProcess ?? spawn
+  const args = localCodexAppServerArguments(options.modelCatalogPath, options.modelCatalogPreserveProvider)
+  const childEnvironment = { ...environment, CODEX_HOME: config.codexHome }
   const child = launch(
     config.codexExecutable,
-    localCodexAppServerArguments(options.modelCatalogPath, options.modelCatalogPreserveProvider),
+    args,
     {
       cwd: config.codexHome,
-      env: { ...environment, CODEX_HOME: config.codexHome },
+      env: childEnvironment,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     },
   ) as ChildProcessWithoutNullStreams
-  const server = new SpawnedCodexAppServer(child, config.timeoutMs)
+  let transport: CodexProviderTransport | undefined
+  if (options.managedCatalog) {
+    try {
+      const asset = '../../assets/launcher/native-provider-transport.mjs'
+      const { createNativeProviderTransport, managedProviderCatalogProtocol } = await import(asset) as {
+        createNativeProviderTransport(
+          child: ChildProcessWithoutNullStreams,
+          options: Record<string, unknown>,
+        ): CodexProviderTransport
+        managedProviderCatalogProtocol?: number
+      }
+      if (managedProviderCatalogProtocol !== 1) throw new Error('HEADLESS_MANAGED_TRANSPORT_UNAVAILABLE')
+      transport = createNativeProviderTransport(child, {
+        executable: config.codexExecutable,
+        args,
+        env: childEnvironment,
+        cwd: config.codexHome,
+        managedCatalog: options.managedCatalog,
+        onlyManagedRouting: true,
+        ...(options.workerEnvironment === undefined ? {} : { workerEnvironment: options.workerEnvironment }),
+        ...(options.readThreadCatalog === undefined ? {} : { readThreadCatalog: options.readThreadCatalog }),
+        ...(options.recordThreadCatalog === undefined ? {} : { recordThreadCatalog: options.recordThreadCatalog }),
+      })
+    } catch (error) {
+      child.kill('SIGTERM')
+      throw error
+    }
+  }
+  const server = new SpawnedCodexAppServer(child, config.timeoutMs, transport)
   try {
     await server.initialize(options.experimentalApi === true)
     return server
