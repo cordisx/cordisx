@@ -583,6 +583,89 @@ describe('supervisor management commands', () => {
     }
   })
 
+  it.each(['completed', 'failed', 'unconfirmed', 'replaced', 'bad-completion', 'legacy', 'legacy-failed'] as const)(
+    'reports the service cleanup receipt when it is %s',
+    async outcome => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-stop-receipt-'))
+      const paths = supervisorPaths(root, 'codex', 'default')
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
+      const token = 'a'.repeat(64)
+      let stopWork: Promise<void> | undefined
+      let control: Awaited<ReturnType<typeof startSupervisorControlServer>> | undefined
+      try {
+        const state = {
+          schemaVersion: 1 as const,
+          mode: 'service' as const,
+          appId: 'codex',
+          profileId: 'default',
+          phase: 'ready' as const,
+          pid: child.pid!,
+          processStartedAt: (await processStartIdentity(child.pid!))!,
+          instanceToken: token,
+          createdAt: new Date().toISOString(),
+          version: cliVersion.version,
+          effectiveConfig: 'service',
+          ...(outcome.startsWith('legacy') ? {} : { serviceCleanup: 'pending' as const }),
+        }
+        expect(state.processStartedAt).toBeDefined()
+        await writeSupervisorState(paths, state)
+        control = await startSupervisorControlServer({
+          socketPath: paths.socket,
+          token,
+          stop: () => {
+            stopWork = (async () => {
+              try {
+                if (outcome === 'completed') {
+                  await writeSupervisorState(paths, { ...state, phase: 'stopping', serviceCleanup: 'completed' })
+                } else if (outcome === 'bad-completion') {
+                  await writeSupervisorState(paths, { ...state, serviceCleanup: 'completed' })
+                } else if (outcome === 'failed' || outcome === 'legacy-failed') {
+                  await writeSupervisorState(paths, {
+                    ...state,
+                    phase: 'failed',
+                    ...(outcome === 'failed' ? { serviceCleanup: 'failed' as const } : {}),
+                    failure: 'synthetic cleanup failure',
+                    failedAt: new Date().toISOString(),
+                  })
+                } else if (outcome === 'replaced') {
+                  await writeSupervisorState(paths, { ...state, instanceToken: 'b'.repeat(64) })
+                }
+              } finally {
+                child.kill('SIGTERM')
+              }
+            })()
+            void stopWork.catch(() => undefined)
+          },
+        })
+        const output: string[] = []
+        const stopped = runSupervisorCommand(
+          parseCordisXCli(['stop', '--mode', 'service', 'codex', 'default', '--json']),
+          {
+            env: { CORDISX_HOME: root },
+            stdout: line => output.push(line),
+          },
+        )
+        if (outcome === 'completed' || outcome === 'legacy') {
+          await stopped
+          expect(JSON.parse(output[0]!)).toMatchObject({ status: 'stopped' })
+          await expect(readSupervisorState(paths)).resolves.toBeUndefined()
+        } else {
+          await expect(stopped).rejects.toThrow(/service cleanup/i)
+          expect(output).toEqual([])
+          expect(await readSupervisorState(paths)).toMatchObject({
+            instanceToken: outcome === 'replaced' ? 'b'.repeat(64) : token,
+          })
+        }
+        await stopWork
+      } finally {
+        await control?.close()
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+    15_000,
+  )
+
   it('stops only the fenced detached process group for the selected instance', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })

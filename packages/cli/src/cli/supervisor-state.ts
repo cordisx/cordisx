@@ -12,6 +12,8 @@ export interface SupervisorState {
   readonly schemaVersion: 1
   readonly mode?: 'service'
   readonly modelApiUrl?: string
+  /** Service-owner cleanup receipt for this supervisor generation. */
+  readonly serviceCleanup?: 'pending' | 'completed' | 'failed'
   readonly appId: string
   readonly profileId: string
   readonly phase: SupervisorPhase
@@ -133,6 +135,9 @@ function validState(value: unknown): value is SupervisorState {
   return item.schemaVersion === 1
     && (item.mode === undefined || item.mode === 'service')
     && (item.modelApiUrl === undefined || typeof item.modelApiUrl === 'string')
+    && (item.serviceCleanup === undefined || item.mode === 'service'
+        && (item.serviceCleanup === 'pending' || item.serviceCleanup === 'completed'
+          || item.serviceCleanup === 'failed'))
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
     && (item.phase === 'starting' || item.phase === 'ready' || item.phase === 'stopping' || item.phase === 'failed')
@@ -181,13 +186,35 @@ export async function readSupervisorState(paths: SupervisorPaths): Promise<Super
   return result.status === 'valid' ? result.state : undefined
 }
 
+async function removeSupervisorFiles(paths: SupervisorPaths): Promise<void> {
+  await Promise.all([
+    rm(paths.state, { force: true }),
+    rm(paths.socket, { force: true }),
+    rm(paths.bootstrapToken, { force: true }),
+  ])
+}
+
 export async function removeSupervisorState(paths: SupervisorPaths): Promise<void> {
-  await stateTransaction(paths, async () => {
-    await Promise.all([
-      rm(paths.state, { force: true }),
-      rm(paths.socket, { force: true }),
-      rm(paths.bootstrapToken, { force: true }),
-    ])
+  await stateTransaction(paths, async () => await removeSupervisorFiles(paths))
+}
+
+/** Do not erase a replacement owner or a cleanup result changed after inspection. */
+export async function removeSupervisorStateIfCurrent(
+  paths: SupervisorPaths,
+  inspected: SupervisorState,
+): Promise<boolean> {
+  return await stateTransaction(paths, async () => {
+    const current = await readSupervisorState(paths)
+    if (
+      !current || current.instanceToken !== inspected.instanceToken || current.pid !== inspected.pid
+      || current.processStartedAt !== inspected.processStartedAt
+      || current.effectiveConfig !== inspected.effectiveConfig
+      || current.appId !== inspected.appId || current.profileId !== inspected.profileId
+      || current.mode !== inspected.mode
+      || current.phase !== inspected.phase || current.serviceCleanup !== inspected.serviceCleanup
+    ) return false
+    await removeSupervisorFiles(paths)
+    return true
   })
 }
 

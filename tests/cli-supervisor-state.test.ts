@@ -11,6 +11,7 @@ import {
   processStartIdentity,
   readSupervisorState,
   removeSupervisorState,
+  removeSupervisorStateIfCurrent,
   stateFileIsPrivate,
   SupervisorOperationBusyError,
   supervisorPaths,
@@ -63,6 +64,38 @@ describe('transient supervisor state', () => {
       effectiveConfig: 'same',
     })
     expect(await hasMatchingProcess((await readSupervisorState(paths))!)).toBe(false)
+  })
+
+  it('removes only the inspected service cleanup receipt and generation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-supervisor-cleanup-state-'))
+    const paths = supervisorPaths(root, 'codex', 'work')
+    const state = {
+      schemaVersion: 1 as const,
+      mode: 'service' as const,
+      appId: 'codex',
+      profileId: 'work',
+      phase: 'stopping' as const,
+      serviceCleanup: 'completed' as const,
+      pid: process.pid,
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      instanceToken: 'a'.repeat(64),
+      createdAt: new Date().toISOString(),
+      version: 'test',
+      effectiveConfig: 'service',
+    }
+    try {
+      await writeSupervisorState(paths, { ...state, instanceToken: 'b'.repeat(64) })
+      expect(await removeSupervisorStateIfCurrent(paths, state)).toBe(false)
+      expect(await readSupervisorState(paths)).toMatchObject({ instanceToken: 'b'.repeat(64) })
+      await writeSupervisorState(paths, { ...state, phase: 'failed', serviceCleanup: 'failed' })
+      expect(await removeSupervisorStateIfCurrent(paths, state)).toBe(false)
+      expect(await readSupervisorState(paths)).toMatchObject({ serviceCleanup: 'failed' })
+      await writeSupervisorState(paths, state)
+      expect(await removeSupervisorStateIfCurrent(paths, state)).toBe(true)
+      expect(await readSupervisorState(paths)).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('serializes concurrent ownership through an OS lock and keeps the fixed lock paths', async () => {

@@ -1,5 +1,6 @@
 import { diagnostic, type DiagnosticEvent, withDiagnostics } from '../packages/cli/src/diagnostics/context.js'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createSupervisorRuntime, publishReadyAfterInspectorClose } from '../packages/cli/src/cli/supervisor-runtime.js'
@@ -37,7 +38,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('waits for a matching published generation before consuming the bootstrap token', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const token = 'a'.repeat(64)
     const fingerprint = 'current'
@@ -79,7 +80,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('resolves the exposed startup promise with the main-agent handoff', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })
@@ -136,7 +137,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('waits past an older published generation and times out without consuming the token', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })
@@ -164,7 +165,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('leaves the bootstrap token intact when the parent never publishes state', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })
@@ -181,7 +182,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('rejects lifecycle updates after the published generation is replaced', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })
@@ -216,7 +217,7 @@ describe('background supervisor publication handshake', () => {
   })
 
   it('records its own launch failure while the published generation is still current', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })
@@ -260,8 +261,68 @@ describe('background supervisor publication handshake', () => {
     }
   })
 
+  it.each(['completed', 'failed', 'replaced'] as const)(
+    'publishes a generation-bound service cleanup receipt when %s',
+    async outcome => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-cleanup-runtime-'))
+      const paths = supervisorPaths(root, 'codex', 'work')
+      const token = '7'.repeat(64)
+      await mkdir(paths.directory, { recursive: true })
+      await writeFile(paths.bootstrapToken, token, { mode: 0o600 })
+      await writeSupervisorState(paths, {
+        schemaVersion: 1,
+        mode: 'service',
+        appId: 'codex',
+        profileId: 'work',
+        phase: 'starting',
+        pid: process.pid,
+        processStartedAt: (await processStartIdentity(process.pid))!,
+        instanceToken: token,
+        createdAt: new Date().toISOString(),
+        version: 'test',
+        effectiveConfig: 'service',
+      })
+      const runtime = await createSupervisorRuntime({
+        CORDISX_SUPERVISOR_HOME: root,
+        CORDISX_SUPERVISOR_APP: 'codex',
+        CORDISX_SUPERVISOR_PROFILE: 'work',
+        CORDISX_SUPERVISOR_FINGERPRINT: 'service',
+        CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+      }, { platform: 'linux' })
+      try {
+        await runtime.markServiceReady('http://127.0.0.1:12345', new AbortController().signal)
+        const ready = await readSupervisorState(paths)
+        expect(ready).toMatchObject({ phase: 'ready', serviceCleanup: 'pending' })
+        if (outcome === 'replaced') {
+          await writeSupervisorState(paths, { ...ready!, instanceToken: '8'.repeat(64) })
+        }
+        const result = await runtime.markServiceCleanup(
+          outcome === 'failed'
+            ? { ok: false, failure: 'synthetic cleanup failure' }
+            : { ok: true },
+        )
+        expect(result).toBe(outcome !== 'replaced')
+        const final = await readSupervisorState(paths)
+        if (outcome === 'replaced') {
+          expect(final).toMatchObject({ instanceToken: '8'.repeat(64), serviceCleanup: 'pending' })
+        } else {
+          expect(final).toMatchObject({
+            phase: outcome === 'completed' ? 'stopping' : 'failed',
+            serviceCleanup: outcome,
+            ...(outcome === 'failed' ? { failure: 'synthetic cleanup failure' } : {}),
+          })
+          expect(final?.modelApiUrl).toBeUndefined()
+          expect(await runtime.markServiceCleanup({ ok: true })).toBe(false)
+        }
+      } finally {
+        await runtime.close()
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('releases the startup operation when initialization closes before ready', async () => {
-    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const { mkdir } = await import('node:fs/promises')
     await mkdir(paths.directory, { recursive: true })

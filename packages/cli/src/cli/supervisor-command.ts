@@ -19,12 +19,14 @@ import {
   readSupervisorState,
   readSupervisorStateResult,
   removeSupervisorState,
+  removeSupervisorStateIfCurrent,
   SupervisorOperationBusyError,
   supervisorPaths,
   updateSupervisorState,
   writeSupervisorState,
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
+import { assertServiceCleanupReceipt } from './service-cleanup-receipt.js'
 import { supervisorEntryArgs } from './supervisor-entry.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { preflightShortcut } from '../shortcuts/create.js'
@@ -679,13 +681,24 @@ async function runSelectedSupervisorCommand(
       }
     }
     if (invocation.action === 'stop' || invocation.action === 'restart') {
+      let stateRemoved = false
       if (state !== undefined) {
         // Ask a ready supervisor to close normally, then fence any remaining
         // launcher-owned helpers through the detached group.
         const requested = await requestSupervisorStop(paths.socket, state.instanceToken)
         if (requested ? !(await waitForOwnedShutdown(state)) : true) await terminateOwnedGroups(state)
+        if (state.mode === 'service') {
+          const latest = await readMutableSupervisorState(paths)
+          assertServiceCleanupReceipt(state, latest)
+          if (latest !== undefined) {
+            if (!await removeSupervisorStateIfCurrent(paths, latest)) {
+              throw new Error('CordisX service cleanup could not be confirmed because the owner changed')
+            }
+            stateRemoved = true
+          }
+        }
       }
-      await removeSupervisorState(paths)
+      if (!stateRemoved) await removeSupervisorState(paths)
       state = undefined
       if (invocation.action === 'stop') {
         output(runtime, { app: target.appId, profile: target.selection.profileId, status: 'stopped' }, json)

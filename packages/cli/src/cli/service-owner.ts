@@ -80,6 +80,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererPermissionProof: ManagerPermissionProofAuthority | undefined
       let rendererPermissionConsumers: ServiceOwnerPermissionConsumers | undefined
       let ownerOpen = true
+      let serviceReady = false
       let failure: unknown
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
@@ -401,10 +402,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           codex,
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
+        serviceReady = true
         diagnostic({ event: 'service-ready' })
         await waitForAbort(lifetime.signal)
       } catch (error) {
-        if (!lifetime.signal.aborted) failure = error
+        if (!lifetime.signal.aborted) failure = error ?? new Error('service owner failed')
       } finally {
         ownerOpen = false
         lifetime.signal.removeEventListener('abort', stopServices)
@@ -436,12 +438,25 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           try {
             await close()
           } catch (error) {
-            failure ??= error
+            failure ??= error ?? new Error('service cleanup failed')
           }
+        }
+        let cleanupRecorded = false
+        if (serviceReady) {
+          try {
+            cleanupRecorded = await supervisor.markServiceCleanup(
+              failure === undefined
+                ? { ok: true }
+                : { ok: false, failure: safeDiagnosticMessage(failure) },
+            )
+          } catch (error) {
+            failure ??= error ?? new Error('service cleanup receipt unavailable')
+          }
+          if (!cleanupRecorded) failure ??= new Error('service cleanup receipt unavailable')
         }
         if (failure !== undefined) {
           diagnostic({ event: 'service-failed', ...diagnosticError(failure) })
-          await supervisor.markFailed(safeDiagnosticMessage(failure)).catch(() => undefined)
+          if (!cleanupRecorded) await supervisor.markFailed(safeDiagnosticMessage(failure)).catch(() => undefined)
         }
         await supervisor.close()
       }

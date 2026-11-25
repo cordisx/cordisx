@@ -104,6 +104,9 @@ export async function createSupervisorRuntime(
     signal?: AbortSignal,
   ) => Promise<void>
   readonly markServiceReady: (modelApiUrl: string, signal: AbortSignal) => Promise<void>
+  readonly markServiceCleanup: (
+    outcome: { readonly ok: true } | { readonly ok: false; readonly failure: string },
+  ) => Promise<boolean>
   readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>, debugPort?: number) => Promise<boolean>
   /** Record why this generation is exiting while its published record is still current. */
   readonly markFailed: (failure: string) => Promise<void>
@@ -402,11 +405,38 @@ export async function createSupervisorRuntime(
           paths,
           owner,
           latest =>
-            latest.phase === 'starting' && !signal.aborted ? { ...latest, phase: 'ready', modelApiUrl } : undefined,
+            latest.phase === 'starting' && !signal.aborted
+              ? { ...latest, phase: 'ready', modelApiUrl, serviceCleanup: 'pending' }
+              : undefined,
         )
       ) throw new Error('Service supervisor is no longer starting')
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
+    },
+    async markServiceCleanup(outcome): Promise<boolean> {
+      if (!home || !app || !profile || !supervisorToken) return false
+      const paths = supervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (
+        !owner || owner.mode !== 'service' || owner.pid !== process.pid
+        || owner.instanceToken !== supervisorToken || owner.effectiveConfig !== fingerprint
+      ) return false
+      return await updateSupervisorState(paths, owner, latest => {
+        if (latest.mode !== 'service' || latest.serviceCleanup !== 'pending') return undefined
+        const { modelApiUrl: _modelApiUrl, ...withoutEndpoint } = latest
+        if (outcome.ok) {
+          if (latest.phase !== 'ready') return undefined
+          return { ...withoutEndpoint, phase: 'stopping', serviceCleanup: 'completed' }
+        }
+        if (latest.phase === 'failed') return { ...withoutEndpoint, serviceCleanup: 'failed' }
+        return {
+          ...withoutEndpoint,
+          phase: 'failed',
+          serviceCleanup: 'failed',
+          failure: outcome.failure,
+          failedAt: new Date().toISOString(),
+        }
+      })
     },
     async markFailed(failure): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
