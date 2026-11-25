@@ -31,6 +31,7 @@ import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { channelJobBlocks, reconcileChannelJob, steerChannelQueued } from './channel-conversation-steer.js'
+import { sameChannelPrincipal } from './channel-source-principal.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
@@ -400,6 +401,18 @@ export class ChannelConversationConsumer {
       if (job.state !== 'running' || job.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
       const record = state.inputs[job.recordId]
       if (!record) throw new Error('REPLY_OPERATION_NOT_FOUND')
+      if (job.steeredInto) {
+        const parent = job.steerParent && state.jobs[job.steerParent]
+        const original = parent && state.inputs[parent.recordId]
+        if (
+          !parent || !original || parent.steeredInto || parent.sessionId !== job.sessionId
+          || parent.bindingId !== job.bindingId || parent.turnId !== job.turnId || job.steeredInto !== job.turnId
+          || !sameChannelPrincipal(original.input.source.event, record.input.source.event)
+        ) throw new Error('REPLY_OPERATION_NOT_FOUND')
+        if (parent.state !== 'running' || parent.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
+        if (mode === 'none') parent.replyMode = 'none'
+        else if (parent.replyMode === 'none') throw new Error('REPLY_MODE_CHANGE_REQUIRES_OWNER')
+      }
       if (mode !== 'none') channelReplyTarget(record.input.source.event, mode)
       job.replyMode = mode
       return { operationId, mode, sendsMessage: false }
