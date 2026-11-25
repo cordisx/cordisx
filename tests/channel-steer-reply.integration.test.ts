@@ -222,6 +222,10 @@ describe('steered replies with a real outbox', () => {
     const f = await fixture()
     const parent = await f.receive('first')
     const child = await f.receive('second')
+    expect(await f.tools.call('reply-mode', { operationId: child.id, mode: 'reply' }, metadata)).toMatchObject({
+      status: 'rejected',
+      code: 'REPLY_MODE_CHANGE_REQUIRES_OWNER',
+    })
     expect(await f.tools.call('reply-mode', { operationId: child.id, mode: 'none' }, metadata)).toMatchObject({
       status: 'ok',
     })

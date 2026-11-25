@@ -410,8 +410,9 @@ export class ChannelConversationConsumer {
           || !sameChannelPrincipal(original.input.source.event, record.input.source.event)
         ) throw new Error('REPLY_OPERATION_NOT_FOUND')
         if (parent.state !== 'running' || parent.replyTarget !== undefined) throw new Error('REPLY_ALREADY_RESERVED')
-        if (mode === 'none') parent.replyMode = 'none'
-        else if (parent.replyMode === 'none') throw new Error('REPLY_MODE_CHANGE_REQUIRES_OWNER')
+        // Other routes are anchored to an incoming message, so only the owner can choose them.
+        if (mode !== 'none') throw new Error('REPLY_MODE_CHANGE_REQUIRES_OWNER')
+        parent.replyMode = 'none'
       }
       if (mode !== 'none') channelReplyTarget(record.input.source.event, mode)
       job.replyMode = mode
