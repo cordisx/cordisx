@@ -4,18 +4,48 @@ import path from 'node:path'
 import type { ChannelForwardReceiptV1, ChannelForwardRequestV1 } from '@cordisx/protocol/channel-forward/v1'
 import { validateForwardEntry } from './channel-forward-validation.js'
 
-type Entry = { request: ChannelForwardRequestV1; receipt: ChannelForwardReceiptV1 }
+export interface ChannelForwardLedgerCodec<Request, Receipt> {
+  validate(value: unknown): { request: Request; receipt: Receipt }
+  pending(request: Request): Receipt
+  unknown(request: Request, code: string): Receipt
+}
+const defaultCodec: ChannelForwardLedgerCodec<ChannelForwardRequestV1, ChannelForwardReceiptV1> = {
+  validate: validateForwardEntry,
+  pending: request => ({
+    contract: 'cordisx.channel-forward-receipt/v1',
+    schemaVersion: 1,
+    operationId: request.operationId,
+    operation: request.operation,
+    state: 'sending',
+  }),
+  unknown: (request, code) => ({
+    contract: 'cordisx.channel-forward-receipt/v1',
+    schemaVersion: 1,
+    operationId: request.operationId,
+    operation: request.operation,
+    state: 'unknown',
+    code,
+  }),
+}
+type Entry<Request, Receipt> = { request: Request; receipt: Receipt }
 
-export class ChannelForwardStore {
+export class ChannelForwardStore<
+  Request extends { readonly operationId: string } = ChannelForwardRequestV1,
+  Receipt extends { readonly operationId: string; readonly state: string } = ChannelForwardReceiptV1,
+> {
   private queue: Promise<unknown> = Promise.resolve()
-  constructor(private readonly filename: string) {}
+  constructor(
+    private readonly filename: string,
+    private readonly codec: ChannelForwardLedgerCodec<Request, Receipt> =
+      defaultCodec as unknown as ChannelForwardLedgerCodec<Request, Receipt>,
+  ) {}
 
   async run(
     scope: string,
-    request: ChannelForwardRequestV1,
-    perform: (request: ChannelForwardRequestV1) => Promise<ChannelForwardReceiptV1>,
+    request: Request,
+    perform: (request: Request) => Promise<Receipt>,
     readOnly = false,
-  ): Promise<ChannelForwardReceiptV1 | undefined> {
+  ): Promise<Receipt | undefined> {
     const operation = this.queue.then(async () => {
       await mkdir(path.dirname(this.filename), { recursive: true })
       const lock = `${this.filename}.lock`
@@ -26,16 +56,16 @@ export class ChannelForwardStore {
         throw error
       }
       try {
-        let entries: Record<string, Entry>
+        let entries: Record<string, Entry<Request, Receipt>>
         try {
-          entries = JSON.parse(await readFile(this.filename, 'utf8')) as Record<string, Entry>
+          entries = JSON.parse(await readFile(this.filename, 'utf8')) as Record<string, Entry<Request, Receipt>>
           if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
             throw new Error('FORWARD_STORE_INVALID')
           }
           if (Object.keys(entries).length > 10000) throw new Error('FORWARD_STORE_INVALID')
           for (const [key, entry] of Object.entries(entries)) {
             if (!/^[a-f0-9]{64}$/u.test(key)) throw new Error('FORWARD_STORE_INVALID')
-            validateForwardEntry(entry)
+            this.codec.validate(entry)
           }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -46,41 +76,28 @@ export class ChannelForwardStore {
         if (prior) {
           if (JSON.stringify(prior.request) !== JSON.stringify(request)) throw new Error('FORWARD_OPERATION_CONFLICT')
           if (prior.receipt.state !== 'sending') return prior.receipt
-          prior.receipt = {
-            contract: 'cordisx.channel-forward-receipt/v1',
-            schemaVersion: 1,
-            operationId: request.operationId,
-            operation: request.operation,
-            state: 'unknown',
-            code: 'FORWARD_INTERRUPTED',
-          }
+          prior.receipt = this.codec.unknown(request, 'FORWARD_INTERRUPTED')
           await this.save(entries)
           return prior.receipt
         }
         if (readOnly) return undefined
         if (Object.keys(entries).length >= 10000) throw new Error('FORWARD_LEDGER_FULL')
-        const pending: ChannelForwardReceiptV1 = {
-          contract: 'cordisx.channel-forward-receipt/v1',
-          schemaVersion: 1,
-          operationId: request.operationId,
-          operation: request.operation,
-          state: 'sending',
-        }
+        const pending = this.codec.pending(request)
         entries[identity] = { request, receipt: pending }
-        validateForwardEntry(entries[identity])
+        this.codec.validate(entries[identity])
         await this.save(entries)
         const uuid = createHash('sha256').update(identity).digest('hex').slice(0, 32)
-        let receipt: ChannelForwardReceiptV1
+        let receipt: Receipt
         try {
           receipt = { ...await perform({ ...request, operationId: uuid }), operationId: request.operationId }
         } catch {
-          receipt = { ...pending, state: 'unknown', code: 'FORWARD_EFFECT_UNCERTAIN' }
+          receipt = this.codec.unknown(request, 'FORWARD_EFFECT_UNCERTAIN')
         }
         entries[identity] = { request, receipt }
         try {
-          validateForwardEntry(entries[identity])
+          this.codec.validate(entries[identity])
         } catch {
-          receipt = { ...pending, state: 'unknown', code: 'FORWARD_RECEIPT_INVALID' }
+          receipt = this.codec.unknown(request, 'FORWARD_RECEIPT_INVALID')
           entries[identity] = { request, receipt }
         }
         await this.save(entries)
@@ -93,7 +110,7 @@ export class ChannelForwardStore {
     return operation
   }
 
-  private async save(entries: Record<string, Entry>): Promise<void> {
+  private async save(entries: Record<string, Entry<Request, Receipt>>): Promise<void> {
     await mkdir(path.dirname(this.filename), { recursive: true })
     const temporary = `${this.filename}.${randomUUID()}.tmp`
     const file = await open(temporary, 'wx', 0o600)

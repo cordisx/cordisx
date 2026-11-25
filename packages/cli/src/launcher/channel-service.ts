@@ -28,6 +28,7 @@ import {
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { ChannelOutboundRpc } from './channel-outbound-rpc.js'
 import { createChannelForwardService } from './channel-forward-service.js'
+import { createChannelThreadForwardService } from './channel-thread-forward-service.js'
 import { channelOutboundRuntimeOptions } from './channel-outbound-runtime-options.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
@@ -42,6 +43,7 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly threadForward: ReturnType<typeof createChannelThreadForwardService>
   readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
   readonly messageOperations: ChannelMessageOperationLedger
@@ -330,6 +332,15 @@ export function createLocalChannelService(input: {
         // that account unavailable without preventing the rest of CordisX from
         // starting.
         const current: ActiveRuntime = {
+          threadForward: createChannelThreadForwardService({
+            filename: path.join(input.dataDir, 'thread-forward.json'),
+            channel: request => directory.channel(request.source),
+            active: () => !disposed && active === current,
+            supported: request =>
+              configuration.connections.some(connection =>
+                ['feishu', 'lark'].includes(connection.adapterKind) && key(connection.ref) === key(request.source)
+              ),
+          }),
           forward: createChannelForwardService({
             filename: path.join(input.dataDir, 'forward.json'),
             channel: request => directory.channel(request.source),
@@ -582,6 +593,7 @@ export function createLocalChannelService(input: {
         runtime: current.runtime,
         outbound: current.outbound,
         forward: current.forward,
+        threadForward: current.threadForward,
         messageOperations: (operation, request, context) =>
           channelMessageOperationsRpc(operation, request, {
             ...context,
