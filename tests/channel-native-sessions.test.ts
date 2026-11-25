@@ -501,6 +501,7 @@ describe('Channel native task delivery', () => {
             status: 'completed',
             ...(params.itemsView === 'full'
               ? {
+                itemsView: 'full',
                 items: [
                   { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
                   { type: 'agentMessage', phase: 'final_answer', text: 'correct' },

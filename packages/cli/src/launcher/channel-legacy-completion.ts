@@ -8,14 +8,15 @@ type Completion = { state: 'completed' | 'failed'; text?: string; code?: string;
 
 /** Keep the legacy unphased fallback distinct from a native final-answer marker. */
 function completionFromItems(items: readonly Record<string, unknown>[], complete: boolean): Completion {
-  const finals = items
-    .filter(item => item.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.text === 'string')
-    .map(item => String(item.text))
-  if (finals.length) return { state: 'completed', text: finals.join('\n') }
+  if (!complete) return { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
+  const last = items.at(-1)
+  if (last?.type === 'agentMessage' && last.phase === 'final_answer' && typeof last.text === 'string') {
+    return { state: 'completed', text: last.text }
+  }
   const messages = items.filter(item => item.type === 'agentMessage')
   const candidate = messages.at(-1)
   if (
-    complete && candidate !== undefined && candidate === items.at(-1)
+    candidate !== undefined && candidate === items.at(-1)
     && candidate.phase == null && typeof candidate.text === 'string' && candidate.text.trim().length > 0
     && messages.every(item => item.phase == null || item.phase === 'commentary')
   ) {
@@ -53,7 +54,10 @@ export async function legacyChannelCompletion(
         const full = object(await request('thread/turns/list', { ...params, itemsView: 'full' }))
         const matching = Array.isArray(full.data) && full.data.length === 1 ? object(full.data[0]) : undefined
         // A changed page or turn must not substitute another final answer after metadata lookup.
-        if (matching?.id !== turnId || matching.status !== 'completed' || !Array.isArray(matching.items)) {
+        if (
+          matching?.id !== turnId || matching.status !== 'completed' || matching.itemsView !== 'full'
+          || !Array.isArray(matching.items)
+        ) {
           return { state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' }
         }
         return completionFromItems(matching.items.map(object), true)
