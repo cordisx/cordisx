@@ -46,6 +46,9 @@ export function fixture(input: {
   readonly graphs?: readonly unknown[]
   readonly configuredGraphs?: readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
   readonly exchangeGate?: Promise<void>
+  readonly entryTransportFailures?: number
+  readonly entryUnauthorized?: boolean
+  readonly entryMalformed?: boolean
   readonly openFailure?: { readonly status: number; readonly body: unknown }
   readonly bootstrapGate?: Promise<void>
   readonly importGate?: Promise<void>
@@ -119,6 +122,7 @@ export function fixture(input: {
   let checks = 0
   let polls = 0
   let resumes = 0
+  let entryTransportFailures = input.entryTransportFailures ?? 0
   let resumeTransportFailures = input.resumeTransportFailures ?? 0
   let rejectPoll: ((error: Error) => void) | undefined
   let resolvePoll: ((response: Response) => void) | undefined
@@ -126,6 +130,12 @@ export function fixture(input: {
   let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
     if (path === '/api/session') {
+      if (entryTransportFailures > 0) {
+        entryTransportFailures--
+        return Promise.reject(new Error('interrupted entry exchange'))
+      }
+      if (input.entryUnauthorized) return Promise.resolve(new Response('{}', { status: 401 }))
+      if (input.entryMalformed) return Promise.resolve(new Response('{}'))
       const result = response({ token: sessionToken, ...(input.issueResume ? { resumeId: 'f'.repeat(64) } : {}) })
       return input.exchangeGate
         ? Promise.race([input.exchangeGate.then(() => result), abortResponse(options.signal!)])

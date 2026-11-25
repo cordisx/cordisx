@@ -31,6 +31,7 @@ const resumeAttemptStorageKey = 'cordisx-manager-resume-attempt'
 const entryStorageKey = 'cordisx-manager-entry-attempt'
 
 class ManagerSessionTransportError extends Error {}
+class ManagerEntryTransportError extends Error {}
 class ManagerResumeTransportError extends Error {}
 class ManagerOpenUnavailableError extends Error {}
 
@@ -184,6 +185,9 @@ export function startStandaloneManager(input: {
           if (path === '/api/renderer/session') {
             throw new ManagerSessionTransportError('manager-session-transport', { cause: error })
           }
+          if (path === '/api/session') {
+            throw new ManagerEntryTransportError('manager-entry-transport', { cause: error })
+          }
           if (path.startsWith('/api/session/resume/')) {
             throw new ManagerResumeTransportError('manager-resume-transport', { cause: error })
           }
@@ -289,6 +293,19 @@ export function startStandaloneManager(input: {
     } catch { /* storage may be disabled */ }
     forgetResumeAttempt(resumeId)
     resumeId = undefined
+  }
+  const exchangeEntry = async (token: string, attempt: string | undefined): Promise<Record<string, unknown>> => {
+    const body = { token, resume: true, ...(attempt ? { attempt } : {}) }
+    try {
+      return await post('/api/session', body, undefined, true)
+    } catch (error) {
+      // The owner serializes exchanges for the same attempt and confirms the
+      // prior session is retired before issuing another. Legacy exchanges and
+      // explicit denials cannot be retried safely.
+      if (attempt === undefined || !(error instanceof ManagerEntryTransportError)) throw error
+      await bounded(new Promise(resolve => setTimeout(resolve, 100)), lifetime.signal, 1_000)
+      return await post('/api/session', body, undefined, true)
+    }
   }
   const resumeSession = async (id: string, attempt: string | undefined): Promise<Record<string, unknown>> => {
     let retriedTransport = false
@@ -456,12 +473,7 @@ export function startStandaloneManager(input: {
       const attempt = isEntry ? entryAttempt() : undefined
       const recoveryAttempt = !isEntry && previousResume ? resumeAttempt(previousResume) : undefined
       const exchanged = isEntry
-        ? await post(
-          '/api/session',
-          { token: entryToken, resume: true, ...(attempt ? { attempt } : {}) },
-          undefined,
-          true,
-        )
+        ? await exchangeEntry(entryToken, attempt)
         : entryToken !== '' || previousResume === undefined
         ? undefined
         : await bounded(resumeSession(previousResume, recoveryAttempt), lifetime.signal, resumeMilliseconds)

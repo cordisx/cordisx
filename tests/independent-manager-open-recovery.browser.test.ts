@@ -61,8 +61,8 @@ const fixtureBundle = [
   '}',
 ].join(String.fromCharCode(10))
 
-it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as const)(
-  'recovers a temporarily refused renderer through the Manager session authority: %s',
+it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'entry-transport'] as const)(
+  'recovers an interrupted admission through the Manager session authority: %s',
   async mode => {
     const built = await build({
       entryPoints: ['packages/cli/src/independent-manager/standalone-entry.ts'],
@@ -135,6 +135,10 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as c
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
     try {
+      if (mode === 'entry-transport') {
+        expect(fence.release()).toBe(true)
+        released = true
+      }
       web = await startManagerWeb({
         appId: 'codex',
         profileId: 'work',
@@ -144,7 +148,7 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as c
           const result = await dispatchManagerRendererOperation(authority, operation)
           if (operation.kind === 'manager-renderer' && operation.action === 'open') {
             opens++
-            if (mode !== 'manual' && opens === 1) {
+            if ((mode === 'automatic' || mode === 'unconfirmed') && opens === 1) {
               expect(result).toEqual({ status: 'unavailable' })
               expect(fence.release()).toBe(true)
               released = true
@@ -199,6 +203,24 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as c
       page = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
       await page.send('Runtime.enable')
       await page.send('Page.enable')
+      if (mode === 'entry-transport') {
+        await page.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: `{
+            const original = window.fetch.bind(window)
+            globalThis.__entryAttempts = []
+            window.fetch = async (request, options) => {
+              if (request !== '/api/session') return await original(request, options)
+              globalThis.__entryAttempts.push(JSON.parse(options.body).attempt)
+              const response = await original(request, options)
+              if (globalThis.__entryAttempts.length === 1 && response.ok) {
+                globalThis.__firstEntryToken = (await response.clone().json()).token
+                throw new TypeError('simulated lost entry response')
+              }
+              return response
+            }
+          }`,
+        })
+      }
       await page.send('Page.navigate', { url: target.href })
       if (mode === 'unconfirmed') {
         await vi.waitFor(async () => {
@@ -233,6 +255,19 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed'] as c
         expect(state).toEqual({ ready: true, view: true })
       }, { timeout: mode === 'automatic' ? 8_000 : 30_000 })
       if (mode === 'automatic') expect(opens).toBe(2)
+      if (mode === 'entry-transport') {
+        const state = await page.evaluate<{ attempts: number; same: boolean; oldStatus: number }>(`(async () => ({
+          attempts: globalThis.__entryAttempts.length,
+          same: /^[a-f0-9]{64}$/.test(globalThis.__entryAttempts[0])
+            && globalThis.__entryAttempts[0] === globalThis.__entryAttempts[1],
+          oldStatus: (await fetch('/api/renderer/session', {
+            method: 'POST', headers: { 'content-type': 'application/json',
+              authorization: 'Bearer ' + globalThis.__firstEntryToken }, body: '{}'
+          })).status
+        }))()`)
+        expect(state).toEqual({ attempts: 2, same: true, oldStatus: 401 })
+        expect(opens).toBe(1)
+      }
     } finally {
       if (!released) fence.release()
       const failures: unknown[] = []
