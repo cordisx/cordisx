@@ -33,6 +33,11 @@ export interface ChannelConversationAccess {
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
+  messageSearch?(
+    ref: ChannelTenantRef,
+    request: import('./channel-message-search.js').ChannelMessageSearchRequest,
+    authorize: () => void,
+  ): Promise<unknown>
   threadHistory?(
     ref: ChannelTenantRef,
     request: import('./channel-thread-history.js').ChannelThreadHistoryRequest,

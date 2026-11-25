@@ -196,6 +196,7 @@ or protocol sources. Availability depends on the installed CordisX version.
 
 - [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.
 - [Independent Channel forwarding](channel-forward.md): single/merge operation choice, source/target permissions, platform restrictions and durable receipts.
+- [Scoped remote message search](channel-message-search.md): exact conversation/time filters, authoritative hit verification, bounded pagination, and read authorization.
 - [Channel media and reactions](channel-media-reactions.md): model capability boundaries, bot-owned reaction CLI, completion mapping and event context.
 - [Channel message operations](channel-message-operations.md): scoped lifecycle writes, read-user/reaction pages, restricted card updates and operation discovery.
 - [Channel memory proposal](channel-memory-design.md): scoped directory-backed memory design, partial local CLI implementation and remaining authority gates.
