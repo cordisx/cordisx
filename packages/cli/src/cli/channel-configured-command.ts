@@ -15,6 +15,8 @@ const OPERATIONS = [
   'forward',
   'merge-forward',
   'forward-receipt',
+  'thread-forward',
+  'thread-forward-receipt',
   'memory',
   'memory-authority-set',
   'memory-persona-profile',

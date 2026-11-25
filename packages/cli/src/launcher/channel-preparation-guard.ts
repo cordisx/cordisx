@@ -1,5 +1,6 @@
 /** During preparation, only read-only Channel operations and the fenced ready signal are admitted. */
 const READ_ONLY = new Set([
+  'thread-forward-receipt',
   'connections',
   'conversations',
   'bind-status',

@@ -1,16 +1,17 @@
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import { type ChannelConversationPolicy, channelPolicyAllows } from './channel-conversation-policy.js'
 
-export const CHANNEL_FORWARD_PERMISSION_KEYS = ['forward-read', 'forward', 'merge-forward'] as const
+export const CHANNEL_FORWARD_PERMISSION_KEYS = ['forward-read', 'forward', 'merge-forward', 'thread-forward'] as const
+export type ChannelForwardPolicyOperation = 'read' | 'forward' | 'merge-forward' | 'thread-forward'
 
-export function forwardPermissionKey(operation: 'read' | 'forward' | 'merge-forward') {
+export function forwardPermissionKey(operation: ChannelForwardPolicyOperation) {
   return operation === 'read' ? 'forward-read' : operation
 }
 
 export function authorizeChannelForward(
   policy: ChannelConversationPolicy,
   event: ChannelEventRef,
-  operation: 'read' | 'forward' | 'merge-forward',
+  operation: ChannelForwardPolicyOperation,
 ): void {
   const key = forwardPermissionKey(operation)
   const restricted = {

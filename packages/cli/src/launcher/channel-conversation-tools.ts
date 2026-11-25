@@ -17,8 +17,7 @@ import { questionDeliveryId } from './channel-questions.js'
 import { channelProgressTarget } from './channel-progress-reminders.js'
 import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 import { type ChannelOutboundRpc, outboundCallerScope, parseOutboundTarget } from './channel-outbound-rpc.js'
-import { channelForwardRpc } from './channel-forward-rpc.js'
-import { authorizeChannelForward } from './channel-forward-permissions.js'
+import { authorizedChannelForwardOperation } from './channel-forward-authority.js'
 import { validateChannelTerminalIntent } from '../cli/channel-send-payload.js'
 import { canonicalTaskJson } from '../agent-task-record.js'
 import { reserveChannelTerminalDelivery } from './channel-terminal-delivery.js'
@@ -352,27 +351,18 @@ export class ChannelConversationTools {
         if (!scopedCaller || !this.consumer || Object.keys(input).length) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
         return this.consumer.feedback.inputStatus(scopedCaller.source, scopedCaller.threadId, operation === 'input-ack')
       }
-      if (['forward', 'merge-forward', 'forward-receipt'].includes(operation)) {
-        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
-          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
-        }
+      if (
+        ['forward', 'merge-forward', 'forward-receipt', 'thread-forward', 'thread-forward-receipt'].includes(operation)
+      ) {
         const access = this.access()
-        if (!access) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
-        return await channelForwardRpc({
-          operation,
-          value: input,
-          access,
-          scope: outboundCallerScope({
-            session: callerSession,
-            turnId: scopedCaller?.turnId ?? callerTurnId(metadata),
-            source,
-          }),
-          ...(source ? { source } : {}),
-          authorize: (event, action) => {
-            if (source && this.consumer) {
-              authorizeChannelForward(this.consumer.profileLogicalOwner().store.snapshot().policy, event, action)
-            }
-          },
+        return await authorizedChannelForwardOperation(operation, input, {
+          current: access,
+          consumer: this.consumer,
+          source,
+          nativeCaller,
+          callerSession,
+          turnId: scopedCaller?.turnId ?? callerTurnId(metadata),
+          active: () => !this.lifetime.signal.aborted && this.access()?.generation === access?.generation,
         })
       }
       if (['user-access', 'user-access-set', 'group-block', 'group-block-set'].includes(operation)) {
