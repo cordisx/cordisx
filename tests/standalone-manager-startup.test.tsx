@@ -73,3 +73,19 @@ it('keeps the navigation visible and shows failure inside the Manager without fa
     await fixture.dispose()
   }
 })
+
+it('prompts for a refresh when an idle interrupted connection can be recovered', async () => {
+  const fixture = reactManagerFixture()
+  fixture.document.documentElement.lang = 'zh-CN'
+  let startup: ReturnType<typeof createStandaloneStartup> | undefined
+  try {
+    await act(async () => {
+      startup = createStandaloneStartup(fixture.document)
+      startup.unavailable('refresh')
+    })
+    expect(fixture.element('[data-cordisx-manager-startup] p[role=status]').textContent).toContain('刷新页面重试')
+  } finally {
+    await act(async () => startup?.dispose())
+    await fixture.dispose()
+  }
+})

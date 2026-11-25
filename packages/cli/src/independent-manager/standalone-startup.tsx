@@ -14,7 +14,7 @@ import {
   type StandaloneStartupWindow,
 } from '../renderer/manager/standalone-startup-contract.js'
 
-type State = 'loading' | 'unavailable' | 'result-unknown'
+type State = 'loading' | 'unavailable' | 'result-unknown' | 'refresh'
 
 function startupSnapshot(document: Document): ManagerSnapshot {
   return {
@@ -76,6 +76,10 @@ function StartingManager({ document, state, reportRoute }: {
           ? zh
             ? '操作结果未确认。请重新打开管理页面，核对已保存的配置后再继续。'
             : 'The operation result is unknown. Reopen the Manager and check the saved configuration.'
+          : state === 'refresh'
+          ? zh
+            ? '连接中断，请刷新页面重试。'
+            : 'Connection interrupted. Refresh the page to retry.'
           : zh
           ? 'CordisX 连接不可用，请重新打开管理页面。'
           : 'CordisX connection unavailable. Reopen the Manager.'}
@@ -163,7 +167,7 @@ export function createStandaloneStartup(document: Document): StandaloneStartupSu
       return true
     },
     unavailable: (reason?: StandaloneStartupFailure) => {
-      if (!disposed) render(reason === 'result-unknown' ? 'result-unknown' : 'unavailable')
+      if (!disposed) render(reason ?? 'unavailable')
     },
     dispose: () => {
       if (disposed) return

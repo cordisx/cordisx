@@ -284,6 +284,88 @@ it('preserves refresh authority if navigation aborts an idle poll before pagehid
   }
 })
 
+it('retains same-tab recovery when an idle lifecycle poll loses its connection', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.failPoll()
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('refresh'))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/close')).toBe(true))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({ preserveResume: true })
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBe('f'.repeat(64))
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not preserve a recovery grant when a dispatched migration is still in flight', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, pluginManagement: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    const target = test.win as unknown as Record<string, any>
+    target.__cordisxPluginManagementReceiveV1 = vi.fn()
+    target.__cordisxPluginManagementRequestV1(JSON.stringify({
+      requestId: 'migration',
+      operation: { kind: 'migrate-legacy-sources', input: { sources: [] } },
+    }))
+    await vi.waitFor(() => expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/binding')).toBe(true))
+    test.failPoll()
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith('result-unknown'))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({})
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+    expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/binding')).toHaveLength(1)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not preserve a recovery grant after an explicit lifecycle poll denial', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.denyPoll()
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith(undefined))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({})
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('does not preserve a recovery grant while a lifecycle transaction is reserved', async () => {
+  const test = fixture({ issueResume: true, controlledPoll: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.deliverPoll({
+      id: 'e'.repeat(64),
+      sequence: 2,
+      method: 'prepare',
+      payload: { transactionId: 'transaction-1', transactionEpoch: 'transaction-1:1', expectedRegistryEpoch: 3 },
+    })
+    await vi.waitFor(() =>
+      expect(test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(3)
+    )
+    test.failPoll()
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledExactlyOnceWith(undefined))
+    const close = test.fetch.mock.calls.find(call => call[0] === '/api/renderer/close')!
+    expect(JSON.parse(String(close[1].body))).toEqual({})
+    expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
 it('retains a recovery attempt for an unanswered startup migration without replaying it', async () => {
   const test = fixture({ issueResume: true, controlledPoll: true, holdBindings: true, pluginManagement: true })
   try {

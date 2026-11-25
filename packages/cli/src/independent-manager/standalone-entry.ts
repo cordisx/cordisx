@@ -4,7 +4,7 @@ import { createStandaloneStartup } from './standalone-startup.js'
 // Show Host chrome immediately; the owner still controls every business operation.
 let startup = createStandaloneStartup(document)
 let failed = false
-const unavailable = (reason?: 'result-unknown') => {
+const unavailable = (reason?: 'result-unknown' | 'refresh') => {
   failed = true
   delete document.documentElement.dataset.cordisxManagerReady
   if (startup.disposed) startup = createStandaloneStartup(document)

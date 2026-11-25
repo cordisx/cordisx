@@ -104,6 +104,7 @@ export function installIndependentHostBindings(input: {
 }): (() => void) & {
   canResume(): boolean
   canQuiesce(): boolean
+  canRecoverAfterTransport(): boolean
   hasUncertainWrite(): boolean
 } {
   if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
@@ -297,6 +298,8 @@ export function installIndependentHostBindings(input: {
   return Object.assign(dispose, {
     canResume: () => safe(true),
     canQuiesce: () => safe(false),
+    canRecoverAfterTransport: () =>
+      !closed && !uncertainNavigationWrite && [...pending.values()].every(item => item.readOnly || !item.dispatched),
     hasUncertainWrite: () => uncertainNavigationWrite,
   })
 }

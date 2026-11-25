@@ -268,6 +268,7 @@ export function fixture(input: {
     beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
     pageHide: () => pageHide?.({ isTrusted: true } as PageTransitionEvent),
     failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
+    denyPoll: () => resolvePoll?.(new Response('{}', { status: 401 })),
     failBinding: () => rejectBinding?.(new Error('navigation interrupted the binding')),
     reportResultUnknown: () => reportResultUnknown?.(),
     reportPermissionUnknown: () => reportResultUnknown?.('permission-policy'),

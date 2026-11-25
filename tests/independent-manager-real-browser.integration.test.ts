@@ -347,6 +347,31 @@ it.skipIf(chrome === undefined)(
       second = await CdpClient.connect(await socketFor(created.targetId))
       await second.send('Runtime.enable')
       await ready(second)
+      // A lost idle poll must retire the old renderer and leave this tab able
+      // to request a new one. The second authenticated page remains live.
+      const beforeLostPoll = await first.evaluate<string>(
+        "sessionStorage.getItem('cordisx-manager-resume-id')",
+      )
+      await first.evaluate(`(() => {
+        const send = window.fetch.bind(window)
+        let dropped = false
+        window.fetch = (resource, options) => {
+          if (resource === '/api/renderer/poll' && !dropped) {
+            dropped = true
+            return Promise.reject(new TypeError('controlled lost poll'))
+          }
+          return send(resource, options)
+        }
+      })()`)
+      await vi.waitFor(async () => {
+        expect(await first!.evaluate("document.querySelector('p[role=status]')?.textContent"))
+          .toMatch(/刷新页面重试|Refresh the page to retry/u)
+      }, { timeout: 25_000 })
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).toBe(beforeLostPoll)
+      await first.send('Page.reload')
+      await ready(first)
+      expect(await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")).not.toBe(beforeLostPoll)
+      expect(await second.evaluate('document.documentElement.dataset.cordisxManagerReady')).toBe('true')
       // Inspect only the privacy result, never the response or its private inputs.
       await first.evaluate(`(() => {
         const send = window.fetch.bind(window)

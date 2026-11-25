@@ -131,7 +131,7 @@ function verifyInitialGraphs(
  */
 export function startStandaloneManager(input: {
   readonly window: Window
-  readonly onUnavailable?: (reason?: 'result-unknown') => void
+  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh') => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
   readonly importBundle?: (url: string) => Promise<Composition>
@@ -158,6 +158,7 @@ export function startStandaloneManager(input: {
   let heartbeatRunning = false
   let watchWorker = false
   let notified = false
+  let admissionConfirmed = false
   let resumeId: string | undefined
   let navigating = false
   let navigationTimer: ReturnType<typeof setTimeout> | undefined
@@ -360,18 +361,21 @@ export function startStandaloneManager(input: {
     closing = Promise.allSettled(pending).then(() => undefined)
     return closing
   }
-  const fail = (reason?: 'result-unknown') => {
+  const fail = (reason?: 'result-unknown', interruptedPoll = false) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
+      || interruptedPoll && removeBindings?.canRecoverAfterTransport() === false
+    const refresh = interruptedPoll && !uncertain && admissionConfirmed && resumeId !== undefined
+      && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
     if (!notified) {
       notified = true
       try {
-        input.onUnavailable?.(uncertain ? 'result-unknown' : undefined)
+        input.onUnavailable?.(uncertain ? 'result-unknown' : refresh ? 'refresh' : undefined)
       } catch { /* presentation cannot keep an invalid session alive */ }
     }
     // An interrupted exchange has not dispatched a new session operation. The
     // same tab can retry it; the owner still has to confirm every retirement.
-    void close(sessionToken === undefined && resumeId !== undefined)
+    void close(refresh || sessionToken === undefined && resumeId !== undefined)
   }
   const canPreserveResume = () =>
     resumeId !== undefined
@@ -646,15 +650,16 @@ export function startStandaloneManager(input: {
         window: browser,
         sessionToken: token,
         client: lifecycle,
-        onFailure: () => {
+        onFailure: reason => {
           if (navigating && canPreserveResume()) void close(true)
-          else fail()
+          else fail(undefined, reason === 'poll-transport')
         },
         onQuiesced: fail,
       })
       const admitted = await pump.admitted
       settleRendererAdmission(admitted && !closed)
       if (!admitted || closed) throw new Error('manager-admission-unavailable')
+      admissionConfirmed = true
       return true
     } catch {
       // Navigation can abort a startup request after beforeunload but before

@@ -7,12 +7,14 @@ interface Client {
   close(): Promise<void>
 }
 
+class PollTransportError extends Error {}
+
 /** A failure retires this renderer; the owner decides whether reconciliation is required. */
 export function startManagerRendererLifecyclePump(input: {
   readonly window: Pick<Window, 'fetch'>
   readonly sessionToken: string
   readonly client: Client
-  readonly onFailure?: () => void
+  readonly onFailure?: (reason?: 'poll-transport') => void
   /** Called only after the owner has accepted a successful quiescence receipt. */
   readonly onQuiesced?: () => void
 }): {
@@ -32,12 +34,12 @@ export function startManagerRendererLifecyclePump(input: {
     closing = input.client.close()
     return closing
   }
-  const fail = () => {
+  const fail = (reason?: 'poll-transport') => {
     if (closed) return
     if (!failureReported) {
       failureReported = true
       try {
-        input.onFailure?.()
+        input.onFailure?.(reason)
       } catch { /* one renderer notification cannot keep a broken session alive */ }
     }
     void close()
@@ -50,6 +52,12 @@ export function startManagerRendererLifecyclePump(input: {
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), path === '/api/renderer/poll' ? 25_000 : 20_000)
     try {
+      const transportFailure = (error: unknown): never => {
+        if (!closed && path === '/api/renderer/poll') {
+          throw new PollTransportError('renderer-poll-transport', { cause: error })
+        }
+        throw error
+      }
       const response = await input.window.fetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
@@ -59,10 +67,12 @@ export function startManagerRendererLifecyclePump(input: {
         redirect: 'error',
         referrerPolicy: 'no-referrer',
         signal: AbortSignal.any([controller.signal, timeout.signal]),
-      })
-      if (!response.ok || closed || timeout.signal.aborted) throw new Error('renderer-pump-unavailable')
-      const content = await response.text()
-      if (content.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('renderer-pump-invalid')
+      }).catch(transportFailure)
+      if (!response.ok || closed) throw new Error('renderer-pump-unavailable')
+      if (timeout.signal.aborted) transportFailure(new Error('renderer-pump-timeout'))
+      const content = await response.text().catch(transportFailure)
+      if (content.length > 1_048_576 || closed) throw new Error('renderer-pump-invalid')
+      if (timeout.signal.aborted) transportFailure(new Error('renderer-pump-timeout'))
       const result: unknown = JSON.parse(content)
       if (result === null || typeof result !== 'object' || Array.isArray(result)) {
         throw new Error('renderer-pump-invalid')
@@ -107,8 +117,8 @@ export function startManagerRendererLifecyclePump(input: {
         }
         if (!closed) polling = post('/api/renderer/poll', { timeoutMs: 15_000 })
       }
-    } catch {
-      fail()
+    } catch (error) {
+      fail(error instanceof PollTransportError ? 'poll-transport' : undefined)
     } finally {
       await close()
     }
