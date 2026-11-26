@@ -61,11 +61,13 @@ const consoleServer = createServer((request, response) => {
   }
   const session = (request.headers.cookie ?? '').split('; ').find(value => value.startsWith('__Host-fixture='))
   if (!session || !sessions.has(session.slice('__Host-fixture='.length))) return response.writeHead(401).end()
+  if (url.pathname === '/probe') return response.writeHead(204, { 'cache-control': 'no-store' }).end()
   if (url.pathname !== '/view') return response.writeHead(404).end()
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
     '<!doctype html><script>parent.postMessage("fixture-console-ready", "*");'
       + 'addEventListener("message", event => { if (event.data === "probe") '
-      + 'parent.postMessage("fixture-console-probe", "*") });</script>'
+      + 'fetch("/probe", {cache: "no-store"}).then(response => parent.postMessage('
+      + 'response.ok ? "fixture-console-probe" : "fixture-console-probe-failed", "*")) });</script>'
   )
 })
 await new Promise(resolve => consoleServer.listen(0, '127.0.0.1', resolve))

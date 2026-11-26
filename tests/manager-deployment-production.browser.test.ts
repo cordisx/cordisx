@@ -308,6 +308,20 @@ it.skipIf(chrome === undefined)(
       await ready(second)
       const secondConsole = await consoleReady(second)
       expect(secondConsole).not.toBe(firstConsole)
+      const probeConsole = async (page: CdpClient) => {
+        const probeCount = () =>
+          page.evaluate<number>(
+            'globalThis.__fixtureConsoleSignals?.filter(value => value === "fixture-console-probe").length ?? 0',
+          )
+        const before = await probeCount()
+        await page.evaluate(
+          'document.querySelector("iframe[data-fixture-console]").contentWindow.postMessage("probe", "*")',
+        )
+        await expect.poll(probeCount, { timeout: 15_000 }).toBe(before + 1)
+      }
+      // A later tab must not replace the first view's cached authentication.
+      await probeConsole(first)
+      await probeConsole(second)
       const firstResume = await first.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")
       const secondResume = await second.evaluate("sessionStorage.getItem('cordisx-manager-resume-id')")
       expect(typeof firstResume === 'string' && typeof secondResume === 'string' && firstResume !== secondResume)
@@ -317,14 +331,22 @@ it.skipIf(chrome === undefined)(
       await expect.poll(() => first.evaluate('performance.timeOrigin'), { timeout: 15_000 }).not.toBe(timeOrigin)
       await ready(first)
       expect(await consoleReady(first)).not.toBe(firstConsole)
+      const retiredStatus = await new Promise<number | undefined>((resolve, reject) => {
+        const outgoing = request({
+          hostname: '127.0.0.1',
+          port: ingressPort,
+          path: '/probe',
+          headers: { host: new URL(firstConsole).host },
+        }, response => {
+          response.resume()
+          response.once('end', () => resolve(response.statusCode))
+        })
+        outgoing.once('error', reject).end()
+      })
+      expect(retiredStatus).toBe(421)
       await ready(second)
-      await second.evaluate(
-        'document.querySelector("iframe[data-fixture-console]").contentWindow.postMessage("probe", "*")',
-      )
-      await expect.poll(
-        () => second.evaluate('globalThis.__fixtureConsoleSignals?.includes("fixture-console-probe") ?? false'),
-        { timeout: 15_000 },
-      ).toBe(true)
+      await probeConsole(first)
+      await probeConsole(second)
       expect(JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout).pid)
         .toBe(started.pid)
     } finally {
