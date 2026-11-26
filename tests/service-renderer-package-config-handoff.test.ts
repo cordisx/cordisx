@@ -48,7 +48,7 @@ const proof = {
   },
 }
 
-function fixture() {
+function fixture(privateValue?: string) {
   const makePeer = (id: string) => {
     const peer = {
       identity: { rendererId: id },
@@ -68,10 +68,17 @@ function fixture() {
   const first = makePeer('first')
   const second = makePeer('second')
   const config = { plugins: [] }
-  const before = { config, plugins: [plugin], policies: [], inputs: new Map([['demo', 'old']]) }
+  const original = privateValue === undefined
+    ? plugin
+    : { ...plugin, config: { ...plugin.config, secret: privateValue } }
+  const before = { config, plugins: [original], policies: [], inputs: new Map([['demo', 'old']]) }
   const after = {
     ...before,
-    plugins: [{ ...plugin, revision: 2, config: { label: 'new' } }],
+    plugins: [{
+      ...original,
+      revision: 2,
+      config: { label: 'new', ...(privateValue === undefined ? {} : { secret: privateValue }) },
+    }],
     inputs: new Map([['demo', 'new']]),
   }
   const entries = new Map([first, second].map(peer => [peer.identity.rendererId, {
@@ -111,10 +118,44 @@ function fixture() {
     second,
     entries,
     drainCurrent,
-    apply: () => currentInputs = after,
+    apply: (config?: unknown) =>
+      currentInputs = config === undefined
+        ? after
+        : { ...after, plugins: [{ ...after.plugins[0]!, config }] },
     reserve: async () => await reserveServiceRendererPackageConfig(input as never, origin as never, 'demo'),
   }
 }
+
+it('adopts redacted updates while verifying the private stored value across pages', async () => {
+  const privateValue = 'synthetic-private-value'
+  const f = fixture(privateValue)
+  const privateProof: any = structuredClone(proof)
+  privateProof.plugin.configuration.fields.push({ path: ['secret'], type: 'string', role: 'secret' })
+  privateProof.plugin.configuration.secrets.push({ path: ['secret'], set: false })
+  const handoff = await f.reserve()
+  const confirmation = handoff.prepareRendererConfirmation('request-private', 1, { label: 'new' }, operations)!
+  f.apply()
+  expect(await handoff.adopt({ label: 'new' }, privateProof, true, { label: 'new', secret: privateValue })).toBe(true)
+  expect(await confirmation.confirm()).toBe(true)
+  expect(JSON.stringify(f.first.request.mock.calls)).not.toContain(privateValue)
+  expect(JSON.stringify(f.second.request.mock.calls)).not.toContain(privateValue)
+  expect(f.entries.get('second')?.projectedConfigs.get('demo')).toEqual({ label: 'new' })
+  expect(handoff.cancel()).toBe(true)
+})
+
+it('does not adopt when a private field changes during the write', async () => {
+  const privateValue = 'synthetic-private-value'
+  const f = fixture(privateValue)
+  const privateProof: any = structuredClone(proof)
+  privateProof.plugin.configuration.fields.push({ path: ['secret'], type: 'string', role: 'secret' })
+  privateProof.plugin.configuration.secrets.push({ path: ['secret'], set: false })
+  const handoff = await f.reserve()
+  f.apply({ label: 'new', secret: 'changed-private-value' })
+  expect(await handoff.adopt({ label: 'new' }, privateProof, true, { label: 'new', secret: privateValue })).toBe(false)
+  handoff.fence()
+  expect(f.first.closed).toBe(true)
+  expect(f.second.closed).toBe(true)
+})
 
 it('drains both pages, adopts the authoritative snapshot and waits for each receipt', async () => {
   const f = fixture()

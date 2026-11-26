@@ -1,6 +1,7 @@
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { parseRendererConfigOperation } from '../launcher/renderer-config-management.js'
 import type { DesktopOwnerRendererLifecycle } from './desktop-owner-renderer-lifecycle.js'
+import { projectDesktopManagerConfig } from './desktop-manager-config-projection.js'
 import { DesktopPackageConfigWrite, type DesktopPackageConfigWriteGate } from './desktop-package-config-write.js'
 import { fenceManagerOrigin } from './manager-origin-fence.js'
 import {
@@ -105,10 +106,13 @@ export function createManagerRendererDesktopPackageConfig(input: {
               && attachmentEqual(result.configuration.value, write.expectedValue())
             const rejected = result.status === 'rejected' && write.unchanged()
             if (!applied && !rejected) throw new Error('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')
-            const expected = applied ? write.expectedValue() : handoff.plugin.config
+            const expected = applied
+              ? write.expectedValue()
+              : projectDesktopManagerConfig(handoff.snapshot, handoff.plugin, proof)
+            const expectedStored = applied ? write.expectedStoredValue() : handoff.plugin.config
             const after = await native.proof(operation.pluginId)
             if (
-              !await handoff.adopt(expected, after, applied) || !native.confirm()
+              !await handoff.adopt(expected, after, applied, expectedStored) || !native.confirm()
               || applied && !await confirmation.confirm()
               || !handoff.cancel() || !origin.release()
             ) throw new Error('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')

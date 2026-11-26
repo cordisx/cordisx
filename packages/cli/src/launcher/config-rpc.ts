@@ -146,7 +146,7 @@ export function createConfigBridgeHandler(input: {
     readonly mutate?: (
       request: ConfigBindingRequest,
       seat: object | undefined,
-      action: () => Promise<unknown>,
+      action: (request: ConfigBindingRequest) => Promise<unknown>,
     ) => Promise<unknown>
   }
 }): ConfigBridgeHandler {
@@ -188,15 +188,15 @@ export function createConfigBridgeHandler(input: {
         generation: request.scope.generation,
         ownerToken: input.token,
       }
-      const mutatePackage = async (action: () => Promise<unknown>) =>
-        input.packagePlugins?.mutate ? await input.packagePlugins.mutate(request, seat, action) : await action()
+      const mutatePackage = async (action: (request: ConfigBindingRequest) => Promise<unknown>) =>
+        input.packagePlugins?.mutate ? await input.packagePlugins.mutate(request, seat, action) : await action(request)
       if (request.operation === 'stage') {
         if (packageOwned) {
-          return await mutatePackage(async () =>
+          return await mutatePackage(async storedRequest =>
             await packageConfig!.stage(
               request.identity.pluginId,
               request.expectedRevision!,
-              request.config!,
+              storedRequest.config!,
               input.token,
             )
           )

@@ -88,7 +88,8 @@ function projectedConfig(
   const value = projectDesktopManagerConfig(snapshot, plugin, proof)
   if (plugin.package === undefined) return { value, writable: false, lifecycle: false }
   const descriptor = proof.plugin.configuration
-  const lifecycle = descriptor.applies === 'live' && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
+  const live = descriptor.applies === 'live' && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
+  const lifecycle = live
     && isDeepStrictEqual(
       normalized(plugin.config),
       normalized(removePaths(plugin.config, descriptor.secrets.map(secret => secret.path))),
@@ -96,7 +97,7 @@ function projectedConfig(
   return {
     value,
     lifecycle,
-    writable: descriptor.writable === true && lifecycle
+    writable: descriptor.writable === true && live
       && descriptor.fields.some(field => isWritableDesktopConfigField(field, descriptor.secrets)),
   }
 }

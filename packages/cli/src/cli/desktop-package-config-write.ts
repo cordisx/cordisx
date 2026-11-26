@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import type { JsonValue } from '../config/home-config.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import type { ConfigBindingRequest } from '../launcher/config-rpc.js'
 import type { DesktopManagerConfigProof, RendererConfigOperation } from '../launcher/renderer-config-management.js'
@@ -12,12 +13,12 @@ import type { ServiceRendererSnapshot } from './service-renderer-bootstrap-state
 
 type Mutation = Extract<RendererConfigOperation, { readonly action: 'update' }>
 
-function json(value: unknown): unknown {
+function json(value: unknown): JsonValue {
   const encoded = JSON.stringify(value)
   if (encoded === undefined || Buffer.byteLength(encoded) > 1_048_576) {
     throw new Error('desktop-package-config-unavailable')
   }
-  return JSON.parse(encoded) as unknown
+  return JSON.parse(encoded) as JsonValue
 }
 
 /** One native Desktop configuration transaction, tied to its exact request and seat. */
@@ -33,6 +34,7 @@ export class DesktopPackageConfigWrite {
     | 'failed'
     | 'closed' = 'ready'
   private candidate: unknown
+  private storedCandidate: JsonValue | undefined
   private readonly candidateRevision: number
 
   constructor(
@@ -56,10 +58,9 @@ export class DesktopPackageConfigWrite {
       operation.pluginId !== plugin.id || operation.expectedRevision !== plugin.revision
       || descriptor.writable !== true || descriptor.applies !== 'live'
       || !Array.isArray(operation.operations) || operation.operations.length === 0 || operation.operations.length > 100
-      // A legacy inline secret needs a separate migration before any write.
-      || !isDeepStrictEqual(json(plugin.config), json(removePaths(plugin.config, secretPaths)))
     ) throw new Error('desktop-package-config-unavailable')
     let candidate = projected
+    let storedCandidate: unknown = json(plugin.config)
     for (const operation of input.operation.operations) {
       if (
         operation.op !== 'set' && operation.op !== 'unset'
@@ -74,9 +75,14 @@ export class DesktopPackageConfigWrite {
         || operation.op === 'set' && !isDesktopConfigFieldValue(field, operation.value)
       ) throw new Error('desktop-package-config-unavailable')
       candidate = setAtPath(candidate, operation.path, operation.value, operation.op === 'unset')
+      storedCandidate = setAtPath(storedCandidate, operation.path, operation.value, operation.op === 'unset')
     }
     this.candidate = json(candidate)
+    this.storedCandidate = json(storedCandidate)
     if (Buffer.byteLength(JSON.stringify(this.candidate)) > 192 * 1024) {
+      throw new Error('desktop-package-config-unavailable')
+    }
+    if (!isDeepStrictEqual(json(removePaths(this.storedCandidate, secretPaths)), this.candidate)) {
       throw new Error('desktop-package-config-unavailable')
     }
     this.candidateRevision = operation.expectedRevision + 1
@@ -115,7 +121,15 @@ export class DesktopPackageConfigWrite {
     const pending = stage ? 'staging' : commit ? 'committing' : 'aborting'
     this.phase = pending
     try {
-      const result = await this.input.run(async () => await dispatch(request))
+      // The native renderer only sees the redacted candidate. Restore the
+      // owner-held fields for storage without returning them to the renderer.
+      let storageRequest = request
+      if (stage) {
+        const candidate = this.storedCandidate
+        if (candidate === undefined) throw new Error('desktop-package-config-unavailable')
+        storageRequest = { ...request, config: structuredClone(candidate) }
+      }
+      const result = await this.input.run(async () => await dispatch(storageRequest))
       const record = result !== null && typeof result === 'object' && !Array.isArray(result)
         ? result as Record<string, unknown>
         : undefined
@@ -123,7 +137,8 @@ export class DesktopPackageConfigWrite {
         this.phase !== pending || !this.current(seat, request)
         || stage && record?.candidateRevision !== this.candidateRevision
         || commit
-          && (record?.revision !== this.candidateRevision || !isDeepStrictEqual(json(record.config), this.candidate))
+          && (record?.revision !== this.candidateRevision
+            || !isDeepStrictEqual(json(record.config), this.storedCandidate))
       ) throw new Error('desktop-package-config-result-uncertain')
       this.phase = stage ? 'staged' : commit ? 'committed' : 'aborted'
       return stage
@@ -146,6 +161,12 @@ export class DesktopPackageConfigWrite {
     return structuredClone(this.candidate)
   }
 
+  /** Owner-only value used to confirm the stored revision, including private fields. */
+  expectedStoredValue(): unknown {
+    if (this.phase === 'closed') throw new Error('desktop-package-config-unavailable')
+    return structuredClone(this.storedCandidate)
+  }
+
   unchanged(): boolean {
     return this.phase === 'ready' || this.phase === 'aborted'
   }
@@ -153,6 +174,7 @@ export class DesktopPackageConfigWrite {
   close(): void {
     this.phase = 'closed'
     this.candidate = undefined
+    this.storedCandidate = undefined
   }
 }
 
@@ -179,11 +201,11 @@ export class DesktopPackageConfigWriteGate {
   async handle(
     request: ConfigBindingRequest,
     seat: object | undefined,
-    action: () => Promise<unknown>,
+    action: (request: ConfigBindingRequest) => Promise<unknown>,
   ): Promise<unknown> {
     if (this.closed) throw new Error('desktop-package-config-unavailable')
     const write = this.active
-    return write ? await write.handle(seat, request, async () => await action()) : await action()
+    return write ? await write.handle(seat, request, action) : await action(request)
   }
 
   invalidate(): void {

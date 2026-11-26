@@ -124,7 +124,12 @@ export async function reserveServiceRendererPackageConfig(
       isCurrent: current,
       run: async <T>(action: () => Promise<T>) =>
         await pluginFence.runPackageMutation({ pluginId, isCurrent: current }, action),
-      async adopt(expected: unknown, proof: DesktopManagerConfigProof | undefined, applied: boolean): Promise<boolean> {
+      async adopt(
+        expected: unknown,
+        proof: DesktopManagerConfigProof | undefined,
+        applied: boolean,
+        expectedStored: unknown = expected,
+      ): Promise<boolean> {
         try {
           const after = await input.readInputs(snapshot)
           const target = after.plugins.find(value => value.id === pluginId)
@@ -137,7 +142,7 @@ export async function reserveServiceRendererPackageConfig(
             || target.revision !== (plugin.revision ?? 0) + (applied ? 1 : 0)
             // Package storage uses null-prototype records; compare the JSON
             // value rather than object prototypes after a confirmed commit.
-            || !attachmentEqual(JSON.parse(JSON.stringify(target.config)), JSON.parse(JSON.stringify(expected)))
+            || !attachmentEqual(JSON.parse(JSON.stringify(target.config)), JSON.parse(JSON.stringify(expectedStored)))
             || !attachmentEqual(projectDesktopManagerConfig(snapshot, target, proof), expected)
             || !await hasNoPackageServiceState(input.homeDir, input.profileId, pluginId)
             || !current()

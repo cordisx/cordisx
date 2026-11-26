@@ -14,6 +14,7 @@ export async function stageDesktopConfigFixture(input: {
   generation: string
   store: PackagePluginConfigStore
   writeFixture: boolean
+  retainPrivateForWrite?: boolean
   label: string
   secret: string
 }): Promise<void> {
@@ -63,7 +64,9 @@ export async function stageDesktopConfigFixture(input: {
   const candidate = await input.store.stage(
     pluginId,
     0,
-    input.writeFixture ? { label: input.label } : { label: input.label, token: input.secret },
+    input.writeFixture && !input.retainPrivateForWrite
+      ? { label: input.label }
+      : { label: input.label, token: input.secret },
     'fixture-owner',
   )
   await input.store.commit(pluginId, candidate.candidateRevision, 'fixture-owner')
@@ -277,6 +280,7 @@ export async function expectDesktopConfigApplied(
   revision: number,
   label: string,
   labels?: readonly string[],
+  privateValue?: string,
 ): Promise<void> {
   const deadline = Date.now() + 30_000
   const expected = labels === undefined ? { label } : { label, labels }
@@ -286,7 +290,10 @@ export async function expectDesktopConfigApplied(
       || document.documentElement.dataset.cordisxManagerReady === 'true'`)
     if (!alive) throw new Error('Manager session retired during configuration')
     try {
-      expect(await store.loadStable(pluginId)).toEqual({ revision, config: expected })
+      expect(await store.loadStable(pluginId)).toEqual({
+        revision,
+        config: { ...expected, ...(privateValue === undefined ? {} : { token: privateValue }) },
+      })
       expect(
         await page.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins.find(p => p.id === '${pluginId}')
         ?.configuration.value`),

@@ -133,8 +133,14 @@ it('refuses stale, sensitive, undeclared, disabled and non-live configuration in
   const sensitiveProof = structuredClone(proof)
   sensitiveProof.plugin.configuration.fields.push({ path: ['secret'], type: 'string', role: 'secret' })
   sensitiveProof.plugin.configuration.secrets.push({ path: ['secret'], set: false })
-  expect(() => new DesktopPackageConfigWrite({ ...base, plugin: sensitivePlugin, proof: sensitiveProof }))
-    .toThrow('desktop-package-config-unavailable')
+  expect(() =>
+    new DesktopPackageConfigWrite({
+      ...base,
+      plugin: sensitivePlugin,
+      proof: sensitiveProof,
+      operation: { ...operation, operations: [{ op: 'set', path: ['secret'], value: 'replacement' }] },
+    })
+  ).toThrow('desktop-package-config-unavailable')
   expect(() =>
     new DesktopPackageConfigWrite({
       ...base,
@@ -155,6 +161,124 @@ it('refuses stale, sensitive, undeclared, disabled and non-live configuration in
   const restart = structuredClone(proof)
   restart.plugin.configuration.applies = 'plugin-restart'
   expect(() => new DesktopPackageConfigWrite({ ...base, proof: restart })).toThrow('desktop-package-config-unavailable')
+})
+
+it.skipIf(unsupported)(
+  'preserves an existing private value while committing a proved ordinary field',
+  async () => {
+    const root = await mkdtemp('/tmp/cx-desktop-config-private-')
+    const fence = new SharedProfilePluginConfigFence(path.join(root, 'config.json'), 'work')
+    const store = new PackagePluginConfigStore(root, 'work', 'owner-1')
+    const seat = {}
+    const privateValue = 'synthetic-private-value'
+    const privatePlugin = { ...plugin, config: { label: 'old', secret: privateValue } }
+    const privateProof = structuredClone(proof)
+    privateProof.plugin.configuration.fields.push({ path: ['secret'], type: 'string', role: 'secret' })
+    privateProof.plugin.configuration.secrets.push({ path: ['secret'], set: false })
+    try {
+      const seed = await store.stage('demo', 0, privatePlugin.config, token)
+      await store.commit('demo', seed.candidateRevision, token)
+      const release = await fence.acquire()
+      const write = new DesktopPackageConfigWrite({
+        snapshot,
+        plugin: privatePlugin,
+        proof: privateProof,
+        operation,
+        profileId: 'work',
+        rendererGeneration: 'renderer-1',
+        seat,
+        current: () => true,
+        run: async action => await fence.runPackageMutation({ pluginId: 'demo', isCurrent: () => true }, action),
+      })
+      const dispatch = vi.fn(async (value: ConfigBindingRequest) => {
+        if (value.operation === 'stage') return await store.stage('demo', value.expectedRevision!, value.config!, token)
+        if (value.operation === 'commit') return await store.commit('demo', value.candidateRevision!, token)
+        return await store.abort('demo', value.candidateRevision!, token)
+      })
+      expect(write.expectedValue()).toEqual({ label: 'new' })
+      await expect(write.handle(seat, request({ config: { label: 'new', secret: 'replacement' } }), dispatch))
+        .rejects.toThrow('desktop-package-config-unavailable')
+      expect(dispatch).not.toHaveBeenCalled()
+      expect(await write.handle(seat, request({}), dispatch)).toEqual({ candidateRevision: 2 })
+      expect(dispatch.mock.calls[0]![0].config).toEqual({ label: 'new', secret: privateValue })
+      expect(await write.handle(seat, request({ operation: 'commit', candidateRevision: 2 }), dispatch))
+        .toEqual({ revision: 2 })
+      expect(await store.loadStable('demo')).toEqual({ revision: 2, config: { label: 'new', secret: privateValue } })
+      expect(JSON.stringify(write.expectedValue())).not.toContain(privateValue)
+      write.close()
+      await release()
+    } finally {
+      await fence.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+)
+
+it('fences an unconfirmed commit if private readback differs from the owner-held value', async () => {
+  const seat = {}
+  const privatePlugin = { ...plugin, config: { label: 'old', secret: 'synthetic-private-value' } }
+  const privateProof = structuredClone(proof)
+  privateProof.plugin.configuration.fields.push({ path: ['secret'], type: 'string', role: 'secret' })
+  privateProof.plugin.configuration.secrets.push({ path: ['secret'], set: false })
+  const write = new DesktopPackageConfigWrite({
+    snapshot,
+    plugin: privatePlugin,
+    proof: privateProof,
+    operation,
+    profileId: 'work',
+    rendererGeneration: 'renderer-1',
+    seat,
+    current: () => true,
+    run: async action => await action(),
+  })
+  const dispatch = vi.fn(async (value: ConfigBindingRequest) =>
+    value.operation === 'stage'
+      ? { candidateRevision: 2 }
+      : { revision: 2, config: { label: 'new', secret: 'changed-private-value' } }
+  )
+  expect(await write.handle(seat, request({}), dispatch)).toEqual({ candidateRevision: 2 })
+  await expect(write.handle(seat, request({ operation: 'commit', candidateRevision: 2 }), dispatch))
+    .rejects.toThrow('desktop-package-config-result-uncertain')
+  expect(write.outcome()).toBeUndefined()
+  write.close()
+})
+
+it('preserves a nested private sibling and refuses writes to its parent', () => {
+  const privatePlugin = { ...plugin, config: { auth: { label: 'old', token: 'synthetic-private-value' } } }
+  const privateProof = structuredClone(proof)
+  privateProof.plugin.configuration.value = { auth: { label: 'old' } }
+  privateProof.plugin.configuration.fields = [
+    { path: ['auth', 'label'], type: 'string' },
+    { path: ['auth', 'token'], type: 'string', role: 'secret' },
+    { path: ['auth'], type: 'string' },
+  ]
+  privateProof.plugin.configuration.secrets = [{ path: ['auth', 'token'], set: false }]
+  const base = {
+    snapshot,
+    plugin: privatePlugin,
+    proof: privateProof,
+    profileId: 'work',
+    rendererGeneration: 'renderer-1',
+    seat: {},
+    current: () => true,
+    run: async <T>(action: () => Promise<T>) => await action(),
+  }
+  const validProof = structuredClone(privateProof)
+  validProof.plugin.configuration.fields.pop()
+  const write = new DesktopPackageConfigWrite({
+    ...base,
+    proof: validProof,
+    operation: { ...operation, operations: [{ op: 'set', path: ['auth', 'label'], value: 'new' }] },
+  })
+  expect(write.expectedValue()).toEqual({ auth: { label: 'new' } })
+  expect(write.expectedStoredValue()).toEqual({ auth: { label: 'new', token: 'synthetic-private-value' } })
+  write.close()
+  expect(() =>
+    new DesktopPackageConfigWrite({
+      ...base,
+      operation: { ...operation, operations: [{ op: 'unset', path: ['auth'] }] },
+    })
+  ).toThrow('desktop-package-config-unavailable')
 })
 
 it.skipIf(unsupported)(

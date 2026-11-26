@@ -101,6 +101,7 @@ async function exerciseDesktopOwner(
   writeFixture = false,
   lifecycleFixture = false,
   extraConfiguredFixture = false,
+  privateWriteFixture = false,
 ) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
@@ -188,6 +189,7 @@ async function exerciseDesktopOwner(
       generation,
       store: configStore,
       writeFixture,
+      retainPrivateForWrite: privateWriteFixture,
       label: fixtureLabel,
       secret: fixtureSecret,
     })
@@ -465,7 +467,7 @@ async function exerciseDesktopOwner(
     first = await connect(firstTarget.targetId)
     await first.send('Page.navigate', { url: url(web.url) })
     await ready(first)
-    if (writeFixture) {
+    if (writeFixture && !privateWriteFixture) {
       expect(
         await first.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
         .find(item => item.id === 'desktop-config-fixture')?.configuration.writable`),
@@ -501,6 +503,43 @@ async function exerciseDesktopOwner(
     second = await connect(secondTarget.targetId)
     await second.send('Page.navigate', { url: url(web.issueUrl()) })
     await ready(second)
+    if (privateWriteFixture) {
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
+          .find(item => item.id === 'desktop-config-fixture')?.configuration.writable`),
+        ).toBe(true)
+        expect(
+          await page.evaluate('JSON.stringify(globalThis.__cordisxRuntime.snapshot()) + document.body.textContent'),
+        )
+          .not.toContain(fixtureSecret)
+      }
+      await first.evaluate("globalThis.__desktopConfigDocumentMarker = 'same-document'")
+      await openDesktopConfig(first)
+      await editDesktopConfig(first, 'private field retained')
+      await expectDesktopConfigApplied(
+        first,
+        desktop,
+        configStore,
+        2,
+        'private field retained',
+        undefined,
+        fixtureSecret,
+      )
+      await vi.waitFor(async () => {
+        expect(await second!.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'private field retained' })
+      }, { timeout: 15_000 })
+      await second.send('Page.reload')
+      await ready(second)
+      expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'private field retained' })
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate('JSON.stringify(globalThis.__cordisxRuntime.snapshot()) + document.body.textContent'),
+        )
+          .not.toContain(fixtureSecret)
+      }
+      return
+    }
     if (lifecycleFixture) {
       second = await verifyDesktopConfigLifecycle(configStore, desktop, first, second, async () => {
         await desktop!.send('Target.closeTarget', { targetId: secondTarget.targetId })
@@ -915,6 +954,12 @@ it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platf
 it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
   'synchronizes a proven Desktop package field while preserving another Manager draft',
   async () => await exerciseDesktopOwner(undefined, false, true, true),
+  120_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'preserves an owner-held private field while two Manager pages adopt an ordinary setting',
+  async () => await exerciseDesktopOwner(undefined, false, true, true, false, false, true),
   120_000,
 )
 

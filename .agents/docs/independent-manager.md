@@ -53,7 +53,9 @@ and a schema classifies every projected field. Only declared non-sensitive
 values are copied. For a service-free, capability-free v1 package, declared
 live primitive fields and bounded arrays of primitive values may also be saved
 after the owner verifies the Desktop seat, durable readback, and each admitted
-Manager's adoption. Secrets and other field types remain unavailable. A Desktop
+Manager's adoption. Existing private fields remain in owner storage when ordinary
+fields are saved. Editing those private fields and other field types remains
+unavailable. A Desktop
 seat change retires pages using this projection, and a new page requires a fresh
 proof. Each Manager receives only matching existing Manager UI permissions.
 Managed-service reads and subscriptions are available; the service owner can

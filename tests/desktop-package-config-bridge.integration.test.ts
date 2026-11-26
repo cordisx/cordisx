@@ -10,9 +10,9 @@ import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-compo
 import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 
-it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
-  'binds a package configuration transaction to its authenticated Desktop seat and stored identity',
-  async () => {
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux').each([false, true])(
+  'binds a package configuration transaction to its authenticated Desktop seat and stored identity; private: %s',
+  async hasPrivateValue => {
     const f = await fixture()
     const fence = new SharedProfilePluginConfigFence(f.configPath, f.profileId)
     const token = 'a'.repeat(64)
@@ -21,7 +21,9 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
     try {
       expect(await f.install('desktop-config-bridge')).toMatchObject({ outcome: 'applied' })
       const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
-      const initial = await configs.stage('desktop-config-bridge', 0, { label: 'old' }, token)
+      const privateValue = 'synthetic-private-value'
+      const initialConfig = { label: 'old', ...(hasPrivateValue ? { secret: privateValue } : {}) }
+      const initial = await configs.stage('desktop-config-bridge', 0, initialConfig, token)
       await configs.commit('desktop-config-bridge', initial.candidateRevision, token)
       const snapshot = f.lifecycle.snapshot()
       const plugin = (await loadPluginComposition(f.coordinator.store, snapshot.active))
@@ -41,8 +43,11 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
             revision: 1,
             lastGoodRevision: 1,
             value: { label: 'old' },
-            fields: [{ path: ['label'], type: 'string' }],
-            secrets: [],
+            fields: [
+              { path: ['label'], type: 'string' },
+              ...(hasPrivateValue ? [{ path: ['secret'], type: 'string', role: 'secret' }] : []),
+            ],
+            secrets: hasPrivateValue ? [{ path: ['secret'], set: false }] : [],
           },
         },
       }
@@ -109,7 +114,11 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
         'renderer-1',
       )
       expect(await handler.handle(commit, seat)).toEqual({ revision: 2 })
-      expect(await configs.loadStable(plugin.id)).toEqual({ revision: 2, config: { label: 'new' } })
+      expect(await configs.loadStable(plugin.id)).toEqual({
+        revision: 2,
+        config: { label: 'new', ...(hasPrivateValue ? { secret: privateValue } : {}) },
+      })
+      expect(JSON.stringify(write.expectedValue())).not.toContain(privateValue)
       expect(write.outcome()).toBe('committed')
       authority.release()
       expect(authority.isCurrent()).toBe(false)
