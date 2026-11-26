@@ -6,6 +6,30 @@ import type { ChannelHistoricalResourceResultV1 } from '@cordisx/protocol/channe
 import { ChannelInboundResources } from './channel-inbound-resources.js'
 import { feishuHistoricalResourceDescriptors } from './feishu-historical-resource-descriptors.js'
 
+const safeResourceErrors = new Set([
+  'CHANNEL_GENERATION_CHANGED',
+  'CHANNEL_POLICY_DENIED',
+  'CHANNEL_RESOURCE_PERMISSION_DENIED',
+  'CHANNEL_SOURCE_SCOPE_MISMATCH',
+  'CONNECTION_NOT_READY',
+  'HISTORICAL_RESOURCE_INVALID_MESSAGE',
+  'HISTORICAL_RESOURCE_LIMIT',
+  'HISTORICAL_RESOURCE_NOT_FOUND',
+  'HISTORICAL_RESOURCE_READ_FAILED',
+  'HISTORICAL_RESOURCE_SOURCE_MISMATCH',
+  'HISTORICAL_RESOURCE_TIMEOUT',
+  'HISTORICAL_RESOURCE_UNSUPPORTED',
+  'RESOURCE_CAPACITY_UNAVAILABLE',
+  'RESOURCE_CHANGED',
+  'RESOURCE_EMPTY',
+  'RESOURCE_IMAGE_FORMAT_UNSUPPORTED',
+  'RESOURCE_NOT_READY',
+  'RESOURCE_RANGE_INVALID',
+  'RESOURCE_SOURCE_DENIED',
+  'RESOURCE_TIMEOUT',
+  'RESOURCE_TOO_LARGE',
+])
+
 async function historicalResourceSdkRead<Result>(operation: () => Promise<Result>): Promise<Result | undefined> {
   try {
     return await operation()
@@ -154,7 +178,7 @@ export class ChannelHistoricalResources {
       ])
     } catch (error) {
       if (
-        error instanceof Error && /^(?:CHANNEL_|HISTORICAL_RESOURCE_|RESOURCE_)[A-Z0-9_]{1,100}$/u.test(error.message)
+        error instanceof Error && safeResourceErrors.has(error.message)
       ) {
         throw error
       }

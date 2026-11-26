@@ -36,6 +36,23 @@ describe('historical resource SDK acquisition and consumption', () => {
       sdk.download.mockRejectedValueOnce(new Error('CHANNEL_PRIVATE_DIAGNOSTIC_TOKEN'))
       expect(await service.read(source, 'om_old', 0, true, 'session', sdk.value, () => {}))
         .toEqual({ status: 'unavailable', code: 'HISTORICAL_RESOURCE_READ_FAILED' })
+      sdk.download.mockImplementationOnce(async () => ({
+        getReadableStream: () => {
+          throw new Error('CHANNEL_PRIVATE_DIAGNOSTIC_TOKEN')
+        },
+      }))
+      expect(await service.read(source, 'om_old', 0, true, 'session', sdk.value, () => {}))
+        .toEqual({ status: 'unavailable', code: 'HISTORICAL_RESOURCE_READ_FAILED' })
+      sdk.download.mockImplementationOnce(async () => ({
+        getReadableStream: () =>
+          new Readable({
+            read() {
+              this.destroy(new Error('RESOURCE_PRIVATE_DIAGNOSTIC_TOKEN'))
+            },
+          }),
+      }))
+      expect(await service.read(source, 'om_old', 0, true, 'session', sdk.value, () => {}))
+        .toEqual({ status: 'unavailable', code: 'HISTORICAL_RESOURCE_READ_FAILED' })
     } finally {
       await service.dispose()
     }
