@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
-import { runConfiguredChannelCommand } from '../packages/cli/src/cli/channel-configured-command.js'
+import { runChannelCommand } from '../packages/cli/src/cli/channel-command.js'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import { ChannelGenericCardActions } from '../packages/cli/src/launcher/channel-generic-card-actions.js'
 import {
@@ -78,7 +78,7 @@ it('configured CLI dispatches explicit owned action publication/read/receipt thr
   const target = { account, conversationId: 'oc_chat', kind: 'direct' }
   const call = async (operation: string, input: unknown) => {
     const output: string[] = []
-    await runConfiguredChannelCommand(
+    await runChannelCommand(
       [operation, '--profile', 'default', '--input', JSON.stringify(input)],
       line => output.push(line),
     )
