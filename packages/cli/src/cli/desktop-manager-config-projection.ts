@@ -183,6 +183,29 @@ export class DesktopManagerConfigProjection {
     return structuredClone((await this.projection(snapshot, plugin)).value)
   }
 
+  /** Isolate an unprovable plugin only while the same Desktop authority remains current. */
+  async projectForAdmission(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<
+    { readonly status: 'projected'; readonly value: unknown } | { readonly status: 'unavailable' }
+  > {
+    const seat = this.input.seat()
+    if (seat === undefined || !this.input.current(snapshot)) throw new Error('desktop-manager-config-unavailable')
+    if (this.boundSeat !== seat) {
+      this.clear()
+      this.boundSeat = seat
+    }
+    const epoch = this.epoch
+    const current = () =>
+      epoch === this.epoch && this.boundSeat === seat && this.input.seat() === seat && this.input.current(snapshot)
+    try {
+      const value = await this.project(snapshot, plugin)
+      if (!current()) throw new Error('desktop-manager-config-unavailable')
+      return { status: 'projected', value }
+    } catch (error) {
+      if (!current()) throw error
+      return { status: 'unavailable' }
+    }
+  }
+
   async canWrite(snapshot: ServiceRendererSnapshot, plugin: CordisXConfigPlugin): Promise<boolean> {
     return (await this.projection(snapshot, plugin)).writable
   }

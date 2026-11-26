@@ -188,6 +188,50 @@ it('discards a native readback if the seat changes while the read is pending', a
   await expect(pending).rejects.toThrow('desktop-manager-config-unavailable')
 })
 
+it('isolates an unprovable plugin only while the same Desktop authority remains current', async () => {
+  let seat: symbol | undefined = Symbol('desktop-seat')
+  const unavailable = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => seat,
+    read: async () => undefined,
+  })
+  expect(await unavailable.projectForAdmission(snapshot, plugin)).toEqual({ status: 'unavailable' })
+  seat = undefined
+  await expect(unavailable.projectForAdmission(snapshot, plugin)).rejects.toThrow('desktop-manager-config-unavailable')
+
+  let finish!: (value: any) => void
+  const stableSeat = Symbol('stable-seat')
+  const read = vi.fn(() => new Promise<any>(resolve => finish = resolve))
+  const retired = new DesktopManagerConfigProjection({ current: () => true, seat: () => stableSeat, read })
+  const pending = retired.projectForAdmission(snapshot, plugin)
+  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+  retired.clear()
+  finish(proof)
+  await expect(pending).rejects.toThrow('desktop-manager-config-unavailable')
+
+  seat = Symbol('original-seat')
+  const replaced = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => seat,
+    read: async () => {
+      seat = Symbol('replacement-seat')
+      return proof
+    },
+  })
+  await expect(replaced.projectForAdmission(snapshot, plugin)).rejects.toThrow('desktop-manager-config-unavailable')
+
+  let ownerCurrent = true
+  const stale = new DesktopManagerConfigProjection({
+    current: () => ownerCurrent,
+    seat: () => stableSeat,
+    read: async () => {
+      ownerCurrent = false
+      return proof
+    },
+  })
+  await expect(stale.projectForAdmission(snapshot, plugin)).rejects.toThrow('desktop-manager-config-unavailable')
+})
+
 it('offers live non-secret writes and remembers confirmed readback for another page', async () => {
   const clean = { ...plugin, config: { display: { label: 'visible' } } }
   const native = structuredClone(proof)

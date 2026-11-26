@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
+import { DesktopManagerConfigProjection } from '../packages/cli/src/cli/desktop-manager-config-projection.js'
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
 import { projectManagementRequest } from '../packages/cli/src/cli/service-renderer-management-projection.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
@@ -309,6 +310,109 @@ it('isolates service-free packages with unprojected configuration and their depe
     await f.close()
   }
 }, 60_000)
+
+it('isolates an unprovable Desktop configuration while keeping an unrelated plugin available', async () => {
+  const projection = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => Symbol.for('fixture-desktop-seat'),
+    read: async () => undefined,
+  })
+  const f = await fixture({ protectProfileInputs: true, browserManagement: true, projectPluginConfig: projection })
+  const secondId = secret()
+  const handle = (await f.sessions.open(f.gateway, secondId))!
+  const second = { gateway: f.gateway, browserSessionId: secondId, handle }
+  const privateValue = 'fixture-unprovable-desktop-config'
+  try {
+    expect(
+      await f.install(
+        'configured-plugin',
+        0,
+        false,
+        'export const privateCodeMarker = "fixture-unprovable-code"; export function apply() {}',
+      ),
+    ).toMatchObject({ outcome: 'applied' })
+    expect(
+      await f.install('dependent-plugin', 1, false, undefined, [
+        { id: 'configured-plugin', version: '1.0.0' },
+      ]),
+    ).toMatchObject({ outcome: 'applied' })
+    expect(await f.install('healthy-plugin', 2)).toMatchObject({ outcome: 'applied' })
+    const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
+    const token = secret()
+    await configs.stage('configured-plugin', 0, { value: privateValue }, token)
+    await configs.commit('configured-plugin', 1, token)
+    const boot = async (invocation: typeof f.invocation) => {
+      const prepared = await f.sessions.call(invocation, 'manager-bootstrap', { action: 'prepare' }) as any
+      expect(prepared.status).toBe('ok')
+      expect(prepared.value.privateGraphs.map((graph: ServiceRendererPrivateGraph) => graph.pluginId))
+        .toEqual(['healthy-plugin'])
+      const completed = await f.sessions.call(invocation, 'manager-bootstrap', {
+        action: 'complete',
+        managerOrigin: origin,
+        graphs: prepared.value.privateGraphs.map(project),
+      }) as any
+      expect(completed.status).toBe('ok')
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      try {
+        const bundle = bytes.toString('utf8')
+        expect(bundle.match(/standaloneUnavailable\s*:\s*(?:true|!0)/gu)).toHaveLength(2)
+        expect(bundle).not.toContain(privateValue)
+        expect(bundle).not.toContain('fixture-unprovable-code')
+        return new Set(bundle.match(/https:\/\/renderer\.cordisx\.invalid\/plugin\/[a-f0-9]{64}/gu))
+      } finally {
+        bytes.fill(0)
+      }
+    }
+    const firstAliases = await boot(f.invocation)
+    const secondAliases = await boot(second)
+    expect(firstAliases.size).toBe(3)
+    expect(secondAliases.size).toBe(3)
+    expect([...secondAliases].some(alias => firstAliases.has(alias))).toBe(false)
+    const query = await f.sessions.call(
+      f.invocation,
+      'plugin-management',
+      JSON.stringify({
+        version: 1,
+        requestId: secret(),
+        token: 'renderer-binding-placeholder',
+        profileId: f.profileId,
+        operation: { kind: 'query' },
+      }),
+    ) as any
+    expect(query.value.value.plugins.find((item: any) => item.id === 'configured-plugin').availableOperations).toEqual(
+      [],
+    )
+    await f.sessions.close(f.invocation)
+    expect(await f.sessions.call(second, 'manager-bootstrap', { action: 'status' }))
+      .toMatchObject({ status: 'ok', value: { current: true } })
+  } finally {
+    await f.sessions.close(second).catch(() => undefined)
+    await f.close()
+  }
+}, 60_000)
+
+it('refuses the whole bootstrap when the Desktop authority disappears during configuration proof', async () => {
+  let seat: symbol | undefined = Symbol('fixture-desktop-seat')
+  const projection = new DesktopManagerConfigProjection({
+    current: () => true,
+    seat: () => seat,
+    read: async () => {
+      seat = undefined
+      return undefined
+    },
+  })
+  const f = await fixture({ protectProfileInputs: true, projectPluginConfig: projection })
+  try {
+    expect(await f.install('configured-plugin')).toMatchObject({ outcome: 'applied' })
+    const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
+    const token = secret()
+    await configs.stage('configured-plugin', 0, { value: 'fixture-private' }, token)
+    await configs.commit('configured-plugin', 1, token)
+    expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+  } finally {
+    await f.close()
+  }
+}, 30_000)
 
 it('keeps the Manager available when a managed package has unprojected configuration', async () => {
   const f = await fixture({

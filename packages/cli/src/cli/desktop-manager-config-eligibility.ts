@@ -6,7 +6,9 @@ import { hasNoPackageServiceState } from './service-renderer-profile-inputs.js'
 
 export type DesktopConfigProjector =
   & Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
-  & Partial<Pick<DesktopManagerConfigProjection, 'canWrite' | 'canCoordinateLifecycle' | 'remember'>>
+  & Partial<
+    Pick<DesktopManagerConfigProjection, 'projectForAdmission' | 'canWrite' | 'canCoordinateLifecycle' | 'remember'>
+  >
 
 export function emptyPluginConfig(value: unknown): boolean {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
@@ -21,6 +23,28 @@ export function desktopPackageConfigBundleOptions(
     : {}
 }
 
+/** Classify each installed configuration before acquiring browser graph leases. */
+export async function preflightDesktopManagerConfigs(
+  projector: DesktopConfigProjector | undefined,
+  snapshot: ServiceRendererSnapshot,
+  plugins: readonly CordisXConfigPlugin[],
+  current: () => boolean,
+): Promise<{ readonly unavailable: Set<string>; readonly values: Map<string, unknown> }> {
+  const unavailable = new Set<string>()
+  const values = new Map<string, unknown>()
+  for (const plugin of plugins) {
+    if (emptyPluginConfig(plugin.config)) continue
+    if (!projector) unavailable.add(plugin.id)
+    else if (projector.projectForAdmission) {
+      const result = await projector.projectForAdmission(snapshot, plugin)
+      if (result.status === 'unavailable') unavailable.add(plugin.id)
+      else values.set(plugin.id, result.value)
+    } else values.set(plugin.id, await projector.project(snapshot, plugin))
+    if (!current()) throw new Error('renderer-bootstrap-stale')
+  }
+  return { unavailable, values }
+}
+
 /** Select only owner-proved package values and live fields for one Manager bootstrap. */
 export async function prepareDesktopManagerConfigs(
   input: {
@@ -33,6 +57,7 @@ export async function prepareDesktopManagerConfigs(
   plugins: readonly CordisXConfigPlugin[],
   managedOwners: ReadonlyMap<string, string>,
   current: () => boolean,
+  preprojected: ReadonlyMap<string, unknown>,
 ): Promise<{
   readonly projectedConfigs: Map<string, unknown>
   readonly writablePlugins: string[]
@@ -41,8 +66,10 @@ export async function prepareDesktopManagerConfigs(
   const projectedConfigs = new Map<string, unknown>()
   for (const plugin of plugins) {
     if (emptyPluginConfig(plugin.config)) continue
-    if (!input.projectPluginConfig) throw new Error('renderer-bootstrap-plugin-unsupported')
-    projectedConfigs.set(plugin.id, await input.projectPluginConfig.project(snapshot, plugin))
+    if (!input.projectPluginConfig || !preprojected.has(plugin.id)) {
+      throw new Error('renderer-bootstrap-plugin-unsupported')
+    }
+    projectedConfigs.set(plugin.id, structuredClone(preprojected.get(plugin.id)))
     if (!current()) throw new Error('renderer-bootstrap-stale')
   }
   const writablePlugins: string[] = []

@@ -7,6 +7,50 @@ import { decision, FakeRuntime, localPackage, request } from './plugin-lifecycle
 const pluginId = 'desktop-config-fixture'
 const form = `[data-plugin-config-form=${pluginId}]`
 
+export async function verifyReadOnlyDesktopConfig(
+  pages: readonly CdpClient[],
+  label: string,
+  secret: string,
+): Promise<void> {
+  for (const page of pages) {
+    const projection = await page.evaluate<any>([
+      '(() => {',
+      '  const plugin = globalThis.__cordisxRuntime.snapshot().plugins',
+      "    .find(item => item.id === 'desktop-config-fixture')",
+      '  return { value: plugin?.configuration.value, writable: plugin?.configuration.writable,',
+      '    body: document.body.textContent, pluginConfig: globalThis.__desktopConfigValue }',
+      '})()',
+    ].join('\n'))
+    expect(projection.value).toEqual({ label })
+    expect(projection.pluginConfig).toEqual({ label })
+    expect(projection.writable).toBe(false)
+    expect(JSON.stringify(projection)).not.toContain(secret)
+  }
+}
+
+export async function verifyDesktopConfigRecovery(
+  page: CdpClient,
+  secret: string,
+  label: string,
+  ready: (page: CdpClient) => Promise<void>,
+): Promise<void> {
+  const unavailable = await page.evaluate<any>(`({
+    plugins: globalThis.__cordisxRuntime.snapshot().plugins,
+    body: document.body.textContent,
+    pluginConfig: globalThis.__desktopConfigValue,
+  })`)
+  expect(unavailable.plugins.find((item: any) => item.id === pluginId)?.status).toBe('failed')
+  expect(JSON.stringify(unavailable)).not.toContain(secret)
+  expect(unavailable.pluginConfig).toBeUndefined()
+  await page.evaluate('globalThis.__unavailableConfigBeforeReload = true')
+  await page.send('Page.reload')
+  await vi.waitFor(async () => {
+    expect(await page.evaluate('globalThis.__unavailableConfigBeforeReload === undefined')).toBe(true)
+  }, { timeout: 15_000 })
+  await ready(page)
+  expect(await page.evaluate('globalThis.__desktopConfigValue')).toEqual({ label })
+}
+
 export async function stageDesktopConfigFixture(input: {
   root: string
   homeDir: string

@@ -61,6 +61,7 @@ import {
   type DesktopConfigProjector,
   desktopPackageConfigBundleOptions,
   emptyPluginConfig,
+  preflightDesktopManagerConfigs,
   prepareDesktopManagerConfigs,
 } from './desktop-manager-config-eligibility.js'
 import type {
@@ -553,14 +554,16 @@ export class ServiceRendererBootstrap {
         }
         const active = snapshot.active.plugins.filter(plugin => plugin.enabled)
         if (active.length + activeConfigured.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
+        const initialConfigs = await preflightDesktopManagerConfigs(
+          this.input.protectProfileInputs ? this.input.projectPluginConfig : undefined,
+          snapshot,
+          plugins,
+          () => this.current(rendererId, entry),
+        )
         const installed = await prepareServiceRendererInstalledGraphs({
           homeDir: this.input.homeDir,
           plugins: snapshot.active.plugins,
-          unprojectedConfigIds: new Set(
-            this.input.projectPluginConfig === undefined
-              ? plugins.filter(plugin => !emptyPluginConfig(plugin.config)).map(plugin => plugin.id)
-              : [],
-          ),
+          unprojectedConfigIds: initialConfigs.unavailable,
           managedServiceUIAvailable: this.managedServiceUI !== undefined,
           leases,
           server: async () => await this.input.lifecycle.artifactServer(),
@@ -569,10 +572,6 @@ export class ServiceRendererBootstrap {
         const { unavailable, managedOwners } = installed
         let needsIdentityProjection = installed.needsIdentityProjection
         const availablePlugins = plugins.filter(plugin => !unavailable.has(plugin.id))
-        if (
-          availablePlugins.some(plugin => !emptyPluginConfig(plugin.config))
-          && (!this.input.protectProfileInputs || !this.input.projectPluginConfig)
-        ) throw new Error('renderer-bootstrap-plugin-unsupported')
         const {
           projectedConfigs,
           writablePlugins: desktopPackageConfigPlugins,
@@ -583,6 +582,7 @@ export class ServiceRendererBootstrap {
           availablePlugins,
           managedOwners,
           () => this.current(rendererId, entry),
+          initialConfigs.values,
         )
         if (projectedConfigs.size > 0 || desktopPackageConfigPlugins.length > 0) needsIdentityProjection = true
         if (needsIdentityProjection && !this.input.protectProfileInputs) {

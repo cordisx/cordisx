@@ -74,6 +74,8 @@ import {
   submitDesktopConfig,
   verifyDesktopArrayUpdate,
   verifyDesktopConfigLifecycle,
+  verifyDesktopConfigRecovery,
+  verifyReadOnlyDesktopConfig,
   waitForHeldConfigReply,
 } from './suites/desktop-package-config-browser.js'
 
@@ -602,20 +604,7 @@ async function exerciseDesktopOwner(
     await verifyDesktopActivationViews([first, second, desktop], extras !== undefined)
     if (extras) await verifyDesktopConfiguredPlugins([first, second], extras)
     if (configFixture) {
-      for (const page of [first, second]) {
-        const projection = await page.evaluate<any>([
-          '(() => {',
-          '  const plugin = globalThis.__cordisxRuntime.snapshot().plugins',
-          "    .find(item => item.id === 'desktop-config-fixture')",
-          '  return { value: plugin?.configuration.value, writable: plugin?.configuration.writable,',
-          '    body: document.body.textContent, pluginConfig: globalThis.__desktopConfigValue }',
-          '})()',
-        ].join('\n'))
-        expect(projection.value).toEqual({ label: fixtureLabel })
-        expect(projection.pluginConfig).toEqual({ label: fixtureLabel })
-        expect(projection.writable).toBe(false)
-        expect(JSON.stringify(projection)).not.toContain(fixtureSecret)
-      }
+      await verifyReadOnlyDesktopConfig([first, second], fixtureLabel, fixtureSecret)
       expect(configProof).toHaveBeenCalledOnce()
       await expect(configStore.stage('desktop-config-fixture', 1, { label: 'other' }, 'other-owner'))
         .rejects.toThrow('plugin configuration is in use')
@@ -647,12 +636,13 @@ async function exerciseDesktopOwner(
       }, { timeout: 15_000 })
       await desktop.send('Target.closeTarget', { targetId: firstTarget.targetId })
       await first.close().catch(() => {})
+      configProof.mockResolvedValueOnce(undefined)
       const reopened = await desktop.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }
       first = await connect(reopened.targetId)
       await first.send('Page.navigate', { url: url(web.issueUrl()) })
       await ready(first)
-      expect(await first.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: fixtureLabel })
-      expect(configProof).toHaveBeenCalledTimes(2)
+      await verifyDesktopConfigRecovery(first, fixtureSecret, fixtureLabel, ready)
+      expect(configProof).toHaveBeenCalledTimes(3)
       return
     }
     if (archive !== undefined && review) {
