@@ -73,6 +73,54 @@ function fixture(
 }
 
 describe('terminal provider lifecycle', () => {
+  it('uses a current Host-owned selection without plugin aliases and retires a stale lease', async () => {
+    let current = true
+    let invalidateDuringPreparation = false
+    const release = vi.fn()
+    const authority = createTerminalProviderAuthority({
+      owns: id => id === 'host-provider',
+      catalog: async () => [{
+        providerId: 'host-provider',
+        pluginId: 'cordisx-host',
+        models: [{ id: 'model-one', label: 'One', aliases: [] }],
+      }],
+      resolve: () => ({
+        value: {
+          service: { pluginId: 'cordisx-host', serviceId: 'one', generation: 'scope' },
+          endpoint: { origin: 'https://fixture.invalid', apiPath: '/v1', auth: { scheme: 'none' } },
+          models: { generation: 'revision', defaultAlias: '', aliases: [] },
+          cleanup: { authorityId: 'fixture' },
+        },
+        dispose() {},
+      }),
+      currentHostConnection: (providerId, model, connection) =>
+        current && providerId === 'host-provider' && model === 'model-one'
+        && connection.value.service.generation === 'scope',
+      credentials: {
+        prepare: async () => {
+          if (invalidateDuringPreparation) current = false
+          return { scheme: 'none', serviceGeneration: 'scope', dispose: release }
+        },
+        close: async () => {},
+      },
+    })
+    try {
+      const lease = await authority.request({ kind: 'prepare', providerId: 'host-provider', model: 'model-one' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      current = false
+      await expect(authority.request({ kind: 'renew', leaseId: lease.leaseId })).rejects.toThrow('generation or model')
+      expect(release).toHaveBeenCalledOnce()
+      current = true
+      invalidateDuringPreparation = true
+      await expect(
+        authority.request({ kind: 'prepare', providerId: 'host-provider', model: 'model-one' }),
+      ).rejects.toThrow('generation or model')
+      expect(release).toHaveBeenCalledTimes(2)
+    } finally {
+      authority.close()
+    }
+  })
+
   it('leases loopback gateways to Claude without putting bearer credentials in the response', async () => {
     const dispose = vi.fn()
     const authority = createTerminalProviderAuthority({

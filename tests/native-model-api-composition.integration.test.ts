@@ -4,6 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createNativeSubmissionComposition } from '../packages/cli/src/launcher/native-submission-composition.js'
+import { ManagedProviderOwner } from '../packages/cli/src/launcher/model-catalog/managed-provider-owner.js'
+import { portableConnection } from '../packages/cli/src/launcher/model-catalog/portable-transfer-codec.js'
 import { bundle, pluginActivation, writeManagedProfile } from './fixtures/native-app-bundle.js'
 
 const roots: string[] = []
@@ -129,4 +131,63 @@ it.skipIf(process.platform !== 'darwin')(
     }
   },
   20000,
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'prepares a Host-managed terminal model through the Desktop owner composition',
+  async () => {
+    vi.stubEnv('CORDISX_MODEL_API_PORT', '0')
+    const f = await bundle(roots)
+    const home = path.join(f.contents, 'terminal-home')
+    await mkdir(home, { mode: 0o700 })
+    await writeManagedProfile(home, 'terminal-fixture')
+    const seed = await ManagedProviderOwner.open({ homeDir: home, profileId: 'terminal-fixture' })
+    let providerId: string
+    try {
+      const connection = portableConnection({
+        title: 'Fixture',
+        endpoint: 'https://fixture.invalid/v1',
+        protocol: 'responses',
+        auth: 'bearer',
+        environment: 'FIXTURE_MODEL_KEY',
+        models: [{ id: 'fixture-model', label: 'Fixture model' }],
+      })
+      const imported = await seed.importPortable(
+        { version: 2, environment: [{ name: 'FIXTURE_MODEL_KEY' }], connections: [connection] },
+        [{ sourceName: 'FIXTURE_MODEL_KEY', name: 'FIXTURE_MODEL_KEY', value: 'fixture-secret', enabled: true }],
+      )
+      providerId = `cordisx-${imported.bindingRefs[0]!}`
+    } finally {
+      await seed.close()
+    }
+    const composition = await createNativeSubmissionComposition(pluginActivation({}), f.executable, home, {
+      managedCatalog: { homeDir: home, profileId: 'terminal-fixture' },
+      nativeModelDiscovery: false,
+    })
+    try {
+      await vi.waitFor(async () => {
+        const catalog = await composition.terminalProvider({ kind: 'list' })
+        expect(catalog).toMatchObject({
+          kind: 'list',
+          providers: expect.arrayContaining([
+            expect.objectContaining({ providerId, models: [expect.objectContaining({ id: 'fixture-model' })] }),
+          ]),
+        })
+      })
+      const lease = await composition.terminalProvider({ kind: 'prepare', providerId, model: 'fixture-model' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      expect(JSON.stringify(lease)).not.toContain('fixture-secret')
+      await expect(composition.terminalProvider({
+        kind: 'prepare',
+        providerId,
+        model: 'fixture-model',
+        client: 'claude-code',
+      })).rejects.toThrow('not a local Claude Code endpoint')
+      expect(await composition.terminalProvider({ kind: 'renew', leaseId: lease.leaseId })).toEqual({ kind: 'renewed' })
+      await composition.terminalProvider({ kind: 'release', leaseId: lease.leaseId })
+    } finally {
+      await composition.close()
+    }
+  },
+  20_000,
 )

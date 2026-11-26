@@ -92,6 +92,12 @@ export function createTerminalProviderAuthority(options: {
   readonly resolve: (
     providerId: string,
   ) => NativeManagedGatewayConnectionSession | Promise<NativeManagedGatewayConnectionSession>
+  /** A Host-owned catalog may validate a connection without plugin gateway aliases. */
+  readonly currentHostConnection?: (
+    providerId: string,
+    model: string,
+    connection: NativeManagedGatewayConnectionSession,
+  ) => boolean | undefined
   readonly credentials: NativeProviderCredentialBroker
   readonly now?: () => number
 }) {
@@ -136,10 +142,9 @@ export function createTerminalProviderAuthority(options: {
     const connection = await options.resolve(providerId)
     let service: { readonly pluginId: string; readonly serviceId: string; readonly generation: string }
     try {
-      if (
-        !connection.value.models.aliases.some(item => item.gatewayModelId === model)
-        || generation !== undefined && connection.value.service.generation !== generation
-      ) {
+      const current = options.currentHostConnection?.(providerId, model, connection)
+        ?? connection.value.models.aliases.some(item => item.gatewayModelId === model)
+      if (!current || generation !== undefined && connection.value.service.generation !== generation) {
         throw new Error('Terminal provider generation or model changed; start a new CLI session')
       }
       service = { ...connection.value.service }

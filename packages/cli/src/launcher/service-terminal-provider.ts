@@ -52,6 +52,8 @@ export function createServiceTerminalProvider(input: {
     catalog,
     owns: id => managed?.owns(id) === true || activation.nativeProviderIds.includes(id),
     resolve,
+    currentHostConnection: (id, model, connection) =>
+      managed?.owns(id) ? managed.isCurrentNativeConnection(id, model, connection.value) : undefined,
     credentials,
   })
   return {
