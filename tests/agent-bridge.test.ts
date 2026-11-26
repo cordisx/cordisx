@@ -103,6 +103,7 @@ describe('Codex side of the agent bridge', () => {
       operationId: 'full-access',
       prompt: 'build it',
       execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+      verifyExecutionBeforeFirstTurn: true,
     })
     expect(started).toMatchObject({
       status: 'started',
@@ -129,6 +130,7 @@ describe('Codex side of the agent bridge', () => {
         operationId: 'unconfirmed',
         prompt: 'build it',
         execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+        verifyExecutionBeforeFirstTurn: true,
       }
       expect(await handler('start_session', request)).toMatchObject({
         status: 'failed',
@@ -182,6 +184,7 @@ describe('Codex side of the agent bridge', () => {
           prompt: 'work',
           cwd: root,
           execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+          verifyExecutionBeforeFirstTurn: true,
         }),
       ).toMatchObject({ status: 'started', executionVerifiedBeforeTurn: true })
       expect(codex.calls[0]!.params).toMatchObject({ sandbox: 'danger-full-access', approvalPolicy: 'never' })

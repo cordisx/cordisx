@@ -485,7 +485,10 @@ export function createCodexBridgeHandler(
             ...(execution.approval === undefined ? {} : { approval: execution.approval }),
             ...(execution.networkAccess === undefined ? {} : { networkAccess: execution.networkAccess }),
           }
-          const checksSecurity = Object.values(requestedSecurity).some(value => value !== 'inherit')
+          // The public MCP opts into confirmation. Internal Channel callers
+          // retain their existing project-scoped execution semantics.
+          const checksSecurity = args.verifyExecutionBeforeFirstTurn === true
+            && Object.values(requestedSecurity).some(value => value !== 'inherit')
           const effective = { ...object(started?.thread), ...started }
           if (checksSecurity && !executionSettingsMatch(requestedSecurity, effective)) {
             return turn.failed({

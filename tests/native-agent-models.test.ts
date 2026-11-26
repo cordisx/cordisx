@@ -57,7 +57,12 @@ describe('Agent model-provider tools', () => {
       .toMatchObject({ reason: 'invalid-arguments' })
     expect(await handler('session:start_session', args, { 'openai/threadId': 'local' }))
       .toMatchObject({ status: 'started' })
-    expect(sessions).toHaveBeenCalledOnce()
+    expect(sessions).toHaveBeenCalledExactlyOnceWith('codex', 'start_session', {
+      prompt: 'work',
+      execution: { execution: 'full-access', approval: 'never' },
+      callerSessionId: 'local',
+      verifyExecutionBeforeFirstTurn: true,
+    }, { 'openai/threadId': 'local' })
   })
 
   it('restricts preparation callers to the bounded history and ready tools', async () => {

@@ -128,14 +128,26 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
           message: 'The CordisX agent bridge is not running',
         })
       }
-      const { app: _app, callerSessionId: _caller, callerSummary: _summary, ...rest } = args
+      const {
+        app: _app,
+        callerSessionId: _caller,
+        callerSummary: _summary,
+        verifyExecutionBeforeFirstTurn: _verified,
+        ...rest
+      } = args
       try {
         // The bridge answers with the whole result: a value, or its structured failure.
         const caller = session === 'start_session' ? callerThreadId(metadata) : undefined
         return await authority.sessions(
           app as SessionApp,
           session,
-          caller === undefined ? rest : { ...rest, callerSessionId: caller },
+          {
+            ...rest,
+            ...(caller === undefined ? {} : { callerSessionId: caller }),
+            ...(session === 'start_session' && args.execution !== undefined
+              ? { verifyExecutionBeforeFirstTurn: true }
+              : {}),
+          },
           metadata,
         )
       } catch (error) {

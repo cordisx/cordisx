@@ -210,12 +210,12 @@ value it ignores.
 | `start_session.execution`            | per-session execution settings, checked before the first turn      | rejected                                                                 |
 
 When an authorized user requests explicit execution settings for a Codex
-`start_session`, supply `execution` on that request; omitted fields inherit the
-profile defaults. Before sending the first message, the bridge verifies the
-native thread settings. If confirmation is missing or mismatched, it returns the
-created session without sending the message. Inspect that session and reuse the
-same operation ID. This option is unavailable to Claude and Channel callers.
-A dry run validates the request without observing permissions.
+session, supply `execution` to the Codex MCP `start_session` tool; omitted fields
+inherit the profile defaults. Before sending the first message, the bridge
+verifies the native thread settings. If confirmation is missing or mismatched,
+it returns the created session without sending the message. Inspect that session
+and reuse the same operation ID. This option is unavailable to Claude and Channel
+callers. A dry run validates the request without observing permissions.
 
 `list_sessions.searchTerm` matches message content as well as titles and returns
 `matchedIn` plus a short `match` excerpt and role. Codex searches at most eight
