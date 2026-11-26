@@ -68,9 +68,32 @@ it('publishes live plugin leases from the production service owner without a Des
       anthropicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:/u),
     })
     expect(claude.leaseId).not.toBe(second.leaseId)
-    await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: claude.leaseId } })
+    const disable = async () => {
+      const plan = await request({
+        kind: 'plan',
+        request: { kind: 'plugin-disable', pluginId: 'fixture-service' },
+      }) as { status: string; executionRequest?: { kind: 'plugin-execute-plan'; executionToken: string } }
+      expect(plan.status).toBe('planned')
+      if (!plan.executionRequest) throw new Error('Missing fixture execution plan')
+      return await request({ kind: 'execute', request: plan.executionRequest }) as {
+        status: string
+        error?: { code: string; message: string }
+      }
+    }
+    expect(await disable()).toMatchObject({
+      status: 'rejected',
+      error: { code: 'operation-unavailable', message: expect.stringContaining('Terminal sessions') },
+    })
     expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: second.leaseId } }))
       .toEqual({ kind: 'renewed' })
+    expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: claude.leaseId } }))
+      .toEqual({ kind: 'renewed' })
+    await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: claude.leaseId } })
+    expect((await disable()).status).not.toBe('applied')
+    expect(await request({ kind: 'terminal-provider', request: { kind: 'renew', leaseId: second.leaseId } }))
+      .toEqual({ kind: 'renewed' })
+    await request({ kind: 'terminal-provider', request: { kind: 'release', leaseId: second.leaseId } })
+    expect((await disable()).status).toBe('applied')
   } finally {
     await command('stop').catch(() => undefined)
     const allowRemoval = async (directory: string) => {

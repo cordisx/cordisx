@@ -135,6 +135,7 @@ import {
   type RuntimePublicationObservation,
   type RuntimeReadinessObservation,
   safeError,
+  TerminalLifecycleUnavailable,
   usesIsolatedWorker,
   validateDecision,
   validateDecisionV2,
@@ -354,7 +355,10 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
           targetId: input.targetId,
           ...(input.staged === undefined ? {} : { package: input.staged }),
         })
-      } catch {
+      } catch (error) {
+        if (error instanceof TerminalLifecycleUnavailable) {
+          throw new LifecycleFailure('operation-unavailable', error.message)
+        }
         throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
       }
     }

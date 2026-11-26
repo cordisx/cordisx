@@ -57,6 +57,7 @@ export function createServiceTerminalProvider(input: {
   return {
     request: terminal.request,
     reserveForService: terminal.reserveForService,
+    reserveForLifecycle: terminal.reserveForLifecycle,
     async close() {
       terminal.close()
       await credentials.close()

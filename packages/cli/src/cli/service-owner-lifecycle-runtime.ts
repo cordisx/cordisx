@@ -42,7 +42,9 @@ export class ServiceOwnerLifecycleRuntime implements PluginLifecycleRuntime {
     let fence: ServiceOwnerLifecycleFence | undefined
     try {
       const reservation = this.input.reserve(mutation)
-      fence = reservation === undefined ? undefined : await reservation
+      // A synchronous terminal-only reservation must reach the underlying
+      // preflight before another renderer can join this owner.
+      fence = reservation !== undefined && 'then' in reservation ? await reservation : reservation
       if (fence && !this.input.runtime.preflight) throw new Error('manager-lifecycle-fence-unavailable')
       await this.input.runtime.preflight?.(mutation)
       if (fence && !fence.isCurrent()) throw new Error('manager-lifecycle-fence-unavailable')

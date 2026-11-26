@@ -93,6 +93,12 @@ The wrapper asks its terminal child to exit and, if it does not respond, ends it
 after a short grace period. It does not replay the interrupted request. An
 orphaned launch expires. The existing App and unrelated services are retained.
 
+In the standalone service candidate, a plugin change is rejected while an
+active terminal uses that plugin or a dependent. Finish the affected session
+and retry. Unrelated active terminals retain their leases; new terminal launches
+may be temporarily unavailable during a plugin change. This guard does not yet
+cover native adapters or external model API clients.
+
 The CLI discovers the single live owner among configured App namespaces that
 contain the selected profile; `--owner-app ID` requires that exact namespace.
 Multiple claiming owners, an insecure or unverifiable endpoint, and an owner

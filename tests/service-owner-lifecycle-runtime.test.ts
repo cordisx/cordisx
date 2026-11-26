@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ServiceOwnerLifecycleRuntime } from '../packages/cli/src/cli/service-owner-lifecycle-runtime.js'
+import {
+  includeTerminalLifecycleFence,
+  terminalLifecycleAffectedPlugins,
+} from '../packages/cli/src/cli/service-owner-lifecycle-fence.js'
 import type {
   PluginLifecycleRuntime,
   PluginRuntimeMutation,
@@ -40,12 +44,71 @@ function fixture() {
 }
 
 describe('service owner lifecycle coordination', () => {
+  it('includes dependents when a plugin generation changes', () => {
+    const base = { id: 'base', dependencies: [], enabled: true }
+    const dependent = { id: 'dependent', dependencies: [{ id: 'base' }], enabled: true }
+    const other = { id: 'other', dependencies: [], enabled: true }
+    const input = {
+      targetId: 'base',
+      previous: { plugins: [base, dependent, other] },
+      candidate: { plugins: [{ ...base, enabled: false }, { ...dependent, enabled: false }, other] },
+    } as unknown as PluginRuntimePreflight
+    expect(new Set(terminalLifecycleAffectedPlugins(input))).toEqual(new Set(['base', 'dependent']))
+  })
+
+  it('keeps terminal admission reserved until Manager adoption finishes', async () => {
+    let finish!: (value: boolean) => void
+    const manager = {
+      isCurrent: () => true,
+      cancel: vi.fn(() => true),
+      abort: vi.fn(() => true),
+      finish: vi.fn(() => new Promise<boolean>(resolve => finish = resolve)),
+      fence: vi.fn(),
+    }
+    const terminal = { isCurrent: () => true, release: vi.fn(() => true), fence: vi.fn() }
+    const combined = includeTerminalLifecycleFence(terminal, manager)
+    const completion = combined.finish()
+    expect(terminal.release).not.toHaveBeenCalled()
+    finish(true)
+    expect(await completion).toBe(true)
+    expect(terminal.release).toHaveBeenCalledOnce()
+  })
+
+  it('fences terminal admission if Manager adoption is not confirmed', async () => {
+    const manager = {
+      isCurrent: () => true,
+      cancel: vi.fn(() => true),
+      abort: vi.fn(() => true),
+      finish: vi.fn(async () => false),
+      fence: vi.fn(),
+    }
+    const terminal = { isCurrent: () => true, release: vi.fn(() => true), fence: vi.fn() }
+    expect(await includeTerminalLifecycleFence(terminal, manager).finish()).toBe(false)
+    expect(terminal.release).not.toHaveBeenCalled()
+    expect(terminal.fence).toHaveBeenCalledOnce()
+    expect(manager.fence).toHaveBeenCalledOnce()
+  })
+
   it('starts the underlying preflight synchronously when no Manager needs a reservation', async () => {
     let managerAppeared = false
     const check = vi.fn(async () => expect(managerAppeared).toBe(false))
     const wrapped = new ServiceOwnerLifecycleRuntime({
       runtime: { preflight: check } as unknown as PluginLifecycleRuntime,
       reserve: () => undefined,
+    })
+    const pending = wrapped.preflight(preflight)
+    managerAppeared = true
+    await pending
+    expect(check).toHaveBeenCalledOnce()
+  })
+
+  it('starts preflight synchronously when only terminal clients are reserved', async () => {
+    let managerAppeared = false
+    const check = vi.fn(async () => expect(managerAppeared).toBe(false))
+    const terminal = { isCurrent: () => true, release: () => true, fence: () => {} }
+    const wrapped = new ServiceOwnerLifecycleRuntime({
+      runtime: { preflight: check } as unknown as PluginLifecycleRuntime,
+      reserve: () => includeTerminalLifecycleFence(terminal),
     })
     const pending = wrapped.preflight(preflight)
     managerAppeared = true

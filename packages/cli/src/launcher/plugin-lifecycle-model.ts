@@ -314,6 +314,13 @@ export class LifecycleFailure extends Error {
   }
 }
 
+/** Owner-only preflight result with a bounded explanation safe for the Manager. */
+export class TerminalLifecycleUnavailable extends Error {
+  constructor() {
+    super('Terminal sessions are active or unavailable. Finish affected sessions and retry.')
+  }
+}
+
 export function safeError(code: CordisXPluginLifecycleErrorCode): string {
   const messages: Record<CordisXPluginLifecycleErrorCode, string> = {
     'invalid-source': 'The selected local package source is unavailable or outside the supported boundary.',

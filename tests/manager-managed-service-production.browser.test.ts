@@ -137,6 +137,20 @@ it.skipIf(chrome === undefined).each([false, true])(
         await ready(second)
         const paths = pluginManagementRpcPaths(home, 'codex', 'default')
         const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+        const terminalLeases = await Promise.all(
+          [undefined, 'claude-code' as const].map(async client =>
+            await requestPluginManagementRpc(paths, endpoint, {
+              kind: 'terminal-provider',
+              request: {
+                kind: 'prepare',
+                providerId: 'fixture-provider',
+                model: 'fixture-model',
+                ...(client === undefined ? {} : { client }),
+              },
+            }) as { kind: string; leaseId: string }
+          ),
+        )
+        expect(terminalLeases.map(lease => lease.kind)).toEqual(['prepared', 'prepared'])
         const sourceDirectory = await localPackage({ root, id: 'healthy-browser-plugin' })
         const execute = async (request: Record<string, unknown>) => {
           const planned = await requestPluginManagementRpc(paths, endpoint, { kind: 'plan', request } as never) as any
@@ -168,6 +182,18 @@ it.skipIf(chrome === undefined).each([false, true])(
         await checkEnabled(false)
         await execute({ kind: 'plugin-enable', pluginId: 'healthy-browser-plugin' })
         await checkEnabled(true)
+        for (const lease of terminalLeases) {
+          expect(
+            await requestPluginManagementRpc(paths, endpoint, {
+              kind: 'terminal-provider',
+              request: { kind: 'renew', leaseId: lease.leaseId },
+            }),
+          ).toEqual({ kind: 'renewed' })
+          await requestPluginManagementRpc(paths, endpoint, {
+            kind: 'terminal-provider',
+            request: { kind: 'release', leaseId: lease.leaseId },
+          })
+        }
         expect(JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout).pid)
           .toBe(started.pid)
         return

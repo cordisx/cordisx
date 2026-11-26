@@ -85,6 +85,11 @@ confirmed. If a participant
 disconnects or continuity cannot be confirmed, affected pages are retired and
 the operation may require reconciliation. The installed managed packages remain
 read-only in these Manager pages.
+
+The service owner also protects [active terminal leases](terminal-model-services.md#select-an-existing-plugin-service)
+during plugin changes; native adapters and external model API clients are not
+yet included in that guard.
+
 A Desktop owner must own the profile exclusively, have a ready Desktop renderer
 and not be in attach mode. On macOS or Linux, either owner can project one
 configured Channel archive when its staged browser graph has an initial

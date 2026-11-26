@@ -10,6 +10,7 @@ import { safeDiagnosticMessage } from '../launcher/diagnostic-redaction.js'
 import { acquireProfileRuntimeOwner } from '../launcher/profile-runtime-owner.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
+import { TerminalLifecycleUnavailable } from '../launcher/plugin-lifecycle-model.js'
 import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
@@ -31,7 +32,11 @@ import { createProductionManagedServiceLifecycle } from './production-managed-se
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
 import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
 import { createConfiguredChannelOwner } from './configured-channel-owner.js'
-import { reserveServiceOwnerLifecycle } from './service-owner-lifecycle-fence.js'
+import {
+  includeTerminalLifecycleFence,
+  reserveServiceOwnerLifecycle,
+  terminalLifecycleAffectedPlugins,
+} from './service-owner-lifecycle-fence.js'
 import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
 import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
@@ -143,9 +148,22 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         const coordinatorRuntime = new ServiceOwnerLifecycleRuntime({
           runtime: services,
           reserve: mutation => {
+            const terminal = terminalProvider?.reserveForLifecycle(terminalLifecycleAffectedPlugins(mutation))
+            if (terminalProvider && !terminal) throw new TerminalLifecycleUnavailable()
+            const releaseTerminal = () => {
+              if (!terminal) return
+              try {
+                if (!terminal.release()) terminal.fence()
+              } catch {
+                try {
+                  terminal.fence()
+                } catch { /* Preserve the original admission failure. */ }
+              }
+            }
             const managers = management?.lifecycleParticipants
-            if (!managers || !managers.hasLive()) return undefined
+            if (!managers || !managers.hasLive()) return terminal ? includeTerminalLifecycleFence(terminal) : undefined
             if (!rendererBootstrap || !rendererManagedServiceUI || !rendererLifecycle || !rendererParticipants) {
+              releaseTerminal()
               throw new Error('manager-lifecycle-fence-unavailable')
             }
             return reserveServiceOwnerLifecycle({
@@ -155,7 +173,13 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               managedUI: rendererManagedServiceUI,
               lifecycle: rendererLifecycle,
               participants: rendererParticipants,
-            })
+            }).then(
+              manager => terminal ? includeTerminalLifecycleFence(terminal, manager) : manager,
+              error => {
+                releaseTerminal()
+                throw error
+              },
+            )
           },
         })
         const coordinator = new PluginLifecycleCoordinator({

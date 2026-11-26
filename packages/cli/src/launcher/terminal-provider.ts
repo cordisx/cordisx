@@ -149,40 +149,53 @@ export function createTerminalProviderAuthority(options: {
     if (closed) throw new Error('Terminal provider authority retired')
     return service
   }
+  const reserve = (busy: () => boolean) => {
+    sweep()
+    if (closed || fenced || reservation !== undefined || preparing !== 0 || busy()) return undefined
+    const token = Symbol('terminal-service-reservation')
+    reservation = token
+    let ended = false
+    const current = () => !ended && !closed && !fenced && reservation === token
+    return {
+      isCurrent: current,
+      release() {
+        if (!current()) return false
+        ended = true
+        reservation = undefined
+        return true
+      },
+      fence() {
+        if (ended) return
+        ended = true
+        if (reservation === token) {
+          reservation = undefined
+          fenced = true
+        }
+      },
+    }
+  }
   return {
     /** Reserve a service only when no live or in-flight terminal can still use it. */
     reserveForService(identity: { readonly pluginId: string; readonly serviceId: string }) {
-      sweep()
       if (
         !identity || typeof identity.pluginId !== 'string' || typeof identity.serviceId !== 'string'
         || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(identity.pluginId)
         || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(identity.serviceId)
-        || closed || fenced || reservation !== undefined || preparing !== 0
-        || [...leases.values()].some(lease =>
+      ) return undefined
+      return reserve(() =>
+        [...leases.values()].some(lease =>
           lease.service.pluginId === identity.pluginId && lease.service.serviceId === identity.serviceId
         )
+      )
+    },
+    /** Do not replace a plugin generation while a terminal still uses it. */
+    reserveForLifecycle(pluginIds: readonly string[]) {
+      if (
+        !Array.isArray(pluginIds) || pluginIds.length === 0 || pluginIds.length > 4_096
+        || pluginIds.some(id => typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id))
       ) return undefined
-      const token = Symbol('terminal-service-reservation')
-      reservation = token
-      let ended = false
-      const current = () => !ended && !closed && !fenced && reservation === token
-      return {
-        isCurrent: current,
-        release() {
-          if (!current()) return false
-          ended = true
-          reservation = undefined
-          return true
-        },
-        fence() {
-          if (ended) return
-          ended = true
-          if (reservation === token) {
-            reservation = undefined
-            fenced = true
-          }
-        },
-      }
+      const affected = new Set(pluginIds)
+      return reserve(() => [...leases.values()].some(lease => affected.has(lease.service.pluginId)))
     },
     async request(raw: TerminalProviderRequest): Promise<TerminalProviderResult> {
       const request = parseTerminalProviderRequest(raw)

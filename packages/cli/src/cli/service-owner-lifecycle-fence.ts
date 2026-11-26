@@ -1,4 +1,7 @@
 import type { PluginRuntimePreflight } from '../launcher/plugin-lifecycle-model.js'
+import { isDeepStrictEqual } from 'node:util'
+import { pluginDependentClosure } from '../launcher/plugin-activation.js'
+import type { ManagedServiceClientReservation } from '../launcher/managed-service-client-reservation.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
@@ -11,6 +14,75 @@ export interface ServiceOwnerLifecycleFence {
   abort(): boolean
   finish(): Promise<boolean>
   fence(): void
+}
+
+/** Include changed packages and their dependents in both activation graphs. */
+export function terminalLifecycleAffectedPlugins(mutation: PluginRuntimePreflight): readonly string[] {
+  const before = new Map(mutation.previous.plugins.map(plugin => [plugin.id, plugin]))
+  const after = new Map(mutation.candidate.plugins.map(plugin => [plugin.id, plugin]))
+  const changed = new Set([mutation.targetId])
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    if (!isDeepStrictEqual(before.get(id), after.get(id))) changed.add(id)
+  }
+  const affected = new Set(changed)
+  for (const id of changed) {
+    for (const dependent of pluginDependentClosure(mutation.previous.plugins, id)) affected.add(dependent)
+    for (const dependent of pluginDependentClosure(mutation.candidate.plugins, id)) affected.add(dependent)
+  }
+  return [...affected]
+}
+
+/** Keep terminal admission closed until the Manager handoff has settled. */
+export function includeTerminalLifecycleFence(
+  terminal: ManagedServiceClientReservation,
+  manager?: ServiceOwnerLifecycleFence,
+): ServiceOwnerLifecycleFence {
+  let ended = false
+  const current = () => {
+    try {
+      return !ended && terminal.isCurrent() && (manager?.isCurrent() ?? true)
+    } catch {
+      return false
+    }
+  }
+  const fence = () => {
+    if (ended) return
+    ended = true
+    for (const close of [() => manager?.fence(), () => terminal.fence()]) {
+      try {
+        close()
+      } catch { /* Continue fencing the other participant. */ }
+    }
+  }
+  const settle = (action: 'cancel' | 'abort') => {
+    try {
+      if (current() && (manager?.[action]() ?? true) && terminal.isCurrent() && terminal.release()) {
+        ended = true
+        return true
+      }
+    } catch { /* Unconfirmed release must remain fenced. */ }
+    fence()
+    return false
+  }
+  return {
+    isCurrent: current,
+    cancel: () => settle('cancel'),
+    abort: () => settle('abort'),
+    finish: async () => {
+      try {
+        if (
+          current() && (manager === undefined || await manager.finish()) && terminal.isCurrent()
+          && terminal.release()
+        ) {
+          ended = true
+          return true
+        }
+      } catch { /* Unconfirmed release must remain fenced. */ }
+      fence()
+      return false
+    },
+    fence,
+  }
 }
 
 /** Compose the Manager portion of one service-owner plugin lifecycle transaction. */
