@@ -9,6 +9,8 @@ const READ_ONLY = new Set([
   'remote-history',
   'thread-history',
   'message-search',
+  'resource-status',
+  'resource-read',
   'message-get',
   'message-capabilities',
   'message-operation-receipt',

@@ -13,8 +13,9 @@ export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   },
   {
     capability: 'historical-resource-refetch',
-    implementation: 'unsupported',
-    reason: 'No scoped public operation for historical media resource preparation.',
+    implementation: 'supported',
+    reason:
+      'CLI/RPC resource-refetch/status/read verify ancestry and resource association; explicit resource-read policy and platform scopes remain required. Bounded bytes expose no local paths or platform keys.',
   },
   {
     capability: 'thread-forward',
