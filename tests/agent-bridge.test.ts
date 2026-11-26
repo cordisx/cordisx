@@ -1,5 +1,5 @@
 import { request } from 'node:http'
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,6 +11,8 @@ import {
   threadTranscript,
 } from '../packages/cli/src/launcher/agent-bridge.js'
 import { createNativeAgentModelsHandler } from '../packages/cli/src/launcher/native-agent-models.js'
+import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { ChatExecutionPreferences } from '../packages/cli/src/launcher/chat-execution-preferences.js'
 
 const CLI_ID = '0b5c8a52-6c6a-4a1c-b982-51a43c159cba'
 
@@ -89,6 +91,150 @@ function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: strin
 }
 
 describe('Codex side of the agent bridge', () => {
+  it('confirms explicit execution settings before the first business turn', async () => {
+    const codex = fakeCodex(), nativeRequest = codex.nativeRequest
+    codex.nativeRequest = async (method, params) => {
+      const result = await nativeRequest(method, params) as Record<string, unknown>
+      return method === 'thread/start'
+        ? { ...result, cwd: '/home/u', sandbox: { type: 'dangerFullAccess' }, approvalPolicy: 'never' }
+        : result
+    }
+    const started = await createCodexBridgeHandler(codex, '/home/u')('start_session', {
+      operationId: 'full-access',
+      prompt: 'build it',
+      execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+    })
+    expect(started).toMatchObject({
+      status: 'started',
+      executionVerifiedBeforeTurn: true,
+      execution: { execution: 'full-access', approval: 'never' },
+    })
+    expect(codex.calls.map(call => call.method)).toEqual(['thread/start', 'turn/start'])
+    expect(codex.calls[0]!.params).toMatchObject({ sandbox: 'danger-full-access', approvalPolicy: 'never' })
+    expect(codex.calls[1]!.params).toMatchObject({
+      sandboxPolicy: { type: 'dangerFullAccess' },
+      approvalPolicy: 'never',
+    })
+  })
+
+  it('does not send a first turn when requested execution settings are missing or differ', async () => {
+    for (const sandbox of [undefined, { type: 'workspaceWrite', networkAccess: true }]) {
+      const codex = fakeCodex(), nativeRequest = codex.nativeRequest
+      codex.nativeRequest = async (method, params) => {
+        const result = await nativeRequest(method, params) as Record<string, unknown>
+        return method === 'thread/start' ? { ...result, sandbox, approvalPolicy: 'on-request' } : result
+      }
+      const handler = createCodexBridgeHandler(codex, '/home/u')
+      const request = {
+        operationId: 'unconfirmed',
+        prompt: 'build it',
+        execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+      }
+      expect(await handler('start_session', request)).toMatchObject({
+        status: 'failed',
+        reason: 'execution-settings-unconfirmed',
+        retryable: false,
+        sessionId: 'new-thread',
+      })
+      expect(await handler('start_session', request)).toMatchObject({ repeated: true, sessionId: 'new-thread' })
+      expect(codex.calls.map(call => call.method)).toEqual(['thread/start'])
+      expect(await handler('check_operation', { operationId: 'unconfirmed' })).toMatchObject({
+        status: 'failed',
+        reason: 'execution-settings-unconfirmed',
+        retryable: false,
+      })
+    }
+  })
+
+  it('keeps the explicit first-turn settings above restricted profile defaults', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'bridge-execution-defaults-'))
+    const configPath = path.join(root, 'config.json')
+    await ensureHomeConfig(configPath)
+    const preferences = await ChatExecutionPreferences.open({
+      file: path.join(root, 'execution.json'),
+      configPath,
+      appId: 'codex',
+      profileId: 'default',
+    })
+    try {
+      const defaults = { execution: 'workspace-write', approval: 'on-request', networkAccess: false } as const
+      await preferences.setDefaults(defaults, 0)
+      const codex = fakeCodex(), nativeRequest = codex.nativeRequest
+      codex.nativeRequest = async (method, params) => {
+        const prepared = await preferences.prepare(method, params)
+        const response = await nativeRequest(method, prepared.params) as Record<string, unknown>
+        const result = method === 'thread/start'
+          ? {
+            ...response,
+            cwd: root,
+            sandbox: prepared.params.sandbox === 'danger-full-access'
+              ? { type: 'dangerFullAccess' }
+              : { type: 'workspaceWrite', networkAccess: false },
+            approvalPolicy: prepared.params.approvalPolicy,
+          }
+          : response
+        if (prepared.captureId) await preferences.complete(prepared.captureId, true, result)
+        return result
+      }
+      expect(
+        await createCodexBridgeHandler(codex, root)('start_session', {
+          operationId: 'explicit-over-default',
+          prompt: 'work',
+          cwd: root,
+          execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+        }),
+      ).toMatchObject({ status: 'started', executionVerifiedBeforeTurn: true })
+      expect(codex.calls[0]!.params).toMatchObject({ sandbox: 'danger-full-access', approvalPolicy: 'never' })
+      expect(codex.calls[1]!.params).toMatchObject({
+        sandboxPolicy: { type: 'dangerFullAccess' },
+        approvalPolicy: 'never',
+      })
+      expect((await preferences.defaults()).settings).toEqual(defaults)
+    } finally {
+      await preferences.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('validates execution syntax in a dry run without claiming native permissions were observed', async () => {
+    const codex = fakeCodex(), handler = createCodexBridgeHandler(codex, os.tmpdir())
+    expect(
+      await handler('start_session', {
+        prompt: 'work',
+        dryRun: true,
+        execution: { execution: 'full-access', approval: 'never', networkAccess: true },
+      }),
+    ).toMatchObject({
+      status: 'dry-run',
+      checks: { execution: 'valid-not-observed' },
+      wouldStart: { execution: { execution: 'full-access', approval: 'never', networkAccess: true } },
+    })
+    expect(
+      await handler('start_session', {
+        prompt: 'work',
+        dryRun: true,
+        execution: { execution: 'full-access', networkAccess: false },
+      }),
+    ).toMatchObject({ reason: 'invalid-arguments' })
+    expect(codex.calls).toEqual([])
+  })
+
+  it('rejects Codex execution settings for Claude before starting a session', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'bridge-claude-execution-'))
+    const bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
+    try {
+      expect(
+        await bridge.call('claude', 'start_session', {
+          prompt: 'work',
+          execution: { execution: 'full-access' },
+        }),
+      ).toMatchObject({ reason: 'invalid-arguments' })
+    } finally {
+      await bridge.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('confirms project sandbox and membership before the first model turn, and stops on uncertainty', async () => {
     const codex = fakeCodex(), order: string[] = []
     const request = codex.nativeRequest

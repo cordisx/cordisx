@@ -164,6 +164,18 @@ describe('exact Channel task changes', () => {
       } as never,
     )
     const metadata = { 'cordisx/channelContext': 'current', 'openai/threadId': 'chat', 'openai/turnId': 'turn' }
+    expect(await tools.executionGuard('session-start-execution', { execution: 'full-access' }, metadata))
+      .toMatchObject({ code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' })
+    expect(
+      await tools.executionGuard('session-start-execution', { execution: 'full-access' }, {
+        'openai/threadId': 'chat',
+      }),
+    ).toMatchObject({ code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' })
+    expect(
+      await tools.executionGuard('session-start-execution', { execution: 'full-access' }, {
+        'openai/threadId': 'local-unbound',
+      }),
+    ).toBeUndefined()
     expect(await tools.executionGuard('fast-set', { sessionId: 'chat', fast: true, expectedRevision: 3 }, metadata))
       .toMatchObject({ application: 'approval-required', settings: { fast: true } })
     expect(f.native.applyTaskSelection).not.toHaveBeenCalled()

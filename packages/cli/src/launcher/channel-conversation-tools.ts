@@ -68,6 +68,11 @@ export class ChannelConversationTools {
       || caller && this.consumer?.taskSettings.isBound(caller)
       || this.consumer?.agentAccess.preparation(metadata)
     ) {
+      // A new session has no bound target on which to check Channel field grants.
+      // Do not let a generic session tool bypass those grants.
+      if (operation === 'session-start-execution') {
+        return { status: 'rejected', code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' }
+      }
       if (['fast', 'fast-set', 'project', 'project-set', 'model-defaults', 'model-defaults-set'].includes(operation)) {
         const scoped = this.consumer?.agentAccess.caller(metadata)
         if (meta['cordisx/channelContext'] !== undefined && !scoped) {

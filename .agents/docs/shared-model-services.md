@@ -199,7 +199,7 @@ an `app` argument (`"codex"` or `"claude"`). A new app is a new `app` value,
 not new tool names. Results carry `codex://` or `claude://` links. Both apps
 also have `list_model_providers`, which returns the same shape on either side.
 
-Every declared argument does something on both sides; a tool never accepts a
+Declared arguments are either honored or explicitly rejected; a tool never accepts a
 value it ignores.
 
 | Argument                             | Codex                                                              | Claude                                                                   |
@@ -207,6 +207,15 @@ value it ignores.
 | `read_session.limit`                 | newest `limit` transcript entries, on top of the 60k-character cap | same                                                                     |
 | `start_session.title`                | `thread/name/set` right after `thread/start`                       | written into the session record `list_sessions` reads                    |
 | `start_session.providerId` / `model` | a catalog provider and one of its models                           | a `model-service` declared for Claude and one of its `models.claude` ids |
+| `start_session.execution`            | per-session execution settings, checked before the first turn      | rejected                                                                 |
+
+When an authorized user requests explicit execution settings for a Codex
+`start_session`, supply `execution` on that request; omitted fields inherit the
+profile defaults. Before sending the first message, the bridge verifies the
+native thread settings. If confirmation is missing or mismatched, it returns the
+created session without sending the message. Inspect that session and reuse the
+same operation ID. This option is unavailable to Claude and Channel callers.
+A dry run validates the request without observing permissions.
 
 `list_sessions.searchTerm` matches message content as well as titles and returns
 `matchedIn` plus a short `match` excerpt and role. Codex searches at most eight

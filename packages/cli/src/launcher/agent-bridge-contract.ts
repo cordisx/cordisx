@@ -58,6 +58,7 @@ export const BRIDGE_REASONS = [
   'provider-key-missing',
   'session-not-found',
   'session-busy',
+  'execution-settings-unconfirmed',
   'session-open-in-claude',
   'claude-not-running',
   'codex-not-running',
@@ -160,6 +161,10 @@ const BRIDGE_REASON_GUIDE: Readonly<
     retryable: true,
     howToContinue:
       'A turn is already running there; call check_operation or read_session, then send again once it is done.',
+  },
+  'execution-settings-unconfirmed': {
+    retryable: false,
+    howToContinue: 'Inspect the created session and its actual settings before sending its first message.',
   },
   'session-open-in-claude': {
     retryable: false,
@@ -301,6 +306,7 @@ export interface DryRunChecks {
   readonly model: 'ok' | 'remembered' | 'not-requested'
   readonly cwd: 'ok' | 'remembered'
   readonly key: 'ok' | 'remembered' | 'not-required'
+  readonly execution?: 'valid-not-observed'
 }
 
 /** One app + provider + model + cwd combination a start proved works. */

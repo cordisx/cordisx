@@ -44,6 +44,8 @@ export interface NativeAgentModelsAuthority {
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
   /** Cross-app session tools through the CordisX agent bridge; `app` names the target. */
   sessions?(app: SessionApp, operation: SessionOperation, input: unknown, metadata?: unknown): Promise<unknown>
+  /** Keep source-specific authority when a session start requests execution settings. */
+  sessionExecutionGuard?(input: Record<string, unknown>, metadata?: unknown): Promise<unknown | undefined>
   /** The read-only integration report. Reads files and probes; never launches or writes. */
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
@@ -102,6 +104,23 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       const app = args.app
       if (typeof app !== 'string' || !(SESSION_APPS as readonly string[]).includes(app)) {
         return bridgeFailure('unknown-app', { message: `app must be one of ${SESSION_APPS.join(', ')}`, detail: 'app' })
+      }
+      if (session === 'start_session' && args.execution !== undefined) {
+        if (app !== 'codex') {
+          return bridgeFailure('invalid-arguments', { message: 'execution is supported only for Codex sessions' })
+        }
+        const settings = object(args.execution)
+        if (
+          !settings || !Object.keys(settings).length
+          || Object.keys(settings).some(key => !['execution', 'approval', 'networkAccess'].includes(key))
+        ) {
+          return bridgeFailure('invalid-arguments', { message: 'Invalid session execution settings' })
+        }
+        if (object(metadata)?.['cordisx/channelContext'] !== undefined) {
+          return { status: 'rejected', code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' }
+        }
+        const guarded = await authority.sessionExecutionGuard?.(args, metadata)
+        if (guarded !== undefined) return guarded
       }
       if (authority.sessions === undefined) {
         return bridgeFailure('agent-bridge-unavailable', {

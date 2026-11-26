@@ -89,7 +89,6 @@ import {
   PluginPreferenceAuthority,
   PluginPreferenceManagementAdapter,
 } from '../model-catalog/plugin-preference-authority.js'
-
 type NativeSubmissionActivation =
   & Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
   & {
@@ -99,7 +98,6 @@ type NativeSubmissionActivation =
   }
 
 const attachDesktopContext = desktopContext.attachDesktopNativeContextObserver
-
 export interface NativeSubmissionInstallation {
   readonly authority: NativeSubmissionCdpAuthority
   readonly adapterLifecycle?: {
@@ -923,6 +921,8 @@ export async function prepareNativeSubmissionBootstrap(
           controller,
           channelModelSelection: (input, metadata) =>
             completeOptions.channel?.('task-model-select', input, metadata) ?? Promise.resolve(undefined),
+          sessionExecutionGuard: async (a, m) =>
+            await completeOptions.chatSettingsGuard?.('session-start-execution', a, m),
           sessions: async (app, operation, input) => {
             if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
             return await agentBridge.call(app, operation, input)
