@@ -6,10 +6,10 @@ import { type ActiveConnection, isEligibleInbox, RUNTIME_DEFAULTS } from './runt
 export type { ChannelSentDelivery } from './delivery-observers.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { runtimeSnapshot, visibleConnections } from './runtime-snapshot.js'
-import { validateOutboundMedia } from './outbound-media.js'
-import { validateOutboundContent } from './outbound-content.js'
-import { mentionCapabilities, validateMentionAuthority, validateMentionDispatch } from './outbound-mention.js'
-import { outboundAdapterDefinition, sendOutboundPublic } from './outbound-public.js'
+import { richtextV3Capabilities } from './outbound-richtext-v3-capabilities.js'
+import { mentionCapabilities, validateMentionAuthority } from './outbound-mention.js'
+import { prepareOutboundDispatch } from './outbound-dispatch.js'
+import { assertOutboundV3Request, outboundAdapterDefinition, sendOutboundPublic } from './outbound-public.js'
 import { enqueueOutbound, outboundCapabilitiesPublic } from './outbound-enqueue.js'
 import {
   ChannelGenerationFencedError,
@@ -44,7 +44,6 @@ import {
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
   accountKey,
-  canonical,
   channelInboxRecordId,
   ChannelIntegrityError,
   digest,
@@ -353,6 +352,29 @@ export class ChannelRuntime {
     const original = await this.outboundCapabilities(target, caller)
     const connection = this.#connections.get(accountKey(target))?.connection
     return mentionCapabilities(original, connection)
+  }
+
+  async sendTypedV3(
+    request: import('@cordisx/protocol/channel-outbound/v3').ChannelMessageSendV3,
+    caller: ChannelPluginIdentity,
+  ): Promise<ChannelSendHandleV1> {
+    assertOutboundV3Request(request)
+    return sendOutboundPublic(
+      request,
+      caller,
+      (notification, identity, id) => this.notifyOnce(notification, identity, id),
+      id => this.#store.snapshot().outbox[id],
+    )
+  }
+
+  async outboundCapabilitiesV3(
+    target: ChannelThreadRef,
+    caller: ChannelPluginIdentity,
+  ): Promise<import('@cordisx/protocol/channel-outbound/v3').ChannelOutboundCapabilitiesV3> {
+    return richtextV3Capabilities(
+      await this.outboundCapabilitiesV2(target, caller),
+      this.#connections.get(accountKey(target))?.connection,
+    )
   }
 
   async validateMentionContent(
@@ -812,36 +834,14 @@ export class ChannelRuntime {
 
       let effectStarted = false
       try {
-        if (claimed.content && claimed.effectiveType !== 'text') {
-          await validateMentionDispatch(claimed.target, claimed.content, active.connection)
-        }
-        if (claimed.content && !(active.connection.outboundTypes ?? ['text']).includes(claimed.effectiveType!)) {
-          throw new ChannelIntegrityError('Effective outbound type is no longer supported')
-        }
-        if (claimed.media && active.connection.supportsOutboundMedia !== true) {
-          throw new ChannelIntegrityError('Channel adapter media support is unavailable')
-        }
-        effectStarted = true
-        const result = await active.connection.send({
-          deliveryId: claimed.deliveryId,
-          target: claimed.target,
-          kind: claimed.kind,
-          text: claimed.text,
-          ...(claimed.idempotencyKey === undefined ? {} : { idempotencyKey: claimed.idempotencyKey }),
-          ...(claimed.content
-            ? {
-              content: claimed.effectiveType === 'text'
-                ? { type: 'text' as const, text: claimed.text }
-                : validateOutboundContent(claimed.content),
-              fallback: claimed.fallback!,
-              requestedType: claimed.requestedType!,
-              effectiveType: claimed.effectiveType!,
-            }
-            : {}),
-          ...(claimed.media ? { media: validateOutboundMedia(claimed.media) } : {}),
-          ...(claimed.questionCard ? { questionCard: claimed.questionCard } : {}),
-          createdAt: claimed.createdAt,
+        const delivery = await prepareOutboundDispatch(claimed, active.connection, {
+          assertGeneration: () => this.#assertGeneration(claimed.target, generation),
+          authorize: request => this.#requirePermission(request),
+          descriptor: this.#outboundMediaDescriptor,
+          processing: () => this.#store.snapshot().outbox[claimed.deliveryId]?.status === 'processing',
         })
+        effectStarted = true
+        const result = await active.connection.send(delivery)
         const completedAt = this.#now()
         if (!result || typeof result.externalMessageId !== 'string' || result.externalMessageId.length === 0) {
           throw new UncertainChannelSendError('OUTBOUND_RECEIPT_MISSING')

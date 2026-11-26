@@ -229,7 +229,10 @@ export interface ChannelAdapterDescriptor {
 
 export interface ChannelOutboundDelivery {
   readonly idempotencyKey?: string
-  readonly content?: import('./outbound-content.js').ChannelOutboundContent
+  readonly content?: import('./outbound-richtext-v3.js').ChannelOutboundContentV3
+  readonly outboundVersion?: 3
+  readonly preparedImages?: readonly import('./outbound-media.js').ChannelOutboundMedia[]
+  readonly verifyPreparedImages?: () => Promise<void>
   readonly fallback?: import('./outbound-content.js').ChannelOutboundFallback
   readonly requestedType?: import('./outbound-content.js').ChannelOutboundType
   readonly effectiveType?: import('./outbound-content.js').ChannelOutboundType
@@ -249,6 +252,7 @@ export interface ChannelSendResult {
 }
 
 export interface ChannelAdapterConnection {
+  readonly richtextV3?: boolean
   readonly richtext?: { readonly paragraphs: boolean; readonly mentions: boolean }
   verifyMentions?(target: ChannelThreadRef, userIds: readonly string[]): Promise<void>
   readonly maxMediaBytes?: number
@@ -322,7 +326,8 @@ export type ChannelOutboxStatus =
 
 export interface ChannelNotification {
   readonly idempotencyKey?: string
-  readonly content?: import('./outbound-content.js').ChannelOutboundContent
+  readonly content?: import('./outbound-richtext-v3.js').ChannelOutboundContentV3
+  readonly outboundVersion?: 3
   readonly fallback?: import('./outbound-content.js').ChannelOutboundFallback
   readonly target: ChannelThreadRef
   readonly kind: ChannelOutboundDelivery['kind']

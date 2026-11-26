@@ -13,9 +13,9 @@ vi.mock('@larksuiteoapi/node-sdk', async original => ({
 }))
 
 describe('configured Feishu factory outbound authority', () => {
-  it.each(['conversation', 'topic'] as const)(
-    'forwards prepared authority through factory and runtime to SDK %s',
-    async semantics => {
+  it.each([['conversation', false], ['topic', false], ['conversation', true], ['topic', true]] as const)(
+    'forwards prepared authority through factory and runtime to SDK %s typed richtext %s',
+    async (semantics, richtext) => {
       const directory = await mkdtemp(path.join(os.tmpdir(), 'feishu-outbound-factory-'))
       const account = { adapterId: 'feishu', accountId: 'synthetic-factory', tenantId: 'synthetic' }
       const target = {
@@ -77,30 +77,72 @@ describe('configured Feishu factory outbound authority', () => {
           expect.objectContaining({ appId: account.accountId, appSecret: 'synthetic-only', transport: 'websocket' }),
         )
         expect(connected).toHaveBeenCalledWith(account, channel)
-        const handle = await runtime.sendOutbound({
-          contract: 'cordisx.channel-message-send/v1',
-          schemaVersion: 1,
+        const base = {
           target,
-          kind: 'reply',
+          kind: 'reply' as const,
           idempotencyKey: 'factory-image',
-          content: { type: 'image', handle: media.handle },
-          fallback: { mode: 'reject' },
-        }, caller)
+          fallback: { mode: 'reject' as const },
+        }
+        const handle = richtext
+          ? await runtime.sendTypedV3({
+            ...base,
+            contract: 'cordisx.channel-message-send/v3',
+            schemaVersion: 3,
+            content: {
+              type: 'richtext',
+              blocks: [
+                {
+                  type: 'paragraph',
+                  nodes: [{ type: 'link', text: 'Docs', url: 'https://example.org' }, {
+                    type: 'image',
+                    handle: media.handle,
+                  }],
+                },
+                { type: 'inline-code', text: 'literal code' },
+                { type: 'code', text: 'return 42', language: 'GO' },
+              ],
+            },
+          }, caller)
+          : await runtime.sendOutbound({
+            contract: 'cordisx.channel-message-send/v1',
+            schemaVersion: 1,
+            target,
+            kind: 'reply',
+            idempotencyKey: 'factory-image',
+            content: { type: 'image', handle: media.handle },
+            fallback: { mode: 'reject' },
+          }, caller)
         await runtime.drainOutbound(account)
         expect(resolve).toHaveBeenCalledExactlyOnceWith(media.handle, target, media.size)
         expect(upload).toHaveBeenCalledExactlyOnceWith({ data: { image_type: 'message', image: bytes } })
         expect(dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
           ...(semantics === 'topic' ? { path: { message_id: 'om_root' } } : { params: { receive_id_type: 'chat_id' } }),
           data: expect.objectContaining({
-            msg_type: 'image',
-            content: JSON.stringify({ image_key: 'factory-image' }),
+            msg_type: richtext ? 'post' : 'image',
+            content: JSON.stringify(
+              richtext
+                ? {
+                  en_us: {
+                    title: '',
+                    content: [
+                      [{ tag: 'a', text: 'Docs', href: 'https://example.org' }, {
+                        tag: 'img',
+                        image_key: 'factory-image',
+                      }],
+                      [{ tag: 'md', text: '`literal code`' }],
+                      [{ tag: 'code_block', text: 'return 42', language: 'GO' }],
+                    ],
+                  },
+                }
+                : { image_key: 'factory-image' },
+            ),
             ...(semantics === 'topic' ? { reply_in_thread: true } : { receive_id: 'oc_target' }),
           }),
         }))
         expect(await handle.receipt()).toMatchObject({
           status: 'sent',
           externalMessageId: 'om_factory_sent',
-          effectiveType: 'image',
+          effectiveType: richtext ? 'richtext' : 'image',
           downgraded: false,
         })
         expect(legacySend).not.toHaveBeenCalled()

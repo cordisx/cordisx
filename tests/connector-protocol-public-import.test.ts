@@ -24,14 +24,16 @@ import type {
   ChannelCardActionResultV1,
   ChannelCardActionsV1,
 } from '@cordisx/protocol/channel-card-actions/v1'
+import type { ChannelMessageSendV3 } from '@cordisx/protocol/channel-outbound/v3'
+import type { ChannelRuntimeContextV4 } from '@cordisx/protocol/channel-runtime/v4'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.21'
-const protocolSpec = 'github:cordisx/cordisx-protocol#43e24704829eb3317b27a1619b0090294a23932f'
+const protocolSpec = 'github:cordisx/cordisx-protocol#52fe15b6416be16429357e4994cfe4a7a2fb54fe'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#43e24704829eb3317b27a1619b0090294a23932f'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#52fe15b6416be16429357e4994cfe4a7a2fb54fe'
 const protocolIntegrity =
-  'sha512-2hfNZ5JXlCwScheSh4Eyt53NSqwYjdxvfQQjD3iy8V7T81bJocDyxApCMM4AU1TDnWhAnihfaqIxDqEPzzdirg=='
+  'sha512-uXUMy7xR5hohh1Np6ZhDPo4Yi4nif+zLFHmI3LxI0sA20QJs9ceChBqMipc2Moo9zihqfjWLh8Vq+7efIcU5Nw=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -116,6 +118,7 @@ type FormalCardActionSurface = readonly [
   ChannelCardActionEventV1,
 ]
 const formalCardActionSurface = null as unknown as FormalCardActionSurface
+const formalRichtextSurface = null as unknown as readonly [ChannelMessageSendV3, ChannelRuntimeContextV4]
 const formalHistoricalResourceSurface = null as unknown as readonly [
   ChannelHistoricalResourceRequestV1,
   ChannelHistoricalResourceReadRequestV1,
@@ -141,6 +144,7 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
     expect(formalCardActionSurface).toBeNull()
+    expect(formalRichtextSurface).toBeNull()
     expect(formalHistoricalResourceSurface).toBeNull()
   })
 
