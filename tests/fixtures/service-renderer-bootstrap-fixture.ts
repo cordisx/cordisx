@@ -58,6 +58,7 @@ export async function fixture(
     delayLease?: boolean
     managedBackend?: boolean
     managedUiVersion?: 14 | 15 | 16
+    secondManagedService?: boolean
     managedWithoutStartup?: boolean
     managedChannelExact?: boolean
     managedUiSource?: string
@@ -197,6 +198,17 @@ export async function fixture(
       }))
       await persistPermissionPolicies({ configPath }, policies)
     }
+  }
+  if (options.secondManagedService) {
+    await stageServiceModePlugin(
+      root,
+      homeDir,
+      profileId,
+      true,
+      'https://example.test/second-fixture',
+      'export function apply() {}',
+      { version: 15, pluginId: 'fixture-service-2' },
+    )
   }
   if (options.managedStartupConfig) {
     await updateHomeConfigAtomic(current => ({

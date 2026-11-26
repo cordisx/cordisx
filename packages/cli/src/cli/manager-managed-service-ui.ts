@@ -20,6 +20,11 @@ import {
   ManagerManagedServiceObservation,
   type ManagerManagedServiceObservationRequest,
 } from './manager-managed-service-observation.js'
+import {
+  sameCapabilities,
+  sameManagedServiceIdentities,
+  selectManagedServiceCapabilities,
+} from './manager-managed-service-ui-selection.js'
 
 const secret = /^[a-f0-9]{64}$/u
 const localId = /^[a-z0-9][a-z0-9._-]{0,95}$/u
@@ -149,16 +154,6 @@ function copyCapabilities(value: readonly ManagedServiceUICapabilityMutation[]):
     )
   ) throw unavailable()
   return copied
-}
-
-function sameCapabilities(left: readonly OwnerCapability[], right: readonly OwnerCapability[]): boolean {
-  return left.length === right.length
-    && left.every(a =>
-      right.some(b =>
-        a.pluginId === b.pluginId && a.pluginGeneration === b.pluginGeneration && a.token === b.token
-        && a.startup === b.startup
-      )
-    )
 }
 
 /**
@@ -359,12 +354,20 @@ export function createManagerManagedServiceUIBridge(input: {
     return { requestId, ok: true, value: response.value }
   }
 
-  function projectInitial(context: ManagerRendererChannelContext): readonly ManagerManagedServiceUICapability[] {
+  function projectInitial(
+    context: ManagerRendererChannelContext,
+    allowedOwners?: ReadonlyMap<string, string>,
+  ): readonly ManagerManagedServiceUICapability[] {
     if (!gate.open || !validContext(context)) throw unavailable()
     const existing = sessions.get(context.rendererId)
     if (existing) {
       assertCurrent(existing, context)
-      return [...existing.aliases.values()].map(alias => alias.public)
+      const projected = [...existing.aliases.values()].map(alias => alias.public)
+      if (allowedOwners !== undefined) {
+        const selected = selectManagedServiceCapabilities(existing.capabilities, allowedOwners)
+        if (!sameManagedServiceIdentities(projected, selected)) throw unavailable()
+      }
+      return projected
     }
     if (usedRenderers.has(context.rendererId) || usedRenderers.size >= 4_096 || sessions.size >= 16) {
       throw unavailable()
@@ -376,10 +379,11 @@ export function createManagerManagedServiceUIBridge(input: {
     } catch {
       throw unavailable()
     }
-    if (usedAliases.size + capabilities.length > 16_384) throw unavailable()
+    const selected = selectManagedServiceCapabilities(capabilities, allowedOwners)
+    if (usedAliases.size + selected.length > 16_384) throw unavailable()
     if (fence() !== currentFence || !validContext(context)) throw unavailable()
     const aliases = new Map<string, Alias>()
-    for (const owner of capabilities) {
+    for (const owner of selected) {
       let token: string
       do token = randomBytes(32).toString('hex')
       while (usedAliases.has(token) || capabilities.some(item => token.includes(item.token)))

@@ -6,6 +6,7 @@ import {
   loadServiceRendererInitialPackage,
   loadServiceRendererPackage,
 } from '../packages/cli/src/cli/service-renderer-projection.js'
+import { prepareServiceRendererInstalledGraphs } from '../packages/cli/src/cli/service-renderer-installed-graphs.js'
 
 vi.mock('../packages/cli/src/launcher/plugin-package.js', async importOriginal => ({
   ...await importOriginal<typeof import('../packages/cli/src/launcher/plugin-package.js')>(),
@@ -74,6 +75,23 @@ it('classifies only owner-matched service-free packages as safe to omit', async 
   vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce(safe as never)
   await expect(inspectServiceRendererInitialPackage('/fixture', item))
     .rejects.toThrow('renderer-projection-plugin-unsupported')
+})
+
+it('still rejects an unsupported managed package instead of omitting its service graph', async () => {
+  const value = staged()
+  value.manifest.runtimeManifest.capabilities.push({ name: 'models.read', required: true, scope: {} })
+  vi.mocked(loadStagedPluginPackage).mockResolvedValue(value as never)
+  const server = vi.fn()
+  await expect(prepareServiceRendererInstalledGraphs({
+    homeDir: '/fixture',
+    plugins: [item],
+    unprojectedConfigIds: new Set([item.id]),
+    managedServiceUIAvailable: true,
+    leases: [],
+    server,
+    current: () => true,
+  })).rejects.toThrow('renderer-bootstrap-plugin-unsupported')
+  expect(server).not.toHaveBeenCalled()
 })
 
 it('admits mixed Host services with optional Platform declarations only for the initial projection', async () => {

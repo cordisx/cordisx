@@ -34,19 +34,25 @@ export async function prepareServiceRendererInstalledGraphs(input: {
     if (!input.current()) throw new Error('renderer-bootstrap-stale')
     inspected.set(item.id, value)
     if (!value.supported || input.unprojectedConfigIds.has(item.id)) {
-      if (!value.safeToOmit) throw new Error('renderer-bootstrap-plugin-unsupported')
+      // A supported managed backend remains owned and running independently;
+      // an unavailable browser configuration only omits its Manager graph.
+      if (!value.safeToOmit && !value.supported) throw new Error('renderer-bootstrap-plugin-unsupported')
       unavailable.add(item.id)
     }
   }
 
   // A dependent cannot run without its owner-selected dependency, even if its
-  // own graph is otherwise supported. Never omit a service-bearing dependent.
+  // own graph is otherwise supported. Unknown service-bearing packages still
+  // prevent admission; supported managed backends continue under their owner.
   let changed = true
   while (changed) {
     changed = false
     for (const item of input.plugins) {
       if (unavailable.has(item.id) || !item.dependencies.some(dependency => unavailable.has(dependency.id))) continue
-      if (!inspected.get(item.id)?.safeToOmit) throw new Error('renderer-bootstrap-plugin-unsupported')
+      const value = inspected.get(item.id)
+      if (!value || !value.safeToOmit && !value.supported) {
+        throw new Error('renderer-bootstrap-plugin-unsupported')
+      }
       unavailable.add(item.id)
       changed = true
     }

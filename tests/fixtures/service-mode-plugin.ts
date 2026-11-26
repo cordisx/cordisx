@@ -92,6 +92,7 @@ export async function stageServiceModePlugin(
   canonicalSource: string | null = 'https://example.test/fixtures',
   browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
   options: {
+    readonly pluginId?: string
     readonly version?: 14 | 15 | 16
     readonly withoutStartup?: boolean
     readonly channelExact?: boolean
@@ -103,7 +104,8 @@ export async function stageServiceModePlugin(
     readonly browserConsole?: boolean
   } = {},
 ) {
-  const id = withService ? 'fixture-service' : 'fixture-desktop'
+  const id = options.pluginId ?? (withService ? 'fixture-service' : 'fixture-desktop')
+  const providerId = options.pluginId === undefined ? 'fixture-provider' : `${id}-provider`
   const dir = path.join(root, id)
   await mkdir(dir)
   const routes = [{ alias: 'fixture', gatewayModelId: 'fixture-model' }]
@@ -158,7 +160,7 @@ export async function apply(ctx, input) {
   const ready = await handle.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')
   const result = await handle.publishNativeProvider({
-    providerId: 'fixture-provider', compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
+    providerId: ${JSON.stringify(providerId)}, compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
   })
   if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
   `
@@ -243,7 +245,7 @@ export async function prepare(ctx, input) {
               id: 'provider',
               serviceId: 'gateway',
               kind: 'provider',
-              providerId: 'fixture-provider',
+              providerId,
               compositionOrigin: 'api',
               dependsOn: [],
               milestones: [],

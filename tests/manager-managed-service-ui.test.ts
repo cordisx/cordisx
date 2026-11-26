@@ -49,11 +49,17 @@ function fixture(
     allowLogout?: boolean
     allowAccountReads?: boolean
     allowAccountToggle?: boolean
+    secondCapability?: boolean
   } = {},
 ) {
   let epoch = 1
   let live = true
-  let capabilities = [{ pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true }]
+  let capabilities = [
+    { pluginId: 'sample-provider', pluginGeneration: 'plugin-1', token: ownerToken, startup: true },
+    ...(options.secondCapability
+      ? [{ pluginId: 'other-provider', pluginGeneration: 'plugin-2', token: secondOwnerToken, startup: true }]
+      : []),
+  ]
   const handle = vi.fn(async (value: string, _signal?: AbortSignal): Promise<Record<string, unknown>> => {
     const input = JSON.parse(value) as { requestId: string; operation: string }
     return {
@@ -95,6 +101,25 @@ function fixture(
 }
 
 describe('manager managed-service UI bridge', () => {
+  it('issues capabilities only for the graphs selected for that Manager', () => {
+    const { bridge } = fixture({ secondCapability: true })
+    const a = context('1', new AbortController().signal)
+    const b = context('2', new AbortController().signal)
+    const first = bridge.projectInitial(a, new Map([['sample-provider', 'plugin-1']]))
+    const second = bridge.projectInitial(b, new Map([['other-provider', 'plugin-2']]))
+    expect(first.map(item => item.pluginId)).toEqual(['sample-provider'])
+    expect(second.map(item => item.pluginId)).toEqual(['other-provider'])
+    expect(bridge.projectInitial(a)).toEqual(first)
+    expect(() => bridge.projectInitial(a, new Map([['other-provider', 'plugin-2']])))
+      .toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(() => bridge.assertBundleSafe(a, secondOwnerToken)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(() => bridge.channel.prepare(request(first[0]!.token), b)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    const stale = context('3', new AbortController().signal)
+    expect(() => bridge.projectInitial(stale, new Map([['sample-provider', 'stale-generation']])))
+      .toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    bridge.dispose()
+  })
+
   it('rejects an owner token in a bundle and retires only the requested session', () => {
     const { bridge } = fixture()
     const a = context('1', new AbortController().signal)

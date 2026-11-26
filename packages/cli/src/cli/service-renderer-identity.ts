@@ -103,7 +103,7 @@ export class ServiceRendererIdentityProjection {
     const staged = inspected.staged
     if (
       !this.current(context) || this.plugins.has(captured.id) || this.aliases.size >= 256
-      || (options.unavailable ? !inspected.safeToOmit : !inspected.supported)
+      || (options.unavailable ? !inspected.safeToOmit && !inspected.supported : !inspected.supported)
       || plugin.id !== captured.id || plugin.enabled !== captured.enabled || !plugin.package
       || plugin.entry !== stagedPluginModulePath(this.input.homeDir, captured.digest)
       || plugin.source !== staged.identitySource || !attachmentEqual(plugin.manifest, staged.manifest.runtimeManifest)

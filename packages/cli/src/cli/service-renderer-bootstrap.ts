@@ -782,7 +782,7 @@ export class ServiceRendererBootstrap {
         }
         const managedServiceUICapabilities = entry.managedOwners.size === 0
           ? undefined
-          : this.managedServiceUI?.projectInitial(context)
+          : this.managedServiceUI?.projectInitial(context, entry.managedOwners)
         if (entry.managedOwners.size > 0 && managedServiceUICapabilities === undefined) {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }

@@ -310,14 +310,77 @@ it('isolates service-free packages with unprojected configuration and their depe
   }
 }, 60_000)
 
-it('still refuses an unprojected configuration when the package owns a service', async () => {
-  const f = await fixture({ managedUiVersion: 15, protectProfileInputs: true })
+it('keeps the Manager available when a managed package has unprojected configuration', async () => {
+  const f = await fixture({
+    managedUiVersion: 15,
+    secondManagedService: true,
+    protectProfileInputs: true,
+    browserManagement: true,
+  })
+  const privateValue = 'fixture-managed-private-config'
+  const projections = vi.spyOn(f.managedUI, 'projectInitial')
   try {
+    const revision = f.lifecycle.snapshot().active.revision
+    expect(await f.install('healthy-plugin', revision)).toMatchObject({ outcome: 'applied' })
     const configs = new PackagePluginConfigStore(f.homeDir, f.profileId, f.generation)
     const token = secret()
-    await configs.stage('fixture-service', 0, { value: 'private' }, token)
+    await configs.stage('fixture-service', 0, { value: privateValue }, token)
     await configs.commit('fixture-service', 1, token)
-    expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+    const capabilities = f.managed.capabilities()
+    expect(capabilities.map(item => item.pluginId).sort()).toEqual(['fixture-service', 'fixture-service-2'])
+    const prepared = await f.call({ action: 'prepare' }) as any
+    expect(prepared.status).toBe('ok')
+    expect(prepared.value.privateGraphs.map((graph: ServiceRendererPrivateGraph) => graph.pluginId))
+      .toEqual(['fixture-service-2', 'healthy-plugin'])
+    const completed = await f.call({
+      action: 'complete',
+      managerOrigin: origin,
+      graphs: prepared.value.privateGraphs.map(project),
+    }) as any
+    expect(completed.status).toBe('ok')
+    const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+    try {
+      const bundle = bytes.toString('utf8')
+      expect(bundle).toContain('fixture-service')
+      expect(bundle).toMatch(/standaloneUnavailable\s*:\s*(?:true|!0)/u)
+      expect(bundle).not.toContain(privateValue)
+      expect(bundle).not.toContain('https://example.test/fixtures')
+    } finally {
+      bytes.fill(0)
+    }
+    expect(f.managed.capabilities()).toEqual(capabilities)
+    const projected = projections.mock.results.at(-1)?.value
+    expect(projected?.map(item => item.pluginId)).toEqual(['fixture-service-2'])
+    const capability = projected![0]!
+    const response = await f.sessions.call(
+      f.invocation,
+      'managed-service-ui',
+      JSON.stringify({
+        version: 1,
+        token: capability.token,
+        requestId: 'other-managed-read',
+        operation: 'get',
+        scope: {
+          profileId: f.profileId,
+          runtimeGeneration: f.generation,
+          pluginGeneration: capability.pluginGeneration,
+        },
+        serviceId: 'gateway',
+      }),
+    ) as any
+    expect(response).toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+    const query = await f.sessions.call(
+      f.invocation,
+      'plugin-management',
+      JSON.stringify({
+        version: 1,
+        requestId: secret(),
+        token: 'renderer-binding-placeholder',
+        profileId: f.profileId,
+        operation: { kind: 'query' },
+      }),
+    ) as any
+    expect(query.value.value.plugins.find((item: any) => item.id === 'fixture-service').availableOperations).toEqual([])
   } finally {
     await f.close()
   }

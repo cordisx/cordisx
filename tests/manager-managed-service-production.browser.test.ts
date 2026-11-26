@@ -6,9 +6,16 @@ import { promisify } from 'node:util'
 import type { ChildProcess } from 'node:child_process'
 import { expect, it } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
+import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 
 const exec = promisify(execFile)
 const chrome = [
@@ -49,9 +56,9 @@ async function makeRemovable(directory: string): Promise<void> {
   }
 }
 
-it.skipIf(chrome === undefined)(
-  'runs two browser clients against one real managed-service owner with isolated read-only aliases',
-  async () => {
+it.skipIf(chrome === undefined).each([false, true])(
+  'runs two browser clients against one real managed-service owner (unprojected configuration: %s)',
+  async unprojectedConfig => {
     const root = await mkdtemp('/tmp/cx-managed-browser-')
     const home = path.join(root, 'home')
     const cli = path.resolve('packages/cli/dist/src/cli.js')
@@ -72,13 +79,22 @@ it.skipIf(chrome === undefined)(
       })
     let browser: ChildProcess | undefined
     const clients: CdpClient[] = []
+    let ownerAttempted = false
+    let managerAttempted = false
     try {
       await mkdir(home)
       await writeFile(path.join(home, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
       await stageServiceModePlugin(root, home, 'default', true, 'https://example.test/fixtures', fixturePlugin)
+      if (unprojectedConfig) {
+        const configs = new PackagePluginConfigStore(home, 'default', 'offline-fixture')
+        await configs.stage('fixture-service', 0, { token: 'fixture-private-managed-configuration' }, 'fixture')
+        await configs.commit('fixture-service', 1, 'fixture')
+      }
+      ownerAttempted = true
       const started = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
       expect(started).toMatchObject({ status: 'ready', mode: 'service' })
       const link = async () => {
+        managerAttempted = true
         const output = (await run('manager', 'open', '--print-url')).stdout.trim().split(/\s+/u).at(-1)!
         const url = new URL(output)
         url.search = '?host=1'
@@ -93,6 +109,69 @@ it.skipIf(chrome === undefined)(
       clients.push(first)
       await first.send('Page.enable')
       await first.send('Page.navigate', { url: firstLink })
+      if (unprojectedConfig) {
+        const ready = async (client: CdpClient) => {
+          await expect.poll(() =>
+            client.evaluate(`({
+            ready: document.documentElement.dataset.cordisxManagerReady === 'true',
+            status: globalThis.__cordisxRuntime?.snapshot?.().plugins?.find(p => p.id === 'fixture-service')?.status,
+          })`), { timeout: 45_000 }).toEqual({ ready: true, status: 'failed' })
+          expect(await client.evaluate('Boolean(document.querySelector("[data-tab=plugins]"))')).toBe(true)
+          expect(await client.evaluate('globalThis.__fixtureManagedStatus')).toBeUndefined()
+          expect(
+            await client.evaluate('JSON.stringify(globalThis.__cordisxRuntime.snapshot()) + document.body.textContent'),
+          )
+            .not.toContain('fixture-private-managed-configuration')
+        }
+        await ready(first)
+        const debugOrigin = `http://${new URL(socket).host}`
+        const response = await fetch(`${debugOrigin}/json/new?${encodeURIComponent(await link())}`, { method: 'PUT' })
+        const tab = await response.json() as { webSocketDebuggerUrl: string }
+        const second = await CdpClient.connect(tab.webSocketDebuggerUrl)
+        clients.push(second)
+        await ready(second)
+        const before = await first.evaluate('performance.timeOrigin')
+        await first.send('Page.reload')
+        await expect.poll(() => first.evaluate('performance.timeOrigin'), { timeout: 15_000 }).not.toBe(before)
+        await ready(first)
+        await ready(second)
+        const paths = pluginManagementRpcPaths(home, 'codex', 'default')
+        const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+        const sourceDirectory = await localPackage({ root, id: 'healthy-browser-plugin' })
+        const execute = async (request: Record<string, unknown>) => {
+          const planned = await requestPluginManagementRpc(paths, endpoint, { kind: 'plan', request } as never) as any
+          expect(planned.status).toBe('planned')
+          const result = await requestPluginManagementRpc(paths, endpoint, {
+            kind: 'execute',
+            request: planned.executionRequest,
+            expectedRevision: planned.snapshot.revision,
+          }) as any
+          expect(result.status).toBe('applied')
+        }
+        const checkEnabled = async (enabled: boolean) => {
+          await expect.poll(
+            async () =>
+              await Promise.all(
+                [first, second].map(async page =>
+                  await page.evaluate(`globalThis.__cordisxRuntime.activePluginGeneration().plugins
+              .find(plugin => plugin.id === 'healthy-browser-plugin')?.enabled`)
+                ),
+              ),
+            { timeout: 20_000 },
+          ).toEqual([enabled, enabled])
+          await ready(first)
+          await ready(second)
+        }
+        await execute({ kind: 'plugin-plan-local', sourceDirectory })
+        await checkEnabled(true)
+        await execute({ kind: 'plugin-disable', pluginId: 'healthy-browser-plugin' })
+        await checkEnabled(false)
+        await execute({ kind: 'plugin-enable', pluginId: 'healthy-browser-plugin' })
+        await checkEnabled(true)
+        expect(JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout).pid)
+          .toBe(started.pid)
+        return
+      }
       const waitForSnapshot = async (client: CdpClient, label: string) => {
         try {
           await expect.poll(() => client.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 45_000 })
@@ -161,12 +240,34 @@ it.skipIf(chrome === undefined)(
       const current = JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout)
       expect(current.pid).toBe(started.pid)
     } finally {
-      await Promise.allSettled(clients.map(async client => await client.close()))
-      if (browser) await stopChrome(browser)
-      await run('manager', 'stop').catch(() => undefined)
-      await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(() => undefined)
-      await makeRemovable(home)
-      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      const failures: unknown[] = []
+      const cleanup = async (action: () => Promise<void>) => {
+        try {
+          await action()
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      for (const client of clients) await cleanup(async () => await client.close())
+      await cleanup(async () => {
+        if (browser) await stopChrome(browser)
+      })
+      await cleanup(async () => {
+        if (managerAttempted) expect(JSON.parse((await run('manager', 'stop')).stdout).status).toBe('stopped')
+      })
+      await cleanup(async () => {
+        if (ownerAttempted) {
+          expect(JSON.parse((await run('stop', '--mode', 'service', 'codex', 'default', '--json')).stdout).status)
+            .toBe('stopped')
+        }
+      })
+      if (failures.length === 0) {
+        await cleanup(async () => {
+          await makeRemovable(home)
+          await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+        })
+      }
+      if (failures.length) throw new AggregateError(failures, 'fixture process cleanup was not confirmed')
     }
   },
   150_000,
