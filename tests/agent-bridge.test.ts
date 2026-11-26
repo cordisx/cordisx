@@ -118,7 +118,7 @@ describe('Codex side of the agent bridge', () => {
     })
   })
 
-  it('does not send a first turn when requested execution settings are missing or differ', async () => {
+  it('starts the first turn with requested settings when thread readback is missing or differs', async () => {
     for (const sandbox of [undefined, { type: 'workspaceWrite', networkAccess: true }]) {
       const codex = fakeCodex(), nativeRequest = codex.nativeRequest
       codex.nativeRequest = async (method, params) => {
@@ -133,17 +133,18 @@ describe('Codex side of the agent bridge', () => {
         verifyExecutionBeforeFirstTurn: true,
       }
       expect(await handler('start_session', request)).toMatchObject({
-        status: 'failed',
-        reason: 'execution-settings-unconfirmed',
-        retryable: false,
+        status: 'started',
         sessionId: 'new-thread',
+        executionVerifiedBeforeTurn: false,
       })
       expect(await handler('start_session', request)).toMatchObject({ repeated: true, sessionId: 'new-thread' })
-      expect(codex.calls.map(call => call.method)).toEqual(['thread/start'])
+      expect(codex.calls.map(call => call.method)).toEqual(['thread/start', 'turn/start'])
+      expect(codex.calls[1]!.params).toMatchObject({
+        sandboxPolicy: { type: 'dangerFullAccess' },
+        approvalPolicy: 'never',
+      })
       expect(await handler('check_operation', { operationId: 'unconfirmed' })).toMatchObject({
-        status: 'failed',
-        reason: 'execution-settings-unconfirmed',
-        retryable: false,
+        status: 'running',
       })
     }
   })

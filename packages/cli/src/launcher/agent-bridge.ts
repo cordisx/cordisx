@@ -478,27 +478,18 @@ export function createCodexBridgeHandler(
               message: 'Fresh thread configuration did not match the source; its first turn was not started.',
             })
           }
-          // Explicit security settings must be observed on the new native thread
-          // before any business prompt can reach it. An omitted setting still inherits.
+          // Report any available thread-start settings without gating the first
+          // turn. The requested settings are also sent with turn/start below.
           const requestedSecurity = {
             ...(execution.execution === undefined ? {} : { execution: execution.execution }),
             ...(execution.approval === undefined ? {} : { approval: execution.approval }),
             ...(execution.networkAccess === undefined ? {} : { networkAccess: execution.networkAccess }),
           }
-          // The public MCP opts into confirmation. Internal Channel callers
+          // The public MCP opts into readback reporting. Internal Channel callers
           // retain their existing project-scoped execution semantics.
           const checksSecurity = args.verifyExecutionBeforeFirstTurn === true
             && Object.values(requestedSecurity).some(value => value !== 'inherit')
           const effective = { ...object(started?.thread), ...started }
-          if (checksSecurity && !executionSettingsMatch(requestedSecurity, effective)) {
-            return turn.failed({
-              ...bridgeFailure('execution-settings-unconfirmed', { status: 'failed' }),
-              sessionId: threadId,
-              link,
-              message:
-                'The new session did not confirm the requested execution settings; its first turn was not started.',
-            })
-          }
           const requestedTitle = text(args.title, 120)
           let title: string | undefined
           if (requestedTitle !== undefined) {
@@ -533,7 +524,10 @@ export function createCodexBridgeHandler(
             modelProvider: started?.modelProvider,
             model: started?.model,
             ...(checksSecurity
-              ? { execution: observedExecutionSettings(effective), executionVerifiedBeforeTurn: true }
+              ? {
+                execution: observedExecutionSettings(effective),
+                executionVerifiedBeforeTurn: executionSettingsMatch(requestedSecurity, effective),
+              }
               : {}),
             ...(context === 'summary' ? { context: contextResult(handed) } : {}),
           }
