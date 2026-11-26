@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest'
+import { brotliDecompressSync } from 'node:zlib'
 import { createManagerRendererBootstrap } from '../packages/cli/src/cli/manager-renderer-bootstrap.js'
 import { encodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 
@@ -119,6 +120,7 @@ it('builds a bundle using only owner-issued graphs projected for this session', 
   const result = await bootstrap.prepare()
   expect(result.initialGraphs).toEqual([publicGraph])
   expect(result.bundle.toString()).toBe('export const fixture = true')
+  expect(brotliDecompressSync((result as any).brotli).toString()).toBe('export const fixture = true')
   expect(projection.projectInitial).toHaveBeenCalledWith([privateGraph])
   expect(projection.close).not.toHaveBeenCalled()
   await expect(bootstrap.prepare()).rejects.toThrow('MANAGER_BOOTSTRAP_UNAVAILABLE')

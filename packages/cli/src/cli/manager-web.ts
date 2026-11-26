@@ -7,6 +7,7 @@ import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
 import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
+import { sendManagerBundle } from './manager-bundle-encoding.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
@@ -172,7 +173,10 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     session.lifecyclePolls?.close()
     session.graphs?.close()
     for (const response of session.resources ?? []) response.destroy()
-    void session.rendererBundle?.then(result => result.bundle.fill(0)).catch(() => undefined)
+    void session.rendererBundle?.then(result => {
+      result.bundle.fill(0)
+      result.brotli.fill(0)
+    }).catch(() => undefined)
     const retireKinds = [
       ...(session.managedServicesUsed
         ? [{
@@ -429,13 +433,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         session.resources ??= new Set()
         session.resources.add(response)
         response.once('close', () => session.resources?.delete(response))
-        response.writeHead(200, {
-          'content-type': 'text/javascript; charset=utf-8',
-          'content-length': built.bundle.byteLength,
-          'cache-control': 'private, no-store, max-age=0',
-          'cross-origin-resource-policy': 'same-origin',
-        })
-        response.end(request.method === 'HEAD' ? undefined : built.bundle)
+        sendManagerBundle(request, response, built)
         return
       }
       if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname.startsWith('/api/renderer/graphs/')) {

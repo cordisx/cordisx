@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { brotliCompressSync } from 'node:zlib'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -147,9 +148,10 @@ export async function startManagerResourceFixture() {
     })
     const worker = await readFile('packages/cli/assets/manager/manager-resource-worker.js')
     const active = new Set(['A', 'B'])
-    const events: Array<{ label: string; path: string; accepted: boolean }> = []
+    const events: Array<{ label: string; path: string; accepted: boolean; encoding?: string }> = []
     let origin = ''
     let slow = false
+    let bundleMode: 'normal' | 'bad-length' | 'oversized' | 'missing-length' | 'legacy' = 'normal'
     const projections = new Map<string, ReturnType<typeof createSessionPluginGraphProjection>>()
     cleanup.push(async () => {
       for (const projection of projections.values()) projection.close()
@@ -199,13 +201,36 @@ export async function startManagerResourceFixture() {
           requestUrl.pathname === '/api/renderer/bundle.js' || requestUrl.pathname.startsWith('/api/renderer/graphs/')
         ) {
           const authorized = !!label && active.has(label)
-          events.push({ label, path: requestUrl.pathname, accepted: authorized })
+          const event: { label: string; path: string; accepted: boolean; encoding?: string } = {
+            label,
+            path: requestUrl.pathname,
+            accepted: authorized,
+          }
+          events.push(event)
           if (!authorized) {
             response.statusCode = 401
             return response.end()
           }
           if (requestUrl.pathname === '/api/renderer/bundle.js') {
             const data = Buffer.from(`export const result = 'bundle:${label}'`)
+            if (
+              bundleMode !== 'legacy' && request.headers['x-cordisx-resource-encoding'] === 'br-v1'
+              && request.headers['accept-encoding']?.split(',').some(value => value.trim() === 'br')
+            ) {
+              const compressed = brotliCompressSync(data)
+              event.encoding = 'br'
+              response.writeHead(200, {
+                'content-type': 'text/javascript',
+                'content-encoding': 'br',
+                'content-length': String(compressed.length),
+                ...(bundleMode === 'missing-length' ? {} : {
+                  'x-cordisx-decoded-length': bundleMode === 'oversized'
+                    ? String(64 * 1024 * 1024 + 1)
+                    : String(data.length + (bundleMode === 'bad-length' ? 1 : 0)),
+                }),
+              })
+              return response.end(compressed)
+            }
             response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': String(data.length) })
             return response.end(data)
           }
@@ -249,6 +274,7 @@ export async function startManagerResourceFixture() {
       graphA,
       graphB,
       events,
+      bundleMode: (mode: 'normal' | 'bad-length' | 'oversized' | 'missing-length' | 'legacy') => bundleMode = mode,
       revoke: (label: string) => active.delete(label),
       slow: () => slow = true,
       close,

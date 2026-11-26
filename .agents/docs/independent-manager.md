@@ -240,6 +240,11 @@ does not stop the profile owner.
 
 ## Browser sessions
 
+The sidecar verifies the owner’s startup bundle before serving it. A compatible
+resource worker can receive the pre-compressed Brotli representation and check
+its decoded length, while older workers and browsers without Brotli support
+receive uncompressed bytes.
+
 Each browser opening obtains a 60-second bootstrap
 in the URL fragment; it is exchanged for a separate session token and removed
 from the address bar. If that exchange is interrupted, the same tab may retry

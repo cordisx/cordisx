@@ -79,6 +79,7 @@ it.skipIf(chrome === undefined)(
     let proxy: HttpsServer | undefined
     const pages: CdpClient[] = []
     const reachedAddresses = new Set<string>()
+    const bundleTransfers: Array<{ encoding: string | undefined; wire: number; decoded: number }> = []
     let managerAttempted = false
     let ownerAttempted = false
     let cleanupConfirmed = true
@@ -144,6 +145,13 @@ it.skipIf(chrome === undefined)(
             path: incoming.url,
             headers: { ...incoming.headers, 'x-forwarded-proto': 'https' },
           }, response => {
+            if (incoming.url === '/api/renderer/bundle.js' && response.statusCode === 200) {
+              bundleTransfers.push({
+                encoding: response.headers['content-encoding'],
+                wire: Number(response.headers['content-length']),
+                decoded: Number(response.headers['x-cordisx-decoded-length']),
+              })
+            }
             outgoing.writeHead(response.statusCode ?? 502, response.headers)
             response.pipe(outgoing)
           })
@@ -291,6 +299,8 @@ it.skipIf(chrome === undefined)(
         return await page.evaluate<string>('globalThis.__fixtureConsoleOrigin')
       }
       await ready(first)
+      expect(bundleTransfers.some(item => item.encoding === 'br' && item.wire > 0 && item.decoded > item.wire))
+        .toBe(true)
       const firstConsole = await consoleReady(first)
       const policy = await first.evaluate<string>(
         "fetch('/').then(response => response.headers.get('content-security-policy'))",
@@ -306,6 +316,8 @@ it.skipIf(chrome === undefined)(
       await second.send('Page.enable')
       await second.send('Page.navigate', { url: await link() })
       await ready(second)
+      expect(bundleTransfers.filter(item => item.encoding === 'br' && item.decoded > item.wire).length)
+        .toBeGreaterThanOrEqual(2)
       const secondConsole = await consoleReady(second)
       expect(secondConsole).not.toBe(firstConsole)
       const probeConsole = async (page: CdpClient) => {
@@ -330,6 +342,8 @@ it.skipIf(chrome === undefined)(
       await first.send('Page.reload')
       await expect.poll(() => first.evaluate('performance.timeOrigin'), { timeout: 15_000 }).not.toBe(timeOrigin)
       await ready(first)
+      expect(bundleTransfers.filter(item => item.encoding === 'br' && item.decoded > item.wire).length)
+        .toBeGreaterThanOrEqual(3)
       expect(await consoleReady(first)).not.toBe(firstConsole)
       const retiredStatus = await new Promise<number | undefined>((resolve, reject) => {
         const outgoing = request({

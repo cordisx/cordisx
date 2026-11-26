@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { expect, it } from 'vitest'
 import {
   decodeManagerRendererBundle,
+  decodeManagerRendererBundleForTransport,
   encodeManagerRendererBundle,
   MANAGER_BUNDLE_ENVELOPE_LIMIT,
   MANAGER_BUNDLE_OUTPUT_LIMIT,
@@ -18,6 +19,18 @@ it('round trips bounded bytes and fits the actual management RPC envelope', asyn
     expect(Buffer.byteLength(wrapped)).toBeLessThanOrEqual(MANAGER_BUNDLE_RPC_LIMIT)
     expect(Buffer.compare(await decodeManagerRendererBundle(envelope), input)).toBe(0)
   }
+})
+
+it('retains only the verified owner-compressed representation for transport', async () => {
+  const input = Buffer.from('fixture bundle '.repeat(10_000))
+  const envelope = await encodeManagerRendererBundle(input)
+  const decoded = await decodeManagerRendererBundleForTransport(envelope)
+  expect(decoded.bundle).toEqual(input)
+  expect(decoded.brotli).toEqual(Buffer.from(envelope.payload, 'base64'))
+  decoded.brotli.fill(0)
+  expect(decoded.bundle).toEqual(input)
+  await expect(decodeManagerRendererBundleForTransport({ ...envelope, sha256: '0'.repeat(64) }))
+    .rejects.toThrow('MANAGER_BUNDLE_INTEGRITY')
 })
 
 it('rejects malformed, noncanonical, oversized, and unrecognized envelopes', async () => {

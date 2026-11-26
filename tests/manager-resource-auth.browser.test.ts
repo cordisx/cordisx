@@ -53,6 +53,16 @@ it.skipIf(chrome === undefined)(
       await expect.poll(() => fixture.events.some(event => event.path.endsWith('/font.woff2') && event.accepted))
         .toBe(true)
       expect(await first.evaluate('window.fixture.bundle()')).toBe('bundle:A')
+      expect(fixture.events.some(event => event.path === '/api/renderer/bundle.js' && event.encoding === 'br'))
+        .toBe(true)
+      for (const mode of ['bad-length', 'oversized', 'missing-length'] as const) {
+        fixture.bundleMode(mode)
+        expect(await first.evaluate("window.fixture.read('/api/renderer/bundle.js')")).toMatchObject({ status: 503 })
+      }
+      fixture.bundleMode('legacy')
+      expect(await first.evaluate("window.fixture.read('/api/renderer/bundle.js')"))
+        .toMatchObject({ status: 200, text: "export const result = 'bundle:A'" })
+      fixture.bundleMode('normal')
       await first.evaluate(`(() => {
         globalThis.__beforeHardReload = true
         window.addEventListener('pagehide', () => { void window.fixture.revoke() }, { once: true })

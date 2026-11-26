@@ -3,7 +3,7 @@ import { type ManagerRendererGraph, parseManagerRendererGraph } from '../indepen
 import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererInvocation } from './manager-renderer-sessions.js'
-import { decodeManagerRendererBundle } from './manager-renderer-bundle-codec.js'
+import { decodeManagerRendererBundleForTransport } from './manager-renderer-bundle-codec.js'
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -78,10 +78,13 @@ export function createManagerRendererBootstrap(input: {
     },
     async prepare(
       permissionPublicKey?: unknown,
-    ): Promise<{ readonly initialGraphs: readonly ManagerRendererGraph[]; readonly bundle: Buffer }> {
+    ): Promise<
+      { readonly initialGraphs: readonly ManagerRendererGraph[]; readonly bundle: Buffer; readonly brotli: Buffer }
+    > {
       if (started) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
       started = true
       let bundle: Buffer | undefined
+      let brotli: Buffer | undefined
       try {
         const prepared = await call({ action: 'prepare' })
         if (
@@ -114,15 +117,18 @@ export function createManagerRendererBootstrap(input: {
           parseManagerRendererGraph(graph, input.managerOrigin)
         )
         if (JSON.stringify(initialGraphs) !== JSON.stringify(graphs)) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
-        bundle = await decodeManagerRendererBundle(completed.bundle)
+        const decoded = await decodeManagerRendererBundleForTransport(completed.bundle)
+        bundle = decoded.bundle
+        brotli = decoded.brotli
         const privateValues = [...privateBases, ...input.forbiddenSecrets]
         if (
           privateValues.some(secret => typeof secret !== 'string' || secret.length < 1 || bundle!.includes(secret))
           || !await current()
         ) throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
-        return { initialGraphs, bundle }
+        return { initialGraphs, bundle, brotli }
       } catch {
         bundle?.fill(0)
+        brotli?.fill(0)
         input.projection.close()
         throw new Error('MANAGER_BOOTSTRAP_UNAVAILABLE')
       }

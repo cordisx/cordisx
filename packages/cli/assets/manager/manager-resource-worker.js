@@ -96,6 +96,7 @@ self.addEventListener('fetch', event => {
 
     const headers = new Headers(event.request.headers)
     headers.set('authorization', `Bearer ${token}`)
+    if (url.pathname === '/api/renderer/bundle.js') headers.set('x-cordisx-resource-encoding', 'br-v1')
     const controller = new AbortController()
     const abort = () => controller.abort()
     event.request.signal.addEventListener('abort', abort, { once: true })
@@ -123,7 +124,16 @@ self.addEventListener('fetch', event => {
       if (response.status !== 200 || response.redirected) {
         return unavailable([401, 403, 404].includes(response.status) ? response.status : 503)
       }
-      const rawLength = response.headers.get('content-length')
+      const encoding = response.headers.get('content-encoding')
+      const encoded = encoding !== null && encoding.toLowerCase() !== 'identity'
+      if (encoded && (url.pathname !== '/api/renderer/bundle.js' || encoding.toLowerCase() !== 'br')) {
+        return unavailable(503)
+      }
+      const wireLength = response.headers.get('content-length')
+      if (!wireLength || !/^(?:0|[1-9][0-9]*)$/u.test(wireLength) || Number(wireLength) > maxFileBytes) {
+        return unavailable(503)
+      }
+      const rawLength = encoded ? response.headers.get('x-cordisx-decoded-length') : wireLength
       if (!rawLength || !/^(?:0|[1-9][0-9]*)$/u.test(rawLength)) return unavailable(503)
       const length = Number(rawLength)
       if (!Number.isSafeInteger(length) || length > maxFileBytes || reservedBytes + length > maxReservedBytes) {
@@ -154,6 +164,8 @@ self.addEventListener('fetch', event => {
       }
       const responseHeaders = new Headers(response.headers)
       responseHeaders.delete('content-encoding')
+      responseHeaders.delete('x-cordisx-decoded-length')
+      responseHeaders.set('content-length', String(length))
       responseHeaders.set('cache-control', 'no-store')
       return new Response(bytes, { status: 200, headers: responseHeaders })
     } catch {

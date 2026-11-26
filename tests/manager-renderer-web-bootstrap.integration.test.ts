@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import { request as httpRequest } from 'node:http'
+import { brotliDecompressSync } from 'node:zlib'
 import { expect, it, vi } from 'vitest'
 import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
@@ -515,6 +517,39 @@ it('bootstraps two authenticated renderer sessions without exposing private grap
     const fetchResource = (token: string, url: string) => fetch(url, { headers: { authorization: `Bearer ${token}` } })
     expect(await (await fetchResource(first, `${origin}/api/renderer/bundle.js`)).text())
       .toBe('export const ready = true')
+    const rawBundle = async (headers: Record<string, string>, method = 'GET') =>
+      await new Promise<{ status?: number; headers: import('node:http').IncomingHttpHeaders; body: Buffer }>(
+        (resolve, reject) => {
+          const request = httpRequest(`${origin}/api/renderer/bundle.js`, {
+            method,
+            headers: { authorization: `Bearer ${first}`, ...headers },
+          }, response => {
+            const chunks: Buffer[] = []
+            response.on('data', chunk => chunks.push(Buffer.from(chunk)))
+            response.on(
+              'end',
+              () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }),
+            )
+          })
+          request.on('error', reject).end()
+        },
+      )
+    const legacy = await rawBundle({ 'accept-encoding': 'br' })
+    expect(legacy.headers['content-encoding']).toBeUndefined()
+    expect(legacy.body.toString()).toBe('export const ready = true')
+    const compressed = await rawBundle({ 'accept-encoding': 'gzip, br', 'x-cordisx-resource-encoding': 'br-v1' })
+    expect(compressed.status).toBe(200)
+    expect(compressed.headers['content-encoding']).toBe('br')
+    expect(compressed.headers['x-cordisx-decoded-length']).toBe(String(Buffer.byteLength('export const ready = true')))
+    expect(Number(compressed.headers['content-length'])).toBe(compressed.body.length)
+    expect(brotliDecompressSync(compressed.body).toString()).toBe('export const ready = true')
+    const rejectedEncoding = await rawBundle({ 'accept-encoding': 'br;q=0', 'x-cordisx-resource-encoding': 'br-v1' })
+    expect(rejectedEncoding.headers['content-encoding']).toBeUndefined()
+    expect(rejectedEncoding.body.toString()).toBe('export const ready = true')
+    const head = await rawBundle({ 'accept-encoding': 'br', 'x-cordisx-resource-encoding': 'br-v1' }, 'HEAD')
+    expect(head.headers['content-encoding']).toBe('br')
+    expect(Number(head.headers['content-length'])).toBe(compressed.body.length)
+    expect(head.body.length).toBe(0)
     expect(await (await fetchResource(first, firstGraph.entryUrl)).text()).toBe(fixture.source)
     expect((await fetchResource(second, firstGraph.entryUrl)).status).toBe(404)
     interruptNextStatus = true
