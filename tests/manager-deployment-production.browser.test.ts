@@ -5,7 +5,8 @@ import { accessSync, constants } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
-import { createServer } from 'node:net'
+import { createServer, isIP } from 'node:net'
+import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
@@ -18,6 +19,15 @@ import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const exec = promisify(execFile)
+const networkAddress = process.env.CORDISX_TEST_NETWORK_ADDRESS
+if (
+  networkAddress !== undefined && (isIP(networkAddress) !== 4
+    || !Object.values(networkInterfaces()).flat().some(entry =>
+      entry && !entry.internal && entry.family === 'IPv4' && entry.address === networkAddress
+    ))
+) throw new Error('The test network address must be a local, non-loopback IPv4 address')
+const managerHost = networkAddress ? 'manager.fixture.test' : '127.0.0.1'
+const consoleHost = networkAddress ? 'console.fixture.test' : 'console.localhost'
 const chrome = [
   process.env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -43,21 +53,22 @@ async function makeRemovable(directory: string): Promise<void> {
 }
 
 it.skipIf(chrome === undefined)(
-  'boots and refreshes two managed console frames through an HTTPS proxy with a real service owner',
+  `boots and refreshes two managed console frames through an HTTPS proxy on ${
+    networkAddress ? 'a network interface' : 'loopback'
+  } with a real service owner`,
   async () => {
     // macOS Unix sockets have a short path limit; the owner creates nested sockets below this root.
     const root = await mkdtemp('/tmp/cx-manager-public-')
     const home = path.join(root, 'home')
     const cli = path.resolve('packages/cli/dist/src/cli.js')
-    const env: NodeJS.ProcessEnv = Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith('CORDISX_')),
-    )
-    Object.assign(env, {
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      LANG: 'en_US.UTF-8',
       CORDISX_HOME: home,
       CORDISX_MODEL_API_PORT: '0',
       HOME: root,
       CODEX_HOME: path.join(root, 'codex'),
-    })
+    }
     const run = async (...args: string[]) =>
       await exec(process.execPath, [cli, ...args], {
         env,
@@ -67,6 +78,7 @@ it.skipIf(chrome === undefined)(
     let browser: ChildProcess | undefined
     let proxy: HttpsServer | undefined
     const pages: CdpClient[] = []
+    const reachedAddresses = new Set<string>()
     let managerAttempted = false
     let ownerAttempted = false
     let cleanupConfirmed = true
@@ -124,6 +136,7 @@ it.skipIf(chrome === undefined)(
       proxy = createHttpsServer(
         { cert: certificate, key: await readFile(privateKeyFile) },
         (incoming, outgoing) => {
+          if (incoming.socket.localAddress) reachedAddresses.add(incoming.socket.localAddress)
           const upstream = request({
             hostname: '127.0.0.1',
             port: ingressPort,
@@ -138,16 +151,16 @@ it.skipIf(chrome === undefined)(
           incoming.pipe(upstream)
         },
       )
-      await new Promise<void>(resolve => proxy!.listen(0, '127.0.0.1', resolve))
+      await new Promise<void>(resolve => proxy!.listen(0, networkAddress ?? '127.0.0.1', resolve))
       const proxyAddress = proxy.address()
       if (!proxyAddress || typeof proxyAddress === 'string') throw new Error('fixture proxy unavailable')
-      const origin = 'https://127.0.0.1:' + proxyAddress.port
+      const origin = 'https://' + managerHost + ':' + proxyAddress.port
       const deployment = path.join(root, 'deployment.json')
       await writeFile(
         deployment,
         JSON.stringify({
           publicOrigin: origin,
-          consoleOrigins: { template: 'https://{view}.console.localhost:' + proxyAddress.port },
+          consoleOrigins: { template: 'https://{view}.' + consoleHost + ':' + proxyAddress.port },
           listeners: [{ host: '127.0.0.1', port: ingressPort }],
         }),
         { mode: 0o600 },
@@ -165,6 +178,12 @@ it.skipIf(chrome === undefined)(
       }
       const launched = launchChrome(chrome!, path.join(root, 'chrome'), [
         '--ignore-certificate-errors-spki-list=' + certificateFingerprint,
+        ...(networkAddress
+          ? [
+            '--no-proxy-server',
+            `--host-resolver-rules=MAP ${managerHost} ${networkAddress}, MAP *.${consoleHost} ${networkAddress}`,
+          ]
+          : []),
       ])
       browser = launched.browser
       const socket = await waitForChromeTarget(path.join(root, 'chrome'), browser, launched.stderr)
@@ -276,7 +295,8 @@ it.skipIf(chrome === undefined)(
       const policy = await first.evaluate<string>(
         "fetch('/').then(response => response.headers.get('content-security-policy'))",
       )
-      expect(policy).toContain('frame-src https://*.console.localhost:' + proxyAddress.port)
+      expect(policy).toContain('frame-src https://*.' + consoleHost + ':' + proxyAddress.port)
+      if (networkAddress) expect(reachedAddresses.has(networkAddress)).toBe(true)
       const debugOrigin = 'http://' + new URL(socket).host
       const response = await fetch(debugOrigin + '/json/new?about:blank', { method: 'PUT' })
       const tab = await response.json() as { webSocketDebuggerUrl: string }
