@@ -68,6 +68,12 @@ const HELP: Readonly<Record<string, string>> = {
     'Read one remote thread page, including sibling replies. Input: {account,conversationId,kind,threadId,anchorMessageId,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. The anchor must belong to this conversation and report this threadId. No time filters; hasMore/pageToken describe continuation, not full-thread completeness. Requires history policy and platform message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
+  'resource-refetch':
+    'Prepare one historical attachment by verified message and index 0..15. Input: {account,conversationId,kind,messageId,index}. Only source reply ancestry; history and independent resource-read policy/platform scopes required. No URL or file key input. Returns caller/generation-scoped attachment metadata, never a local path.',
+  'resource-status':
+    'Inspect one historical attachment after authoritative source verification. Same input and permissions as resource-refetch; does not download. Distinguishes ready, expired, not-prepared and unavailable.',
+  'resource-read':
+    'Read prepared historical resource bytes without arbitrary paths/keys. Input: {account,conversationId,kind,messageId,index,offset,length:1..65536}. Revalidates reply ancestry, remote association and explicit resource-read policy. Returns base64, nextOffset/hasMore; decode bounded chunks locally with your permitted tools. No automatic transcription or media understanding.',
   'message-search':
     'Search one authorized conversation and required time window. Input: {account,conversationId,kind,query,startTime,endTime,pageSize?:1..50,pageToken?}. Times are integer Unix seconds as strings; interval is start-inclusive/end-exclusive. Authoritative message details are revalidated before disclosure. Search ranking is platform-defined. Requires history policy and platform read/search scopes.',
   'message-capabilities':
