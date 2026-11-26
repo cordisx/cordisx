@@ -78,6 +78,12 @@ const HELP: Readonly<Record<string, string>> = {
     'Search one authorized conversation and required time window. Input: {account,conversationId,kind,query,startTime,endTime,pageSize?:1..50,pageToken?}. Times are integer Unix seconds as strings; interval is start-inclusive/end-exclusive. Authoritative message details are revalidated before disclosure. Search ranking is platform-defined. Requires history policy and platform read/search scopes.',
   'message-capabilities':
     'Discover implemented operations, restrictions and permission alternatives, not permission success. Input: {account,conversationId,kind}.',
+  'card-action-publish':
+    'Explicitly replace a successfully sent owned plain notice with an action-notice. Input: {account,conversationId,kind,messageId,operationId,expectedVersion,template:"action-notice",title,body,actions:[{id,label}],expiresInSeconds:1..3600,operatorIds?}. Up to 5 unique actions; expectedVersion starts at 0. Optional operators must match the verified incoming sender. No automatic task dispatch. Stable operationId; unknown effects are never replayed.',
+  'card-action-read':
+    'Read only your own generation-local normalized action observations. Input: {account,conversationId,kind,messageId,version,pageSize?:1..50,pageToken?}. Restart, connection retirement, expiry or replacement makes registrations unavailable. This is not durable platform history.',
+  'card-action-receipt':
+    'Read a durable action publication result without replay. Input: {account,conversationId,kind,operationId}. null is not proof of no effect; publication success does not guarantee that generation-local action readback is still available.',
   'message-operation-receipt':
     'Read a durable operation without replay. Input: {account,conversationId,kind,operationId}. null is not proof of no effect; unknown writes must not be blindly repeated with new IDs.',
   'message-edit':
