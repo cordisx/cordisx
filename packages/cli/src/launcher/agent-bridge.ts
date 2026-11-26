@@ -49,7 +49,13 @@ import { createBridgeValidationCache, memoryValidationCache } from './agent-brid
 import { type ClaudeHostSessionsInput, createClaudeHostSessions } from './claude-host-sessions.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
-import { nativeExecutionStart, nativeExecutionTurn, parseChatExecutionSettings } from '../chat-execution-settings.js'
+import {
+  executionSettingsMatch,
+  nativeExecutionStart,
+  nativeExecutionTurn,
+  observedExecutionSettings,
+  parseChatExecutionSettings,
+} from '../chat-execution-settings.js'
 import { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
 import { createIntegrationStatus } from './integration-status.js'
 import {
@@ -276,6 +282,19 @@ async function resolveCallerSummary(
   return summary === undefined ? rest : { ...rest, callerSummary: summary }
 }
 
+function requestedExecution(value: unknown) {
+  try {
+    const settings = parseChatExecutionSettings(value)
+    nativeExecutionStart(settings)
+    return settings
+  } catch {
+    throw new BridgeOperationError('invalid-arguments', {
+      message: 'Invalid or unsupported execution settings.',
+      detail: 'execution',
+    })
+  }
+}
+
 /** Validated operations on Codex. Each maps onto the allowlisted native methods only. */
 export function createCodexBridgeHandler(
   codex: AgentBridgeCodexAuthority,
@@ -311,6 +330,7 @@ export function createCodexBridgeHandler(
     const prompt = text(args.prompt, 100_000)
     if (prompt === undefined) throw new BridgeOperationError('prompt-required')
     if (contextArgument(args) === undefined) throw new BridgeOperationError('context-invalid')
+    const execution = requestedExecution(args.execution)
     const providerId = text(args.providerId, 128)
     let model = text(args.model)
     const cwd = text(args.cwd, 4096) ?? homedir
@@ -342,11 +362,13 @@ export function createCodexBridgeHandler(
         model: model === undefined || providerId === undefined ? 'not-requested' : known ? 'remembered' : 'ok',
         cwd: 'ok',
         key: declared === undefined ? 'not-required' : 'ok',
+        ...(args.execution === undefined ? {} : { execution: 'valid-not-observed' }),
       },
       wouldStart: {
         cwd,
         ...(providerId === undefined ? {} : { providerId }),
         ...(model === undefined ? {} : { model }),
+        ...(args.execution === undefined ? {} : { execution }),
       },
     })
   }
@@ -364,7 +386,7 @@ export function createCodexBridgeHandler(
           if (context === undefined) throw new BridgeOperationError('context-invalid')
           const handed = context === 'summary' ? handedSummary(args) : undefined
           const providerId = text(args.providerId, 128)
-          const execution = parseChatExecutionSettings(args.execution)
+          const execution = requestedExecution(args.execution)
           const serviceTier = args.serviceTier
           const permissions = args.permissions
           const approvalsReviewer = args.approvalsReviewer
@@ -456,6 +478,18 @@ export function createCodexBridgeHandler(
               message: 'Fresh thread configuration did not match the source; its first turn was not started.',
             })
           }
+          // Report any available thread-start settings without gating the first
+          // turn. The requested settings are also sent with turn/start below.
+          const requestedSecurity = {
+            ...(execution.execution === undefined ? {} : { execution: execution.execution }),
+            ...(execution.approval === undefined ? {} : { approval: execution.approval }),
+            ...(execution.networkAccess === undefined ? {} : { networkAccess: execution.networkAccess }),
+          }
+          // The public MCP opts into readback reporting. Internal Channel callers
+          // retain their existing project-scoped execution semantics.
+          const checksSecurity = args.verifyExecutionBeforeFirstTurn === true
+            && Object.values(requestedSecurity).some(value => value !== 'inherit')
+          const effective = { ...object(started?.thread), ...started }
           const requestedTitle = text(args.title, 120)
           let title: string | undefined
           if (requestedTitle !== undefined) {
@@ -489,6 +523,12 @@ export function createCodexBridgeHandler(
             ...(title === undefined ? {} : { title }),
             modelProvider: started?.modelProvider,
             model: started?.model,
+            ...(checksSecurity
+              ? {
+                execution: observedExecutionSettings(effective),
+                executionVerifiedBeforeTurn: executionSettingsMatch(requestedSecurity, effective),
+              }
+              : {}),
             ...(context === 'summary' ? { context: contextResult(handed) } : {}),
           }
           await validation.remember({
@@ -814,6 +854,11 @@ export async function startAgentBridge(input: {
   ): Promise<unknown> {
     try {
       signal?.throwIfAborted()
+      if (app === 'claude' && operation === 'start_session' && object(args)?.execution !== undefined) {
+        return bridgeFailure('invalid-arguments', {
+          message: 'Execution settings are only supported for Codex sessions.',
+        })
+      }
       const request = operation === 'start_session' ? await resolveCallerSummary(input.codex, args) : args
       signal?.throwIfAborted()
       return app === 'codex' ? await codexHandler(operation, request, signal) : await claudeHandler(operation, request)

@@ -322,9 +322,29 @@ export class ChatExecutionPreferences {
         throw new Error('REVIEW_PARENT_MODEL_NOT_IN_CATALOG')
       }
     }
+    // Thread creation expresses the sandbox as a string, while turns use a
+    // sandboxPolicy object. Capture the explicit native selection in either form;
+    // otherwise a restricted profile default can leak into the first turn.
+    const startSandbox = method === 'thread/start' ? prepared.sandbox : undefined
+    const startExecution: ChatExecutionSettings['execution'] = startSandbox === 'danger-full-access'
+      ? 'full-access'
+      : startSandbox === 'workspace-write'
+      ? 'workspace-write'
+      : startSandbox === 'read-only'
+      ? 'read-only'
+      : undefined
+    const startNetwork = method !== 'thread/start'
+      ? undefined
+      : startSandbox === 'danger-full-access'
+      ? true
+      : typeof object(prepared.config)['sandbox_workspace_write.network_access'] === 'boolean'
+      ? object(prepared.config)['sandbox_workspace_write.network_access'] as boolean
+      : undefined
     const capturedSettings = (method === 'turn/start' || method === 'thread/start') && !current?.override
       ? {
         ...settings,
+        ...(startExecution === undefined ? {} : { execution: startExecution }),
+        ...(startNetwork === undefined ? {} : { networkAccess: startNetwork }),
         ...observedExecutionSettings({
           sandbox: prepared.sandboxPolicy,
           approvalPolicy: prepared.approvalPolicy,

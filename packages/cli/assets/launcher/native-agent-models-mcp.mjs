@@ -113,7 +113,7 @@ const tools = [
   {
     name: 'start_session',
     description:
-      'Start a new conversation in the named app for a task the user asked to hand over. context summary appends a bounded summary of this conversation as background. Costs a model call and may take minutes. Returns `operationId`, `sessionId` and a link; keep the operationId. A repeat with the same operationId returns that same session instead of starting a second one. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns; a value it does not list is refused. In Claude the turn runs in the background in bypass permissions mode; `check_operation` reports when it ends. `dryRun: true` validates provider, model, cwd and key and starts nothing. If the app is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
+      'Start a new conversation in the named app for a task the user asked to hand over. context summary appends a bounded summary of this conversation as background. Costs a model call and may take minutes. Returns `operationId`, `sessionId` and a link; keep the operationId. A repeat with the same operationId returns that same session instead of starting a second one. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns; a value it does not list is refused. For Codex, `execution` requests settings for this conversation only, when the user authorized them; the host passes them to the first turn without a user confirmation. Thread-start readback is diagnostic and does not block the turn. Channel callers retain their source permissions. Claude rejects this field. In Claude the turn runs in the background in bypass permissions mode; `check_operation` reports when it ends. `dryRun: true` validates arguments, provider, model, cwd and key, but does not observe actual permissions or start anything. If the app is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -134,6 +134,18 @@ const tools = [
         cwd: { type: 'string', minLength: 1, maxLength: 4096 },
         providerId: { type: 'string', minLength: 1, maxLength: 128 },
         model: { type: 'string', minLength: 1, maxLength: 512 },
+        execution: {
+          type: 'object',
+          additionalProperties: false,
+          minProperties: 1,
+          description:
+            'Codex only. Explicit per-conversation permissions authorized by the user; omitted fields inherit.',
+          properties: {
+            execution: { enum: ['inherit', 'read-only', 'workspace-write', 'full-access'] },
+            approval: { enum: ['inherit', 'untrusted', 'on-request', 'never'] },
+            networkAccess: { type: 'boolean' },
+          },
+        },
         context: {
           enum: ['none', 'summary'],
           description: 'summary appends bounded background from the calling conversation.',
