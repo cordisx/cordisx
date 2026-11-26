@@ -73,6 +73,7 @@ it.skipIf(chrome === undefined).each(
     'bootstrap-transport',
     'bootstrap-unconfirmed',
     'bootstrap-repeated',
+    'legacy-capacity',
   ] as const,
 )(
   'recovers an interrupted admission through the Manager session authority: %s',
@@ -148,7 +149,15 @@ it.skipIf(chrome === undefined).each(
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
     try {
-      if (mode === 'entry-transport' || mode.startsWith('open-') || mode.startsWith('bootstrap-')) {
+      if (mode === 'legacy-capacity') {
+        for (let index = 0; index < 4096; index++) {
+          expect(await authority.revoke(gateway, 'f' + index.toString(16).padStart(63, '0'))).toBe(true)
+        }
+      }
+      if (
+        mode === 'legacy-capacity' || mode === 'entry-transport' || mode.startsWith('open-')
+        || mode.startsWith('bootstrap-')
+      ) {
         expect(fence.release()).toBe(true)
         released = true
       }
@@ -324,6 +333,7 @@ it.skipIf(chrome === undefined).each(
         expect(state).toEqual({ ready: true, view: true })
       }, { timeout: mode === 'automatic' ? 8_000 : 30_000 })
       if (mode === 'automatic') expect(opens).toBe(2)
+      if (mode === 'legacy-capacity') expect(opens).toBe(1)
       if (mode === 'open-repeated') expect(opens).toBe(3)
       if (mode === 'entry-transport') {
         const state = await page.evaluate<{ attempts: number; same: boolean; oldStatus: number }>(`(async () => ({

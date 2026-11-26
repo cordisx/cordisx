@@ -1,4 +1,19 @@
 type Settled = { readonly ok: true; readonly value: unknown } | { readonly ok: false }
+
+export function observationRequestId(channel: string, payload: string): string | undefined {
+  if (channel !== 'managed-service-ui') return undefined
+  try {
+    const value: unknown = JSON.parse(payload)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const input = value as Record<string, unknown>
+    if (
+      ['next', 'pull', 'closed', 'startupNext'].includes(String(input.operation))
+      && typeof input.requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/u.test(input.requestId)
+    ) return input.requestId
+  } catch { /* The owner will reject a malformed request. */ }
+  return undefined
+}
+
 type Entry = {
   readonly payload: string
   readonly result: Promise<Settled>

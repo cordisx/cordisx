@@ -9,6 +9,46 @@ import { managerRendererGraphFixture } from './fixtures/manager-renderer-graph.j
 
 const secret = () => randomBytes(32).toString('hex')
 
+it('opens a new Manager after earlier retired sessions filled the legacy owner limit', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([['plugin-management', {
+      prepare: () => {
+        throw new Error('unused')
+      },
+    }]]),
+  })
+  for (let index = 0; index < 4096; index++) {
+    expect(await authority.revoke(gateway, 'f' + index.toString(16).padStart(63, '0'))).toBe(true)
+  }
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+  } finally {
+    authority.dispose()
+    await web.close()
+  }
+})
+
 it('rejects a refresh while an owner permission write is still in flight', async () => {
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
   let entered!: () => void

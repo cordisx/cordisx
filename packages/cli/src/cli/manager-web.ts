@@ -10,7 +10,8 @@ import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
-import { ManagerObservationPolls } from './manager-observation-polls.js'
+import { createManagerBrowserSessionIdIssuer } from './manager-browser-session-id.js'
+import { ManagerObservationPolls, observationRequestId } from './manager-observation-polls.js'
 import type { ManagerLifecyclePolls } from './manager-lifecycle-polls.js'
 import { handleManagerRendererLifecycleHttp } from './manager-renderer-lifecycle-http.js'
 import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
@@ -102,18 +103,6 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
-function observationRequestId(channel: string, payload: string): string | undefined {
-  if (channel !== 'managed-service-ui') return undefined
-  try {
-    const value = object(JSON.parse(payload))
-    if (
-      value && ['next', 'pull', 'closed', 'startupNext'].includes(String(value.operation))
-      && typeof value.requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/u.test(value.requestId)
-    ) return value.requestId
-  } catch { /* The owner will reject a malformed request. */ }
-  return undefined
-}
-
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
 export async function startManagerWeb(owner: ManagerOwner, options: {
   /** Private supervisor identity; it must never be supplied by the browser. */
@@ -147,6 +136,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     ? undefined
     : canonicalManagerBrowserOrigin(options.publicOrigin)
   const sessions = new Map<string, BrowserSession>()
+  const browserSessionId = createManagerBrowserSessionIdIssuer(options.rendererGateway)
   const resumes = new ManagerSessionResumeGrants(publicOrigin?.startsWith('https://') === true)
   const closedSessions = new Map<string, { deadline: number; retired: Promise<boolean> }>()
   let authority = ''
@@ -262,7 +252,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
     while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
     const resume = resumes.issue(token)
-    touchSession(token, randomBytes(32).toString('hex'), false)
+    touchSession(token, browserSessionId(), false)
     return { token, resumeId: resume.id, cookie: resume.cookie }
   }
   const server = createServer(async (request, response) => {
@@ -332,7 +322,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
           while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
           const resume = offered?.resume === true ? resumes.issue(token) : undefined
-          touchSession(token, randomBytes(32).toString('hex'), false)
+          touchSession(token, browserSessionId(), false)
           return { token, ...(resume ? { resumeId: resume.id, cookie: resume.cookie } : {}) }
         })
         if (!exchanged) {

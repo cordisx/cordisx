@@ -4,6 +4,7 @@ import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import { ManagerRendererReadLifetimes } from './manager-renderer-read-lifetimes.js'
+import { ManagerBrowserSessionTombstones } from './manager-browser-session-id.js'
 
 /** Private to the owner RPC and sidecar memory. Never serialize to the browser. */
 export interface ManagerRendererHandle {
@@ -63,6 +64,7 @@ export type ManagerRendererCallResult =
 interface Session {
   readonly gateway: ManagerRendererGatewayProof
   readonly browserSessionId: string
+  readonly timedBrowserSession: boolean
   readonly handle: ManagerRendererHandle
   readonly controller: AbortController
   readonly timer: ReturnType<typeof setTimeout>
@@ -113,7 +115,7 @@ function gatewayMatches(left: ManagerRendererGatewayProof, right: ManagerRendere
  */
 export class ManagerRendererSessions {
   private readonly sessions = new Map<string, Session>()
-  private readonly usedBrowserSessions = new Set<string>()
+  private readonly usedBrowserSessions: ManagerBrowserSessionTombstones
   private readonly retiredSessions = new Map<
     string,
     { gateway: ManagerRendererGatewayProof; result: Promise<boolean> }
@@ -163,12 +165,14 @@ export class ManagerRendererSessions {
       readonly maxSessions?: number
       readonly sessionLifetimeMs?: number
       readonly monitorIntervalMs?: number
+      readonly now?: () => number
     },
   ) {
     // Copy the allowlist: a later mutation cannot silently add authority.
     this.channels = new Map(input.channels)
     this.writeLifetimes = input.writeLifetimes ?? new ManagerRendererWriteLifetimes()
     this.readLifetimes = input.readLifetimes ?? new ManagerRendererReadLifetimes()
+    this.usedBrowserSessions = new ManagerBrowserSessionTombstones(input.now)
   }
 
   private alive(): boolean {
@@ -239,6 +243,12 @@ export class ManagerRendererSessions {
     }
     void retirement.then(result => {
       this.pendingRetirements.delete(retirement)
+      if (
+        result && session.timedBrowserSession
+        && this.retiredSessions.get(session.browserSessionId)?.result === retirement
+      ) {
+        this.retiredSessions.delete(session.browserSessionId)
+      }
       if (!result) {
         this.retirementUncertain = true
         this.fenceMutations()
@@ -304,7 +314,7 @@ export class ManagerRendererSessions {
     if (this.pendingRetirements.size > 0) {
       if (
         this.pendingOpens.size >= Math.min(this.input.maxSessions ?? 16, 16)
-        || this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
+        || !this.usedBrowserSessions.canOpen(gateway, browserSessionId)
         || this.sessions.size >= (this.input.maxSessions ?? 16)
         || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
         || this.retirementUncertain
@@ -322,11 +332,12 @@ export class ManagerRendererSessions {
     // All admission checks are synchronous after authentication, so concurrent
     // opens cannot create two renderer identities for one browser session.
     if (
-      this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
+      !this.usedBrowserSessions.canOpen(gateway, browserSessionId)
       || this.sessions.size >= (this.input.maxSessions ?? 16)
       || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined || this.retirementUncertain
       || this.pendingRetirements.size > 0
     ) return undefined
+    if (!this.usedBrowserSessions.consume(gateway, browserSessionId)) return undefined
     const handle: ManagerRendererHandle = {
       rendererId: randomBytes(32).toString('hex'),
       ownerGeneration: this.input.ownerGeneration,
@@ -337,8 +348,16 @@ export class ManagerRendererSessions {
     let session: Session
     const timer = setTimeout(() => this.retire(session), lifetime)
     timer.unref()
-    session = { gateway: { ...gateway }, browserSessionId, handle, controller, timer, inFlight: 0, longLivedReads: 0 }
-    this.usedBrowserSessions.add(browserSessionId)
+    session = {
+      gateway: { ...gateway },
+      browserSessionId,
+      timedBrowserSession: this.usedBrowserSessions.isTimed(gateway, browserSessionId),
+      handle,
+      controller,
+      timer,
+      inFlight: 0,
+      longLivedReads: 0,
+    }
     this.sessions.set(handle.rendererId, session)
     if (this.input.participant !== undefined) {
       try {
@@ -753,8 +772,7 @@ export class ManagerRendererSessions {
     ) return false
     // Tombstone before walking live sessions, so an overlapping open cannot
     // create a renderer after this revocation. The finite cap fails closed.
-    if (!this.usedBrowserSessions.has(browserSessionId) && this.usedBrowserSessions.size >= 4096) return false
-    this.usedBrowserSessions.add(browserSessionId)
+    if (!this.usedBrowserSessions.revoke(gateway, browserSessionId)) return false
     for (const session of this.sessions.values()) {
       if (session.browserSessionId === browserSessionId && gatewayMatches(gateway, session.gateway)) {
         this.retire(session)
