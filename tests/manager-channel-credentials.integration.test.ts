@@ -269,6 +269,17 @@ describe('local manager Channel credential transactions', () => {
       const { token } = await (await post('/api/session', { token: url.hash.slice(1) })).json() as { token: string }
       const view = await (await post('/api/channel-credentials', { action: 'view' }, token)).json()
       expect(view).toMatchObject({ status: 'available', revision: 0, writable: true })
+      const mismatch = await (await post('/api/channel-credentials', {
+        action: 'capture',
+        purpose: 'create',
+        account: { ...account, tenantId: 'wrong-tenant' },
+        secret: 'synthetic-secret',
+        expectedRevision: view.revision,
+        serviceGeneration: view.serviceGeneration,
+      }, token)).json()
+      expect(mismatch).toEqual({ status: 'rejected', code: 'TENANT_MISMATCH' })
+      expect(f.values.size).toBe(0)
+      expect(f.restart).not.toHaveBeenCalled()
       const captured = await (await post('/api/channel-credentials', {
         action: 'capture',
         purpose: 'create',

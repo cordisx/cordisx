@@ -52,7 +52,10 @@ registerHooks({
             throw new Error("CREDENTIAL_VALIDATION_FAILED");
           }
         },
-        discoverTenant: async () => { throw new Error("TENANT_DISCOVERY_FAILED"); },`,
+        discoverTenant: async () => {
+          if (process.env.CORDISX_CHANNEL_CREATE_DISCOVER_TENANT === "match") return "fixture-tenant";
+          throw new Error("TENANT_DISCOVERY_FAILED");
+        },`,
       )
     } else {
       source = `import { createSyntheticChannel } from ${JSON.stringify(transport)};\n` + replaceOnce(

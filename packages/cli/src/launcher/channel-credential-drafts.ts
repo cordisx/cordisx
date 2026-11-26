@@ -318,19 +318,23 @@ export class ChannelCredentialDraftBroker {
       accountId: account.accountId,
       secret,
     })
-    if (!account.tenantId && request.purpose === 'create') {
+    let discovered: string | undefined
+    if (request.purpose === 'create') {
       try {
-        account = {
-          ...account,
-          tenantId: await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+        discovered = text(
+          await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
             adapterId: account.adapterId,
             accountId: account.accountId,
             secret,
           })),
-        }
+        )
       } catch { /* Authenticated credentials remain useful while tenant metadata is unavailable. */ }
     }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
+    if (discovered !== undefined) {
+      if (account.tenantId && account.tenantId !== discovered) return rejected('TENANT_MISMATCH')
+      account = { ...account, tenantId: discovered }
+    }
     const configuration = await this.input.service.descriptor()
     if (!configuration.writable) return rejected('PERMISSION_DENIED')
     if (request.expectedRevision !== undefined) {

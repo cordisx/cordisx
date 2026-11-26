@@ -80,25 +80,28 @@ describe('Host-owned credential draft transactions', () => {
       await f.broker.dispose()
     }
   })
-  it('bounds a stalled optional tenant lookup and still captures authenticated credentials', async () => {
-    vi.useFakeTimers()
-    const f = fixture()
-    f.discoverTenant.mockImplementationOnce(async () => await new Promise<string>(() => {}))
-    try {
-      const result = f.broker.handle({
-        operation: 'capture',
-        owner: 'owner',
-        purpose: 'create',
-        account: { ...ref, tenantId: '' },
-        secret: 'test-only',
-      }, 'document')
-      await vi.advanceTimersByTimeAsync(5_000)
-      await expect(result).resolves.toMatchObject({ status: 'applied', ref: { ...ref, tenantId: '' } })
-    } finally {
-      await f.broker.dispose()
-      vi.useRealTimers()
-    }
-  })
+  it.each(['', 'test'])(
+    'bounds a stalled optional lookup with tenant %s and still captures credentials',
+    async tenantId => {
+      vi.useFakeTimers()
+      const f = fixture()
+      f.discoverTenant.mockImplementationOnce(async () => await new Promise<string>(() => {}))
+      try {
+        const result = f.broker.handle({
+          operation: 'capture',
+          owner: 'owner',
+          purpose: 'create',
+          account: { ...ref, tenantId },
+          secret: 'test-only',
+        }, 'document')
+        await vi.advanceTimersByTimeAsync(5_000)
+        await expect(result).resolves.toMatchObject({ status: 'applied', ref: { ...ref, tenantId } })
+      } finally {
+        await f.broker.dispose()
+        vi.useRealTimers()
+      }
+    },
+  )
   it('accepts a manually supplied tenant key without re-reading or rotating the saved secret', async () => {
     const f = fixture()
     const descriptor = await f.service.descriptor()
@@ -213,12 +216,86 @@ describe('Host-owned credential draft transactions', () => {
         accountId: ref.accountId,
         secret: 'test-only',
       })
+      expect(f.discoverTenant).not.toHaveBeenCalled()
       expect(f.backend.upsert).not.toHaveBeenCalled()
       expect(f.service.mutate).not.toHaveBeenCalled()
     } finally {
       await f.broker.dispose()
     }
   })
+  it('rejects a manually entered tenant that disagrees with authenticated discovery before saving credentials', async () => {
+    const f = fixture()
+    f.discoverTenant.mockResolvedValueOnce('different-tenant')
+    try {
+      await expect(f.capture()).resolves.toEqual({ status: 'rejected', code: 'TENANT_MISMATCH' })
+      expect(f.discoverTenant).toHaveBeenCalledWith({
+        adapterId: ref.adapterId,
+        accountId: ref.accountId,
+        secret: 'test-only',
+      })
+      expect(f.backend.upsert).not.toHaveBeenCalled()
+      expect(f.service.mutate).not.toHaveBeenCalled()
+      expect(f.values.size).toBe(0)
+    } finally {
+      await f.broker.dispose()
+    }
+  })
+  it('does not save credentials if the document retires during a manual tenant lookup', async () => {
+    const f = fixture()
+    let finish!: (tenantId: string) => void, started!: () => void
+    const entered = new Promise<void>(resolve => {
+      started = resolve
+    })
+    f.discoverTenant.mockImplementationOnce(async () => {
+      started()
+      return await new Promise<string>(resolve => {
+        finish = resolve
+      })
+    })
+    try {
+      const capture = f.capture()
+      await entered
+      const retire = f.broker.retireDocument('document')
+      finish('different-tenant')
+      await expect(capture).resolves.toEqual({ status: 'rejected', code: 'STALE_GENERATION' })
+      await retire
+      expect(f.backend.upsert).not.toHaveBeenCalled()
+      expect(f.service.mutate).not.toHaveBeenCalled()
+    } finally {
+      await f.broker.dispose()
+    }
+  })
+  it('accepts a manually entered tenant when authenticated discovery agrees', async () => {
+    const f = fixture()
+    try {
+      const captured = await f.capture()
+      expect(captured).toMatchObject({ status: 'applied', ref })
+      expect(f.discoverTenant).toHaveBeenCalledOnce()
+      expect(f.backend.upsert).toHaveBeenCalledOnce()
+      await expect(f.broker.handle({
+        operation: 'commit',
+        owner: 'owner',
+        draftId: captured.draftId,
+        draft: { displayName: 'Test' },
+      }, 'document')).resolves.toMatchObject({ status: 'applied', ref })
+    } finally {
+      await f.broker.dispose()
+    }
+  })
+  it.each(['TENANT_DISCOVERY_PERMISSION_DENIED', 'TENANT_DISCOVERY_FAILED'])(
+    'keeps the manual tenant fallback when discovery returns %s',
+    async code => {
+      const f = fixture()
+      f.discoverTenant.mockRejectedValueOnce(new Error(code))
+      try {
+        await expect(f.capture()).resolves.toMatchObject({ status: 'applied', ref })
+        expect(f.discoverTenant).toHaveBeenCalledOnce()
+        expect(f.backend.upsert).toHaveBeenCalledOnce()
+      } finally {
+        await f.broker.dispose()
+      }
+    },
+  )
   it('rotates the key and connection settings in one CAS while preserving unrelated connection bytes', async () => {
     const f = fixture()
     const descriptor = await f.service.descriptor()
@@ -253,6 +330,7 @@ describe('Host-owned credential draft transactions', () => {
         secret: 'test-only',
         expectedRevision: 0,
       }, 'document')
+      expect(f.discoverTenant).not.toHaveBeenCalled()
       const draft = { displayName: 'Updated', selectors: ['direct', 'mentions'] }
       expect(
         await f.broker.handle({ operation: 'commit', owner: 'owner', draftId: captured.draftId, draft }, 'document'),

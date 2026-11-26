@@ -399,6 +399,9 @@ it('verifies a write-only Feishu credential and requires confirmation before sav
       requests.push(input)
       if (input.action === 'view') return view
       if (input.action === 'capture') {
+        if (requests.filter(request => request.action === 'capture').length === 1) {
+          return { status: 'rejected', code: 'TENANT_MISMATCH' }
+        }
         return {
           status: 'applied',
           code: 'CAPTURED',
@@ -418,15 +421,24 @@ it('verifies a write-only Feishu credential and requires confirmation before sav
       .find(button => button.textContent === '添加飞书/Lark 连接')!.click()
     const fields = window.document.querySelectorAll<HTMLInputElement>('#channel-credentials-list input')
     fields[0]!.value = 'cli_example'
+    fields[1]!.value = 'wrong-tenant'
     fields[2]!.value = 'Work'
     fields[3]!.value = 'temporary-test-secret'
-    ;[...window.document.querySelectorAll('#channel-credentials button')]
-      .find(button => button.textContent === '验证并暂存')!.click()
+    const verify = [...window.document.querySelectorAll<HTMLButtonElement>('#channel-credentials button')]
+      .find(button => button.textContent === '验证并暂存')!
+    verify.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('不一致'))
+    expect(fields[3]!.value).toBe('')
+    expect(requests.some(request => request.action === 'commit')).toBe(false)
+    await vi.waitFor(() => expect(verify.disabled).toBe(false))
+    fields[1]!.value = ''
+    fields[3]!.value = 'temporary-test-secret'
+    verify.click()
     await vi.waitFor(() =>
       expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('已验证')
     )
     expect(fields[3]!.value).toBe('')
-    expect(requests.find(request => request.action === 'capture')).toMatchObject({
+    expect(requests.filter(request => request.action === 'capture').at(-1)).toMatchObject({
       purpose: 'create',
       expectedRevision: 4,
       serviceGeneration: 'service-generation',

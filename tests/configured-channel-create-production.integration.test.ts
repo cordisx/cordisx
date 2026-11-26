@@ -63,6 +63,7 @@ it.skipIf(
       CORDISX_MODEL_API_PORT: '0',
       CORDISX_CHANNEL_CREATE_FIXTURE_ROOT: root,
       CORDISX_CHANNEL_CREATE_PACKAGE: packagePath,
+      CORDISX_CHANNEL_CREATE_DISCOVER_TENANT: 'match',
       CORDISX_CHANNEL_CREATE_MISSING_BUNDLE: missingBundle ? '1' : '0',
       NODE_OPTIONS: `--import=${loader}`,
       TMPDIR: root,
@@ -219,7 +220,7 @@ it.skipIf(
       await trustedClick(first, '[data-channel-page=create] button[type=submit]')
       await expect.poll(() => exists(first, '#channel-credential-appId input')).toBe(true)
       await set(first, '#channel-credential-appId input', 'cli_created_fixture')
-      await set(first, '#channel-credential-tenantId input', 'fixture-tenant')
+      await set(first, '#channel-credential-tenantId input', 'wrong-tenant')
       await set(first, '#channel-credential-secret input', 'synthetic-create-secret')
       await expect.poll(async () => {
         const action = await findDialogAction(first, 'capture')
@@ -228,6 +229,24 @@ it.skipIf(
       const capture = await findDialogAction(first, 'capture')
       if (!capture) throw new Error('Credential action disappeared')
       await clickDialogAction(first, capture)
+      await expect.poll(() =>
+        first.evaluate(`(() => {
+          const error = document.querySelector('#channel-credential-tenantId-error')
+          return Boolean(error && !error.hidden && (
+            error.textContent.includes('不一致') || error.textContent.includes('does not match')
+          ))
+        })()`), { timeout: 15_000 }).toBe(true)
+      const unchanged = JSON.parse(await readFile(configPath, 'utf8')).plugins[0].services.runtime.profiles.default
+      expect(unchanged.revision).toBe(1)
+      expect(JSON.stringify(unchanged)).not.toContain('synthetic-create-secret')
+      await set(first, '#channel-credential-tenantId input', 'fixture-tenant')
+      await expect.poll(async () => {
+        const action = await findDialogAction(first, 'capture')
+        return !!action && !action.attributes?.includes('disabled')
+      }, { timeout: 15_000 }).toBe(true)
+      const retry = await findDialogAction(first, 'capture')
+      if (!retry) throw new Error('Credential retry action disappeared')
+      await clickDialogAction(first, retry)
 
       const readService = async () => {
         const config = JSON.parse(await readFile(configPath, 'utf8'))

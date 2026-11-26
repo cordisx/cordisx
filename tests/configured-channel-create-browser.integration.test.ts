@@ -64,6 +64,7 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       protectProfileInputs: true,
       channelServiceConfig: true,
       channelCredentials: true,
+      channelCredentialDiscoverTenant: async () => 'fixture-tenant',
       browserManagement: true,
     })
     let browser: ChildProcess | undefined
@@ -164,7 +165,7 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       await trustedClick(active, submit)
       await expect.poll(() => exists('#channel-credential-appId input')).toBe(true)
       await set('#channel-credential-appId input', 'cli_created_fixture')
-      await set('#channel-credential-tenantId input', 'fixture-tenant')
+      await set('#channel-credential-tenantId input', 'wrong-tenant')
       await set('#channel-credential-secret input', 'synthetic-create-secret')
       await expect.poll(async () => {
         const action = await findDialogAction(active, 'capture')
@@ -173,6 +174,29 @@ it.skipIf(!archive || !managerPackage || !chrome || process.platform !== 'darwin
       const capture = await findDialogAction(active, 'capture')
       if (!capture) throw new Error('Credential action disappeared')
       await clickDialogAction(active, capture)
+      await expect.poll(() =>
+        active.evaluate(`(() => {
+        const error = document.querySelector('#channel-credential-tenantId-error')
+        return Boolean(error && !error.hidden && (
+          error.textContent.includes('不一致') || error.textContent.includes('does not match')
+        ))
+      })()`), { timeout: 15_000 }).toBe(true)
+      expect(f.credentialValues.size).toBe(0)
+      const unchanged = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath)
+      expect(unchanged.revision).toBe(1)
+      await set('#channel-credential-tenantId input', 'fixture-tenant')
+      await expect.poll(async () => {
+        const action = await findDialogAction(active, 'capture')
+        return !!action && !action.attributes?.includes('disabled')
+      }, { timeout: 15_000 }).toBe(true)
+      const retry = await findDialogAction(active, 'capture')
+      if (!retry) throw new Error('Credential retry action disappeared')
+      await clickDialogAction(active, retry)
       await expect.poll(async () => {
         const state = await readServiceConfigState({
           profileId: f.profileId,

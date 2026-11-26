@@ -68,9 +68,14 @@ export function validateChannelCredentialValues(values: ChannelCredentialValues,
 
 export function channelCredentialFailure(code: string | undefined, zh: boolean): { id: string; message: string } {
   const tenant = code === 'TENANT_DISCOVERY_PERMISSION_DENIED' || code === 'TENANT_DISCOVERY_FAILED'
+    || code === 'TENANT_MISMATCH'
   return {
     id: tenant ? 'channel-tenantId' : 'channel-secret',
-    message: code === 'TENANT_DISCOVERY_PERMISSION_DENIED'
+    message: code === 'TENANT_MISMATCH'
+      ? zh
+        ? '填写的租户 ID 与应用所属企业不一致，请核对 tenant_key，或留空以自动查询。'
+        : 'The tenant ID does not match the application’s tenant. Check its tenant_key or leave the field blank for automatic lookup.'
+      : code === 'TENANT_DISCOVERY_PERMISSION_DENIED'
       ? zh
         ? '自动查询需要开通并发布 tenant:tenant:readonly 权限，也可手动填写租户 ID。'
         : 'Automatic lookup needs the published tenant:tenant:readonly scope. You can also enter the Tenant ID.'

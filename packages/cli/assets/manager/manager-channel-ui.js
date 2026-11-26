@@ -24,6 +24,7 @@ export function createChannelCredentialsUI(
       CREDENTIAL_VALIDATION_TIMEOUT: '凭据验证超时，请检查网络后重新填写。',
       TENANT_DISCOVERY_PERMISSION_DENIED: '应用没有查询租户信息的权限，可手动填写 Tenant ID。',
       TENANT_DISCOVERY_FAILED: '无法查询租户信息，可手动填写 Tenant ID。',
+      TENANT_MISMATCH: '填写的租户 ID 与应用所属企业不一致，请核对 tenant_key，或留空以自动查询。',
       CREDENTIAL_UNAVAILABLE: '凭据暂存不可用。',
       CREDENTIAL_CLEANUP_UNAVAILABLE: '无法确认临时凭据已清理，请检查 Host 状态。',
       DRAFT_RECOVERY_UNAVAILABLE: '历史临时凭据尚未完成核对或清理；请检查 Host 状态。',
