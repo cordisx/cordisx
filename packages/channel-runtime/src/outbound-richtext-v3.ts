@@ -54,7 +54,8 @@ function boundedText(value: unknown, maximum = 4096): string {
 function safeUrl(value: unknown): string {
   const url = boundedText(value, 2048)
   if (
-    /[\s\u0000-\u001f\u007f\\]/u.test(url) || /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/iu.test(url) || !/^https?:\/\//u.test(url)
+    /[\s\u0000-\u001f\u007f\\]/u.test(url) || /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/iu.test(url)
+    || /%(?![0-9a-f]{2})/iu.test(url) || /^https?:\/\/[^/?#]*@/u.test(url) || !/^https?:\/\//u.test(url)
   ) {
     throw new ChannelIntegrityError('Invalid richtext link')
   }

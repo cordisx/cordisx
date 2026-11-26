@@ -23,6 +23,8 @@ describe('typed richtext v3 validation', () => {
     'file:///tmp/a',
     '//example.org',
     'https://user:password@example.org',
+    'https://@example.org',
+    'https://example.org/bad%G0',
     'https://example.org/a\nb',
     'https://example.org\\evil',
     'https://',

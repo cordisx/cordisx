@@ -33,7 +33,7 @@ it('runs configured CLI over its real socket through scoped preparation, runtime
   const target = { id: 'oc_fixture', kind: 'group' }
   const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
   const upload = vi.fn(async () => ({ image_key: 'img_socket_verified' }))
-  const dispatch = vi.fn(async () => ({ code: 0, data: { message_id: 'om_socket_sent' } }))
+  const dispatch = vi.fn(async (_request: unknown) => ({ code: 0, data: { message_id: 'om_socket_sent' } }))
   sdkFactory.mockReturnValue({
     connect: async () => {},
     disconnect: async () => {},
