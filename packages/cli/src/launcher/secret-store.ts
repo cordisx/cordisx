@@ -45,6 +45,8 @@ export interface LauncherSecretStoreResult {
 export interface LauncherSecretStoreOptions {
   readonly platform?: NodeJS.Platform
   readonly backend?: LauncherKeychainBackend
+  /** Optional read path that never presents an authentication prompt. */
+  readonly silentReadBackend?: Pick<LauncherKeychainBackend, 'read'>
   readonly homeDir?: string
 }
 
@@ -81,6 +83,7 @@ export function channelKeychainReference(input: SecretIdentity): string {
 export class LauncherSecretStore {
   private readonly captures = new Map<string, SecretIdentity>()
   private readonly backend: LauncherKeychainBackend | undefined
+  private readonly silentReadBackend: Pick<LauncherKeychainBackend, 'read'> | undefined
   private readonly platform: NodeJS.Platform
 
   // Public Manager workflows bind these private handles in ChannelCredentialDraftBroker.
@@ -92,6 +95,11 @@ export class LauncherSecretStore {
       : this.platform === 'linux'
       ? (options.backend ?? createFileSecretBackend(options.homeDir ?? path.dirname(resolveHomeConfigPath())))
       : undefined
+    this.silentReadBackend = options.silentReadBackend ?? (options.backend !== undefined
+      ? undefined
+      : this.platform === 'darwin'
+      ? createMacOSKeychainBackend({ allowAuthenticationUI: false, timeoutMs: 5_000 })
+      : this.backend)
   }
 
   beginCapture(input: SecretIdentity): LauncherSecretCapture {
@@ -149,7 +157,20 @@ export class LauncherSecretStore {
 
   /** Resolve only a credential belonging to the supplied Channel profile. */
   async readChannelReference(reference: string, profileId: string): Promise<string> {
-    if (!this.backend || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profileId)) throw new Error('CREDENTIAL_UNAVAILABLE')
+    return await this.readChannelReferenceWith(reference, profileId, this.backend)
+  }
+
+  /** Optional validation must never fall back to an interactive credential read. */
+  async readChannelReferenceSilently(reference: string, profileId: string): Promise<string> {
+    return await this.readChannelReferenceWith(reference, profileId, this.silentReadBackend)
+  }
+
+  private async readChannelReferenceWith(
+    reference: string,
+    profileId: string,
+    backend: Pick<LauncherKeychainBackend, 'read'> | undefined,
+  ): Promise<string> {
+    if (!backend || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profileId)) throw new Error('CREDENTIAL_UNAVAILABLE')
     const prefix = this.platform === 'linux'
       ? `host-secret:channel/${profileId}/`
       : `keychain:cordisx/channel/${profileId}/`
@@ -157,7 +178,7 @@ export class LauncherSecretStore {
     const account = reference.slice(prefix.length)
     if (!/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(account)) throw new Error('CREDENTIAL_UNAVAILABLE')
     try {
-      const value = await this.backend.read(`cordisx/channel/${profileId}`, account)
+      const value = await backend.read(`cordisx/channel/${profileId}`, account)
       if (!validSecret(value)) throw new Error('invalid')
       return value
     } catch {

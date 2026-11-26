@@ -23,6 +23,7 @@ export async function prepareServiceRendererConfiguredGraphs(input: {
   readonly allowConfiguration: boolean
   readonly allowConnectionControl: boolean
   readonly allowConnectionReconnect: boolean
+  readonly allowPendingTenantResolution: boolean
   readonly current: () => boolean
   readonly unchanged: () => Promise<boolean>
   readonly retire: () => void
@@ -53,6 +54,7 @@ export async function prepareServiceRendererConfiguredGraphs(input: {
       allowConfiguration: input.allowConfiguration,
       allowConnectionControl: input.allowConnectionControl,
       allowConnectionReconnect: input.allowConnectionReconnect,
+      allowPendingTenantResolution: input.allowPendingTenantResolution,
       server: await input.server(),
       current: input.current,
       unchanged: input.unchanged,

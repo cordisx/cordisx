@@ -19,7 +19,10 @@ import { fenceManagerOrigin } from './manager-origin-fence.js'
 import { channelConfigurationApi } from './renderer-channel-composition.js'
 
 const TOKEN = 'renderer-binding-placeholder'
-type SupportedOperation = Extract<ManagerChannelCredentialOperation, { action: 'capture' | 'commit' | 'discard' }>
+type SupportedOperation = Extract<
+  ManagerChannelCredentialOperation,
+  { action: 'capture' | 'commit' | 'discard' | 'resolve-tenant' }
+>
 type CredentialResult = {
   readonly status: 'applied' | 'conflict' | 'rejected' | 'unavailable'
   readonly code: string
@@ -56,6 +59,8 @@ function parse(payload: unknown, context: ManagerRendererChannelContext): {
     ? [...common, 'draftId', 'draft']
     : action === 'discard'
     ? [...common, 'draftId']
+    : action === 'resolve-tenant'
+    ? [...common, 'account', 'tenantId', 'expectedRevision']
     : []
   if (
     !value || !fields.length || Object.keys(value).some(key => !fields.includes(key))
@@ -67,14 +72,17 @@ function parse(payload: unknown, context: ManagerRendererChannelContext): {
     kind: 'manager-channel-credentials',
     sessionId: context.rendererId,
     action,
-    ...(action === 'capture'
+    ...(action === 'capture' || action === 'resolve-tenant'
       ? {
-        purpose: value.purpose,
         account: value.account,
-        secret: value.secret,
         expectedRevision: value.expectedRevision,
         // Replaced with the current owner generation at dispatch.
         serviceGeneration: 'pending',
+        ...(action === 'capture'
+          ? { purpose: value.purpose, secret: value.secret }
+          : value.tenantId === undefined
+          ? {}
+          : { tenantId: value.tenantId }),
       }
       : {
         draftId: value.draftId,
@@ -83,6 +91,7 @@ function parse(payload: unknown, context: ManagerRendererChannelContext): {
   })
   if (
     parsed.action !== 'capture' && parsed.action !== 'commit' && parsed.action !== 'discard'
+      && parsed.action !== 'resolve-tenant'
     || parsed.action === 'capture' && parsed.purpose === 'rotate' && !parsed.account.tenantId
   ) throw new Error('CHANNEL_CREDENTIAL_UNAVAILABLE')
   return { requestId: value.requestId, operation: parsed }
@@ -115,6 +124,16 @@ function project(value: unknown, operation: SupportedOperation): CredentialResul
       ref: { ...operation.account, tenantId: ref.tenantId },
       expiresAt: new Date(result.expiresAt).toISOString(),
     }
+  }
+  if (operation.action === 'resolve-tenant') {
+    const ref = object(result.ref)
+    if (
+      result.code !== 'APPLIED' || !ref || ref.adapterId !== operation.account.adapterId
+      || ref.accountId !== operation.account.accountId || typeof ref.tenantId !== 'string'
+      || !ref.tenantId.trim() || ref.tenantId.length > 512 || /[\u0000-\u001f]/u.test(ref.tenantId)
+      || operation.tenantId && ref.tenantId !== operation.tenantId
+    ) throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
+    return { status, code: result.code, ref: { ...operation.account, tenantId: ref.tenantId } }
   }
   if (result.code !== (operation.action === 'commit' ? 'APPLIED' : 'DISCARDED')) {
     throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
@@ -181,7 +200,7 @@ export function createManagerRendererChannelCredentials(input: {
           watch(context)
           const identity = await input.bootstrap.configuredChannelServiceIdentity(context)
           const operation = request.operation
-          if (operation.action !== 'commit') {
+          if (operation.action !== 'commit' && operation.action !== 'resolve-tenant') {
             const generation = input.service.generation()
             if (!generation) throw new Error('CHANNEL_CREDENTIAL_UNAVAILABLE')
             const dispatched = operation.action === 'capture'
@@ -233,12 +252,16 @@ export function createManagerRendererChannelCredentials(input: {
           }
           try {
             const confirmed = await input.bootstrap.configuredChannelServiceIdentity(context, identity.alias)
-            if (!origin.isCurrent() || confirmed.source !== identity.source) {
+            const beforeGeneration = input.service.generation()
+            if (!origin.isCurrent() || confirmed.source !== identity.source || !beforeGeneration) {
               throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
             }
             let outcome: CredentialResult | undefined
             await input.bootstrap.mutateConfiguredChannel(origin, async () => {
-              outcome = project(await input.handle(operation), operation)
+              const dispatched = operation.action === 'resolve-tenant'
+                ? { ...operation, serviceGeneration: beforeGeneration }
+                : operation
+              outcome = project(await input.handle(dispatched), operation)
               const generation = input.service.generation()
               if (!generation) throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
               const api = channelConfigurationApi({
@@ -257,6 +280,26 @@ export function createManagerRendererChannelCredentials(input: {
                   !descriptor || descriptor.identity.source !== identity.source
                   || descriptor.revision !== descriptor.lastGoodRevision || !origin.isCurrent()
                 ) throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
+                if (operation.action === 'resolve-tenant' && outcome.status === 'applied') {
+                  const config = object(descriptor.configuration)
+                  const connections = config?.connections
+                  const pending = config?.pendingConnections
+                  const sameAccount = (value: unknown) => {
+                    const candidate = object(value)
+                    return candidate?.adapterId === operation.account.adapterId
+                      && candidate.accountId === operation.account.accountId
+                  }
+                  const resolved = Array.isArray(connections)
+                    ? connections.filter(item => sameAccount(object(item)?.ref))
+                    : []
+                  if (
+                    descriptor.revision !== operation.expectedRevision + 1 || !outcome.ref
+                    || !Array.isArray(connections) || !Array.isArray(pending)
+                    || pending.some(item => sameAccount(object(item)?.account))
+                    || resolved.length !== 1 || object(object(resolved[0])?.ref)?.tenantId !== outcome.ref.tenantId
+                    || object(resolved[0])?.enabled !== true
+                  ) throw new Error('CHANNEL_CREDENTIAL_RESULT_UNKNOWN')
+                }
                 const base = {
                   contract: 'cordisx.service-config-result/v1' as const,
                   schemaVersion: 1 as const,

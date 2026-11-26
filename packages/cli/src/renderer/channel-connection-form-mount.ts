@@ -13,12 +13,14 @@ import { applyInlineChannelCredential } from './channel-inline-credential.js'
 import { channelReceiveSelectors } from './channel-connection-form-fields.js'
 import { ChannelCredentialForm } from './channel-credential-form.js'
 import type { HostServiceConfigDescriptor } from '../launcher/service-config.js'
+import { channelPendingTenantResolutionAllowed } from './channel-manager-presentation-scope.js'
 
 export function channelConnectionFormSnapshot(
   descriptor: HostServiceConfigDescriptor,
   controller: PublicChannelManagerController,
   connectionToken: string,
   live: () => boolean,
+  service?: object,
 ): ChannelConnectionFormSnapshot {
   const account = controller.target(connectionToken)
   const configuration = descriptor.configuration as {
@@ -43,7 +45,9 @@ export function channelConnectionFormSnapshot(
     selectors: stored.selectors ?? ['direct', 'group'],
     serviceRevision: descriptor.revision,
     revision: controller.currentRevision(),
-    writable: descriptor.writable && current.availableOperations.includes('connection.update'),
+    writable: descriptor.writable && (current.availableOperations.includes('connection.update')
+      || account?.tenantId === '' && service !== undefined && channelPendingTenantResolutionAllowed(service)
+        && ['feishu', 'lark'].includes(account.adapterId)),
     credentialWritable: descriptor.writable && current.availableOperations.includes('target.credential.capture.rotate'),
   }
 }

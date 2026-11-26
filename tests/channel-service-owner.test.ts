@@ -158,7 +158,10 @@ describe('Channel owned management service', () => {
       .mockImplementation(async input => input.submit(ref, 'fixture-secret', input.signal))
     const fiber = f.root.plugin(CordisXChannelManagerPresentationService, {
       presentationMode: 'configuration-only',
-      projection: projection(),
+      projection: {
+        ...projection(),
+        service: { ...projection().service, pendingTenantResolution: true },
+      },
       profileId: 'test',
       hostGeneration: 'runtime',
       serviceConfig: {},
@@ -170,7 +173,10 @@ describe('Channel owned management service', () => {
     try {
       const service = f.ctx.channelManager as unknown as CordisXChannelManagerPresentationService
       const manager = service.forOwnConfigurationPresentationService()!
-      expect(manager.configurationPresentationCapabilities()).toMatchObject({ connectionCreate: 'credentialed' })
+      expect(manager.configurationPresentationCapabilities()).toMatchObject({
+        connectionCreate: 'credentialed',
+        pendingTenantResolution: true,
+      })
       expect(manager.snapshot().availableOperations).toContain('target.credential.capture.create')
       expect(manager.snapshot().availableOperations).not.toContain('target.connection.create.simulator')
       const fence = () => ({

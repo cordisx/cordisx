@@ -26,6 +26,16 @@ interface Draft {
 const sameRef = (left: ChannelCredentialRef, right: ChannelCredentialRef) =>
   left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 const rejected = (code: string): ChannelCredentialDraftResult => ({ status: 'rejected', code })
+const undispatchedTenantResults = new WeakSet<ChannelCredentialDraftResult>()
+function rejectedUndispatchedTenant(code: string): ChannelCredentialDraftResult {
+  const result = Object.freeze(rejected(code))
+  undispatchedTenantResults.add(result)
+  return result
+}
+/** Owner-only evidence that this result was produced before configuration mutation. */
+export function isUndispatchedTenantResult(result: ChannelCredentialDraftResult): boolean {
+  return undispatchedTenantResults.has(result)
+}
 const TENANT_LOOKUP_TIMEOUT_MS = 5_000
 async function boundedTenantLookup(operation: Promise<string>): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -261,13 +271,52 @@ export class ChannelCredentialDraftBroker {
     })
     if (index < 0) return rejected('TARGET_UNAVAILABLE')
     const entry = pending[index]!
-    const tenantId = request.tenantId === undefined || request.tenantId === ''
-      ? await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
-        adapterId: account.adapterId,
-        accountId: account.accountId,
-        secret: await this.input.store.readChannelReference(text(entry.secretRef), this.input.profileId),
-      }))
-      : text(request.tenantId)
+    let tenantId: string
+    if (request.tenantId === undefined || request.tenantId === '') {
+      try {
+        tenantId = await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+          adapterId: account.adapterId,
+          accountId: account.accountId,
+          secret: await this.input.store.readChannelReference(text(entry.secretRef), this.input.profileId),
+        }))
+      } catch (error) {
+        if (!this.live(documentId)) return rejected('STALE_GENERATION')
+        const code = error instanceof Error && [
+            'CREDENTIAL_UNAVAILABLE',
+            'TENANT_DISCOVERY_PERMISSION_DENIED',
+            'TENANT_DISCOVERY_FAILED',
+          ].includes(error.message)
+          ? error.message
+          : 'TENANT_DISCOVERY_FAILED'
+        return rejectedUndispatchedTenant(code)
+      }
+    } else {
+      tenantId = text(request.tenantId)
+      let discovered: string | undefined
+      let checking = true
+      try {
+        discovered = text(
+          await boundedTenantLookup((async () => {
+            const secret = await this.input.store.readChannelReferenceSilently(
+              text(entry.secretRef),
+              this.input.profileId,
+            )
+            if (!checking || !this.live(documentId)) throw new Error('TENANT_DISCOVERY_FAILED')
+            return await (this.input.discoverTenant ?? discoverChannelTenant)({
+              adapterId: account.adapterId,
+              accountId: account.accountId,
+              secret,
+            })
+          })()),
+        )
+      } catch {
+        /* Manual identity remains available when silent verification is unavailable. */
+      } finally {
+        checking = false
+      }
+      if (!this.live(documentId)) return rejected('STALE_GENERATION')
+      if (discovered !== undefined && tenantId !== discovered) return rejectedUndispatchedTenant('TENANT_MISMATCH')
+    }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
     const resolved = {
       ref: { ...account, tenantId },

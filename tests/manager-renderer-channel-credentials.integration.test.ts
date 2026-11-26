@@ -48,6 +48,130 @@ const options = {
 }
 
 it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'resolves a pending tenant only after the other Manager adopts the confirmed owner state',
+  async () => {
+    const f = await fixture({
+      ...options,
+      channelPendingCredential: true,
+      channelCredentialDiscoverTenant: async () => 'resolved-tenant',
+    })
+    const secondId = randomBytes(32).toString('hex')
+    const second = {
+      gateway: f.gateway,
+      browserSessionId: secondId,
+      handle: (await f.sessions.open(f.gateway, secondId))!,
+    }
+    const pendingAccount = { adapterId: 'feishu', accountId: 'cli_pending', tenantId: '' }
+    try {
+      await bootConfiguredChannelManager(f)
+      await bootConfiguredChannelManager(f, second)
+      const call = (requestId: string, tenantId: string, expectedRevision: number) =>
+        f.sessions.call(
+          f.invocation,
+          'channel-credentials',
+          envelope(requestId, 'resolve-tenant', {
+            account: pendingAccount,
+            tenantId,
+            expectedRevision,
+          }),
+        )
+      const mismatch = await call('pending-mismatch', 'wrong-tenant', 1)
+      expect(mismatch).toMatchObject({
+        status: 'ok',
+        value: { value: { status: 'rejected', code: 'TENANT_MISMATCH' } },
+      })
+      expect(JSON.stringify(mismatch)).not.toMatch(/synthetic-pending-secret|pending-fixture|secretRef/)
+      const stale = await call('pending-stale', 'resolved-tenant', 0)
+      expect(stale).toMatchObject({ status: 'ok', value: { value: { status: 'conflict' } } })
+      const unchanged = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath) as any
+      expect(unchanged.revision).toBe(1)
+      expect(unchanged.config.pendingConnections).toHaveLength(1)
+
+      const polling = f.sessions.poll(second, 10_000)
+      const pending = call('pending-resolve', 'resolved-tenant', 1)
+      const command = (await polling as any).value.command
+      expect(command).toMatchObject({ method: 'channel-configuration', payload: { revision: 2 } })
+      expect(JSON.stringify(command)).not.toMatch(/synthetic-pending-secret|pending-fixture|secretRef/)
+      expect(
+        await f.sessions.acknowledge(second, {
+          id: command.id,
+          sequence: command.sequence,
+          ok: true,
+          value: { rendererId: second.handle.rendererId, ownerGeneration: f.generation, revision: 2, adopted: true },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      const result = await pending as any
+      expect(result).toMatchObject({
+        status: 'ok',
+        value: {
+          value: { status: 'applied', code: 'APPLIED', ref: { ...pendingAccount, tenantId: 'resolved-tenant' } },
+        },
+      })
+      expect(JSON.stringify(result)).not.toMatch(/synthetic-pending-secret|pending-fixture|secretRef/)
+      const stored = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath) as any
+      expect(stored.revision).toBe(2)
+      expect(stored.config.pendingConnections).toHaveLength(0)
+      expect(stored.config.connections).toContainEqual(expect.objectContaining({
+        ref: { ...pendingAccount, tenantId: 'resolved-tenant' },
+        secretRef: 'keychain:cordisx/channel/default/pending-fixture',
+      }))
+      expect(f.credentialValues.size).toBe(1)
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'fences a pending-tenant write whose owner receipt is lost',
+  async () => {
+    const f = await fixture({
+      ...options,
+      channelPendingCredential: true,
+      channelCredentialResolveUnknown: true,
+      channelCredentialDiscoverTenant: async () => 'resolved-tenant',
+    })
+    try {
+      await bootConfiguredChannelManager(f)
+      const result = await f.sessions.call(
+        f.invocation,
+        'channel-credentials',
+        envelope('pending-unknown', 'resolve-tenant', {
+          account: { adapterId: 'feishu', accountId: 'cli_pending', tenantId: '' },
+          tenantId: 'resolved-tenant',
+          expectedRevision: 1,
+        }),
+      )
+      expect(result).toEqual({ status: 'unknown' })
+      expect(f.sessions.mutationAvailability()).toBe('unavailable')
+      const stored = await readServiceConfigState({
+        profileId: f.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: {},
+      }, f.configPath) as any
+      expect(stored.revision).toBe(2)
+      expect(stored.config.pendingConnections).toHaveLength(0)
+      expect(f.credentialValues.size).toBe(1)
+    } finally {
+      await f.close()
+    }
+  },
+  45_000,
+)
+
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
   'creates an owner-bound connection and waits for the other Manager to adopt it',
   async () => {
     const f = await fixture({

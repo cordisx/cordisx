@@ -40,6 +40,13 @@ export function channelCredentialCreationAllowed(service: object): boolean {
     && state.projection.service.writable && state.credentials !== undefined
 }
 
+/** Pending resolution also needs the owner-projected configuration and private credential bridge. */
+export function channelPendingTenantResolutionAllowed(service: object): boolean {
+  const state = stateFor(service)
+  return channelCredentialCreationAllowed(service) && state.serviceConfig !== undefined
+    && state.projection.service.pendingTenantResolution === true
+}
+
 export function channelSnapshotOperationAllowed(
   service: object,
   operation: ChannelManagerRequestV2['operation'],

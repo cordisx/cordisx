@@ -18,12 +18,22 @@ export function adoptStandaloneChannelProjection(
       || projection.service.writable !== state.projection.service.writable
       || projection.service.connectionControl !== state.projection.service.connectionControl
       || projection.service.connectionReconnect !== state.projection.service.connectionReconnect
+      || projection.service.pendingTenantResolution !== state.projection.service.pendingTenantResolution
     ) return false
     // An older in-flight snapshot must not overwrite the newly confirmed view.
     state.refreshSequence += 1
     const key = (ref: { adapterId: string; accountId: string; tenantId: string }) =>
       JSON.stringify([ref.adapterId, ref.accountId, ref.tenantId])
     const previous = new Map(projectionFor(service).accounts.map(account => [key(account.ref), account]))
+    const sameAccount = (left: { adapterId: string; accountId: string }, right: typeof left) =>
+      left.adapterId === right.adapterId && left.accountId === right.accountId
+    for (const pending of state.projection.connections.filter(connection => connection.pendingTenant)) {
+      const old = state.projection.connections.filter(connection => sameAccount(connection.ref, pending.ref))
+      const next = projection.connections.filter(connection => sameAccount(connection.ref, pending.ref))
+      if (old.length === 1 && next.length === 1 && !next[0]!.pendingTenant && next[0]!.ref.tenantId) {
+        state.publicController?.resolvePendingToken(pending.ref, next[0]!.ref)
+      }
+    }
     state.projection = {
       ...projection,
       accounts: projection.accounts.map(account => {

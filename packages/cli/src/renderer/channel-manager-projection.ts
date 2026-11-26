@@ -79,6 +79,8 @@ export interface ChannelManagerProjectionV1 {
     readonly connectionControl?: 'enable-disable'
     /** Present only when the owner also supports coordinated reconnect. */
     readonly connectionReconnect?: true
+    /** Present only when the owner supplies coordinated pending-tenant resolution. */
+    readonly pendingTenantResolution?: true
   }
   readonly connections: readonly ChannelManagerConnectionProjection[]
   readonly routes: readonly ChannelManagerRouteProjection[]
@@ -245,6 +247,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       'writable',
       'connectionControl',
       'connectionReconnect',
+      'pendingTenantResolution',
     ],
     'Channel Manager projection.service',
   )
@@ -255,6 +258,8 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       && (service.connectionControl !== 'enable-disable' || service.writable !== true)
     || service.connectionReconnect !== undefined
       && (service.connectionReconnect !== true || service.connectionControl !== 'enable-disable')
+    || service.pendingTenantResolution !== undefined
+      && (service.pendingTenantResolution !== true || service.writable !== true)
   ) {
     throw new TypeError('Channel Manager service projection is invalid')
   }
@@ -431,6 +436,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       writable: service.writable,
       ...(service.connectionControl === 'enable-disable' ? { connectionControl: 'enable-disable' as const } : {}),
       ...(service.connectionReconnect === true ? { connectionReconnect: true as const } : {}),
+      ...(service.pendingTenantResolution === true ? { pendingTenantResolution: true as const } : {}),
     },
     connections,
     routes,

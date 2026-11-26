@@ -52,7 +52,13 @@ registerHooks({
             throw new Error("CREDENTIAL_VALIDATION_FAILED");
           }
         },
-        discoverTenant: async () => {
+        discoverTenant: async ({ adapterId, accountId, secret }) => {
+          if (adapterId !== "feishu" || ![
+            ["cli_created_fixture", "synthetic-create-secret"],
+            ["cli_pending_fixture", "synthetic-pending-secret"],
+          ].some(([account, value]) => account === accountId && value === secret)) {
+            throw new Error("TENANT_DISCOVERY_FAILED");
+          }
           if (process.env.CORDISX_CHANNEL_CREATE_DISCOVER_TENANT === "match") return "fixture-tenant";
           throw new Error("TENANT_DISCOVERY_FAILED");
         },`,

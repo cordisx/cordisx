@@ -86,6 +86,10 @@ it('adopts a confirmed redacted view while preserving the mounted service', () =
     ...after,
     service: { ...after.service, writable: false },
   }, 2)).toBe(false)
+  expect(adoptStandaloneChannelProjection(manager, {
+    ...after,
+    service: { ...after.service, pendingTenantResolution: true },
+  }, 2)).toBe(false)
   expect(changed).toHaveBeenCalledOnce()
   const renamed = {
     ...after,
@@ -94,4 +98,50 @@ it('adopts a confirmed redacted view while preserving the mounted service', () =
   }
   expect(adoptStandaloneChannelProjection(manager, renamed, 3)).toBe(true)
   expect(stateFor(manager).projection.accounts[0]).not.toHaveProperty('accountAvatar')
+})
+
+it('keeps a peer page target stable when the owner confirms a pending tenant', () => {
+  const pending = {
+    ref: { adapterId: 'feishu', accountId: 'cli_pending', tenantId: '' },
+    pendingTenant: true as const,
+    displayName: 'Pending',
+    adapterKind: 'feishu',
+    enabled: false,
+    transportMode: 'websocket',
+    secretState: 'ready' as const,
+  }
+  const initial = {
+    contract: 'cordisx.channel-manager-projection/v1' as const,
+    schemaVersion: 1 as const,
+    status: 'verified' as const,
+    service: {
+      configurationKind: 'host' as const,
+      configApplies: 'service-restart' as const,
+      revision: 1,
+      lastGoodRevision: 1,
+      writable: true,
+    },
+    connections: [pending],
+    routes: [],
+    bindings: [],
+    diagnostics: [],
+    accounts: [],
+  }
+  const manager = new CordisXChannelManagerPresentationService(new Context(), {
+    presentationMode: 'configuration-only',
+    projection: initial,
+    serviceConfig: {} as never,
+  })
+  const controller = stateFor(manager).publicController!
+  const token = controller.snapshot().accounts[0]!.connectionToken
+  const { pendingTenant: _pending, ...resolved } = pending
+  void _pending
+  const next = {
+    ...initial,
+    service: { ...initial.service, revision: 2, lastGoodRevision: 2 },
+    connections: [{ ...resolved, ref: { ...resolved.ref, tenantId: 'resolved-tenant' }, enabled: true }],
+  }
+  expect(adoptStandaloneChannelProjection(manager, next, 2)).toBe(true)
+  expect(controller.snapshot().accounts[0]).toMatchObject({ connectionToken: token, displayName: 'Pending' })
+  expect(controller.target(token)).toEqual({ ...pending.ref, tenantId: 'resolved-tenant' })
 })

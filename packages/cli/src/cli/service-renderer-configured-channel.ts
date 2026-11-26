@@ -51,6 +51,7 @@ export class ServiceRendererConfiguredChannel {
       readonly allowConfiguration: boolean
       readonly allowConnectionControl: boolean
       readonly allowConnectionReconnect: boolean
+      readonly allowPendingTenantResolution: boolean
       readonly current: () => boolean
       readonly unchanged: () => Promise<boolean>
       readonly retire: () => void
@@ -71,6 +72,7 @@ export class ServiceRendererConfiguredChannel {
     readonly allowConfiguration: boolean
     readonly allowConnectionControl: boolean
     readonly allowConnectionReconnect: boolean
+    readonly allowPendingTenantResolution: boolean
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
     readonly unchanged: () => Promise<boolean>
@@ -207,6 +209,7 @@ export class ServiceRendererConfiguredChannel {
               ...(this.input.allowConnectionControl && this.input.allowConnectionReconnect
                 ? { connectionReconnect: true as const }
                 : {}),
+              ...(this.input.allowPendingTenantResolution ? { pendingTenantResolution: true as const } : {}),
             },
           }
           : view.initial.projection,
@@ -324,6 +327,7 @@ export class ServiceRendererConfiguredChannel {
           ...(this.input.allowConnectionControl && this.input.allowConnectionReconnect
             ? { connectionReconnect: true as const }
             : {}),
+          ...(this.input.allowPendingTenantResolution ? { pendingTenantResolution: true as const } : {}),
         },
       }
       : projection

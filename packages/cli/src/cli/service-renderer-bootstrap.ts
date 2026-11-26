@@ -605,6 +605,7 @@ export class ServiceRendererBootstrap {
           allowConfiguration: this.input.experimentalChannelServiceConfig === true,
           allowConnectionControl: this.input.experimentalChannelControl === true,
           allowConnectionReconnect: this.input.experimentalChannelReconnect === true,
+          allowPendingTenantResolution: this.input.experimentalChannelCredentials === true,
           current: () => this.current(rendererId, entry),
           unchanged: async () => await this.channelAuthorityCurrent(rendererId, entry),
           retire: () => entry.peer.close(),

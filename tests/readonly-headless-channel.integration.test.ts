@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -25,7 +25,7 @@ import {
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-readonly-channel-'))
-  const entry = bundledPluginEntry('channel')
+  const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? bundledPluginEntry('channel')
   const configPath = path.join(root, 'config.json')
   const configuration = {
     contract: 'cordisx.channel-service-config/v3',
@@ -52,6 +52,7 @@ async function fixture() {
   const plugin = config.plugins.find(item => item.id === 'channel')!
   const service = createLocalChannelService({
     artifactDirectory: path.dirname(plugin.entry),
+    ...(plugin.configuredServiceEntry === undefined ? {} : { runtimeEntry: plugin.configuredServiceEntry }),
     dataDir: path.join(root, 'runtime'),
     source: plugin.source ?? pathToFileURL(plugin.entry).href,
     environment: {},
@@ -76,6 +77,13 @@ async function fixture() {
     current,
     async dispose() {
       await service.dispose()
+      const makeRemovable = async (directory: string): Promise<void> => {
+        await chmod(directory, 0o700)
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (entry.isDirectory()) await makeRemovable(path.join(directory, entry.name))
+        }
+      }
+      await makeRemovable(root)
       await rm(root, { recursive: true, force: true })
     },
   }
@@ -231,6 +239,7 @@ describe('read-only independent manager for an existing configured Channel', () 
       const config = manager.forOwnConfigurationPresentationService()!
       expect(old.presentationCapabilities().mode).toBe('snapshot-only')
       expect(config.configurationPresentationCapabilities().mode).toBe('configuration-only')
+      expect(config.configurationPresentationCapabilities()).not.toHaveProperty('pendingTenantResolution')
       expect(() => (config as unknown as CordisXChannelManagerPresentationService).presentationCapabilities())
         .toThrow('OPERATION_UNAVAILABLE')
       const before = config.snapshot()

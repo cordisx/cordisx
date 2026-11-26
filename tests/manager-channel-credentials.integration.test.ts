@@ -12,6 +12,7 @@ import { openProductionPluginManagementComposition } from '../packages/cli/src/c
 import { attachmentHomeDigest } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { ManagerChannelCredentials } from '../packages/cli/src/launcher/manager-channel-credentials.js'
+import { ChannelCredentialDraftBroker } from '../packages/cli/src/launcher/channel-credential-drafts.js'
 import { ManagerChannelDraftJournal } from '../packages/cli/src/launcher/manager-channel-draft-journal.js'
 import { PackagePluginServiceConfigStore } from '../packages/cli/src/launcher/package-plugin-service-config.js'
 import { LauncherSecretStore } from '../packages/cli/src/launcher/secret-store.js'
@@ -122,18 +123,20 @@ async function fixture(options: { coordinated?: boolean } = {}) {
     manager: { snapshot: () => undefined, connections: { reconnect: async () => ({ status: 'unavailable' }) } },
   } as unknown as LocalChannelService
   const values = new Map<string, string>()
+  const backend = {
+    read: async (service: string, account: string) => values.get(`${service}/${account}`)!,
+    upsert: async (service: string, account: string, value: string) => {
+      values.set(`${service}/${account}`, value)
+    },
+    remove: async (service: string, account: string) => {
+      values.delete(`${service}/${account}`)
+    },
+    status: async () => 'set' as const,
+  }
   const store = new LauncherSecretStore({
     platform: 'darwin',
-    backend: {
-      read: async (service, account) => values.get(`${service}/${account}`)!,
-      upsert: async (service, account, value) => {
-        values.set(`${service}/${account}`, value)
-      },
-      remove: async (service, account) => {
-        values.delete(`${service}/${account}`)
-      },
-      status: async () => 'set',
-    },
+    backend,
+    silentReadBackend: backend,
   })
   const validateCredentials = vi.fn(async () => {})
   const discoverTenant = vi.fn(async () => 'tenant-one')
@@ -529,6 +532,27 @@ describe('local manager Channel credential transactions', () => {
         .toMatchObject({ status: 'applied' })
       const view = await f.request(requestOp('view'))
       expect(view.pendingConnections).toMatchObject([{ account: { adapterId: 'feishu', accountId: 'cli_fixture' } }])
+      f.discoverTenant.mockRejectedValueOnce(new Error('TENANT_DISCOVERY_PERMISSION_DENIED'))
+      const lookupFailure = await f.request(requestOp('resolve-tenant', {
+        account: pendingAccount,
+        expectedRevision: view.revision,
+        serviceGeneration: view.serviceGeneration,
+      }))
+      expect(lookupFailure).toEqual({ status: 'rejected', code: 'TENANT_DISCOVERY_PERMISSION_DENIED' })
+      const mismatch = await f.request(requestOp('resolve-tenant', {
+        account: pendingAccount,
+        tenantId: 'wrong-tenant',
+        expectedRevision: view.revision,
+        serviceGeneration: view.serviceGeneration,
+      }))
+      expect(mismatch).toEqual({ status: 'rejected', code: 'TENANT_MISMATCH' })
+      expect(await f.request(requestOp('view'))).toMatchObject({
+        revision: view.revision,
+        pendingConnections: [
+          { account: { adapterId: 'feishu', accountId: 'cli_fixture' } },
+        ],
+      })
+      f.discoverTenant.mockRejectedValueOnce(new Error('TENANT_DISCOVERY_PERMISSION_DENIED'))
       const resolved = await f.request(
         requestOp('resolve-tenant', {
           account: pendingAccount,
@@ -540,6 +564,27 @@ describe('local manager Channel credential transactions', () => {
       expect(resolved).toMatchObject({ status: 'applied', ref: { ...account, tenantId: 'tenant-manual' } })
       expect(f.values.size).toBe(1)
     } finally {
+      await f.close()
+    }
+  })
+
+  it('does not trust an unmarked tenant rejection after a possible write', async () => {
+    const f = await fixture()
+    const forged = vi.spyOn(ChannelCredentialDraftBroker.prototype, 'handle').mockResolvedValueOnce({
+      status: 'rejected',
+      code: 'TENANT_MISMATCH',
+    })
+    try {
+      const view = await f.request(requestOp('view'))
+      const result = await f.request(requestOp('resolve-tenant', {
+        account: { ...account, tenantId: '' },
+        tenantId: 'tenant-manual',
+        expectedRevision: view.revision,
+        serviceGeneration: view.serviceGeneration,
+      }))
+      expect(result).toEqual({ status: 'unknown', code: 'RESULT_UNKNOWN' })
+    } finally {
+      forged.mockRestore()
       await f.close()
     }
   })

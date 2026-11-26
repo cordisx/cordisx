@@ -62,7 +62,9 @@ describe('unified Host Channel connection form', () => {
       credentialWritable: false,
     }
     const retry = vi.fn(async () => ({ status: 'rejected' as const, code: 'TENANT_DISCOVERY_PERMISSION_DENIED' }))
-    const apply = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED' }))
+    const apply = vi.fn()
+      .mockResolvedValueOnce({ status: 'rejected', code: 'TENANT_MISMATCH' })
+      .mockResolvedValueOnce({ status: 'applied', code: 'APPLIED' })
     try {
       await f.render(createElement(ChannelConnectionForm, {
         account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: '' },
@@ -79,6 +81,13 @@ describe('unified Host Channel connection form', () => {
       expect(f.document.body.textContent).toContain('Tenant identification is pending')
       expect(f.document.querySelector('a')?.href).toContain('/app/cli_fixture/auth?')
       expect(f.document.querySelector('#channel-credential-secret')).toBeNull()
+      await f.type('#channel-credential-tenantId input', 'tenant-wrong')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(f.document.querySelector('#channel-credential-tenantId-error')?.textContent).toContain('does not match')
       await f.type('#channel-credential-tenantId input', 'tenant-real')
       await act(async () => {
         f.document.querySelector('form')!.dispatchEvent(

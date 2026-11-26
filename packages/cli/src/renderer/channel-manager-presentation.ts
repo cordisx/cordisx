@@ -5,6 +5,7 @@ import {
   channelConnectionControlAllowed,
   channelConnectionReconnectAllowed,
   channelCredentialCreationAllowed,
+  channelPendingTenantResolutionAllowed,
 } from './channel-manager-presentation-scope.js'
 
 /** Experimental local implementation of the proposed owner-bound presentation contract. */
@@ -29,6 +30,7 @@ export class CordisXChannelManagerPresentationService extends CordisXChannelMana
       schemaVersion: 1 as const,
       mode: 'configuration-only' as const,
       ...(channelCredentialCreationAllowed(this) ? { connectionCreate: 'credentialed' as const } : {}),
+      ...(channelPendingTenantResolutionAllowed(this) ? { pendingTenantResolution: true as const } : {}),
       ...(channelConnectionControlAllowed(this) ? { connectionControl: 'enable-disable' as const } : {}),
       ...(channelConnectionReconnectAllowed(this) ? { connectionReconnect: true as const } : {}),
     })

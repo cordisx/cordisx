@@ -612,7 +612,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
             if (!live() || !await this.authorizeChannel('channel.accounts.read')) throw new Error('PERMISSION_DENIED')
             const descriptor = await this.serviceConfiguration()
             if (!descriptor) throw new Error('TARGET_UNAVAILABLE')
-            return channelConnectionFormSnapshot(descriptor, controller, connectionToken, live)
+            return channelConnectionFormSnapshot(descriptor, controller, connectionToken, live, this)
           },
           subscribe: listener => this.subscribeInternal(listener),
           update: (ref, patch, revision) => this.updateConfiguration(ref, patch, revision),

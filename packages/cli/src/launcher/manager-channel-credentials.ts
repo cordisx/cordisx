@@ -1,4 +1,8 @@
-import { ChannelCredentialDraftBroker, type ChannelCredentialDraftResult } from './channel-credential-drafts.js'
+import {
+  ChannelCredentialDraftBroker,
+  type ChannelCredentialDraftResult,
+  isUndispatchedTenantResult,
+} from './channel-credential-drafts.js'
 import type { HostServiceConfigNarrowApi } from './service-config.js'
 import type { LauncherSecretStore } from './secret-store.js'
 import { validateChannelCredentials } from './channel-credential-validation.js'
@@ -411,6 +415,7 @@ export class ManagerChannelCredentials {
           mutationAttempted && response.status === 'rejected'
           && !['INVALID_REQUEST', 'TARGET_UNAVAILABLE', 'UNSUPPORTED_SELECTOR', 'PERMISSION_DENIED', 'STALE_GENERATION']
             .includes(response.code)
+          && !(action === 'resolve-tenant' && isUndispatchedTenantResult(response))
         ) {
           return { status: 'unknown', code: 'RESULT_UNKNOWN' }
         }

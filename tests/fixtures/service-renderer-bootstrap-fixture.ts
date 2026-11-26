@@ -77,8 +77,10 @@ export async function fixture(
     channelCredentials?: boolean
     channelCredentialValidate?: () => Promise<void>
     channelCredentialDiscoverTenant?: () => Promise<string>
+    channelPendingCredential?: boolean
     channelCredentialCleanupFails?: boolean
     channelCredentialCommitUnknown?: boolean
+    channelCredentialResolveUnknown?: boolean
     permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
     channelPermissionPolicy?: boolean
     configuredPluginPermissionPolicy?: boolean
@@ -119,7 +121,9 @@ export async function fixture(
       pendingConnections: [{
         account: { adapterId: 'feishu', accountId: 'cli_pending' },
         adapterKind: 'feishu',
-        secretRef: 'host-secret:channel/fixture-private-reference',
+        secretRef: options.channelPendingCredential
+          ? 'keychain:cordisx/channel/default/pending-fixture'
+          : 'host-secret:channel/fixture-private-reference',
         displayName: 'Pending',
       }],
     }
@@ -413,21 +417,26 @@ export async function fixture(
     })
     : channelBridge?.channel
   const credentialValues = new Map<string, string>()
+  if (options.channelPendingCredential) {
+    credentialValues.set('cordisx/channel/default/pending-fixture', 'synthetic-pending-secret')
+  }
   let credentialCleanupFails = options.channelCredentialCleanupFails === true
   let credentialCommitUnknown = options.channelCredentialCommitUnknown === true
+  const credentialBackend = {
+    read: async (service: string, account: string) => credentialValues.get(`${service}/${account}`)!,
+    upsert: async (service: string, account: string, value: string) => {
+      credentialValues.set(`${service}/${account}`, value)
+    },
+    remove: async (service: string, account: string) => {
+      if (credentialCleanupFails) throw new Error('synthetic cleanup failure')
+      credentialValues.delete(`${service}/${account}`)
+    },
+    status: async () => 'set' as const,
+  }
   const credentialStore = new LauncherSecretStore({
     platform: 'darwin',
-    backend: {
-      read: async (service, account) => credentialValues.get(`${service}/${account}`)!,
-      upsert: async (service, account, value) => {
-        credentialValues.set(`${service}/${account}`, value)
-      },
-      remove: async (service, account) => {
-        if (credentialCleanupFails) throw new Error('synthetic cleanup failure')
-        credentialValues.delete(`${service}/${account}`)
-      },
-      status: async () => 'set',
-    },
+    backend: credentialBackend,
+    ...(options.channelPendingCredential ? { silentReadBackend: credentialBackend } : {}),
   })
   const credentialManager = options.channelCredentials && configuredChannel && configuredOwner
     ? new ManagerChannelCredentials({
@@ -468,7 +477,8 @@ export async function fixture(
       handle: async operation => {
         const result = await credentialManager.handle(operation)
         if (
-          credentialCommitUnknown && operation.action === 'commit'
+          (credentialCommitUnknown && operation.action === 'commit'
+            || options.channelCredentialResolveUnknown && operation.action === 'resolve-tenant')
           && result !== null && typeof result === 'object' && 'status' in result && result.status === 'applied'
         ) return { status: 'unknown', code: 'RESULT_UNKNOWN' }
         return result

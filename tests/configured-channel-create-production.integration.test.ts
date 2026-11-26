@@ -10,6 +10,7 @@ import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/sr
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { LauncherSecretStore } from '../packages/cli/src/launcher/secret-store.js'
 import { CdpClient, stopChrome, trustedClick } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
@@ -76,6 +77,7 @@ it.skipIf(
     let browser: ChildProcess | undefined
     let attemptedOwner = false
     let attemptedManager = false
+    let testFailed = false
     const open = async () => {
       attemptedManager = true
       const value = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
@@ -116,6 +118,24 @@ it.skipIf(
     try {
       if (!path.isAbsolute(archive!) || !path.isAbsolute(managerPackage!)) throw new Error('Invalid fixture paths')
       await Promise.all([homeDir, userHome, codexHome].map(directory => mkdir(directory, { mode: 0o700 })))
+      const secretStore = new LauncherSecretStore({ platform: 'linux', homeDir })
+      const pendingCapture = secretStore.beginCapture({ profileId: 'default', connectionId: 'pending-fixture' })
+      expect(await secretStore.capture({ captureId: pendingCapture.captureId, secret: 'synthetic-pending-secret' }))
+        .toMatchObject({ state: 'set' })
+      const pendingReference = secretStore.referenceFor(pendingCapture.captureId)
+      expect(pendingReference).toBeDefined()
+      const serviceConfig = {
+        contract: 'cordisx.channel-service-config/v3',
+        schemaVersion: 3,
+        connections: SIMULATOR_CHANNEL_SERVICE_CONFIG.connections,
+        pendingConnections: [{
+          account: { adapterId: 'feishu', accountId: 'cli_pending_fixture' },
+          adapterKind: 'feishu',
+          secretRef: pendingReference,
+          displayName: 'Pending fixture',
+          selectors: ['direct'],
+        }],
+      }
       if (process.env.CORDISX_TEST_CODEX_AUTH_FILE) {
         const auth = path.join(codexHome, 'auth.json')
         await copyFile(process.env.CORDISX_TEST_CODEX_AUTH_FILE, auth, constants.COPYFILE_EXCL)
@@ -134,7 +154,7 @@ it.skipIf(
                   default: {
                     revision: 1,
                     lastGoodRevision: 1,
-                    config: SIMULATOR_CHANNEL_SERVICE_CONFIG,
+                    config: serviceConfig,
                   },
                 },
               },
@@ -285,28 +305,129 @@ it.skipIf(
           timeout: 20_000,
         }).toBe(true)
       }
+      const pendingButton = '[data-manager-collection-item] button[aria-label="Pending fixture"]'
+      for (const page of [first, second]) {
+        await expect.poll(() => exists(page, pendingButton), { timeout: 15_000 }).toBe(true)
+        await trustedClick(page, pendingButton)
+        await expect.poll(() => exists(page, '#channel-credential-tenantId input'), { timeout: 15_000 }).toBe(true)
+      }
+      await set(first, '#channel-credential-tenantId input', 'wrong-tenant')
+      const savePending = '[data-channel-connection-form] button[type=submit]'
+      await expect.poll(() => first.evaluate('!document.querySelector(' + JSON.stringify(savePending) + ')?.disabled'))
+        .toBe(true)
+      await trustedClick(first, savePending)
+      await expect.poll(() =>
+        first.evaluate(`(() => {
+        const error = document.querySelector('#channel-credential-tenantId-error')
+        return Boolean(error && !error.hidden && (
+          error.textContent.includes('不一致') || error.textContent.includes('does not match')
+        ))
+      })()`), { timeout: 15_000 }).toBe(true)
+      expect((await readService()).revision).toBe(2)
+      expect((await readService()).config.pendingConnections).toHaveLength(1)
+      expect(await exists(first, '.cxn-card[data-type="error"]')).toBe(false)
+      await set(first, '#channel-credential-tenantId input', 'fixture-tenant')
+      await expect.poll(() => first.evaluate('!document.querySelector(' + JSON.stringify(savePending) + ')?.disabled'))
+        .toBe(true)
+      expect(
+        await first.evaluate(`(() => {
+        const button = document.querySelector('[data-channel-connection-form] button[type=submit]')
+        button.scrollIntoView({ block: 'center' })
+        const rect = button.getBoundingClientRect()
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        return button.contains(hit)
+      })()`),
+      ).toBe(true)
+      await trustedClick(first, savePending)
+      await expect.poll(async () => (await readService()).revision, { timeout: 30_000 }).toBe(3)
+      const resolved = await readService()
+      expect(resolved.config.pendingConnections).toHaveLength(0)
+      expect(resolved.config.connections).toContainEqual(expect.objectContaining({
+        ref: { adapterId: 'feishu', accountId: 'cli_pending_fixture', tenantId: 'fixture-tenant' },
+        secretRef: pendingReference,
+      }))
+      expect(JSON.stringify(resolved)).not.toContain('synthetic-pending-secret')
+      await expect.poll(
+        () => readFile(path.join(homeDir, 'synthetic-adapter.log'), 'utf8').catch(() => ''),
+        { timeout: 30_000 },
+      ).toContain('connected:cli_pending_fixture')
+      const tenantValue = (page: CdpClient) =>
+        page.evaluate('document.querySelector("#channel-credential-tenantId input")?.value')
+      for (const page of [first, second]) {
+        await expect.poll(() =>
+          page.evaluate(`(() => {
+          const input = document.querySelector('#channel-credential-tenantId input')
+          return Boolean(input && input.value === 'fixture-tenant' && input.disabled)
+        })()`), { timeout: 30_000 }).toBe(true)
+      }
+      await second.evaluate('globalThis.__beforeResolvedReload = true')
+      await second.send('Page.reload')
+      await expect.poll(
+        () => second.evaluate('globalThis.__beforeResolvedReload === undefined').catch(() => false),
+        { timeout: 15_000 },
+      ).toBe(true)
+      await showChannel(second)
+      await expect.poll(() => exists(second, pendingButton), { timeout: 15_000 }).toBe(true)
+      await trustedClick(second, pendingButton)
+      await expect.poll(() => tenantValue(second), { timeout: 30_000 }).toBe('fixture-tenant')
+      const dismiss = '.cxn-card button[aria-label="关闭通知"], .cxn-card button[aria-label="Dismiss notification"]'
+      if (await exists(first, dismiss)) await trustedClick(first, dismiss)
+      await set(first, '#channel-connection-displayName input', 'Resolved fixture')
+      await expect.poll(() => first.evaluate('!document.querySelector(' + JSON.stringify(savePending) + ')?.disabled'))
+        .toBe(true)
+      await trustedClick(first, savePending)
+      await expect.poll(async () => (await readService()).revision, { timeout: 30_000 }).toBe(4)
+      await expect.poll(
+        () => second.evaluate('document.querySelector("#channel-connection-displayName input")?.value'),
+        { timeout: 30_000 },
+      ).toBe('Resolved fixture')
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate(
+            '(document.body.textContent + JSON.stringify(localStorage) + JSON.stringify(sessionStorage))'
+              + '.includes("synthetic-pending-secret")',
+          ),
+        ).toBe(false)
+      }
+    } catch (error) {
+      testFailed = true
+      throw error
     } finally {
-      const failures: unknown[] = []
-      for (const page of pages) await page.close().catch(error => failures.push(error))
-      if (browser) await stopChrome(browser).catch(error => failures.push(error))
-      if (attemptedManager) await run('manager', 'stop').catch(error => failures.push(error))
+      const failures: Array<{ phase: string; error: unknown }> = []
+      for (const page of pages) await page.close().catch(error => failures.push({ phase: 'page', error }))
+      if (browser) await stopChrome(browser).catch(error => failures.push({ phase: 'browser', error }))
+      if (attemptedManager) await run('manager', 'stop').catch(error => failures.push({ phase: 'manager', error }))
       if (attemptedOwner) {
-        await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(error => failures.push(error))
+        await run('stop', '--mode', 'service', 'codex', 'default', '--json')
+          .catch(error => failures.push({ phase: 'owner', error }))
       }
       const transport = await readFile(path.join(homeDir, 'synthetic-adapter.log'), 'utf8').catch(() => '')
-      if (transport.includes('connected\n') && !transport.includes('disconnected\n')) {
-        failures.push(new Error('Synthetic transport did not disconnect'))
-      }
-      // A failed stop keeps the private fixture for diagnosis instead of deleting live state.
-      if (failures.length) throw new AggregateError(failures, 'Channel fixture cleanup was not confirmed')
-      const makeRemovable = async (directory: string): Promise<void> => {
-        await chmod(directory, 0o700)
-        for (const item of await readdir(directory, { withFileTypes: true })) {
-          if (item.isDirectory()) await makeRemovable(path.join(directory, item.name))
+      const transportEvents = transport.split('\n')
+      for (const account of ['cli_created_fixture', 'cli_pending_fixture']) {
+        const connected = transportEvents.filter(event => event === `connected:${account}`).length
+        const disconnected = transportEvents.filter(event => event === `disconnected:${account}`).length
+        if (connected > disconnected) {
+          failures.push({ phase: 'transport', error: new Error('Synthetic transport did not disconnect') })
         }
       }
-      await makeRemovable(root)
-      await rm(root, { recursive: true, force: true })
+      // A failed stop keeps the private fixture for diagnosis instead of deleting live state.
+      if (failures.length) {
+        const stages = failures.map(failure => failure.phase).join(', ')
+        if (testFailed) console.error('Channel fixture cleanup was not confirmed:', stages)
+        else {throw new AggregateError(
+            failures.map(failure => failure.error),
+            'Channel fixture cleanup was not confirmed: ' + stages,
+          )}
+      } else {
+        const makeRemovable = async (directory: string): Promise<void> => {
+          await chmod(directory, 0o700)
+          for (const item of await readdir(directory, { withFileTypes: true })) {
+            if (item.isDirectory()) await makeRemovable(path.join(directory, item.name))
+          }
+        }
+        await makeRemovable(root)
+        await rm(root, { recursive: true, force: true })
+      }
     }
   },
   240_000,
