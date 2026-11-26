@@ -333,6 +333,16 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       }, 1_000)
       interval.unref()
       return {
+        ...(channel.getConnectionStatus === undefined ? {} : {
+          connectionState: () => {
+            const state = channel.getConnectionStatus?.()?.state
+            return state === 'connected'
+              ? 'ready' as const
+              : state === 'connecting' || state === 'reconnecting'
+              ? 'retrying' as const
+              : 'unavailable' as const
+          },
+        }),
         richtextV3: channel.rawClient !== undefined,
         richtext: { paragraphs: channel.rawClient !== undefined, mentions: channel.rawClient !== undefined },
         verifyMentions: (target, userIds) => mentions.verify(target, userIds),

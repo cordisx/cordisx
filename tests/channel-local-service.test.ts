@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import * as lark from '@larksuiteoapi/node-sdk'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChannelRuntime } from '../packages/channel-runtime/src/index.js'
 import {
   SimulatedChannelAdapter,
@@ -220,6 +221,72 @@ describe('built-in local Channel service', () => {
       ).toContainEqual(expect.objectContaining({ ref, connectionState: 'unavailable' }))
     } finally {
       await service.dispose()
+    }
+  })
+
+  it('projects the current official transport state as it disconnects and recovers', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-health-'))
+    temporary.add(root)
+    const ref = { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' }
+    const configuration = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG)
+    configuration.connections.push({
+      ref,
+      adapterKind: 'feishu',
+      enabled: true,
+      transport: { mode: 'websocket' },
+      secretRef: 'host-secret:env/CORDISX_TEST_SECRET',
+    })
+    let transportState: string | undefined = 'connected'
+    let statusFails = false
+    const createSdk = vi.spyOn(lark, 'createLarkChannel').mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      on: () => () => {},
+      send: async () => ({ messageId: 'fixture' }),
+      getConnectionStatus: () => {
+        if (statusFails) throw new Error('fixture-status-failed')
+        return transportState === undefined ? undefined : { state: transportState, reconnectAttempts: 0 }
+      },
+    } as never)
+    const service = createLocalChannelService({
+      artifactDirectory: channelArtifactDirectory,
+      dataDir: path.join(root, 'runtime'),
+      source: pathToFileURL(channelEntry).href,
+      environment: { CORDISX_TEST_SECRET: 'fixture-only' },
+    })
+    const expectState = async (expected: string) => {
+      const view = await service.readManagementSnapshot({ configuration, revision: 1, lastGoodRevision: 1 })
+      expect(view?.runtime.accounts).toContainEqual(expect.objectContaining({ ref, connectionState: expected }))
+      expect(view?.projection.accounts).toContainEqual(expect.objectContaining({ ref, connectionState: expected }))
+    }
+    try {
+      const generation = await service.start(configuration)
+      await expectState('ready')
+      transportState = 'reconnecting'
+      await expectState('retrying')
+      transportState = 'connecting'
+      await expectState('retrying')
+      transportState = 'failed'
+      await expectState('unavailable')
+      transportState = 'idle'
+      await expectState('unavailable')
+      transportState = undefined
+      await expectState('unavailable')
+      transportState = 'unexpected'
+      await expectState('unavailable')
+      statusFails = true
+      await expectState('unavailable')
+      statusFails = false
+      transportState = 'connected'
+      await expectState('ready')
+      expect(createSdk).toHaveBeenCalledOnce()
+      await expect(service.manager.connections.disable({ ref, generation })).resolves.toMatchObject({
+        status: 'applied',
+      })
+      expect(service.snapshot()?.accounts).toContainEqual(expect.objectContaining({ ref, connectionState: 'disabled' }))
+    } finally {
+      await service.dispose()
+      createSdk.mockRestore()
     }
   })
 })
