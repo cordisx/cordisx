@@ -53,6 +53,14 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     })
     expect(reused.pid).toBe(ready.pid)
     expect(await lifecycle('status')).toMatchObject({ pid: ready.pid, modelApiUrl: ready.modelApiUrl })
+    expect(JSON.parse(await cmd('cli', '--list', '--profile', profile))).toMatchObject({
+      kind: 'list',
+      providers: expect.arrayContaining([expect.objectContaining({
+        providerId: 'fixture-provider',
+        managed: true,
+        models: expect.arrayContaining([expect.objectContaining({ id: 'fixture-model' })]),
+      })]),
+    })
     expect(JSON.parse(await cmd('codex', 'capabilities', '--profile', profile))).toMatchObject({
       status: 'ok',
       capabilities: { modelServices: true, providerCatalog: false, executionSettings: true },
