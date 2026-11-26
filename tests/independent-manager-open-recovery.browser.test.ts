@@ -67,6 +67,9 @@ it.skipIf(chrome === undefined).each(
     'automatic',
     'unconfirmed',
     'entry-transport',
+    'open-transport',
+    'open-unconfirmed',
+    'open-repeated',
     'bootstrap-transport',
     'bootstrap-unconfirmed',
     'bootstrap-repeated',
@@ -145,7 +148,7 @@ it.skipIf(chrome === undefined).each(
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
     try {
-      if (mode === 'entry-transport' || mode.startsWith('bootstrap-')) {
+      if (mode === 'entry-transport' || mode.startsWith('open-') || mode.startsWith('bootstrap-')) {
         expect(fence.release()).toBe(true)
         released = true
       }
@@ -165,7 +168,7 @@ it.skipIf(chrome === undefined).each(
             }
           }
           if (
-            (mode === 'unconfirmed' || mode === 'bootstrap-unconfirmed')
+            (mode === 'unconfirmed' || mode === 'open-unconfirmed' || mode === 'bootstrap-unconfirmed')
             && operation.kind === 'manager-renderer' && operation.action === 'revoke'
           ) {
             return { status: 'unavailable' }
@@ -234,6 +237,25 @@ it.skipIf(chrome === undefined).each(
           }`,
         })
       }
+      if (mode.startsWith('open-')) {
+        await page.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: `{
+            const original = window.fetch.bind(window)
+            globalThis.__openAttempts = 0
+            window.fetch = async (request, options) => {
+              if (request !== '/api/renderer/open') return await original(request, options)
+              globalThis.__openAttempts++
+              const response = await original(request, options)
+              if (sessionStorage.getItem('__fixtureOpenRestored') !== '1'
+                  && globalThis.__openAttempts <= ${mode === 'open-repeated' ? 2 : 1} && response.ok) {
+                globalThis.__firstOpenAuthorization ??= options.headers.authorization
+                throw new TypeError('simulated lost open response')
+              }
+              return response
+            }
+          }`,
+        })
+      }
       if (mode.startsWith('bootstrap-')) {
         await page.send('Page.addScriptToEvaluateOnNewDocument', {
           source: `{
@@ -253,7 +275,7 @@ it.skipIf(chrome === undefined).each(
         })
       }
       await page.send('Page.navigate', { url: target.href })
-      if (mode === 'unconfirmed' || mode === 'bootstrap-unconfirmed') {
+      if (mode === 'unconfirmed' || mode === 'open-unconfirmed' || mode === 'bootstrap-unconfirmed') {
         await vi.waitFor(async () => {
           const text = await page!.evaluate(
             "document.querySelector('.cxr-standalone-unavailable')?.textContent ?? ''",
@@ -264,18 +286,21 @@ it.skipIf(chrome === undefined).each(
         expect(await page.evaluate("document.querySelector('[data-fixture-manager]') !== null")).toBe(false)
         return
       }
-      if (mode === 'bootstrap-repeated') {
+      if (mode === 'open-repeated' || mode === 'bootstrap-repeated') {
         await vi.waitFor(async () => {
           const state = await page!.evaluate<{ text: string; resume: boolean; attempts: number }>(
             "({ text: document.querySelector('.cxr-standalone-unavailable')?.textContent ?? '', "
-              + "resume: !!sessionStorage.getItem('cordisx-manager-resume-id'), attempts: globalThis.__bootstrapAttempts })",
+              + "resume: !!sessionStorage.getItem('cordisx-manager-resume-id'), attempts: "
+              + (mode === 'open-repeated' ? 'globalThis.__openAttempts' : 'globalThis.__bootstrapAttempts') + ' })',
           )
           expect(state.text).toContain('刷新页面重试')
           expect(state.resume).toBe(true)
           expect(state.attempts).toBe(2)
         }, { timeout: 20_000 })
         expect(opens).toBe(2)
-        return
+        if (mode === 'bootstrap-repeated') return
+        await page.evaluate("sessionStorage.setItem('__fixtureOpenRestored', '1')")
+        await page.send('Page.reload')
       }
       if (mode === 'manual') {
         await vi.waitFor(async () => {
@@ -299,6 +324,7 @@ it.skipIf(chrome === undefined).each(
         expect(state).toEqual({ ready: true, view: true })
       }, { timeout: mode === 'automatic' ? 8_000 : 30_000 })
       if (mode === 'automatic') expect(opens).toBe(2)
+      if (mode === 'open-repeated') expect(opens).toBe(3)
       if (mode === 'entry-transport') {
         const state = await page.evaluate<{ attempts: number; same: boolean; oldStatus: number }>(`(async () => ({
           attempts: globalThis.__entryAttempts.length,
@@ -311,6 +337,17 @@ it.skipIf(chrome === undefined).each(
         }))()`)
         expect(state).toEqual({ attempts: 2, same: true, oldStatus: 401 })
         expect(opens).toBe(1)
+      }
+      if (mode === 'open-transport') {
+        const state = await page.evaluate<{ attempts: number; oldStatus: number }>(`(async () => ({
+          attempts: globalThis.__openAttempts,
+          oldStatus: (await fetch('/api/renderer/session', {
+            method: 'POST', headers: { 'content-type': 'application/json',
+              authorization: globalThis.__firstOpenAuthorization }, body: '{}'
+          })).status
+        }))()`)
+        expect(state).toEqual({ attempts: 2, oldStatus: 401 })
+        expect(opens).toBe(2)
       }
       if (mode === 'bootstrap-transport') {
         const state = await page.evaluate<{ attempts: number; oldStatus: number }>(`(async () => ({

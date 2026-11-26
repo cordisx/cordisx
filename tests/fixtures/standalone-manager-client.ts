@@ -50,6 +50,7 @@ export function fixture(input: {
   readonly entryUnauthorized?: boolean
   readonly entryMalformed?: boolean
   readonly openFailure?: { readonly status: number; readonly body: unknown }
+  readonly openTransportFailure?: 'fetch' | 'body'
   readonly bootstrapGate?: Promise<void>
   readonly bootstrapTransportFailure?: 'fetch' | 'body'
   readonly bootstrapFailure?: { readonly status: number; readonly body: unknown }
@@ -168,12 +169,15 @@ export function fixture(input: {
       return Promise.resolve(response({ token: sessionToken, resumeId: 'f'.repeat(64) }))
     }
     if (path === '/api/renderer/open') {
+      if (input.openTransportFailure === 'fetch') return Promise.reject(new TypeError('lost open response'))
       if (input.openFailure) {
-        return Promise.resolve(
-          new Response(JSON.stringify(input.openFailure.body), { status: input.openFailure.status }),
-        )
+        const result = new Response(JSON.stringify(input.openFailure.body), { status: input.openFailure.status })
+        if (input.openTransportFailure === 'body') {
+          vi.spyOn(result, 'text').mockRejectedValue(new TypeError('lost open error body'))
+        }
+        return Promise.resolve(result)
       }
-      return Promise.resolve(response({
+      const result = response({
         status: 'ok',
         rendererId,
         generation: 'owner-1',
@@ -186,7 +190,11 @@ export function fixture(input: {
           ...(input.credentialFailure ? ['channel-credentials'] : []),
         ],
         commands: true,
-      }))
+      })
+      if (input.openTransportFailure === 'body') {
+        vi.spyOn(result, 'text').mockRejectedValue(new TypeError('lost open body'))
+      }
+      return Promise.resolve(result)
     }
     if (path === '/api/renderer/session') {
       checks++

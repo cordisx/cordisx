@@ -34,6 +34,7 @@ class ManagerSessionTransportError extends Error {}
 class ManagerEntryTransportError extends Error {}
 class ManagerResumeTransportError extends Error {}
 class ManagerOpenUnavailableError extends Error {}
+class ManagerOpenTransportError extends Error {}
 class ManagerBootstrapTransportError extends Error {}
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
@@ -136,7 +137,13 @@ function verifyInitialGraphs(
 export function startStandaloneManager(input: {
   readonly window: Window
   readonly onUnavailable?: (
-    reason?: 'result-unknown' | 'refresh' | 'insecure-context' | 'open-refused' | 'bootstrap-interrupted',
+    reason?:
+      | 'result-unknown'
+      | 'refresh'
+      | 'insecure-context'
+      | 'open-refused'
+      | 'open-interrupted'
+      | 'bootstrap-interrupted',
   ) => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
@@ -191,6 +198,9 @@ export function startStandaloneManager(input: {
           if (path === '/api/session') {
             throw new ManagerEntryTransportError('manager-entry-transport', { cause: error })
           }
+          if (path === '/api/renderer/open') {
+            throw new ManagerOpenTransportError('manager-open-transport', { cause: error })
+          }
           if (path === '/api/renderer/bootstrap') {
             throw new ManagerBootstrapTransportError('manager-bootstrap-transport', { cause: error })
           }
@@ -220,7 +230,12 @@ export function startStandaloneManager(input: {
       ) {
         throw new Error('manager-session-unavailable')
       }
-      const text = await response.text().catch(transportFailure)
+      const text = await response.text().catch(error => {
+        // Do not treat an unreadable error reply as an accepted open. The
+        // explicit 503 path is retryable only after its body is validated.
+        if (path === '/api/renderer/open' && !response.ok) throw error
+        return transportFailure(error)
+      })
       if (text.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('manager-response-invalid')
       const value: unknown = JSON.parse(text)
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('manager-response-invalid')
@@ -400,7 +415,7 @@ export function startStandaloneManager(input: {
     reason?: 'result-unknown' | 'insecure-context',
     interruptedTransport = false,
     openUnavailable = false,
-    bootstrapTransport = false,
+    startupTransport?: 'open' | 'bootstrap',
   ) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
@@ -410,11 +425,12 @@ export function startStandaloneManager(input: {
     const initialIdle = !uncertain && resumeId !== undefined && sessionToken !== undefined
       && !admissionConfirmed && lifecycle === undefined && removeBindings === undefined && runtime === undefined
     const retryableOpen = initialIdle && openUnavailable
-    const retryableBootstrap = initialIdle && bootstrapTransport
+    const retryableOpenTransport = initialIdle && startupTransport === 'open'
+    const retryableBootstrap = initialIdle && startupTransport === 'bootstrap'
     const refresh = !uncertain && resumeId !== undefined && (
       interruptedTransport && admissionConfirmed
         && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
-      || retryableOpen || retryableBootstrap
+      || retryableOpen || retryableOpenTransport || retryableBootstrap
     )
     if (!notified) {
       notified = true
@@ -426,6 +442,8 @@ export function startStandaloneManager(input: {
             ? reason
             : retryableOpen
             ? 'open-refused'
+            : retryableOpenTransport
+            ? 'open-interrupted'
             : retryableBootstrap
             ? 'bootstrap-interrupted'
             : refresh
@@ -744,7 +762,11 @@ export function startStandaloneManager(input: {
           undefined,
           false,
           error instanceof ManagerOpenUnavailableError,
-          error instanceof ManagerBootstrapTransportError,
+          error instanceof ManagerOpenTransportError
+            ? 'open'
+            : error instanceof ManagerBootstrapTransportError
+            ? 'bootstrap'
+            : undefined,
         )
       }
       return false

@@ -16,10 +16,13 @@ const showUnavailable = (reason?: StandaloneStartupFailure) => {
 function start(): void {
   let failed = false
   let manager!: ReturnType<typeof startStandaloneManager>
-  const unavailable = (reason?: StandaloneStartupFailure | 'open-refused' | 'bootstrap-interrupted') => {
+  const unavailable = (
+    reason?: StandaloneStartupFailure | 'open-refused' | 'open-interrupted' | 'bootstrap-interrupted',
+  ) => {
     failed = true
     if (
-      (reason === 'open-refused' || reason === 'bootstrap-interrupted') && !retriedInitial && !stopped
+      (reason === 'open-refused' || reason === 'open-interrupted' || reason === 'bootstrap-interrupted')
+      && !retriedInitial && !stopped
       && !startup.disposed
     ) {
       retriedInitial = true
@@ -32,7 +35,11 @@ function start(): void {
       })
       return
     }
-    showUnavailable(reason === 'open-refused' || reason === 'bootstrap-interrupted' ? 'refresh' : reason)
+    showUnavailable(
+      reason === 'open-refused' || reason === 'open-interrupted' || reason === 'bootstrap-interrupted'
+        ? 'refresh'
+        : reason,
+    )
   }
   manager = startStandaloneManager({ window, onUnavailable: unavailable })
   void manager.ready.then(ready => {
