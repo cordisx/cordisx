@@ -25,6 +25,14 @@ const entries = new Map<
 const tickets = new Map<string, { expires: number; images: string[]; text: string; handles: string[] }>()
 let root: Promise<string> | undefined
 const lifetime = 60 * 60 * 1000
+const resourceHandle = (event: ChannelEventRef, resourceKey: string) =>
+  `attachment:${createHash('sha256').update(scope(event)).update(resourceKey).digest('hex')}`
+
+export type ChannelInboundResourceStatus = {
+  readonly state: 'ready'
+  readonly attachment: Extract<ChannelContentBlock, { type: 'attachment' }>
+  readonly expiresAt: number
+} | { readonly state: 'expired' | 'not-prepared' | 'unavailable' }
 
 export class ChannelInboundResources {
   private readonly outbound = new Map<string, { attachment: string; target: string }>()
@@ -32,6 +40,7 @@ export class ChannelInboundResources {
   private totalBytes = 0
   private readonly active = new Set<Readable>()
   private readonly handles = new Set<string>()
+  private readonly expiredHandles = new Map<string, { scope: string; expiredAt: number }>()
   private readonly directory = (async () => {
     root ??= mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-resources-'))
     const directory = path.join(await root, randomUUID())
@@ -101,6 +110,70 @@ export class ChannelInboundResources {
   ownsOutbound(handle: string): boolean {
     return this.outbound.has(handle)
   }
+  status(event: ChannelEventRef, resourceKey: string): ChannelInboundResourceStatus {
+    if (this.disposed) return { state: 'unavailable' }
+    const handle = resourceHandle(event, resourceKey), entry = entries.get(handle)
+    if (entry && this.handles.has(handle) && entry.scope === scope(event)) {
+      if (entry.expires <= Date.now()) return { state: 'expired' }
+      return {
+        state: 'ready',
+        expiresAt: entry.expires,
+        attachment: {
+          type: 'attachment',
+          handle,
+          mediaType: entry.mediaType,
+          size: entry.size,
+          ...(entry.name ? { name: entry.name } : {}),
+        },
+      }
+    }
+    const expired = this.expiredHandles.get(handle)
+    return {
+      state: expired && expired.scope === scope(event) && expired.expiredAt + lifetime > Date.now()
+        ? 'expired'
+        : 'not-prepared',
+    }
+  }
+  async readRange(event: ChannelEventRef, resourceKey: string, offset: number, length: number): Promise<Buffer> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isInteger(length) || length < 1 || length > 65536) {
+      throw new Error('RESOURCE_RANGE_INVALID')
+    }
+    const status = this.status(event, resourceKey)
+    if (status.state !== 'ready' || offset >= status.attachment.size) throw new Error('RESOURCE_NOT_READY')
+    const entry = entries.get(status.attachment.handle)!
+    const file = await open(entry.file, 'r')
+    try {
+      const info = await file.stat()
+      if (!info.isFile() || info.size !== entry.size) throw new Error('RESOURCE_CHANGED')
+      const bytes = Buffer.alloc(Math.min(length, entry.size - offset))
+      let received = 0
+      while (received < bytes.length) {
+        const result = await file.read(bytes, received, bytes.length - received, offset + received)
+        if (!result.bytesRead) throw new Error('RESOURCE_CHANGED')
+        received += result.bytesRead
+      }
+      if (this.status(event, resourceKey).state !== 'ready') throw new Error('RESOURCE_NOT_READY')
+      return bytes
+    } finally {
+      await file.close()
+    }
+  }
+  async inspect(event: ChannelEventRef, resourceKey: string): Promise<ChannelInboundResourceStatus> {
+    const current = this.status(event, resourceKey)
+    if (current.state !== 'ready') return current
+    const entry = entries.get(current.attachment.handle)!
+    const info = await stat(entry.file).catch(() => undefined)
+    if (!info?.isFile() || info.size !== entry.size) {
+      if (entries.get(current.attachment.handle) === entry && this.handles.has(current.attachment.handle)) {
+        entries.delete(current.attachment.handle)
+        this.handles.delete(current.attachment.handle)
+        this.totalBytes -= entry.size
+        await rm(entry.file, { force: true })
+      }
+      return { state: 'unavailable' }
+    }
+    return this.status(event, resourceKey)
+  }
   async ingest(
     event: ChannelEventRef,
     stream: Readable,
@@ -116,7 +189,7 @@ export class ChannelInboundResources {
     const timeout = setTimeout(() => stream.destroy(new Error('RESOURCE_TIMEOUT')), 30_000)
     timeout.unref()
     const maximum = kind === 'image' ? 10_000_000 : 30_000_000
-    const handle = `attachment:${createHash('sha256').update(scope(event)).update(resourceKey).digest('hex')}`
+    const handle = resourceHandle(event, resourceKey)
     const existing = entries.get(handle)
     if (existing && existing.expires > Date.now()) {
       clearTimeout(timeout)
@@ -182,6 +255,7 @@ export class ChannelInboundResources {
         ...(safeName ? { name: safeName } : {}),
       })
       this.handles.add(handle)
+      this.expiredHandles.delete(handle)
       return {
         type: 'attachment',
         handle,
@@ -204,11 +278,19 @@ export class ChannelInboundResources {
     for (const handle of this.handles) {
       const entry = entries.get(handle)
       if (entry && entry.expires <= Date.now()) {
+        this.expiredHandles.set(handle, { scope: entry.scope, expiredAt: entry.expires })
+        while (this.expiredHandles.size > 128) {
+          const oldest = this.expiredHandles.keys().next().value
+          if (oldest !== undefined) this.expiredHandles.delete(oldest)
+        }
         entries.delete(handle)
         this.handles.delete(handle)
         this.totalBytes -= entry.size
         await rm(entry.file, { force: true })
       }
+    }
+    for (const [handle, entry] of this.expiredHandles) {
+      if (entry.expiredAt + lifetime <= Date.now()) this.expiredHandles.delete(handle)
     }
   }
   async dispose() {
@@ -217,6 +299,7 @@ export class ChannelInboundResources {
     clearInterval(this.timer)
     for (const handle of this.handles) entries.delete(handle)
     this.handles.clear()
+    this.expiredHandles.clear()
     this.outbound.clear()
     await rm(await this.directory, { recursive: true, force: true })
   }

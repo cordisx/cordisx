@@ -3,6 +3,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type {
+  ChannelHistoricalResourceReadRequestV1,
+  ChannelHistoricalResourceRequestV1,
+  ChannelHistoricalResourceResultV1,
+} from '@cordisx/protocol/channel-historical-resources/v1'
+import type {
   BoundConnectorClient,
   BoundConnectorClientResult,
   ConnectorCommand,
@@ -16,11 +21,11 @@ import type {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.21'
-const protocolSpec = 'github:cordisx/cordisx-protocol#76faececfc3a61904b936aecb2bb64eed00e07d0'
+const protocolSpec = 'github:cordisx/cordisx-protocol#9473991e2a7f9d09f6ef6bac0dcdd56fbf3a1ad3'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#76faececfc3a61904b936aecb2bb64eed00e07d0'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#9473991e2a7f9d09f6ef6bac0dcdd56fbf3a1ad3'
 const protocolIntegrity =
-  'sha512-enFqdzhJypML+SBws8neylJYQCoAypp7OCxjIMiw4gr+4X7mvTVYl5JET2EN4rw9ahNEKLehLaQRhkCiXyqzNw=='
+  'sha512-WoLrf68AmTsAublFCJQ/DUK03tsdk+HOHKSRK2OZFkJ0Cim3NW7er2+tkp/AsxmObSKqXca6tr2t74HbGclNyw=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -98,6 +103,11 @@ type FormalConnectorConsumerSurface = readonly [
 ]
 
 const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsumerSurface
+const formalHistoricalResourceSurface = null as unknown as readonly [
+  ChannelHistoricalResourceRequestV1,
+  ChannelHistoricalResourceReadRequestV1,
+  ChannelHistoricalResourceResultV1,
+]
 
 describe('formal Connector Protocol public type import', () => {
   it('pins the Host root, publishable CLI, and lockfile to one exact merged Protocol dependency', async () => {
@@ -117,6 +127,7 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolPinViolations(documents)).toEqual([])
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
+    expect(formalHistoricalResourceSurface).toBeNull()
   })
 
   it('rejects stale manifest, lock, and integrity edges', () => {

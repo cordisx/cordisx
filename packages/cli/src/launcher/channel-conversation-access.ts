@@ -7,6 +7,16 @@ import type { ChannelReplyCapabilities } from './channel-reply-routing.js'
 import type { ChannelOutboundRpc } from './channel-outbound-rpc.js'
 
 export interface ChannelConversationAccess {
+  historicalResource?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    messageId: string,
+    index: number,
+    prepare: boolean,
+    caller: string,
+    authorize: () => void,
+    range?: { offset: number; length: number },
+    signal?: AbortSignal,
+  ): Promise<unknown>
   readonly threadForward?: ReturnType<
     typeof import('./channel-thread-forward-service.js').createChannelThreadForwardService
   >
