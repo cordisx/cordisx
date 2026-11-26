@@ -1,4 +1,5 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import { taskProviderDestination } from './channel-task-provider-reference.js'
 import { validateChannelTerminalDeliveries } from './channel-terminal-delivery.js'
 import { type ChannelModelPriority, parseChannelModelPriority } from './channel-model-priority.js'
 import { type ChannelFailureNoticeConfig, parseChannelFailureNoticeConfig } from './channel-failure-notice-config.js'
@@ -356,7 +357,10 @@ export class ChannelConversationStore {
           delete setting.pending
           delete setting.pendingPatch
           for (const request of Object.values(state.taskRequests)) {
-            if (request.threadId === threadId && request.state === 'applying') {
+            if (
+              (request.threadId === threadId || taskProviderDestination(state, request) === threadId)
+              && request.state === 'applying'
+            ) {
               request.state = 'unknown'
               request.code = 'NATIVE_EFFECT_UNCERTAIN'
             }

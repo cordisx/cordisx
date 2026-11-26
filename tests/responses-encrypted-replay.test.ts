@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { createHash } from 'node:crypto'
+import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import {
   encryptedContentError,
   encryptedReplay,
@@ -40,10 +41,140 @@ async function fixture(handler: Parameters<typeof createServer>[0]) {
   if (!address || typeof address === 'string') throw new Error('no address')
   const recovery = await startResponsesEncryptedReplay()
   disposers.push(() => recovery.close())
-  return { recovery, url: `${recovery.route(`http://127.0.0.1:${address.port}/v1`)}/responses` }
+  const upstream = `http://127.0.0.1:${address.port}`
+  return { recovery, upstream, url: `${recovery.route(`${upstream}/v1`)}/responses` }
 }
 
 describe('encrypted Responses replay', () => {
+  it('keeps native OpenAI auxiliary paths and account headers on the selected upstream', async () => {
+    const requests: {
+      path: string | undefined
+      method: string | undefined
+      account: string | undefined
+      routing: string | undefined
+      body: string
+    }[] = []
+    const { recovery, upstream } = await fixture(async (request, response) => {
+      let payload = ''
+      for await (const chunk of request) payload += chunk
+      requests.push({
+        path: request.url,
+        method: request.method,
+        account: request.headers['chatgpt-account-id'] as string,
+        routing: request.headers['x-openai-account-routing-override'] as string,
+        body: payload,
+      })
+      response.writeHead(request.url?.includes('/compact') ? 400 : 200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: failure }))
+    })
+    let accountCurrent = true
+    const base = recovery.route(`${upstream}/backend-api/codex`, {
+      nativeOpenAi: true,
+      nativeStreamIdlePolicy: true,
+      expectedAccountDigest: createHash('sha256').update('synthetic-account').digest('hex'),
+      accountRoutingOverride: 'us',
+      accountSnapshot: 'synthetic-snapshot',
+      verifyAccount: async () => accountCurrent,
+    })
+    expect(base.endsWith('/backend-api/codex')).toBe(false)
+    const headers = { 'chatgpt-account-id': 'synthetic-account' }
+    expect((await fetch(`${base}/models?client=test`, { headers })).status).toBe(200)
+    expect((await fetch(`${base}/responses/compact`, { method: 'POST', headers, body: JSON.stringify(body) })).status)
+      .toBe(400)
+    expect(requests).toEqual([
+      {
+        path: '/backend-api/codex/models?client=test',
+        method: 'GET',
+        account: 'synthetic-account',
+        routing: 'us',
+        body: '',
+      },
+      {
+        path: '/backend-api/codex/responses/compact',
+        method: 'POST',
+        account: 'synthetic-account',
+        routing: 'us',
+        body: JSON.stringify(body),
+      },
+    ])
+    expect((await fetch(`${base}/%2Fother`, { headers })).status).toBe(404)
+    expect((await fetch(`${base}/models`, { headers: { 'chatgpt-account-id': 'different-account' } })).status).toBe(409)
+    accountCurrent = false
+    expect((await fetch(`${base}/models`, { headers })).status).toBe(409)
+    expect(requests).toHaveLength(2)
+  })
+
+  it.each(['configured', 'native'])(
+    'retries a Zstd-compressed %s request without changing auth or visible history',
+    async kind => {
+      const received: { bytes: Buffer; encoding: string | undefined; authorization: string | undefined }[] = []
+      const { recovery, upstream, url: configuredUrl } = await fixture(async (request, response) => {
+        const chunks: Buffer[] = []
+        for await (const chunk of request) chunks.push(Buffer.from(chunk))
+        received.push({
+          bytes: Buffer.concat(chunks),
+          encoding: request.headers['content-encoding'],
+          authorization: request.headers.authorization,
+        })
+        if (received.length === 1) {
+          response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: failure }))
+        } else response.writeHead(200).end('recovered')
+      })
+      const url = kind === 'native'
+        ? `${recovery.route(`${upstream}/v1`, { nativeOpenAi: true })}/responses`
+        : configuredUrl
+      const original = zstdCompressSync(Buffer.from(JSON.stringify(body)))
+      const result = await fetch(url, {
+        method: 'POST',
+        headers: { authorization: 'Bearer synthetic-token', 'content-encoding': 'zstd' },
+        body: original,
+      })
+      expect(await result.text()).toBe('recovered')
+      expect(received).toHaveLength(2)
+      expect(received[0]!.bytes).toEqual(original)
+      expect(received.map(request => request.encoding)).toEqual(['zstd', 'zstd'])
+      expect(received.map(request => request.authorization)).toEqual([
+        'Bearer synthetic-token',
+        'Bearer synthetic-token',
+      ])
+      expect(JSON.parse(zstdDecompressSync(received[1]!.bytes).toString())).toEqual(encryptedReplay(body))
+    },
+  )
+
+  it('does not rewrite ordinary native OpenAI tool output', async () => {
+    let received = ''
+    const { recovery, upstream } = await fixture(async (request, response) => {
+      for await (const chunk of request) received += chunk
+      response.writeHead(200).end('ok')
+    })
+    const original = JSON.stringify({
+      model: 'native',
+      input: [
+        { type: 'function_call_output', name: 'synthetic-tool', output: 'unchanged' },
+      ],
+    })
+    const base = recovery.route(`${upstream}/v1`, { nativeOpenAi: true })
+    expect(await (await fetch(`${base}/responses`, { method: 'POST', body: original })).text()).toBe('ok')
+    expect(received).toBe(original)
+  })
+
+  it.each(['zstd', 'gzip'])('forwards opaque %s bytes without corruption', async encoding => {
+    let received: Buffer | undefined
+    let forwardedEncoding: string | undefined
+    const { url } = await fixture(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      received = Buffer.concat(chunks)
+      forwardedEncoding = request.headers['content-encoding']
+      response.writeHead(200).end('forwarded')
+    })
+    const original = Buffer.from([0, 255, 0x80, 17, 42])
+    const result = await fetch(url, { method: 'POST', headers: { 'content-encoding': encoding }, body: original })
+    expect(await result.text()).toBe('forwarded')
+    expect(received).toEqual(original)
+    expect(forwardedEncoding).toBe(encoding)
+  })
+
   it('preserves unpaired named outputs as source-labelled untrusted messages on every replay', async () => {
     const named = {
       type: 'function_call_output',

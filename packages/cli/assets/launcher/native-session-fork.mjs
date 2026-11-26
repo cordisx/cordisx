@@ -1,4 +1,5 @@
 import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
+import { prepareNativeResponsesRecovery } from './native-responses-recovery.mjs'
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const valid = value => typeof value === 'string' && /^[^\0\r\n]{1,512}$/u.test(value)
@@ -7,7 +8,7 @@ const efforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'm
 const failure = message => ({ handled: true, error: { code: -32000, message } })
 
 /** Use only a live, exact source; unknown sources retain the native fork path. */
-export async function inheritNativeFork(message, { nativeCall, controlCall }) {
+export async function inheritNativeFork(message, { nativeCall, controlCall, nativeOpenAiRecovery = false }) {
   const params = object(message.params)
   if (
     message.method !== 'thread/fork' || !params || !valid(params.threadId)
@@ -51,7 +52,18 @@ export async function inheritNativeFork(message, { nativeCall, controlCall }) {
     }
     const latest = await controlCall('source-configuration', { threadId: params.threadId })
     if (JSON.stringify(latest) !== JSON.stringify(source)) throw new Error('Source configuration changed')
-    const overrides = lease?.configOverrides ?? {}
+    let overrides = lease?.configOverrides ?? {}
+    if (providerId === 'openai' && nativeOpenAiRecovery) {
+      try {
+        const original = { ...params, modelProvider: providerId, config: inputConfig }
+        const prepared = await prepareNativeResponsesRecovery('thread/fork', original, {
+          nativeCall,
+          controlCall,
+          nativeOpenAiRecovery,
+        })
+        if (prepared !== original) overrides = object(prepared.config) ?? {}
+      } catch {}
+    }
     const config = overrides[optionsAuthority] === undefined
       ? { ...inputConfig, ...overrides }
       : configuredOverrides(inputConfig, overrides)

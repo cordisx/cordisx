@@ -1,5 +1,7 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { promisify } from 'node:util'
+import { zstdCompress, zstdDecompress } from 'node:zlib'
 import { tunnelResponsesWebSocket } from './responses-websocket-tunnel.js'
 import { adaptNamedOutputs } from './responses-named-output.js'
 
@@ -7,10 +9,19 @@ export interface ResponsesReplayRouteOptions {
   readonly websocket?: boolean
   /** Explicit runtime idle policy belongs to Codex, including values above the legacy proxy limit. */
   readonly nativeStreamIdlePolicy?: boolean
+  /** A native OpenAI base also serves other endpoints that must pass through unchanged. */
+  readonly nativeOpenAi?: boolean
+  /** Bind native ChatGPT credentials to the account whose routing was observed. */
+  readonly expectedAccountDigest?: string
+  readonly accountRoutingOverride?: 'NO_CONSTRAINT' | 'us' | 'us_cr'
+  readonly accountSnapshot?: string
+  readonly verifyAccount?: (snapshot: string) => Promise<boolean>
 }
 
 const MAX_PRELUDE = 1024 * 1024
 const MAX_ROUTES = 128
+const compressZstd = promisify(zstdCompress)
+const decompressZstd = promisify(zstdDecompress)
 const HOP_HEADERS = new Set([
   'host',
   'connection',
@@ -172,14 +183,61 @@ async function recoverable(
 }
 
 export async function startResponsesEncryptedReplay() {
-  const routes = new Map<string, { target: string; websocket: boolean; nativeStreamIdlePolicy: boolean }>()
+  const routes = new Map<string, {
+    target: string
+    basePath: string
+    websocket: boolean
+    nativeStreamIdlePolicy: boolean
+    nativeOpenAi: boolean
+    expectedAccountDigest: string | undefined
+    accountRoutingOverride: 'NO_CONSTRAINT' | 'us' | 'us_cr' | undefined
+    accountSnapshot: string | undefined
+    verifyAccount: ((snapshot: string) => Promise<boolean>) | undefined
+  }>()
   const tunnels = new Set<() => void>()
   const controllers = new Set<AbortController>()
   let closed = false
   const server = createServer(async (request, response) => {
-    const route = routes.get(request.url ?? '')
-    if (closed || request.method !== 'POST' || !route || controllers.size + tunnels.size >= 32) {
+    const rawUrl = request.url ?? ''
+    let parsed: URL | undefined
+    try {
+      if (rawUrl.startsWith('/') && !rawUrl.startsWith('//')) parsed = new URL(rawUrl, 'http://127.0.0.1')
+    } catch {}
+    let route = routes.get(rawUrl), target = route?.target, responsesRequest = true
+    if (!route && parsed && !/%2f|%5c/iu.test(parsed.pathname)) {
+      const match = [...routes.values()].find(item =>
+        item.nativeOpenAi
+        && parsed.pathname.startsWith(item.basePath + '/')
+      )
+      if (match) {
+        const suffix = parsed.pathname.slice(match.basePath.length)
+        const upstream = new URL(match.target)
+        upstream.pathname = upstream.pathname.slice(0, -'/responses'.length) + suffix
+        upstream.search = parsed.search
+        route = match
+        target = upstream.href
+        responsesRequest = suffix === '/responses'
+      }
+    }
+    if (
+      closed || !route || !target || !request.method || controllers.size + tunnels.size >= 32
+      || (!route.nativeOpenAi && request.method !== 'POST')
+      || (responsesRequest && request.method !== 'POST')
+    ) {
       response.writeHead(404).end()
+      return
+    }
+    try {
+      const accountId = request.headers['chatgpt-account-id']
+      if (
+        route.expectedAccountDigest && (typeof accountId !== 'string'
+            || createHash('sha256').update(accountId).digest('hex') !== route.expectedAccountDigest)
+        || route.accountSnapshot && (!route.verifyAccount || !await route.verifyAccount(route.accountSnapshot))
+      ) throw new Error('Native account changed')
+    } catch {
+      response.writeHead(409).end(
+        JSON.stringify({ error: { message: 'Native account changed; reopen the conversation' } }),
+      )
       return
     }
     const controller = new AbortController()
@@ -190,13 +248,49 @@ export async function startResponsesEncryptedReplay() {
     request.on('aborted', () => controller.abort())
     try {
       const bytes = await collect(request)
+      const headers = new Headers()
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (!HOP_HEADERS.has(name) && value !== undefined) {
+          headers.set(name, Array.isArray(value) ? value.join(', ') : value)
+        }
+      }
+      if (route.accountRoutingOverride) {
+        headers.delete('x-openai-account-routing-override')
+        if (route.accountRoutingOverride !== 'NO_CONSTRAINT') {
+          headers.set('x-openai-account-routing-override', route.accountRoutingOverride)
+        }
+      }
+      if (!responsesRequest) {
+        const upstream = await fetch(target, {
+          method: request.method,
+          headers,
+          ...(['GET', 'HEAD'].includes(request.method) ? {} : {
+            body: new Uint8Array(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength),
+          }),
+          redirect: 'manual',
+          signal: controller.signal,
+        })
+        if (upstream.status >= 300 && upstream.status < 400) {
+          await upstream.body?.cancel()
+          response.writeHead(502).end(JSON.stringify({ error: { message: 'Provider redirects are not supported' } }))
+        } else await forward(upstream, response)
+        return
+      }
+      const encoding = request.headers['content-encoding']?.trim().toLowerCase()
       let body: unknown
       try {
-        body = JSON.parse(bytes.toString())
+        const decoded = encoding === 'zstd'
+          ? await decompressZstd(bytes)
+          : !encoding || encoding === 'identity'
+          ? bytes
+          : undefined
+        body = decoded && JSON.parse(decoded.toString())
       } catch {
         body = undefined
       }
-      const adapted = adaptNamedOutputs(body)
+      // Native OpenAI requests retain their original semantics. The configured
+      // provider adapter is not part of the official account's request format.
+      const adapted = route.nativeOpenAi ? { invalid: false } : adaptNamedOutputs(body)
       if (adapted.invalid) {
         response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({
           error: {
@@ -207,16 +301,22 @@ export async function startResponsesEncryptedReplay() {
         }))
         return
       }
-      const payload = adapted.body ? JSON.stringify(adapted.body) : bytes.toString('utf8')
-      const replay = encryptedReplay(adapted.body ?? body)
-      const headers = new Headers()
-      for (const [name, value] of Object.entries(request.headers)) {
-        if (!HOP_HEADERS.has(name) && value !== undefined) {
-          headers.set(name, Array.isArray(value) ? value.join(', ') : value)
-        }
+      // Preserve original bytes on ordinary requests, including unknown encodings.
+      // A modified or retried Zstd request retains its original content encoding.
+      const encode = async (value: unknown): Promise<Buffer> => {
+        const serialized = Buffer.from(JSON.stringify(value))
+        return encoding === 'zstd' ? await compressZstd(serialized) : serialized
       }
-      const send = (payload: string) =>
-        fetch(route.target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: controller.signal })
+      const payload = adapted.body ? await encode(adapted.body) : bytes
+      const replay = encryptedReplay(adapted.body ?? body)
+      const send = (payload: Buffer) =>
+        fetch(target, {
+          method: 'POST',
+          headers,
+          body: new Uint8Array(payload.buffer as ArrayBuffer, payload.byteOffset, payload.byteLength),
+          redirect: 'manual',
+          signal: controller.signal,
+        })
       const upstream = await send(payload)
       if (upstream.status >= 300 && upstream.status < 400) {
         await upstream.body?.cancel()
@@ -227,7 +327,7 @@ export async function startResponsesEncryptedReplay() {
       else {
         const inspected = await recoverable(upstream)
         if (inspected.retry && !controller.signal.aborted) {
-          const retried = await send(JSON.stringify(replay))
+          const retried = await send(await encode(replay))
           if (retried.status >= 300 && retried.status < 400) {
             await retried.body?.cancel()
             response.writeHead(502).end(JSON.stringify({ error: { message: 'Provider redirects are not supported' } }))
@@ -287,14 +387,42 @@ export async function startResponsesEncryptedReplay() {
       upstream.pathname = `${upstream.pathname.replace(/\/$/u, '')}/responses`
       const websocket = options.websocket === true
       const nativeStreamIdlePolicy = options.nativeStreamIdlePolicy === true
+      const nativeOpenAi = options.nativeOpenAi === true
+      const expectedAccountDigest = options.expectedAccountDigest
+      const accountRoutingOverride = options.accountRoutingOverride
+      const accountSnapshot = options.accountSnapshot, verifyAccount = options.verifyAccount
+      if (nativeOpenAi && websocket) throw new Error('Native OpenAI recovery requires HTTP')
+      if (
+        (!nativeOpenAi && (expectedAccountDigest !== undefined || accountRoutingOverride !== undefined
+          || accountSnapshot !== undefined || verifyAccount !== undefined))
+        || (expectedAccountDigest !== undefined && !/^[a-f0-9]{64}$/u.test(expectedAccountDigest))
+        || (accountRoutingOverride !== undefined && !['NO_CONSTRAINT', 'us', 'us_cr'].includes(accountRoutingOverride))
+        || ((accountSnapshot === undefined) !== (verifyAccount === undefined))
+      ) throw new Error('Invalid native account routing')
       const existing = [...routes].find(([, value]) =>
         value.target === upstream.href && value.websocket === websocket
-        && value.nativeStreamIdlePolicy === nativeStreamIdlePolicy
+        && value.nativeStreamIdlePolicy === nativeStreamIdlePolicy && value.nativeOpenAi === nativeOpenAi
+        && value.expectedAccountDigest === expectedAccountDigest
+        && value.accountRoutingOverride === accountRoutingOverride
+        && value.accountSnapshot === accountSnapshot && value.verifyAccount === verifyAccount
       )
       if (existing) return `http://127.0.0.1:${address.port}${existing[0].slice(0, -'/responses'.length)}`
       if (routes.size >= MAX_ROUTES) throw new Error('Provider transport route limit')
-      const route = `/${randomBytes(32).toString('hex')}/responses`
-      routes.set(route, { target: upstream.href, websocket, nativeStreamIdlePolicy })
+      // A backend-api/codex suffix would make Codex rewrite the loopback origin
+      // during workspace discovery. Native routing is captured before creating this route.
+      const basePath = `/${randomBytes(32).toString('hex')}`
+      const route = `${basePath}/responses`
+      routes.set(route, {
+        target: upstream.href,
+        basePath,
+        websocket,
+        nativeStreamIdlePolicy,
+        nativeOpenAi,
+        expectedAccountDigest,
+        accountRoutingOverride,
+        accountSnapshot,
+        verifyAccount,
+      })
       return `http://127.0.0.1:${address.port}${route.slice(0, -'/responses'.length)}`
     },
     async close(): Promise<void> {

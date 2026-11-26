@@ -1,10 +1,15 @@
 type WorkMode = 'default' | 'plan'
 type Evidence = { readonly mode?: WorkMode; readonly pendingObservation?: WorkMode; readonly revision: number }
 
+/** Only versions whose fresh-session default was verified may be inferred. */
+export function headlessKnownNewThreadDefault(version: string): boolean {
+  return ['codex-cli 0.149.1', 'codex-cli 0.167.0-alpha.3.2', 'codex-cli 0.172.0'].includes(version)
+}
+
 /**
  * Evidence for an exclusively owned app-server, separate from native readback.
- * Codex 0.149.1 and 0.167.0-alpha.3.2 initialize new sessions in default mode. A resumed
- * or otherwise unknown thread is never assigned that default here.
+ * Verified versions initialize new sessions in default mode. A resumed or otherwise
+ * unknown thread is never assigned that default here.
  */
 export class HeadlessWorkMode {
   private readonly threads = new Map<string, Evidence>()

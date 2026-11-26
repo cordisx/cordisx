@@ -137,6 +137,16 @@ export class ChannelConversationConsumer {
       access: this.input.access,
       agent: this.agentAccess,
       notify: (event, text, id) => this.commandReply(id, event, text),
+      ...(input.appId && input.logicalRuntime
+        ? {
+          logical: {
+            appId: input.appId,
+            profileId: input.profileId,
+            fence: this.sourceFence,
+            claims: this.sessionClaims,
+          },
+        }
+        : {}),
     })
     this.sessionCommands = new ChannelSessionCommands({
       bindings: () => this.bindings(),

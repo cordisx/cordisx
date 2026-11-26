@@ -14,11 +14,13 @@ export async function createLogicalNativeDestination(
   evidence: LogicalContinuationEvidence,
   permitFork?: (threadId: string, params: Readonly<Record<string, unknown>>) => Readonly<Record<string, unknown>>,
   sourceProjectId?: string | null,
+  allowCrossProviderFork = false,
 ) {
   if (
     request.mode === 'fresh' || evidence.sourceConfiguration.execution.workMode !== 'default'
-    || request.mode === 'fork' && (!permitFork || request.target.providerId !== evidence.sourceConfiguration.providerId
-        || request.target.model !== evidence.sourceConfiguration.model)
+    || request.mode === 'fork' && (!permitFork || !allowCrossProviderFork
+          && (request.target.providerId !== evidence.sourceConfiguration.providerId
+            || request.target.model !== evidence.sourceConfiguration.model))
   ) {
     return { state: 'rejected' as const, code: 'NATIVE_MODE_UNAVAILABLE' }
   }
@@ -30,7 +32,7 @@ export async function createLogicalNativeDestination(
     cwd: config.cwd,
     modelProvider: request.target.providerId,
     model: request.target.model,
-    ...(config.serviceTier === null ? {} : { serviceTier: config.serviceTier }),
+    ...(config.serviceTier === null && request.mode !== 'fork' ? {} : { serviceTier: config.serviceTier }),
     approvalsReviewer: config.approvalsReviewer,
     ...(config.permissions ? { permissions: config.permissions } : {}),
     ...(request.mode === 'linked' ? { dynamicTools: [LOGICAL_CONTINUATION_HISTORY_TOOL] } : {}),

@@ -19,6 +19,8 @@ import type { NativeManagedModelListRequest } from './native-managed-model-list.
 import { createDesktopLogicalHandoffControl } from './desktop-logical-handoff-control.js'
 import type { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
 import { MAX_LINE, processId, record, rejectionReason, requestId, TIMEOUT, valid } from './native-control-validation.js'
+import { callConfiguredProvider, type ConfiguredProviderPreparation } from './native-configured-recovery.js'
+import { nativeAccountBridge } from '../../assets/launcher/native-owner-account.mjs'
 
 // Requests stay small; authenticated native responses may contain history.
 export type NativeBridgeMethod =
@@ -75,12 +77,14 @@ export interface NativeSubmissionControlServer {
   ): Promise<unknown>
   /** An opaque digest only; native account records do not cross this bridge. */
   nativeOwnerIdentity(): Promise<string | undefined>
+  /** Sanitized routing and identity digests only; no native credentials or profile details. */
+  nativeRecoveryAccount(): Promise<unknown>
   bindSourceConfigurationReader(
     read: (
       threadId: string,
     ) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>,
   ): void
-  bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
+  bindConfiguredProvider(prepare: ConfiguredProviderPreparation): void
   bindManagedModelList(read: (input: NativeManagedModelListRequest) => Promise<unknown | undefined>): void
   bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
@@ -130,7 +134,7 @@ export async function startNativeSubmissionControlServer(
   let sourceConfiguration:
     | ((threadId: string) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>)
     | undefined
-  let prepareConfigured: ((providerId?: string) => Promise<Readonly<Record<string, unknown>>>) | undefined
+  let prepareConfigured: ConfiguredProviderPreparation | undefined
   let readManagedModelList: ((input: NativeManagedModelListRequest) => Promise<unknown | undefined>) | undefined
   let unmarkedGuard: ((input: { threadId?: string; providerId?: string }) => Promise<boolean>) | undefined
   let controller: NativeSubmissionController | undefined
@@ -624,8 +628,7 @@ export async function startNativeSubmissionControlServer(
         active++
         activeIds.add(value.id)
         try {
-          const overrides =
-            await prepareConfigured?.(typeof value.providerId === 'string' ? value.providerId : undefined) ?? {}
+          const overrides = await callConfiguredProvider(prepareConfigured, value)
           await write(socket, { id: value.id, ok: true, value: overrides })
         } catch {
           await write(socket, { id: value.id, ok: false })
@@ -943,10 +946,7 @@ export async function startNativeSubmissionControlServer(
       if (logicalFenceLease !== undefined && !valid(logicalFenceLease, 256)) throw new Error('Invalid native lease')
       return await callPeer({ type: 'native-request', method, params, configuredProviderOverrides, logicalFenceLease })
     },
-    async nativeOwnerIdentity() {
-      const value = await callPeer({ type: 'native-owner-identity' })
-      return typeof value === 'string' && /^desktop:[a-f0-9]{64}$/u.test(value) ? value : undefined
-    },
+    ...nativeAccountBridge(callPeer),
     bindChatExecution(value: ChatExecutionPreferences) {
       chatExecution = value
     },
@@ -968,7 +968,7 @@ export async function startNativeSubmissionControlServer(
       if (sourceConfiguration) throw new Error('Source configuration reader already bound')
       sourceConfiguration = value
     },
-    bindConfiguredProvider(value: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>) {
+    bindConfiguredProvider(value: ConfiguredProviderPreparation) {
       if (prepareConfigured) throw new Error('Configured provider already bound')
       prepareConfigured = value
     },

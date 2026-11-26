@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process'
+import { createServer } from 'node:http'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { harness } from './fixtures/native-intermediary-harness.js'
 import { configuredEncryptedReplay } from '../packages/cli/src/launcher/configured-encrypted-replay.js'
+import { startResponsesRecovery } from '../packages/cli/src/launcher/responses-recovery-composition.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -12,6 +14,60 @@ import {
   harness as submissionHarness,
   pendingDraft,
 } from './fixtures/native-submission-controller-harness.js'
+
+it('composes experimental native-account recovery through the Desktop intermediary and transport', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'desktop-recovery-'))
+  const requests: { auth: string | undefined; input: unknown[] }[] = []
+  const upstream = createServer(async (request, response) => {
+    let raw = ''
+    for await (const chunk of request) raw += chunk
+    requests.push({ auth: request.headers.authorization, input: JSON.parse(raw).input })
+    if (requests.length === 1) {
+      response.writeHead(400, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ error: { code: 'invalid_encrypted_content' } }))
+    } else response.writeHead(200).end('recovered')
+  })
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
+  const address = upstream.address()
+  if (!address || typeof address === 'string') throw new Error('missing test port')
+  await writeFile(path.join(home, 'config.toml'), `openai_base_url="http://127.0.0.1:${address.port}/v1"\n`)
+  const h = await harness(undefined, 'native-provider-process.mjs', undefined, {
+    CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1',
+    CORDISX_TEST_NATIVE_ACCOUNT: 'api-key',
+  })
+  const recovery = await startResponsesRecovery(home, [], () => h.server.nativeRecoveryAccount())
+  try {
+    h.server.bindConfiguredProvider(recovery.prepareConfigured)
+    h.send({ id: 'init', method: 'initialize', params: { clientInfo: { name: 'fixture', version: '1' } } })
+    await h.read()
+    h.send({ method: 'initialized', params: {} })
+    h.send({ id: 'start', method: 'thread/start', params: { modelProvider: 'openai', model: 'synthetic' } })
+    const result = JSON.parse(await h.read()).result
+    expect(result.modelProvider).toBe('openai')
+    const route = result.receivedConfig.openai_base_url as string
+    const original = [{ type: 'message', role: 'user', content: 'original' }, {
+      type: 'reasoning',
+      encrypted_content: 'foreign',
+      summary: [],
+    }]
+    const response = await fetch(`${route}/responses`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer synthetic' },
+      body: JSON.stringify({ input: original }),
+    })
+    expect(await response.text()).toBe('recovered')
+    expect(requests).toEqual([
+      { auth: 'Bearer synthetic', input: original },
+      { auth: 'Bearer synthetic', input: [original[0]] },
+    ])
+  } finally {
+    await recovery.close()
+    await h.close()
+    upstream.closeAllConnections()
+    await new Promise<void>(resolve => upstream.close(() => resolve()))
+    await rm(home, { recursive: true, force: true })
+  }
+})
 
 it('preserves request auth for a marked configured start through the real submission controller', async () => {
   const configured = {

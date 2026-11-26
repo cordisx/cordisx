@@ -27,6 +27,7 @@ export function nativeLaunchConfiguration(environment, args, node = process.exec
       'CODEX_CLI_PATH',
       'CORDISX_NATIVE_CONTROL_SOCKET',
       'CORDISX_NATIVE_CONTROL_NONCE',
+      'CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY',
       'CORDISX_NATIVE_REAL_CODEX_PATH',
       'CORDISX_NATIVE_CLI_ENTRY_PATH',
       'CORDISX_NATIVE_NODE_PATH',

@@ -148,8 +148,8 @@ export async function createHeadlessNativeAuthority(input: {
         })
         : undefined
       if (saved) params = { ...params, modelProvider: saved.providerId, model: saved.model }
-      if (method === 'thread/resume' && threadId) workMode.forget(threadId)
-      const modeChange = threadId && (method === 'turn/start' || method === 'thread/settings/update')
+      const modeChange = threadId
+          && (method === 'turn/start' || method === 'thread/settings/update' || method === 'thread/resume')
         ? workMode.begin(threadId)
         : undefined
       try {
@@ -190,8 +190,12 @@ export async function createHeadlessNativeAuthority(input: {
           if (typeof started === 'string') workMode.started(started)
         }
         if (modeChange) {
-          const mode = prepared.params.collaborationMode
-          modeChange(true, record(mode).mode, mode === undefined || mode === null)
+          // A resumed 0.172 thread reports its actual collaboration mode. Missing
+          // or malformed readback remains unknown; a persisted default is not proof.
+          const mode = method === 'thread/resume'
+            ? record(record(result).thread).id === threadId ? record(result).collaborationMode : undefined
+            : prepared.params.collaborationMode
+          modeChange(true, record(mode).mode, method !== 'thread/resume' && (mode === undefined || mode === null))
         }
         if (prepared.captureId) {
           await execution.complete(prepared.captureId, true, result).catch(() =>

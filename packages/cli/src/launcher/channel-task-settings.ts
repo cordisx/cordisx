@@ -28,6 +28,7 @@ import {
   validateChannelTaskSelection,
 } from './channel-task-selection.js'
 import { ChannelTaskSettingsPump } from './channel-task-settings-pump.js'
+import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 
 const same = (left: ChannelEventRef, right: ChannelEventRef) =>
   ['adapterId', 'accountId', 'tenantId', 'conversationId']
@@ -46,6 +47,7 @@ export class ChannelTaskSettings {
       access(): ChannelConversationAccess | undefined
       agent: ChannelAgentAccess
       notify?(event: ChannelEventRef, text: string, operationId: string): Promise<unknown>
+      logical?: { appId: string; profileId: string; fence: ChannelNativeSourceFence; claims: Set<string> }
     },
   ) {
     this.application = new ChannelTaskSettingsPump({
@@ -75,7 +77,7 @@ export class ChannelTaskSettings {
   }
   ready(threadId: string): boolean {
     const setting = this.input.store.snapshot().taskSettings[threadId]
-    return !setting || !['saved', 'applying'].includes(setting.application)
+    return !setting || !['saved', 'applying', 'unknown'].includes(setting.application)
   }
   private bound(event: ChannelEventRef, threadId: string): boolean {
     return Object.values(this.input.store.snapshot().bindings).some(binding =>

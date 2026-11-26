@@ -2,7 +2,10 @@ import { isDeepStrictEqual } from 'node:util'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import type { ChannelConversationState } from './channel-conversation-store.js'
-import { channelLogicalContinuationAdmitted } from './channel-logical-continuation-scope.js'
+import {
+  channelLogicalContinuationAdmitted,
+  type ChannelTaskContinuationClaim,
+} from './channel-logical-continuation-scope.js'
 
 export function channelLogicalDestinationAvailable(
   state: ChannelConversationState,
@@ -25,8 +28,9 @@ export function channelLogicalBindingAdmitted(
   event: ChannelEventRef,
   profileId: string,
   source: string,
+  taskClaim?: ChannelTaskContinuationClaim,
 ): boolean {
-  if (!channelLogicalContinuationAdmitted(state, event, profileId, source)) return false
+  if (!channelLogicalContinuationAdmitted(state, event, profileId, source, taskClaim)) return false
   const binding = Object.values(state.bindings).find(value => value.sessionId === source && value.state === 'active')!
   const queued = Object.values(state.jobs).filter(job => job.sessionId === source && job.state === 'queued')
   for (const job of queued) {
@@ -62,10 +66,11 @@ export function bindChannelLogicalContinuation(
   destination: string,
   target: { readonly providerId: string; readonly model: string },
   groupAuthorized = false,
+  taskClaim?: ChannelTaskContinuationClaim,
 ): boolean {
   if (
     !channelLogicalDestinationAvailable(state, source, destination)
-    || !groupAuthorized && !channelLogicalBindingAdmitted(state, event, profileId, source)
+    || !groupAuthorized && !channelLogicalBindingAdmitted(state, event, profileId, source, taskClaim)
   ) return false
   const binding = Object.values(state.bindings).find(value => value.sessionId === source && value.state === 'active')!
   const queued = Object.values(state.jobs).filter(job => job.sessionId === source && job.state === 'queued')

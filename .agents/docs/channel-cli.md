@@ -987,11 +987,19 @@ validated against the actual catalog and queued until the chat is idle. Saving,
 submission and observed application are distinct states; unknown effects are
 not replayed after restart.
 
-Some native Codex versions keep an existing thread's provider fixed. When the
-native service explicitly refuses a cross-provider resume, the change is rejected
-without retrying it, and `/task-settings` explains that the existing chat can be
-kept while a new chat is created for the other provider. A timeout or any
-unrecognized native error remains uncertain and is not treated as a refusal.
+Some native Codex versions keep an existing thread's provider fixed. In the
+experimental headless Codex 0.172 recovery mode, selecting a different provider
+for an eligible direct chat automatically forks the native history to the
+selected provider and moves the binding and eligible queued messages together.
+The original history remains. The target receives the complete inherited native
+history, including tool content. Only one active binding is eligible; group
+chats, unconfirmed settings, unsupported work modes and unavailable recovery
+routes do not use this automatic path. A separately requested project or other
+setting stays pending until actually applied to the new thread.
+
+Without that recovery path, an explicit native refusal rejects the change. A
+timeout or an unrecognized native error remains uncertain; neither an uncertain
+fork nor an uncertain selection is automatically replayed.
 
 Model grants constrain platform/account/conversation, users/user groups, changed
 fields, Provider, qualified model, effort, Fast values (`fastModes`) and local
@@ -1200,8 +1208,10 @@ requires a new choice; it does not grant history access.
 In a direct Channel conversation with exactly one active binding, use
 `/continue-provider suggest <provider> <model>` to see the recommended mode
 and matching confirmation command. Follow its history and checkpoint flags
-explicitly. Fork is currently limited to the same provider and model with no
-linked parent; otherwise the default recommendation is linked. A failed or
+explicitly. Full fork requires a compatible native runtime and no linked parent.
+The experimental 0.172 recovery mode can also fork to an admitted provider with
+an available recovery route; otherwise cross-provider continuation uses linked
+mode. A failed or
 uncertain native creation never automatically retries with another mode.
 Channel dispatch and task-setting permissions are checked again at commit, and
 eligible queued messages move with the binding. Group and multiple-binding

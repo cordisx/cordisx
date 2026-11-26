@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { accountRouting } from './native-responses-recovery.mjs'
 
 const text = value =>
   typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\u0000-\u001f\u007f]/u.test(value)
@@ -16,6 +17,19 @@ export function nativeOwnerIdentity(value) {
     + createHash('sha256').update(JSON.stringify([session.selectedWorkspaceAccountId, session.userId])).digest('hex')
 }
 
+/** Read only sanitized identity and routing over the launch-owned control peer. */
+export function nativeAccountBridge(callPeer) {
+  return {
+    async nativeOwnerIdentity() {
+      const value = await callPeer({ type: 'native-owner-identity' })
+      return typeof value === 'string' && /^desktop:[a-f0-9]{64}$/u.test(value) ? value : undefined
+    },
+    async nativeRecoveryAccount() {
+      return await callPeer({ type: 'native-recovery-account' })
+    },
+  }
+}
+
 /** Never expose native account records on the Host bridge. A changing account fails closed. */
 export function dispatchNativeOwnerIdentity(message, { nativeCall, write, control, stop }) {
   if (message.type !== 'native-owner-identity' || typeof message.id !== 'string') return false
@@ -23,6 +37,18 @@ export function dispatchNativeOwnerIdentity(message, { nativeCall, write, contro
     const first = nativeOwnerIdentity(await nativeCall('accountSession/list', { refreshWorkspaceMetadata: false }))
     const second = nativeOwnerIdentity(await nativeCall('accountSession/list', { refreshWorkspaceMetadata: false }))
     return first && first === second ? first : undefined
+  })().then(value => write(control, { id: message.id, ok: true, value: value ?? null }))
+    .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+  return true
+}
+
+/** Only opaque identity digests and the native-selected route cross this private bridge. */
+export function dispatchNativeRecoveryAccount(message, { nativeCall, write, control, stop }) {
+  if (message.type !== 'native-recovery-account' || typeof message.id !== 'string') return false
+  void (async () => {
+    const first = accountRouting(await nativeCall('account/read', { refreshToken: false }))
+    const second = accountRouting(await nativeCall('account/read', { refreshToken: false }))
+    return first && JSON.stringify(first) === JSON.stringify(second) ? first : undefined
   })().then(value => write(control, { id: message.id, ok: true, value: value ?? null }))
     .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
   return true
