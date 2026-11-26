@@ -160,8 +160,9 @@ describe('bounded generic card actions', () => {
       fixture_.service.execute('card-action-publish', publish, fixture_.context),
       fixture_.service.execute('card-action-publish', { ...publish, operationId: 'concurrent' }, fixture_.context),
     ])
-    expect(results[0]).toMatchObject({ status: 'ok' })
-    expect(results[1]).toMatchObject({ status: 'rejected', code: 'CHANNEL_ACTION_VERSION_CONFLICT' })
+    expect(results.filter(result => result?.status === 'ok')).toHaveLength(1)
+    expect(results.filter(result => result?.status === 'rejected' && result.code === 'CHANNEL_ACTION_VERSION_CONFLICT'))
+      .toHaveLength(1)
     expect(fixture_.patch).toHaveBeenCalledTimes(1)
     const uncertain = await fixture()
     uncertain.patch.mockRejectedValue(new Error('uncertain transport'))
