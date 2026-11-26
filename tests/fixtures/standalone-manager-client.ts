@@ -51,6 +51,8 @@ export function fixture(input: {
   readonly entryMalformed?: boolean
   readonly openFailure?: { readonly status: number; readonly body: unknown }
   readonly bootstrapGate?: Promise<void>
+  readonly bootstrapTransportFailure?: 'fetch' | 'body'
+  readonly bootstrapFailure?: { readonly status: number; readonly body: unknown }
   readonly importGate?: Promise<void>
   readonly startGate?: Promise<void>
   readonly loseAck?: boolean
@@ -199,11 +201,22 @@ export function fixture(input: {
       )
     }
     if (path === '/api/renderer/bootstrap') {
+      if (input.bootstrapTransportFailure === 'fetch') return Promise.reject(new TypeError('lost bootstrap response'))
+      if (input.bootstrapFailure) {
+        return Promise.resolve(
+          new Response(JSON.stringify(input.bootstrapFailure.body), {
+            status: input.bootstrapFailure.status,
+          }),
+        )
+      }
       const result = response({
         status: 'ok',
         bundleUrl: input.bundlePath ?? '/api/renderer/bundle.js',
         initialGraphs: input.graphs ?? [],
       })
+      if (input.bootstrapTransportFailure === 'body') {
+        vi.spyOn(result, 'text').mockRejectedValue(new TypeError('lost bootstrap body'))
+      }
       return input.bootstrapGate
         ? Promise.race([input.bootstrapGate.then(() => result), abortResponse(options.signal!)])
         : Promise.resolve(result)

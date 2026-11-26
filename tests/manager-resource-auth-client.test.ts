@@ -44,6 +44,34 @@ it('binds and explicitly recovers with the fixed worker, then erases its token o
   expect(current).toHaveBeenCalledTimes(2)
 })
 
+it('continues the worker sequence when a new session starts in the same document', async () => {
+  const { target, worker, messages } = fixture()
+  let lastSequence = 0
+  worker.postMessage = (message, ports) => {
+    messages.push(message)
+    const sequence = Number(message.sequence)
+    const accepted = Number.isSafeInteger(sequence) && sequence > lastSequence
+    if (accepted) lastSequence = sequence
+    ports[0]!.postMessage({ version: 1, ok: accepted })
+    ports[0]!.close()
+  }
+  const first = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'a'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  expect(await first.start()).toBe(true)
+  expect(await first.revokeLocal()).toBe(true)
+  const second = createManagerResourceAuthClient({
+    window: target,
+    sessionToken: 'b'.repeat(64),
+    isSessionCurrent: () => true,
+  })
+  expect(await second.start()).toBe(true)
+  expect(await second.revokeLocal()).toBe(true)
+  expect(messages.map(message => message.sequence)).toEqual([1, 2, 3, 4])
+})
+
 it('does not bind when server authority is unavailable or returns after local revocation', async () => {
   const { target, messages } = fixture()
   let resolve!: (value: boolean) => void

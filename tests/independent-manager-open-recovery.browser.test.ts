@@ -61,7 +61,17 @@ const fixtureBundle = [
   '}',
 ].join(String.fromCharCode(10))
 
-it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'entry-transport'] as const)(
+it.skipIf(chrome === undefined).each(
+  [
+    'manual',
+    'automatic',
+    'unconfirmed',
+    'entry-transport',
+    'bootstrap-transport',
+    'bootstrap-unconfirmed',
+    'bootstrap-repeated',
+  ] as const,
+)(
   'recovers an interrupted admission through the Manager session authority: %s',
   async mode => {
     const built = await build({
@@ -135,7 +145,7 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'ent
     let browser: ChildProcess | undefined
     let page: CdpClient | undefined
     try {
-      if (mode === 'entry-transport') {
+      if (mode === 'entry-transport' || mode.startsWith('bootstrap-')) {
         expect(fence.release()).toBe(true)
         released = true
       }
@@ -154,7 +164,10 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'ent
               released = true
             }
           }
-          if (mode === 'unconfirmed' && operation.kind === 'manager-renderer' && operation.action === 'revoke') {
+          if (
+            (mode === 'unconfirmed' || mode === 'bootstrap-unconfirmed')
+            && operation.kind === 'manager-renderer' && operation.action === 'revoke'
+          ) {
             return { status: 'unavailable' }
           }
           return result
@@ -221,8 +234,26 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'ent
           }`,
         })
       }
+      if (mode.startsWith('bootstrap-')) {
+        await page.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: `{
+            const original = window.fetch.bind(window)
+            globalThis.__bootstrapAttempts = 0
+            window.fetch = async (request, options) => {
+              if (request !== '/api/renderer/bootstrap') return await original(request, options)
+              globalThis.__bootstrapAttempts++
+              const response = await original(request, options)
+              if (globalThis.__bootstrapAttempts <= ${mode === 'bootstrap-repeated' ? 2 : 1} && response.ok) {
+                globalThis.__firstBootstrapAuthorization ??= options.headers.authorization
+                throw new TypeError('simulated lost bootstrap response')
+              }
+              return response
+            }
+          }`,
+        })
+      }
       await page.send('Page.navigate', { url: target.href })
-      if (mode === 'unconfirmed') {
+      if (mode === 'unconfirmed' || mode === 'bootstrap-unconfirmed') {
         await vi.waitFor(async () => {
           const text = await page!.evaluate(
             "document.querySelector('.cxr-standalone-unavailable')?.textContent ?? ''",
@@ -231,6 +262,19 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'ent
         }, { timeout: 20_000 })
         expect(opens).toBe(1)
         expect(await page.evaluate("document.querySelector('[data-fixture-manager]') !== null")).toBe(false)
+        return
+      }
+      if (mode === 'bootstrap-repeated') {
+        await vi.waitFor(async () => {
+          const state = await page!.evaluate<{ text: string; resume: boolean; attempts: number }>(
+            "({ text: document.querySelector('.cxr-standalone-unavailable')?.textContent ?? '', "
+              + "resume: !!sessionStorage.getItem('cordisx-manager-resume-id'), attempts: globalThis.__bootstrapAttempts })",
+          )
+          expect(state.text).toContain('刷新页面重试')
+          expect(state.resume).toBe(true)
+          expect(state.attempts).toBe(2)
+        }, { timeout: 20_000 })
+        expect(opens).toBe(2)
         return
       }
       if (mode === 'manual') {
@@ -267,6 +311,17 @@ it.skipIf(chrome === undefined).each(['manual', 'automatic', 'unconfirmed', 'ent
         }))()`)
         expect(state).toEqual({ attempts: 2, same: true, oldStatus: 401 })
         expect(opens).toBe(1)
+      }
+      if (mode === 'bootstrap-transport') {
+        const state = await page.evaluate<{ attempts: number; oldStatus: number }>(`(async () => ({
+          attempts: globalThis.__bootstrapAttempts,
+          oldStatus: (await fetch('/api/renderer/session', {
+            method: 'POST', headers: { 'content-type': 'application/json',
+              authorization: globalThis.__firstBootstrapAuthorization }, body: '{}'
+          })).status
+        }))()`)
+        expect(state).toEqual({ attempts: 2, oldStatus: 401 })
+        expect(opens).toBe(2)
       }
     } finally {
       if (!released) fence.release()

@@ -2,6 +2,8 @@ import { isManagerBrowserOrigin } from './manager-browser-origin.js'
 
 const workerScript = '/manager-resource-worker.js'
 const sessionTokenPattern = /^[a-f0-9]{64}$/u
+// A retry can replace the resource session without replacing its document.
+const documentSequences = new WeakMap<Window, number>()
 
 export interface ManagerResourceAuthClient {
   /** Register the fixed same-origin worker and bind this browser document. */
@@ -108,11 +110,13 @@ export function createManagerResourceAuthClient(input: {
   const expectedUrl = new URL(workerScript, origin.origin).href
   const container = input.window.navigator.serviceWorker
   let token: string | undefined = input.sessionToken
-  let sequence = 0
   let disposed = false
   const nextSequence = () => {
+    const sequence = documentSequences.get(input.window) ?? 0
     if (sequence >= Number.MAX_SAFE_INTEGER) throw new Error('manager-resource-session-exhausted')
-    return ++sequence
+    const next = sequence + 1
+    documentSequences.set(input.window, next)
+    return next
   }
   const bind = async (): Promise<boolean> => {
     try {

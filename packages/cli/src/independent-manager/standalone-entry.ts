@@ -5,7 +5,7 @@ import type { StandaloneStartupFailure } from '../renderer/manager/standalone-st
 // Show Host chrome immediately; the owner still controls every business operation.
 let startup = createStandaloneStartup(document)
 let stopped = false
-let retriedOpen = false
+let retriedInitial = false
 window.addEventListener('pagehide', () => stopped = true, { once: true })
 const showUnavailable = (reason?: StandaloneStartupFailure) => {
   delete document.documentElement.dataset.cordisxManagerReady
@@ -16,10 +16,13 @@ const showUnavailable = (reason?: StandaloneStartupFailure) => {
 function start(): void {
   let failed = false
   let manager!: ReturnType<typeof startStandaloneManager>
-  const unavailable = (reason?: StandaloneStartupFailure | 'open-refused') => {
+  const unavailable = (reason?: StandaloneStartupFailure | 'open-refused' | 'bootstrap-interrupted') => {
     failed = true
-    if (reason === 'open-refused' && !retriedOpen && !stopped && !startup.disposed) {
-      retriedOpen = true
+    if (
+      (reason === 'open-refused' || reason === 'bootstrap-interrupted') && !retriedInitial && !stopped
+      && !startup.disposed
+    ) {
+      retriedInitial = true
       // The client starts its confirmed-retirement close after this callback.
       queueMicrotask(() => {
         if (stopped) return
@@ -29,7 +32,7 @@ function start(): void {
       })
       return
     }
-    showUnavailable(reason === 'open-refused' ? 'refresh' : reason)
+    showUnavailable(reason === 'open-refused' || reason === 'bootstrap-interrupted' ? 'refresh' : reason)
   }
   manager = startStandaloneManager({ window, onUnavailable: unavailable })
   void manager.ready.then(ready => {

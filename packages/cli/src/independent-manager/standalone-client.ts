@@ -34,6 +34,7 @@ class ManagerSessionTransportError extends Error {}
 class ManagerEntryTransportError extends Error {}
 class ManagerResumeTransportError extends Error {}
 class ManagerOpenUnavailableError extends Error {}
+class ManagerBootstrapTransportError extends Error {}
 
 type Runtime = Parameters<typeof createManagerRendererLifecycleClient>[0]['runtime']
 type ResourceFactory = typeof createManagerResourceAuthClient
@@ -134,7 +135,9 @@ function verifyInitialGraphs(
  */
 export function startStandaloneManager(input: {
   readonly window: Window
-  readonly onUnavailable?: (reason?: 'result-unknown' | 'refresh' | 'insecure-context' | 'open-refused') => void
+  readonly onUnavailable?: (
+    reason?: 'result-unknown' | 'refresh' | 'insecure-context' | 'open-refused' | 'bootstrap-interrupted',
+  ) => void
   /** Test seams. The application uses the fixed service worker and native ESM import. */
   readonly createResourceAuth?: ResourceFactory
   readonly importBundle?: (url: string) => Promise<Composition>
@@ -187,6 +190,9 @@ export function startStandaloneManager(input: {
           }
           if (path === '/api/session') {
             throw new ManagerEntryTransportError('manager-entry-transport', { cause: error })
+          }
+          if (path === '/api/renderer/bootstrap') {
+            throw new ManagerBootstrapTransportError('manager-bootstrap-transport', { cause: error })
           }
           if (path.startsWith('/api/session/resume/')) {
             throw new ManagerResumeTransportError('manager-resume-transport', { cause: error })
@@ -394,18 +400,21 @@ export function startStandaloneManager(input: {
     reason?: 'result-unknown' | 'insecure-context',
     interruptedTransport = false,
     openUnavailable = false,
+    bootstrapTransport = false,
   ) => {
     if (closed) return
     const uncertain = reason === 'result-unknown' || removeBindings?.canQuiesce() === false
       || interruptedTransport && removeBindings?.canRecoverAfterTransport() === false
-    // No plugin runtime or user operation exists when the owner refuses an
-    // initial renderer open. Retirement still has to be confirmed on resume.
-    const retryableOpen = !uncertain && resumeId !== undefined && openUnavailable && sessionToken !== undefined
+    // Before runtime admission, a lost bootstrap response has dispatched no
+    // user operation. The owner still confirms retirement before resuming.
+    const initialIdle = !uncertain && resumeId !== undefined && sessionToken !== undefined
       && !admissionConfirmed && lifecycle === undefined && removeBindings === undefined && runtime === undefined
+    const retryableOpen = initialIdle && openUnavailable
+    const retryableBootstrap = initialIdle && bootstrapTransport
     const refresh = !uncertain && resumeId !== undefined && (
       interruptedTransport && admissionConfirmed
         && lifecycle?.canResume() === true && removeBindings?.canRecoverAfterTransport() === true
-      || retryableOpen
+      || retryableOpen || retryableBootstrap
     )
     if (!notified) {
       notified = true
@@ -417,6 +426,8 @@ export function startStandaloneManager(input: {
             ? reason
             : retryableOpen
             ? 'open-refused'
+            : retryableBootstrap
+            ? 'bootstrap-interrupted'
             : refresh
             ? 'refresh'
             : undefined,
@@ -726,8 +737,16 @@ export function startStandaloneManager(input: {
       // Navigation can abort a startup request after beforeunload but before
       // pagehide. Preserve only the same idle session that pagehide could
       // preserve; the owner still has to confirm its retirement.
-      if (navigating && canPreserveResume()) void close(true)
-      else fail(undefined, false, error instanceof ManagerOpenUnavailableError)
+      if (navigating && canPreserveResume()) {
+        void close(true)
+      } else {
+        fail(
+          undefined,
+          false,
+          error instanceof ManagerOpenUnavailableError,
+          error instanceof ManagerBootstrapTransportError,
+        )
+      }
       return false
     }
   })()
