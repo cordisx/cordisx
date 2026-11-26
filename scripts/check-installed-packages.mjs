@@ -33,7 +33,7 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#43e24704829eb3317b27a1619b0090294a23932f') {
+if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#52fe15b6416be16429357e4994cfe4a7a2fb54fe') {
   throw new Error('source cordisx must pin the merged Protocol source')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
@@ -466,14 +466,9 @@ createElement(AgentAvatar, props)
     path.join(repositoryRoot, 'tests', 'fixtures', 'manager-navigation-v9-consumer.ts'),
     path.join(runnerDirectory, 'manager-navigation-v9-consumer.ts'),
   )
-  await copyFile(
-    path.join(repositoryRoot, 'tests', 'fixtures', 'ide-ui-primitives-consumer.tsx'),
-    path.join(runnerDirectory, 'ide-ui-primitives-consumer.tsx'),
-  )
-  await copyFile(
-    path.join(repositoryRoot, 'tests', 'fixtures', 'hover-card-consumer.tsx'),
-    path.join(runnerDirectory, 'hover-card-consumer.tsx'),
-  )
+  for (const file of ['ide-ui-primitives-consumer.tsx', 'hover-card-consumer.tsx', 'channel-richtext-v3-consumer.ts']) {
+    await copyFile(path.join(repositoryRoot, 'tests', 'fixtures', file), path.join(runnerDirectory, file))
+  }
   await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
@@ -497,6 +492,7 @@ createElement(AgentAvatar, props)
             'manager-navigation-v9-consumer.ts',
             'agent-session-consumer.ts',
             'agent-loop-collection-consumer.ts',
+            'channel-richtext-v3-consumer.ts',
           ],
         },
         null,

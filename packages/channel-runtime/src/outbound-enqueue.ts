@@ -10,8 +10,9 @@ import type {
 import type { ChannelQuestionCard } from './question-card.js'
 import type { ChannelStoreState, JsonChannelStore, StoredAuditRecord, StoredOutboxRecord } from './store.js'
 import { accountKey, canonical, ChannelIntegrityError, sanitizedThread } from './runtime-validation.js'
-import { richtextRequirements, validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
+import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
 import { validateNotificationMedia, validateOutboundMedia } from './outbound-media.js'
+import { richtextRequirementsV3, validateOutboundContentV3 } from './outbound-richtext-v3.js'
 
 interface EnqueueContext {
   assertActive(): void
@@ -44,7 +45,11 @@ export async function enqueueOutbound(
   if (!['completion', 'approval', 'failure', 'reply'].includes(notification.kind)) {
     throw new ChannelIntegrityError('Channel notification kind is invalid')
   }
-  const content = notification.content === undefined ? undefined : validateOutboundContent(notification.content)
+  const content = notification.content === undefined
+    ? undefined
+    : notification.outboundVersion === 3
+    ? validateOutboundContentV3(notification.content)
+    : validateOutboundContent(notification.content)
   const fallback = content ? validateOutboundFallback(notification.fallback ?? { mode: 'reject' }) : undefined
   if (
     content && Buffer.byteLength(
@@ -73,10 +78,11 @@ export async function enqueueOutbound(
   const priorTyped = context.store.snapshot().outbox[deliveryId]
   let effectiveType = content?.type
   let effectiveText = notification.text
+  let preparedImages: readonly import('./outbound-media.js').ChannelOutboundMedia[] | undefined
   if (content) {
     const connection = context.connections.get(key)?.connection
     const types = connection?.outboundTypes ?? ['text']
-    const requirements = richtextRequirements(content)
+    const requirements = richtextRequirementsV3(content)
     if (requirements.userIds.length) {
       await context.requirePermission({
         caller,
@@ -89,6 +95,9 @@ export async function enqueueOutbound(
       await connection.verifyMentions(target, requirements.userIds)
     }
     const unsupported = !types.includes(content.type)
+      || notification.outboundVersion === 3 && content.type === 'richtext' && connection?.richtextV3 !== true
+      || requirements.imageHandles.length > 0
+        && (connection?.supportsOutboundMedia !== true || (connection.maxMediaBytes ?? 30000000) <= 0)
       || requirements.paragraphs && connection?.richtext?.paragraphs !== true
       || requirements.userIds.length > 0 && connection?.richtext?.mentions !== true
     if (!priorTyped?.content && unsupported) {
@@ -105,6 +114,7 @@ export async function enqueueOutbound(
       effectiveType = priorTyped.effectiveType
       effectiveText = priorTyped.text
       media = priorTyped.media
+      preparedImages = priorTyped.preparedImages
     } else if (effectiveType !== 'text' && 'handle' in content) {
       await context.requirePermission({
         caller,
@@ -120,6 +130,29 @@ export async function enqueueOutbound(
       }
       const maximum = context.connections.get(key)?.connection.maxMediaBytes ?? 30_000_000
       if (media.size > maximum) throw new ChannelIntegrityError('Prepared media exceeds adapter limit')
+    }
+    if (!priorTyped?.content && effectiveType !== 'text' && requirements.imageHandles.length) {
+      await context.requirePermission({
+        caller,
+        capability: 'channel.messages.send',
+        source: target,
+        generation: adapter.generation,
+        operationId: deliveryId,
+      })
+      if (!context.mediaDescriptor) throw new ChannelIntegrityError('Prepared media authority unavailable')
+      const images = []
+      const maximum = connection?.maxMediaBytes ?? 30_000_000
+      let size = 0
+      for (const handle of requirements.imageHandles) {
+        const image = validateOutboundMedia(await context.mediaDescriptor(caller, handle, target))
+        if (image.type !== 'image' || image.handle !== handle) {
+          throw new ChannelIntegrityError('Prepared image type mismatch')
+        }
+        size += image.size
+        if (size > maximum) throw new ChannelIntegrityError('Prepared images exceed adapter limit')
+        images.push(image)
+      }
+      preparedImages = images
     }
   }
   if (!/^delivery:[A-Za-z0-9-]{1,128}$/u.test(deliveryId)) {
@@ -149,6 +182,8 @@ export async function enqueueOutbound(
         || canonical(prior.fallback ?? null) !== canonical(fallback ?? null)
         || prior.idempotencyKey !== notification.idempotencyKey
         || canonical(prior.media ?? null) !== canonical(media ?? null)
+        || prior.outboundVersion !== notification.outboundVersion
+        || canonical(prior.preparedImages ?? null) !== canonical(preparedImages ?? null)
         || canonical(prior.questionCard ?? null) !== canonical(questionCard ?? null)
         || (prior.terminalDelivery === true) !== terminalDelivery
       ) throw new ChannelIntegrityError('Operation conflict')
@@ -167,6 +202,8 @@ export async function enqueueOutbound(
         ? { content, fallback: fallback!, requestedType: content.type, effectiveType: effectiveType! }
         : {}),
       ...(media ? { media } : {}),
+      ...(notification.outboundVersion === 3 ? { outboundVersion: 3 as const } : {}),
+      ...(preparedImages ? { preparedImages } : {}),
       ...(questionCard ? { questionCard } : {}),
       createdAt: now,
       updatedAt: now,

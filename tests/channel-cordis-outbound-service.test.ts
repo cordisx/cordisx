@@ -48,6 +48,52 @@ function fixture(backend: object = {}) {
 }
 
 describe('Protocol V2 Cordis outbound service', () => {
+  it('rejects a forced JavaScript v3 request on real frozen service facades before any effect', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-frozen-v3-'))
+    const runtime = await ChannelRuntime.open({
+      storePath: path.join(directory, 'runtime.json'),
+      permissions: { authorize: async () => 'allow' },
+    })
+    const { ctx } = fixture(runtime)
+    const channel = (ctx as unknown as import('@cordisx/protocol/channel-runtime/v4').ChannelRuntimeContextV4).channel
+    const request = { ...send, contract: 'cordisx.channel-message-send/v3' as const, schemaVersion: 3 as const }
+    const notify = vi.spyOn(runtime, 'notifyOnce')
+    try {
+      await expect(channel.outbound.send(request as never)).rejects.toThrow(
+        'CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE',
+      )
+      await expect(channel.outboundV2.send(request as never)).rejects.toThrow(
+        'CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE',
+      )
+      expect(notify).not.toHaveBeenCalled()
+    } finally {
+      await runtime.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+  it('acquires outboundV3 with stamped authority while fencing both older JavaScript facades', async () => {
+    const backend = {
+      outboundCapabilitiesV3: vi.fn().mockResolvedValue({ richtext: { inlineCodeMode: 'standalone-paragraph' } }),
+      sendTypedV3: vi.fn().mockResolvedValue({ deliveryId: 'typed-v3' }),
+      sendTyped: vi.fn(async request => {
+        if (request.schemaVersion !== 1) throw new Error('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+      }),
+    }
+    const { ctx, root } = fixture(backend)
+    const channel = (ctx as unknown as import('@cordisx/protocol/channel-runtime/v4').ChannelRuntimeContextV4).channel
+    const request = { ...send, contract: 'cordisx.channel-message-send/v3' as const, schemaVersion: 3 as const }
+    expect(Object.isFrozen(channel.outboundV3)).toBe(true)
+    await channel.outboundV3.capabilities(target)
+    await channel.outboundV3.send(request)
+    expect(backend.outboundCapabilitiesV3).toHaveBeenCalledWith(target, identity)
+    expect(backend.sendTypedV3).toHaveBeenCalledWith(request, identity)
+    await expect(channel.outboundV2.send(request as never)).rejects.toThrow(
+      'CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE',
+    )
+    await expect(channel.outbound.send(request as never)).rejects.toThrow('CHANNEL_TYPED_CONTENT_PROTOCOL_UNAVAILABLE')
+    const unbound = root as unknown as import('@cordisx/protocol/channel-runtime/v4').ChannelRuntimeContextV4
+    await expect(unbound.channel.outboundV3.send(request)).rejects.toThrow('launcher-bound')
+  })
   it('adds outboundV2 without replacing frozen services and binds exact caller authority', async () => {
     const backend = {
       outboundCapabilitiesV2: vi.fn().mockResolvedValue({ richtext: { paragraphs: true, mentions: true } }),

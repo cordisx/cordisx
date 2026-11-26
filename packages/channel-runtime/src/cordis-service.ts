@@ -34,7 +34,7 @@ export interface CordisXChannelMessages {
   subscribe(filter: ChannelSubscriptionFilter, listener: ChannelMessageListener): Promise<() => void>
 }
 
-export type CordisXChannel = import('@cordisx/protocol/channel-runtime/v3').ChannelRuntimeV3
+export type CordisXChannel = import('@cordisx/protocol/channel-runtime/v4').ChannelRuntimeV4
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -205,6 +205,17 @@ export class CordisXChannelService extends Service implements CordisXChannel {
         }
         return runtimeFor(this).sendTypedV2(request, identityFrom(this.ctx))
       },
+    })
+  }
+
+  get outboundV3(): CordisXChannel['outboundV3'] {
+    return Object.freeze({
+      capabilities: async (target: ChannelThreadRef) =>
+        runtimeFor(this).outboundCapabilitiesV3(target, identityFrom(this.ctx)),
+      prepare: async (request: ChannelMediaPrepareRequestV1) =>
+        runtimeFor(this).prepareOutbound(request, identityFrom(this.ctx)),
+      send: async (request: import('@cordisx/protocol/channel-outbound/v3').ChannelMessageSendV3) =>
+        runtimeFor(this).sendTypedV3(request, identityFrom(this.ctx)),
     })
   }
 }

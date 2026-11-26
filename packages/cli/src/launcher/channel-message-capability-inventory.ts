@@ -31,8 +31,9 @@ export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   },
   {
     capability: 'richtext-links-inline-images-code-language',
-    implementation: 'not-verified',
-    reason: 'Use exact outbound contract capability; not supplied by message editing.',
+    implementation: 'supported',
+    reason:
+      'Outbound v3/runtime v4 and CLI/RPC support native links, scoped prepared images, standalone inline code and enumerated code languages on the SDK path; capability support is not permission and edit remains frozen.',
   },
   {
     capability: 'native-mentions-in-edit',

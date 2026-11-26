@@ -1,6 +1,6 @@
 import type { ChannelSubscriptionFilter, ChannelTenantRef, ChannelThreadRef } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
-import { richtextRequirements } from '@cordisx/channel-runtime'
+import { preflightOutboundRequests } from './channel-outbound-preflight.js'
 import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations-rpc.js'
 import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelReadRpc } from './channel-read-rpc.js'
@@ -760,53 +760,21 @@ export class ChannelConversationTools {
             )
           const receipts: unknown[] = []
           if (typed && contents) {
-            for (let index = 0; index < parsed.length; index += 1) {
-              if (current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined) continue
-              const capabilities = await current.runtime.outboundCapabilities(parsed[index]!, caller)
-              const requested = contents[index]!
-              if (
-                Buffer.byteLength(
-                  JSON.stringify({
-                    contract: 'cordisx.channel-message-send/v2',
-                    schemaVersion: 2,
-                    target: parsed[index],
-                    kind: 'reply',
-                    idempotencyKey: deliveryIdFor(index),
-                    content: requested.content,
-                    fallback: requested.fallback,
-                  }),
-                  'utf8',
-                ) > 196_608
-              ) throw new Error('INVALID_CHANNEL_PAYLOAD')
-              const requirements = richtextRequirements(requested.content)
-              if (requirements.userIds.length) {
-                await current.runtime.validateMentionContent(parsed[index]!, requested.content, caller)
-              }
-              const richtext = requirements.paragraphs
-                ? (await current.runtime.outboundCapabilitiesV2(parsed[index]!, caller)).richtext
-                : undefined
-              if (
-                (!capabilities.types.includes(requested.content.type)
-                  || requirements.paragraphs && richtext?.paragraphs !== true
-                  || requirements.userIds.length > 0 && richtext?.mentions !== true)
-                && !(requested.fallback.mode === 'text' && capabilities.types.includes('text'))
-              ) {
-                throw new Error('CHANNEL_OUTBOUND_TYPE_UNSUPPORTED')
-              }
-              if ('handle' in requested.content && capabilities.types.includes(requested.content.type)) {
-                const media = current.outbound!.store.descriptor(
-                  outboundCallerScope(outboundCaller),
-                  requested.content.handle,
-                  parsed[index]!,
-                )
-                if (!Number.isSafeInteger(capabilities.maxMediaBytes) || media.size > capabilities.maxMediaBytes) {
-                  throw new Error('MEDIA_SIZE_DENIED')
+            await preflightOutboundRequests({
+              runtime: current.runtime,
+              outbound: current.outbound!,
+              caller,
+              outboundCaller,
+              targets: parsed,
+              contents,
+              deliveryId: deliveryIdFor,
+              prior: index => current.runtime.deliverySnapshot(deliveryIdFor(index), caller) !== undefined,
+              assertGeneration: () => {
+                if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+                  throw new Error('CHANNEL_GENERATION_CHANGED')
                 }
-              }
-              if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
-                throw new Error('CHANNEL_GENERATION_CHANGED')
-              }
-            }
+              },
+            })
           }
           const pendingIds = new Set(
             Object.values(this.consumer?.profileLogicalOwner().store.snapshot().jobs ?? {})
