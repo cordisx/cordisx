@@ -6,6 +6,14 @@ import type { ChannelHistoricalResourceResultV1 } from '@cordisx/protocol/channe
 import { ChannelInboundResources } from './channel-inbound-resources.js'
 import { feishuHistoricalResourceDescriptors } from './feishu-historical-resource-descriptors.js'
 
+async function historicalResourceSdkRead<Result>(operation: () => Promise<Result>): Promise<Result | undefined> {
+  try {
+    return await operation()
+  } catch {
+    return undefined
+  }
+}
+
 export class ChannelHistoricalResources {
   private readonly owner = randomUUID()
   private readonly resources = new ChannelInboundResources()
@@ -45,8 +53,11 @@ export class ChannelHistoricalResources {
     this.active.set(client, (this.active.get(client) ?? 0) + 1)
     let timer: ReturnType<typeof setTimeout> | undefined
     const operation = (async () => {
-      const response = await client.im.v1.message.get({ path: { message_id: messageId } })
+      const response = await historicalResourceSdkRead(() =>
+        client.im.v1.message.get({ path: { message_id: messageId } })
+      )
       check()
+      if (!response) return { status: 'unavailable' as const, code: 'HISTORICAL_RESOURCE_READ_FAILED' }
       if (response.code !== 0) throw new Error('HISTORICAL_RESOURCE_READ_FAILED')
       if (response.data?.items?.length !== 1) throw new Error('HISTORICAL_RESOURCE_INVALID_MESSAGE')
       const item = response.data.items[0]
@@ -70,10 +81,16 @@ export class ChannelHistoricalResources {
         const cached = await this.resources.inspect(owned, key)
         if (cached.state !== 'ready') {
           check()
-          const resource = await client.im.v1.messageResource.get({
-            path: { message_id: messageId, file_key: descriptor.fileKey },
-            params: { type: descriptor.type === 'image' ? 'image' : 'file' },
-          })
+          const resource = await historicalResourceSdkRead(() =>
+            client.im.v1.messageResource.get({
+              path: { message_id: messageId, file_key: descriptor.fileKey },
+              params: { type: descriptor.type === 'image' ? 'image' : 'file' },
+            })
+          )
+          if (!resource) {
+            check()
+            return { status: 'unavailable' as const, code: 'HISTORICAL_RESOURCE_READ_FAILED' }
+          }
           const stream = resource.getReadableStream()
           download = stream
           try {
