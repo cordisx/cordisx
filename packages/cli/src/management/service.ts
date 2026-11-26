@@ -17,6 +17,7 @@ import {
   allowedDecisionV2,
   allowedDecisionV4,
   impactToken,
+  LifecycleFailure,
   type PluginLifecycleRuntime,
   type PluginRuntimeMutation,
 } from '../launcher/plugin-lifecycle-model.js'
@@ -26,6 +27,7 @@ import { inspectMarketplaceArtifactPackage } from '../launcher/marketplace-artif
 import { createPluginManagementCatalog } from './catalog.js'
 import {
   type PluginManagementCatalogDetail,
+  type PluginManagementCatalogLookup,
   type PluginManagementCatalogQuery,
   type PluginManagementCatalogSnapshot,
   type PluginManagementCatalogSummary,
@@ -64,7 +66,7 @@ export interface PluginManagementService {
   query(): Promise<PluginManagementSnapshot>
   refreshCatalog(sourceUrl?: string): Promise<PluginManagementCatalogSnapshot>
   queryCatalog(query?: PluginManagementCatalogQuery): Promise<readonly PluginManagementCatalogSummary[]>
-  pluginInfo(query: { readonly pluginId: string; readonly sourceUrl?: string; readonly version?: string }): Promise<
+  pluginInfo(query: PluginManagementCatalogLookup): Promise<
     PluginManagementCatalogDetail | undefined
   >
   plan(request: PluginManagementRequest): Promise<PluginManagementResult>
@@ -90,6 +92,15 @@ function configRequest(request: PluginManagementRequest): request is PluginManag
 }
 
 type PluginManagementPlanIntent = Exclude<PluginManagementPluginRequest, { readonly kind: 'plugin-execute-plan' }>
+
+function matchesMarketplaceSelection(
+  request: Pick<PluginManagementCatalogLookup, 'expectedCanonicalSource' | 'expectedArtifactIntegrity'>,
+  plugin: PluginManagementCatalogDetail,
+): boolean {
+  return (request.expectedCanonicalSource === undefined || request.expectedCanonicalSource === plugin.canonicalSource)
+    && (request.expectedArtifactIntegrity === undefined
+      || request.expectedArtifactIntegrity === plugin.artifact?.integrity)
+}
 
 function lifecycleOperation(
   request: PluginManagementPlanIntent,
@@ -312,13 +323,15 @@ export async function openPluginManagementService(
   const lifecycleRequest = async (
     request: PluginManagementPlanIntent,
     confirmedImpactToken?: string,
+    selectedPlugin?: PluginManagementCatalogDetail,
   ): Promise<CordisXPluginLifecycleResultV1> => {
     const lifecycle = await coordinator()
     const active = await lifecycle.store.loadActive()
     const requestId = `management-${randomUUID()}`
     if (request.kind === 'plugin-plan-marketplace') {
-      const plugin = await catalog.pluginInfo(request)
+      const plugin = selectedPlugin ?? await catalog.pluginInfo(request)
       if (plugin === undefined) throw new Error('Marketplace plugin was not found.')
+      if (!matchesMarketplaceSelection(request, plugin)) throw new Error('Marketplace selection changed.')
       if (plugin.artifact === undefined) throw new Error('Marketplace plugin has no installable artifact.')
       if (plugin.schemaVersion === 1 || plugin.schemaVersion === 2) {
         throw new Error('Marketplace plugin schema does not support installable artifacts.')
@@ -428,7 +441,17 @@ export async function openPluginManagementService(
       }
     }
     if (request.kind === 'plugin-plan-marketplace') {
-      const plugin = await catalog.pluginInfo(request)
+      let plugin: PluginManagementCatalogDetail | undefined
+      try {
+        plugin = await catalog.pluginInfo(request)
+      } catch {
+        return {
+          status: 'rejected',
+          request,
+          snapshot: await query(),
+          error: { code: 'catalog-unavailable', message: 'The selected Marketplace source is unavailable.' },
+        }
+      }
       if (plugin === undefined) {
         return {
           status: 'rejected',
@@ -443,6 +466,17 @@ export async function openPluginManagementService(
           request,
           snapshot: await query(),
           error: { code: 'artifact-unavailable', message: 'Marketplace plugin has no installable artifact.' },
+        }
+      }
+      if (!matchesMarketplaceSelection(request, plugin)) {
+        return {
+          status: 'rejected',
+          request,
+          snapshot: await query(),
+          error: {
+            code: 'catalog-selection-changed',
+            message: 'The Marketplace selection changed. Refresh and retry.',
+          },
         }
       }
       const snapshot = await query()
@@ -560,8 +594,47 @@ export async function openPluginManagementService(
         error: { code: 'stale-revision', message: 'Plugin activation changed after planning.' },
       }
     }
+    let selectedPlugin: PluginManagementCatalogDetail | undefined
+    if (planned.request.kind === 'plugin-plan-marketplace') {
+      try {
+        selectedPlugin = await catalog.pluginInfo(planned.request)
+      } catch {
+        return {
+          status: 'rejected',
+          request: planned.request,
+          snapshot: before,
+          error: { code: 'catalog-unavailable', message: 'The selected Marketplace source is unavailable.' },
+        }
+      }
+      if (!selectedPlugin || !matchesMarketplaceSelection(planned.request, selectedPlugin)) {
+        return {
+          status: 'rejected',
+          request: planned.request,
+          snapshot: before,
+          error: {
+            code: 'catalog-selection-changed',
+            message: 'The Marketplace selection changed. Refresh and retry.',
+          },
+        }
+      }
+    }
     if (options.lifecycle === undefined) await initialStore.bindRuntimeGeneration()
-    let lifecycle = await lifecycleRequest(planned.request, planned.impactToken)
+    let lifecycle: CordisXPluginLifecycleResultV1
+    try {
+      lifecycle = await lifecycleRequest(planned.request, planned.impactToken, selectedPlugin)
+    } catch (error) {
+      // Marketplace inspection only stages a candidate. No activation has been dispatched yet.
+      if (planned.request.kind !== 'plugin-plan-marketplace') throw error
+      return {
+        status: 'rejected',
+        request: planned.request,
+        snapshot: await query(),
+        error: {
+          code: 'artifact-inspection-failed',
+          message: 'The plugin artifact could not be downloaded or verified.',
+        },
+      }
+    }
     if (lifecycle.outcome === 'planned' && lifecycle.candidateId !== undefined) {
       const permission = await enrichPermissionPlan(planned.request, lifecycle)
       if (permission !== undefined) {
@@ -579,56 +652,73 @@ export async function openPluginManagementService(
         }
         const active = await (await coordinator()).store.loadActive()
         const requestId = `management-apply-${randomUUID()}`
-        if (permission.schemaVersion === 7) {
-          if (permission.declarations.some(item => item.required && item.policy === 'deny-persistent')) {
+        try {
+          if (permission.schemaVersion === 7) {
+            if (permission.declarations.some(item => item.required && item.policy === 'deny-persistent')) {
+              return {
+                status: 'rejected',
+                request: planned.request,
+                snapshot: await query(),
+                error: { code: 'permission-denied', message: 'A required plugin capability was denied.' },
+              }
+            }
+            lifecycle = await (await coordinator()).applyPermissionReviewV7({
+              requestId,
+              profileId: options.profileId,
+              runtimeGeneration,
+              expectedRevision: active.revision,
+              decision: noDeferredPermissionDecision(permission),
+            })
+          } else if (permission.schemaVersion === 4) {
+            lifecycle = await (await coordinator()).applyPermissionReviewV4({
+              requestId,
+              profileId: options.profileId,
+              runtimeGeneration,
+              expectedRevision: active.revision,
+              decision: allowedDecisionV4(permission),
+            })
+          } else if (permission.schemaVersion === 2) {
+            lifecycle = await (await coordinator()).applyPermissionReviewV2({
+              requestId,
+              profileId: options.profileId,
+              runtimeGeneration,
+              expectedRevision: active.revision,
+              decision: persistedDecisionV2(permission),
+            })
+          } else {
+            const decision = persistedDecisionV1(permission)
+            const operation: CordisXPluginLifecycleOperationV1 = lifecycle.operation === 'enable'
+              ? { kind: 'enable', pluginId: permission.identity.pluginId, authorizationDecision: decision }
+              : {
+                kind: lifecycle.operation as 'install' | 'update',
+                candidateId: lifecycle.candidateId,
+                authorizationDecision: decision,
+              }
+            lifecycle = await (await coordinator()).handle({
+              $schema: CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1,
+              schemaVersion: 1,
+              requestId,
+              profileId: options.profileId,
+              expectedRevision: active.revision,
+              runtimeGeneration,
+              operation,
+            })
+          }
+        } catch (error) {
+          // These lifecycle failures are raised before activation or after a
+          // definite rejection. Unknown/rollback failures must still escape.
+          if (
+            error instanceof LifecycleFailure && (error.outcome === 'rejected' || error.outcome === 'conflict')
+            && ['operation-unavailable', 'permission-denied', 'stale-revision', 'stale-generation'].includes(error.code)
+          ) {
             return {
-              status: 'rejected',
+              status: error.outcome === 'conflict' ? 'conflict' : 'rejected',
               request: planned.request,
               snapshot: await query(),
-              error: { code: 'permission-denied', message: 'A required plugin capability was denied.' },
+              error: { code: error.code, message: error.message },
             }
           }
-          lifecycle = await (await coordinator()).applyPermissionReviewV7({
-            requestId,
-            profileId: options.profileId,
-            runtimeGeneration,
-            expectedRevision: active.revision,
-            decision: noDeferredPermissionDecision(permission),
-          })
-        } else if (permission.schemaVersion === 4) {
-          lifecycle = await (await coordinator()).applyPermissionReviewV4({
-            requestId,
-            profileId: options.profileId,
-            runtimeGeneration,
-            expectedRevision: active.revision,
-            decision: allowedDecisionV4(permission),
-          })
-        } else if (permission.schemaVersion === 2) {
-          lifecycle = await (await coordinator()).applyPermissionReviewV2({
-            requestId,
-            profileId: options.profileId,
-            runtimeGeneration,
-            expectedRevision: active.revision,
-            decision: persistedDecisionV2(permission),
-          })
-        } else {
-          const decision = persistedDecisionV1(permission)
-          const operation: CordisXPluginLifecycleOperationV1 = lifecycle.operation === 'enable'
-            ? { kind: 'enable', pluginId: permission.identity.pluginId, authorizationDecision: decision }
-            : {
-              kind: lifecycle.operation as 'install' | 'update',
-              candidateId: lifecycle.candidateId,
-              authorizationDecision: decision,
-            }
-          lifecycle = await (await coordinator()).handle({
-            $schema: CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1,
-            schemaVersion: 1,
-            requestId,
-            profileId: options.profileId,
-            expectedRevision: active.revision,
-            runtimeGeneration,
-            operation,
-          })
+          throw error
         }
       }
     }
@@ -641,7 +731,10 @@ export async function openPluginManagementService(
     query,
     refreshCatalog: catalog.refresh,
     queryCatalog: catalog.query,
-    pluginInfo: catalog.pluginInfo,
+    async pluginInfo(query) {
+      const plugin = await catalog.pluginInfo(query)
+      return plugin && matchesMarketplaceSelection(query, plugin) ? plugin : undefined
+    },
     plan,
     execute,
     discardExecutionPlan(token) {

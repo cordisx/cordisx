@@ -452,6 +452,13 @@ export const createRuntimeCandidateController = (
     config: descriptor?.value ?? {},
     revision: descriptor?.revision ?? 0,
     ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
+    // A projected lifecycle graph has the same owner provenance as an initial
+    // standalone graph, so its Manager UI can request the normal scoped review.
+    ...(runtimeScope.metadata()!.hostKind === 'standalone' && (replacesTarget
+        ? mutation.package !== undefined && graphModule !== undefined
+        : existing!.item.standaloneInstalledGraph === true)
+      ? { standaloneInstalledGraph: true as const }
+      : {}),
     package: {
       version: activation.version,
       digest: activation.digest,

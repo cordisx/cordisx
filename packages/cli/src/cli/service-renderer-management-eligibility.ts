@@ -1,6 +1,5 @@
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import { loadServiceRendererPackage } from './service-renderer-projection.js'
 import type { ServiceRendererSnapshot } from './service-renderer-bootstrap-state.js'
 
@@ -24,8 +23,7 @@ export async function restrictedLifecycleIds(
       || plugin.package.moduleGeneration !== item.moduleGeneration || plugin.enabled !== item.enabled
       || config === null || typeof config !== 'object' || Array.isArray(config)
       || Object.keys(config).length !== 0 && !configured.has(item.id)
-      || manifest?.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1
-      || manifest.capabilities.length !== 0
+      || manifest === undefined
     ) continue
     try {
       const staged = await loadServiceRendererPackage(homeDir, item)

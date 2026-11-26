@@ -11,7 +11,12 @@ import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
-import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
+import {
+  entityInstallationId,
+  entityPluginGeneration,
+  issueOwnerDocumentPrincipalToken,
+  type OwnerDocumentPrincipalBinding,
+} from './owner-document-rpc.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
@@ -63,6 +68,8 @@ export interface BuildRendererBundleOptions {
   /** Host-validated declarative scenarios emitted only by the explicit Playground launcher. */
   readonly playgroundSessionScenarios?: PlaygroundSessionScenarioCatalogV1
   readonly ownerDocumentAuthority?: { readonly secret: string; readonly profileId: string; readonly generation: string }
+  /** Per-renderer opaque grants issued by the standalone service owner. */
+  readonly standaloneOwnerDocumentBindings?: readonly OwnerDocumentPrincipalBinding[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -116,6 +123,11 @@ async function assertStandaloneOwner(
   options: BuildRendererBundleOptions,
 ): Promise<boolean> {
   const owner = options.standaloneOwner
+  if (
+    options.standaloneOwnerDocumentBindings !== undefined
+    && (options.managerPresentationMode !== 'standalone' || owner === undefined
+      || options.ownerDocumentAuthority !== undefined)
+  ) throw new Error('Standalone document bindings require an owner')
   if (
     options.standaloneDesktopPackageConfig !== undefined
     && (options.managerPresentationMode !== 'standalone' || options.playground === true || owner === undefined)
@@ -515,7 +527,7 @@ export async function buildRendererCompositionSource(
   const nativeSessionBridgeToken = options.ownerDocumentAuthority === undefined
     ? undefined
     : issueNativeSessionHostToken(options.ownerDocumentAuthority)
-  const ownerDocumentBindings = options.ownerDocumentAuthority === undefined
+  const ownerDocumentBindings = options.standaloneOwnerDocumentBindings ?? (options.ownerDocumentAuthority === undefined
     ? undefined
     : enabled.map((plugin, index) => {
       const source = plugin.source ?? pathToFileURL(plugin.entry).href
@@ -535,7 +547,7 @@ export async function buildRendererCompositionSource(
           identity: { source, pluginId: plugin.id },
         }),
       }
-    })
+    }))
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
   // A service declaration is insufficient. Bind only the active launcher provider
   // to the exact renderer artifact selected by this assembly.

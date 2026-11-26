@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CORDISX_OWNER_DOCUMENT_SERVICE_V1 } from '../packages/cli/src/durable-document-contracts.js'
 import { OwnerDocumentStore } from '../packages/cli/src/launcher/owner-document-store.js'
@@ -288,5 +288,32 @@ describe('owner document renderer client', () => {
     a()
     b()
     broker.dispose()
+  })
+
+  it('bounds standalone document polling while still loading immediately', async () => {
+    vi.useFakeTimers()
+    let requests = 0
+    globalThis.__cordisxOwnerDocumentRequestV1 = payload => {
+      requests++
+      const request = JSON.parse(payload) as { requestId: string }
+      queueMicrotask(() =>
+        globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: true,
+          value: { status: 'missing', revision: 0 },
+        }))
+      )
+    }
+    const bridge = new BrowserOwnerDocumentBridge(1_000)
+    try {
+      bridge.watch('a'.repeat(64), 'rooms', () => undefined, () => true)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(requests).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requests).toBe(2)
+    } finally {
+      bridge.dispose()
+      vi.useRealTimers()
+    }
   })
 })

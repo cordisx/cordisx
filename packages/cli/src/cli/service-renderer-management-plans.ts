@@ -1,10 +1,21 @@
 import { randomUUID } from 'node:crypto'
 import type { PluginManagementRequest } from '../management/contracts.js'
 
-export type RestrictedLifecycleIntent = Extract<
+type RestrictedInstalledIntent = Extract<
   PluginManagementRequest,
   { readonly kind: 'plugin-enable' | 'plugin-disable' | 'plugin-uninstall' }
 >
+
+export type RestrictedMarketplaceIntent =
+  & Extract<PluginManagementRequest, { readonly kind: 'plugin-plan-marketplace' }>
+  & {
+    readonly sourceUrl: string
+    readonly version: string
+    readonly expectedCanonicalSource: string
+    readonly expectedArtifactIntegrity: string
+  }
+
+export type RestrictedLifecycleIntent = RestrictedInstalledIntent | RestrictedMarketplaceIntent
 
 export interface RestrictedLifecyclePlan {
   readonly intent: RestrictedLifecycleIntent
@@ -84,16 +95,40 @@ export class ServiceRendererManagementPlans {
   }
 }
 
-/** Accept only exact, owner-selected package operations, never a source or candidate. */
+/** A Marketplace selection contains catalog identity, never an arbitrary artifact or candidate. */
 export function restrictedLifecycleIntent(value: unknown): RestrictedLifecycleIntent | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>
+  if (item.kind === 'plugin-plan-marketplace') {
+    const keys = ['kind', 'pluginId', 'sourceUrl', 'version', 'expectedCanonicalSource', 'expectedArtifactIntegrity']
+    if (
+      Object.keys(item).length !== keys.length || Object.keys(item).some(key => !keys.includes(key))
+      || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
+      || typeof item.sourceUrl !== 'string' || item.sourceUrl.length > 2048
+      || typeof item.version !== 'string' || !/^[^\u0000-\u0020\u007f]{1,128}$/u.test(item.version)
+      || typeof item.expectedCanonicalSource !== 'string' || item.expectedCanonicalSource.length > 2048
+      || typeof item.expectedArtifactIntegrity !== 'string'
+      || !/^sha256:[a-f0-9]{64}$/u.test(item.expectedArtifactIntegrity)
+    ) return undefined
+    try {
+      const source = new URL(item.sourceUrl)
+      const canonical = new URL(item.expectedCanonicalSource)
+      if (
+        !['http:', 'https:'].includes(source.protocol) || source.username || source.password || source.hash
+        || canonical.protocol !== 'https:' || canonical.username || canonical.password || canonical.search
+        || canonical.hash
+      ) return undefined
+    } catch {
+      return undefined
+    }
+    return item as unknown as RestrictedMarketplaceIntent
+  }
   if (
     Object.keys(item).length !== 2 || Object.keys(item).some(key => !['kind', 'pluginId'].includes(key))
     || !['plugin-enable', 'plugin-disable', 'plugin-uninstall'].includes(String(item.kind))
     || typeof item.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(item.pluginId)
   ) return undefined
-  return { kind: item.kind, pluginId: item.pluginId } as RestrictedLifecycleIntent
+  return { kind: item.kind, pluginId: item.pluginId } as RestrictedInstalledIntent
 }
 
 export function restrictedExecutionToken(value: unknown): string | undefined {

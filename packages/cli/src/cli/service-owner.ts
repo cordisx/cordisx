@@ -395,6 +395,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           rendererParticipants,
           rendererLifecycle,
           rendererBootstrap: rendererBootstrap.channel(),
+          ...(rendererBootstrap.documentChannel() === undefined
+            ? {}
+            : { rendererDocuments: rendererBootstrap.documentChannel()! }),
           rendererManagementAuthority: rendererBootstrap,
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,

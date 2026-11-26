@@ -4,6 +4,45 @@ import { installIndependentHostBindings } from '../packages/cli/src/independent-
 type TestWindow = Window & Record<string, any>
 const token = 'a'.repeat(64)
 
+it('loads documents before admission but waits to write, and rejects oversized writes before dispatch', async () => {
+  let admit!: (value: boolean) => void
+  const admission = new Promise<boolean>(resolve => admit = resolve)
+  const receive = vi.fn()
+  const lost = vi.fn()
+  const fetch = vi.fn(async (_url: string, options: RequestInit) => {
+    const body = JSON.parse(String(options.body))
+    const request = JSON.parse(body.payload)
+    return new Response(JSON.stringify({ requestId: request.requestId, ok: true, value: 'available' }))
+  })
+  const target = { fetch, __cordisxOwnerDocumentReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['owner-document'],
+    rendererAdmission: admission,
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxOwnerDocumentRequestV1(JSON.stringify({ requestId: 'read', operation: 'load' }))
+    target.__cordisxOwnerDocumentRequestV1(JSON.stringify({ requestId: 'write', operation: 'replace' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(JSON.parse(JSON.parse(String(fetch.mock.calls[0]![1].body)).payload).operation).toBe('load')
+    admit(true)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(() =>
+      target.__cordisxOwnerDocumentRequestV1(JSON.stringify({
+        requestId: 'large',
+        operation: 'replace',
+        value: '"'.repeat(70_000),
+      }))
+    ).toThrow('independent-host-request-too-large')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(lost).not.toHaveBeenCalled()
+  } finally {
+    dispose()
+  }
+})
+
 it('uses the transport id for a managed-service action with a separate domain id', async () => {
   const receive = vi.fn()
   const fetch = vi.fn(async () =>

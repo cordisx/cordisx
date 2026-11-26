@@ -173,7 +173,7 @@ export async function start(
   let standaloneDesktopPackageConfigBridge: ReturnType<typeof createStandaloneDesktopPackageConfigBridge>
   const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined
     ? undefined
-    : new BrowserOwnerDocumentBridge()
+    : new BrowserOwnerDocumentBridge(metadata.hostKind === 'standalone' ? 1_000 : undefined)
   const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
   const { bindings: entityPrincipalBindings, register: registerEntityBindings } = createEntityPrincipalBindings(
     metadata.ownerDocumentBindings,

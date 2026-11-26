@@ -128,7 +128,10 @@ export class BrowserOwnerDocumentBridge {
       )}
   }
 
-  constructor() {
+  constructor(private readonly pollIntervalMs = POLL_INTERVAL_MS) {
+    if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < POLL_INTERVAL_MS || pollIntervalMs > 5_000) {
+      throw new Error('owner document polling interval is invalid')
+    }
     globalThis[OWNER_DOCUMENT_RECEIVER] = this.#receive
   }
 
@@ -218,7 +221,7 @@ export class BrowserOwnerDocumentBridge {
       }
       watch.timer = setInterval(() => {
         void this.#poll(watch!)
-      }, POLL_INTERVAL_MS)
+      }, this.pollIntervalMs)
       this.#watches.set(key, watch)
       void this.#poll(watch)
     }

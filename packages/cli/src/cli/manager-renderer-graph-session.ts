@@ -7,6 +7,7 @@ import { isStandaloneConfigOperations } from '../renderer/standalone-desktop-pac
 import { parseStandalonePolicyHandoff } from '../independent-manager/standalone-policy-handoff.js'
 import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import { parseManagedServiceAccountAdoption } from '../managed-service-account-adoption.js'
+import { validManagerDocumentBindings } from './manager-document-write.js'
 import {
   createSessionPluginGraphProjection,
   type ProjectedGraphResponse,
@@ -56,6 +57,7 @@ const stageKeys = new Set([
   'affectedPluginIds',
   'package',
   'authorizationDecision',
+  'ownerDocumentBindings',
   'privateGraphs',
 ])
 
@@ -320,6 +322,10 @@ export function createManagerRendererGraphSession(input: {
             )
           ) throw invalid()
           const affected = payload.affectedPluginIds as string[]
+          if (
+            payload.ownerDocumentBindings !== undefined
+            && !validManagerDocumentBindings(payload.ownerDocumentBindings, affected, candidate.record.plugins)
+          ) throw invalid()
           const staged: Entry[] = []
           const byPlugin = new Map<string, Entry>()
           for (const raw of payload.privateGraphs) {

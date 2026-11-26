@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 } from '../packages/cli/src/usage-permissions.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
   inspectServiceRendererInitialPackage,
@@ -51,6 +52,61 @@ it('admits the narrow initial managed slice while retaining the dynamic lifecycl
   vi.mocked(loadStagedPluginPackage).mockResolvedValue(value as never)
   expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(value)
   await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+})
+
+it('admits only the supported service-free visual capability slice', async () => {
+  const value = staged()
+  const visual = {
+    ...value,
+    manifest: {
+      ...value.manifest,
+      runtimeManifest: {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+        schemaVersion: 11,
+        id: item.id,
+        name: 'Fixture',
+        services: [],
+        capabilities: [
+          {
+            name: 'ui.extension-points.render',
+            required: true,
+            scope: { extensionPoints: ['composer.frame.overlay'] },
+          },
+          {
+            name: 'ui.extension-points.interact',
+            required: false,
+            scope: { extensionPoints: ['composer.frame.overlay'], events: ['drag'] },
+          },
+          { name: 'usage.read', required: false, scope: { profile: 'current' } },
+        ],
+      },
+    },
+    serviceModules: [],
+    managedServiceResources: [],
+  }
+  vi.mocked(loadStagedPluginPackage).mockResolvedValue(visual as never)
+  expect(await loadServiceRendererPackage('/fixture', item)).toBe(visual)
+  expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(visual)
+  for (
+    const capability of [
+      { name: 'usage.read', required: true, scope: { profile: 'current' } },
+      {
+        name: 'ui.extension-points.interact',
+        required: true,
+        scope: { extensionPoints: ['composer.frame.overlay'], events: ['drag'] },
+      },
+      { name: 'models.read', required: false, scope: {} },
+    ]
+  ) {
+    vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce({
+      ...visual,
+      manifest: {
+        ...visual.manifest,
+        runtimeManifest: { ...visual.manifest.runtimeManifest, capabilities: [capability] },
+      },
+    } as never)
+    await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+  }
 })
 
 it('classifies only owner-matched service-free packages as safe to omit', async () => {

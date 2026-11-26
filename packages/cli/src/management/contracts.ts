@@ -52,6 +52,14 @@ export interface PluginManagementCatalogQuery {
   readonly includeHidden?: boolean
 }
 
+export interface PluginManagementCatalogLookup {
+  readonly pluginId: string
+  readonly sourceUrl?: string
+  readonly version?: string
+  readonly expectedCanonicalSource?: string
+  readonly expectedArtifactIntegrity?: string
+}
+
 export interface PluginManagementCatalogSummary {
   readonly identity: PluginManagementCatalogIdentity
   readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
@@ -137,6 +145,9 @@ export type PluginManagementPluginRequest =
     readonly pluginId: string
     readonly sourceUrl?: string
     readonly version?: string
+    /** Bind an interactive selection to the catalog entry the user saw. */
+    readonly expectedCanonicalSource?: string
+    readonly expectedArtifactIntegrity?: string
   }
   | { readonly kind: 'plugin-enable'; readonly pluginId: string }
   | { readonly kind: 'plugin-disable'; readonly pluginId: string }

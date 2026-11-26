@@ -2,6 +2,7 @@ import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } f
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { ManagerRendererCommandMethod, OwnerCommandProjection } from './manager-renderer-peer.js'
+import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
 type Candidate = {
@@ -29,6 +30,7 @@ const stageKeys = new Set([
   'affectedPluginIds',
   'package',
   'authorizationDecision',
+  'ownerDocumentBindings',
   'privateGraphs',
 ])
 
@@ -208,6 +210,32 @@ export class ServiceRendererLifecycleProjection {
       return resolved.digest === target.digest
         && (target.canonicalSource === undefined || resolved.source === target.canonicalSource)
     }
+    if (payload.ownerDocumentBindings !== undefined) {
+      const bindings = payload.ownerDocumentBindings
+      const enabled = candidate.affected.filter(id =>
+        candidate.owner.plugins.some(item => item.id === id && item.enabled)
+      )
+      if (!Array.isArray(bindings) || bindings.length !== enabled.length) {
+        throw new Error('renderer-identity-lifecycle-unavailable')
+      }
+      const seen = new Set<string>()
+      for (const value of bindings) {
+        const binding = record(value)
+        const item = candidate.owner.plugins.find(plugin => plugin.id === binding.pluginId)
+        const projectedItem = candidate.renderer.plugins.find(plugin => plugin.id === binding.pluginId)
+        if (
+          Object.keys(binding).length !== 4
+          || Object.keys(binding).some(key => !['source', 'pluginId', 'moduleGeneration', 'token'].includes(key))
+          || typeof binding.pluginId !== 'string' || seen.has(binding.pluginId) || !enabled.includes(binding.pluginId)
+          || typeof binding.source !== 'string' || !aliasPattern.test(binding.source)
+          || typeof binding.token !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.token)
+          || !item || binding.moduleGeneration !== item.moduleGeneration
+          || projectedItem?.canonicalSource !== undefined && projectedItem.canonicalSource !== binding.source
+          || this.input.resolve(binding.source, binding.pluginId).digest !== item.digest
+        ) throw new Error('renderer-identity-lifecycle-unavailable')
+        seen.add(binding.pluginId)
+      }
+    }
     if (payload.package !== undefined) {
       const pkg = record(payload.package)
       const manifest = record(pkg.manifest)
@@ -216,8 +244,9 @@ export class ServiceRendererLifecycleProjection {
         Object.keys(pkg).some(key => !['manifest', 'digest', 'artifactIntegrity', 'identitySource'].includes(key))
         || !aliasMatches(pkg.identitySource) || pkg.digest !== target.digest || manifest.id !== target.id
         || manifest.version !== target.version
-        || runtime.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || runtime.schemaVersion !== 1
-        || runtime.id !== target.id || !Array.isArray(runtime.capabilities) || runtime.capabilities.length !== 0
+        || !(runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
+            && runtime.id === target.id && Array.isArray(runtime.capabilities) && runtime.capabilities.length === 0
+          || isServiceRendererVisualManifest(runtime, target.id))
         || (target.canonicalSource === undefined
           ? manifest.canonicalSource !== undefined
           : manifest.canonicalSource !== pkg.identitySource)

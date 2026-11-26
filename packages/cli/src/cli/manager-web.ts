@@ -8,6 +8,8 @@ import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { createManagerRendererGraphSession } from './manager-renderer-graph-session.js'
 import { createManagerRendererBootstrap } from './manager-renderer-bootstrap.js'
 import { sendManagerBundle } from './manager-bundle-encoding.js'
+import { managerDocumentWrite } from './manager-document-write.js'
+import { MANAGER_RENDERER_BINDING_WIRE_BYTES } from '../independent-manager/owner-document-limits.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
@@ -79,6 +81,7 @@ const rendererChannelAllowlist = new Set([
   'service-config',
   'marketplace',
   'permission-policy',
+  'owner-document',
 ])
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -646,13 +649,18 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (
           Object.keys(input).length !== 2 || typeof input.channel !== 'string'
           || !session.rendererChannels.includes(input.channel) || typeof input.payload !== 'string'
-          || Buffer.byteLength(JSON.stringify(input)) > 200 * 1024
+          || Buffer.byteLength(JSON.stringify(input)) > MANAGER_RENDERER_BINDING_WIRE_BYTES
           || session.rendererOpen === undefined || options.rendererGateway === undefined
         ) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
         const handle = await session.rendererOpen
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
+        if (input.channel === 'owner-document') {
+          const write = managerDocumentWrite(input.payload)
+          if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+          rendererWrite = write
+        }
         let accountToggle = false
         let consoleRequest: ReturnType<typeof parseManagerPublicConsoleRequest>
         if (input.channel === 'service-config') {

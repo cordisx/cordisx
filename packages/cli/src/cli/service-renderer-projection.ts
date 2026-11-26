@@ -13,6 +13,7 @@ import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } f
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap-state.js'
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
+import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 
 // The standalone Manager has no Platform provider bridge. Optional Platform
 // declarations may be present, but no corresponding owner policy is projected.
@@ -173,6 +174,12 @@ async function inspectRendererPackage(
   ) throw new Error('renderer-projection-plugin-unsupported')
   const legacy = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && manifest.schemaVersion === 1
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
+  // These plugins can register native visual seats, but the standalone
+  // Manager does not provide those seats or a usage provider. Their optional
+  // capabilities remain ungranted; Manager UI policies still use the owner
+  // identity projection and the normal permission bridge.
+  const visual = isServiceRendererVisualManifest(manifest, item.id) && staged.serviceModules.length === 0
+    && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 && manifest.schemaVersion === 16
@@ -185,10 +192,10 @@ async function inspectRendererPackage(
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
     )
-  const supported = (legacy || managed)
+  const supported = (legacy || managed || visual)
     && !(legacy
       ? manifest.capabilities.length !== 0
-      : manifest.capabilities.some(capability =>
+      : managed && manifest.capabilities.some(capability =>
         capability.name !== 'ui.extension-points.render'
         && (capability.required !== false || !unavailablePlatformCapabilities.has(capability.name))
       ))
@@ -201,9 +208,8 @@ async function inspectRendererPackage(
 }
 
 /**
- * First honest production slice: v1 packages without declared capabilities,
- * managed services or durable documents. Other plugins fail preflight until
- * their owner-issued per-renderer capabilities are implemented.
+ * Project only packages whose Manager capabilities have an owner-backed
+ * path. Other plugins fail preflight until that path is implemented.
  */
 export function createServiceRendererProjector(input: {
   readonly homeDir: string

@@ -1,4 +1,5 @@
 import { isRendererManagementRead } from '../management/renderer-operation-mode.js'
+import { MANAGER_DOCUMENT_REQUEST_BYTES, MANAGER_RENDERER_BINDING_WIRE_BYTES } from './owner-document-limits.js'
 
 /** Host-private channels. The owner must explicitly grant each one per renderer. */
 export const INDEPENDENT_HOST_CHANNELS = {
@@ -165,6 +166,11 @@ export function installIndependentHostBindings(input: {
       if (closed) throw new Error('independent-host-session-revoked')
       const id = requestId(payload, channel)
       const body = JSON.stringify({ channel, payload })
+      if (
+        channel === 'owner-document'
+        && (new TextEncoder().encode(payload).byteLength > MANAGER_DOCUMENT_REQUEST_BYTES
+          || new TextEncoder().encode(body).byteLength > MANAGER_RENDERER_BINDING_WIRE_BYTES)
+      ) throw new Error('independent-host-request-too-large')
       if (new TextEncoder().encode(body).byteLength > MAX_WIRE_BYTES) {
         throw new Error('independent-host-request-too-large')
       }
@@ -196,6 +202,7 @@ export function installIndependentHostBindings(input: {
           if (channel === 'native-catalog') return envelope.operation === 'read'
           if (channel === 'service-config') return envelope.operation === 'list'
           if (channel === 'marketplace') return true
+          if (channel === 'owner-document') return envelope.operation === 'load'
           if (channel === 'channel-actions') return (envelope as { action?: unknown }).action === 'snapshot'
           if (channel === 'managed-service-ui') {
             // Startup subscriptions are renderer-owned observations; the owner
@@ -229,6 +236,7 @@ export function installIndependentHostBindings(input: {
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
           || channel === 'native-catalog'
           || channel === 'permission-policy'
+          || channel === 'owner-document' && !request.readOnly
           || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')
             && !request.readOnly

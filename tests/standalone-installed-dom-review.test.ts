@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
 import { createStandaloneDomReviewModel } from '../packages/cli/src/renderer/standalone-dom-review-model.js'
+import { createRuntimeCandidateController } from '../packages/cli/src/renderer/runtime-authorization-mutations.js'
 import { bindStandaloneDomReview, StandaloneDomReview } from '../packages/cli/src/renderer/standalone-dom-review.js'
 import {
   MemoryPermissionPolicyStore,
@@ -108,6 +109,68 @@ function configuredFixture() {
   })
   return { ...f, item, model: createStandaloneDomReviewModel(f.scope as never)! }
 }
+
+it('makes a newly projected installed graph eligible for the same scoped review as a reloaded graph', () => {
+  const test = fixture(true)
+  const runtime = {
+    metadata: () => ({ hostKind: 'standalone' }),
+    activeController: () => () => undefined,
+    pluginConsole: () => ({ issue: () => ({}), generation: 'owner-1' }),
+    moduleGenerationOf: () => () => packageItem.moduleGeneration,
+    generationVisibility: () => ({ context: () => ({}), view: () => ({}) }),
+    ctx: { extend: () => ({}) },
+  }
+  const mutation = {
+    operation: 'install',
+    targetId: identity.id,
+    candidate: { plugins: [{ id: identity.id, enabled: true, ...packageItem }] },
+    package: {
+      identitySource: identity.source,
+      digest: packageItem.digest,
+      manifest: {
+        id: identity.id,
+        version: packageItem.version,
+        runtimeManifest: {
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+          schemaVersion: 4,
+          id: identity.id,
+          capabilities: [],
+          services: [],
+        },
+      },
+    },
+  }
+  try {
+    const { controller } = createRuntimeCandidateController(
+      runtime as never,
+      {} as never,
+      mutation as never,
+      identity.id,
+      undefined,
+      undefined,
+      { [identity.id]: { apply() {} } } as never,
+    )
+    const scope = {
+      ...test.scope,
+      activeController: () => () => controller,
+      activeControllers: () => () => [controller],
+    }
+    expect(createStandaloneDomReviewModel(scope as never)!.describe(identity, point)).toMatchObject({
+      version: packageItem.version,
+      persistentAvailable: true,
+    })
+    const unprojected = createRuntimeCandidateController(
+      runtime as never,
+      {} as never,
+      mutation as never,
+      identity.id,
+      { apply() {} } as never,
+    )
+    expect(unprojected.controller.item.standaloneInstalledGraph).toBeUndefined()
+  } finally {
+    test.broker.dispose()
+  }
+})
 
 it('reviews an installed graph only for this tab and never offers a persistent decision', async () => {
   const first = fixture()

@@ -372,9 +372,35 @@ it('applies a fixture-projected install through the real standalone renderer lif
       package: { manifest, digest, identitySource: 'file:///verified/renderer-demo.js' },
     }
     const effects = { mounted: 0, disposed: 0 }
+    let reasoningLease: {
+      snapshot(): { state: string; properties: unknown; commands: readonly unknown[]; events: readonly unknown[] }
+      invoke(command: string, args: Record<string, string>): Promise<{ outcome: string }>
+    } | undefined
     const module = {
-      apply(ctx: { effect(callback: () => () => Promise<void>, label: string): void }) {
+      inject: ['slots'],
+      apply(ctx: {
+        effect(callback: () => () => Promise<void>, label: string): void
+        slots: { register(options: unknown, item: unknown): { control?: typeof reasoningLease } }
+      }) {
         effects.mounted++
+        reasoningLease = ctx.slots.register({
+          name: 'composer.reasoning-intensity',
+          id: 'theme',
+          control: {
+            claimId: 'theme',
+            mode: 'replace',
+            priority: 10,
+            requestedBindings: {
+              properties: ['reasoningIntensity'],
+              commands: ['setReasoningIntensity'],
+              events: ['reasoningIntensityChanged'],
+            },
+          },
+        }, {
+          variant: 'imperium',
+          title: { key: 'title' },
+          stages: [{ label: { key: 'plastic' }, material: 'plastic' }, { label: { key: 'gold' }, material: 'gold' }],
+        }).control
         ctx.effect(() => async () => {
           cleanupStarted()
           await cleanupGate
@@ -391,6 +417,17 @@ it('applies a fixture-projected install through the real standalone renderer lif
       scope: { profileId: 'work', generation, rendererId: 'a'.repeat(64) },
       loader: loader as never,
     })
+    let stageFailure: unknown
+    const target = runtime as unknown as { stagePluginMutation: (...args: unknown[]) => Promise<unknown> }
+    const stage = target.stagePluginMutation.bind(target)
+    target.stagePluginMutation = async (...args) => {
+      try {
+        return await stage(...args)
+      } catch (error) {
+        stageFailure = error
+        throw error
+      }
+    }
     dispose = client.close
     const send = (sequence: number, method: string, payload: unknown) =>
       client.handle({
@@ -407,11 +444,14 @@ it('applies a fixture-projected install through the real standalone renderer lif
         expectedRegistryEpoch: 0,
       }),
     ).toMatchObject({ ok: true })
-    expect(await send(3, 'stage', { rendererId: 'a'.repeat(64), ...mutation })).toMatchObject({ ok: true })
+    const staged = await send(3, 'stage', { rendererId: 'a'.repeat(64), ...mutation })
+    expect(staged, String(stageFailure)).toMatchObject({ ok: true })
     expect(await send(4, 'publish', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
     expect(await send(5, 'complete', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
     expect(await send(6, 'finalize', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
     expect(runtime.snapshot().plugins.find(plugin => plugin.id === 'renderer-demo')).toMatchObject({ status: 'active' })
+    expect(reasoningLease?.snapshot()).toMatchObject({ state: 'denied', properties: {}, commands: [], events: [] })
+    expect(await reasoningLease?.invoke('setReasoningIntensity', { value: '3' })).toMatchObject({ outcome: 'rejected' })
     expect(effects).toEqual({ mounted: 1, disposed: 0 })
     const firstDisposal = runtime.dispose()
     await cleanupEntered

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ServiceRendererLifecycleProjection } from '../packages/cli/src/cli/service-renderer-lifecycle-projection.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 } from '../packages/cli/src/usage-permissions.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
@@ -83,7 +84,7 @@ function setup(first = '1', second = '2') {
     const command = projection.project('prepare', value)
     expect(command.receipt!(command.payload)).toEqual(value)
   }
-  const stage = () => {
+  const stage = (extra: Record<string, unknown> = {}) => {
     const value = {
       rendererId: 'seat',
       transactionId: 'change-1',
@@ -96,6 +97,7 @@ function setup(first = '1', second = '2') {
       previous: rendererPrevious,
       candidate: rendererCandidate,
       privateGraphs: [],
+      ...extra,
     }
     return projection.project('stage', value)
   }
@@ -118,6 +120,28 @@ function setup(first = '1', second = '2') {
     stop: () => live = false,
   }
 }
+
+it('accepts only owner-issued document grants for the exact candidate generation', () => {
+  const grant = { source: alias('2'), pluginId: 'extra', moduleGeneration: 'extra-1', token: 'c'.repeat(64) }
+  const valid = setup()
+  valid.offer()
+  valid.prepare()
+  expect(valid.stage({ ownerDocumentBindings: [grant] }).payload).toMatchObject({ ownerDocumentBindings: [grant] })
+  for (
+    const bad of [
+      { ...grant, source: 'https://example.test/extra' },
+      { ...grant, source: alias('1') },
+      { ...grant, moduleGeneration: 'old' },
+      { ...grant, token: 'short' },
+      { ...grant, extra: true },
+    ]
+  ) {
+    const rejected = setup()
+    rejected.offer()
+    rejected.prepare()
+    expect(() => rejected.stage({ ownerDocumentBindings: [bad] })).toThrow()
+  }
+})
 
 describe('owner-scoped lifecycle identity observations', () => {
   it('maps the confirmed stage, publication and cleanup back to the owner and advances the snapshot', () => {
@@ -343,5 +367,72 @@ describe('owner-scoped lifecycle identity observations', () => {
     ).toThrow('renderer-identity-lifecycle-unavailable')
     f.stop()
     expect(() => f.projection.project('prepare', {})).toThrow('renderer-identity-lifecycle-unavailable')
+  })
+
+  it('projects an owner-verified visual candidate without accepting other capabilities', () => {
+    const f = setup()
+    f.offer()
+    f.prepare()
+    const runtime = {
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+      schemaVersion: 11,
+      id: extra.id,
+      name: 'Visual fixture',
+      services: [],
+      capabilities: [
+        { name: 'ui.extension-points.render', required: true, scope: { extensionPoints: ['composer.frame.overlay'] } },
+        { name: 'usage.read', required: false, scope: { profile: 'current' } },
+      ],
+    }
+    const payload = {
+      rendererId: 'seat',
+      transactionId: 'change-1',
+      transactionEpoch: 'change-1:epoch',
+      expectedRegistryEpoch: 7,
+      afterRegistryEpoch: 8,
+      operation: 'install',
+      targetId: 'extra',
+      affectedPluginIds: ['extra'],
+      previous: f.rendererPrevious,
+      candidate: f.rendererCandidate,
+      privateGraphs: [],
+      package: {
+        digest: extra.digest,
+        identitySource: alias('2'),
+        manifest: { id: extra.id, version: extra.version, canonicalSource: alias('2'), runtimeManifest: runtime },
+      },
+      authorizationDecision: {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+        schemaVersion: 7,
+        origin: 'host-no-decision',
+        planId: `${candidate.runtimeGeneration}:${extra.id}`,
+        operation: 'install',
+        profileId: candidate.profileId,
+        identity: { pluginId: extra.id, source: alias('2') },
+        binding: {
+          operationId: `review:${'c'.repeat(64)}`,
+          runtimeGeneration: candidate.runtimeGeneration,
+          moduleGeneration: extra.moduleGeneration,
+          requestId: candidate.transactionId,
+        },
+        decisions: [],
+      },
+    }
+    const changed = (capabilities: unknown[]) => ({
+      ...payload,
+      package: {
+        ...payload.package,
+        manifest: { ...payload.package.manifest, runtimeManifest: { ...runtime, capabilities } },
+      },
+    })
+    expect(() =>
+      f.projection.project('stage', changed([{ name: 'usage.read', required: true, scope: { profile: 'current' } }]))
+    )
+      .toThrow('renderer-identity-lifecycle-unavailable')
+    expect(() => f.projection.project('stage', changed([{ name: 'models.read', required: false, scope: {} }])))
+      .toThrow('renderer-identity-lifecycle-unavailable')
+    const stage = f.projection.project('stage', payload)
+    expect(stage.receipt!(f.stagedReceipt)).toMatchObject({ observation: candidate })
   })
 })

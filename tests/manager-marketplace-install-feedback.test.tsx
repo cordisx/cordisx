@@ -6,6 +6,98 @@ import { installNotificationHost } from '../packages/cli/src/renderer/notificati
 import { managerModel, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
 import { buildDeferredPermissionPlan } from '../packages/cli/src/permission-deferral.js'
 
+it('installs the selected Marketplace artifact through the standalone owner and waits for its receipt', async () => {
+  const fixture = reactManagerFixture()
+  let disposeNotifications!: () => void
+  await act(async () => {
+    disposeNotifications = installNotificationHost(fixture.document, 'test')
+  })
+  const snapshot = managerSnapshot({
+    pluginLifecycle: { profileId: 'test', revision: 0, runtimeGeneration: 'test', operationsAvailable: false },
+  })
+  const management = {
+    profileId: 'test',
+    revision: 4,
+    activationRevision: 0,
+    rendererLifecycleAccess: 'session-scoped-v1',
+    runtime: { kind: 'active', runtimeGeneration: 'test', mode: 'service' },
+    plugins: [],
+  }
+  const plugin = {
+    id: 'example',
+    identity: 'example@1.0.0',
+    version: '1.0.0',
+    schemaVersion: 8,
+    source: 'https://example.test/plugin',
+    feedUrl: 'https://example.test/marketplace.json',
+    artifact: {
+      packageName: 'example',
+      downloadUrl: 'https://example.test/example.tgz',
+      integrity: `sha256:${'a'.repeat(64)}`,
+    },
+  } as MarketplaceCatalogPlugin
+  const executionRequest = { kind: 'plugin-execute-plan', executionToken: 'session-token' }
+  const planLifecycle = vi.fn(async request => ({ status: 'planned', request, snapshot: management, executionRequest }))
+  let finish!: (value: unknown) => void
+  const executeLifecycle = vi.fn(() =>
+    new Promise(resolve => {
+      finish = resolve
+    })
+  )
+  const binding = { planLifecycle, executeLifecycle }
+  let installer!: ReturnType<typeof useMarketplaceInstaller>
+  function Installer() {
+    installer = useMarketplaceInstaller(
+      managerModel(snapshot),
+      snapshot,
+      { failed: 'Failed', succeeded: 'Installed' },
+      {
+        document: fixture.document,
+        standalone: { binding, snapshot: management },
+      } as any,
+    )
+    return null
+  }
+  try {
+    await fixture.render(<Installer />)
+    expect(installer.available).toBe(true)
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = installer.run(plugin, 'Example')
+      await Promise.resolve()
+    })
+    expect(planLifecycle).toHaveBeenCalledExactlyOnceWith({
+      kind: 'plugin-plan-marketplace',
+      pluginId: plugin.id,
+      sourceUrl: plugin.feedUrl,
+      version: plugin.version,
+      expectedCanonicalSource: plugin.source,
+      expectedArtifactIntegrity: plugin.artifact!.integrity,
+    })
+    expect(executeLifecycle).toHaveBeenCalledExactlyOnceWith(executionRequest, 4)
+    expect((installer as any).cancellable).toBe(false)
+    await act(async () => {
+      installer.cancel()
+      finish({
+        status: 'applied',
+        request: planLifecycle.mock.calls[0]![0],
+        pendingActivation: false,
+        snapshot: {
+          ...management,
+          activationRevision: 1,
+          plugins: [{ id: plugin.id, version: plugin.version, enabled: true }],
+        },
+      })
+      await pending
+    })
+    expect(fixture.document.querySelector('[role="status"]')?.textContent).toContain('Installed')
+    expect(installer.installingIdentity).toBeUndefined()
+  } finally {
+    await act(async () => disposeNotifications())
+    await fixture.dispose()
+  }
+})
+
 it('installs an optional-only Marketplace candidate without opening permission review', async () => {
   const fixture = reactManagerFixture()
   const source = 'https://example.test/plugin'

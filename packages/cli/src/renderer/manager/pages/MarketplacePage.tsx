@@ -20,6 +20,7 @@ import { productLocale } from '../../ui-copy.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
 import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
 import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
+import { useMarketplaceInstalled } from '../model/use-marketplace-installed.js'
 
 const COPY = {
   'zh-CN': {
@@ -120,10 +121,7 @@ export function MarketplacePage(
       ),
     [pluginManagementSnapshot],
   )
-  const installed = useMemo(
-    () => new Map(snapshot.plugins.map(plugin => [`${plugin.source}\0${plugin.id}`, plugin])),
-    [snapshot.plugins],
-  )
+  const installed = useMarketplaceInstalled(catalog.plugins, snapshot, pluginManagement)
   const results = useMemo(
     () =>
       searchMarketplaceCatalog(catalog.plugins.filter(plugin => !hidden.has(`${plugin.feedUrl}\0${plugin.id}`)), {
@@ -195,7 +193,7 @@ export function MarketplacePage(
           const href = result.plugin.homepage ?? result.plugin.source
           const favorite = favorites.has(result.plugin.identity)
           const trustLabels = marketplaceTrustLabels(result.plugin, snapshot.localization.locale)
-          const installedPlugin = installed.get(`${result.plugin.source}\0${result.plugin.id}`)
+          const installedPlugin = installed.get(result.plugin.identity)
           const managedInstalled = installedPlugin !== undefined
             && installedPlugin.package !== undefined
             && installedPlugin.development === undefined
@@ -206,7 +204,7 @@ export function MarketplacePage(
           const anotherInstallRunning = installer.installingIdentity !== undefined && !installing
           const updateAvailable = installedVersion !== undefined && !exactVersionInstalled
           const primaryLabel = installing
-            ? copy.cancelInstall
+            ? installer.cancellable ? copy.cancelInstall : copy.installing
             : installedVersion !== undefined
             ? copy.uninstall
             : unmanagedInstalled
@@ -223,11 +221,11 @@ export function MarketplacePage(
             : installer.available
             ? copy.install
             : copy.installUnavailable
-          const primaryDisabled = !installing && (installedVersion !== undefined
-            ? installedPlugin === undefined || !lifecycle.canRun(installedPlugin, 'uninstall')
-              || lifecycle.busyPluginId === installedPlugin.id
-            : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
-              || !installer.available)
+          const primaryDisabled = installing && !installer.cancellable || !installing && (installedVersion !== undefined
+                ? installedPlugin === undefined || !lifecycle.canRun(installedPlugin, 'uninstall')
+                  || lifecycle.busyPluginId === installedPlugin.id
+                : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
+                  || !installer.available)
           const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
             ? []
             : [

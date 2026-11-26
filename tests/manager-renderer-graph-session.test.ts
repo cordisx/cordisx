@@ -369,7 +369,7 @@ it('closes on off-host graphs, unexpected fields, or a leaked private value', as
   }
 })
 
-it('does not forward owner service or document capabilities before per-session projection exists', async () => {
+it('does not forward unprojected owner service or document capabilities', async () => {
   const fixture = await managerRendererGraphFixture()
   try {
     const previous = await fixture.lease('old')
@@ -380,6 +380,41 @@ it('does not forward owner service or document capabilities before per-session p
       const payload = { ...stage('old', 'new', descriptor(candidate)), [field]: [{ token: 'private' }] }
       expect(() => target.projectCommand(command('stage', 1, payload))).toThrow('MANAGER_RENDERER_GRAPH_INVALID')
       expect(target.closed).toBe(true)
+    }
+  } finally {
+    await fixture.close()
+  }
+})
+
+it('forwards only a candidate-scoped document grant with an opaque renderer identity', async () => {
+  const fixture = await managerRendererGraphFixture()
+  try {
+    const previous = await fixture.lease('old')
+    const candidate = await fixture.lease('new')
+    const grant = {
+      source: `https://renderer.cordisx.invalid/plugin/${'a'.repeat(64)}`,
+      pluginId: 'fixture',
+      moduleGeneration: 'new',
+      token: 'b'.repeat(64),
+    }
+    const payload = { ...stage('old', 'new', descriptor(candidate)), ownerDocumentBindings: [grant] }
+    const session = createManagerRendererGraphSession(baseInput)
+    session.projectInitial([descriptor(previous)])
+    expect(JSON.stringify(session.projectCommand(command('stage', 1, payload)))).toContain(grant.token)
+    session.close()
+    for (
+      const bad of [
+        { ...grant, source: 'https://example.test/private' },
+        { ...grant, moduleGeneration: 'old' },
+        { ...grant, pluginId: 'other' },
+        { ...grant, token: 'short' },
+        { ...grant, extra: true },
+      ]
+    ) {
+      const target = createManagerRendererGraphSession(baseInput)
+      target.projectInitial([descriptor(previous)])
+      expect(() => target.projectCommand(command('stage', 1, { ...payload, ownerDocumentBindings: [bad] })))
+        .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
     }
   } finally {
     await fixture.close()

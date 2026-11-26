@@ -1,5 +1,12 @@
 import type { CordisXRouteService, OutletController } from './navigation.js'
 import { CORDISX_BUILTIN_EXTENSION_POINT_CATALOG, type ExtensionPointDescriptorRegistry } from './extension-points.js'
+import type { CordisXSlotService } from './surfaces.js'
+import {
+  CORDISX_CODEX_CONTROL_CATALOG,
+  REASONING_CONTROL_POINT,
+  ReasoningIntensityControlBinding,
+} from './adapter/reasoning.js'
+import { ControlledSurfaceCoordinator } from './controlled-surfaces.js'
 
 /**
  * A Manager-only renderer owns no Codex or Playground seats. Declare the
@@ -9,8 +16,22 @@ import { CORDISX_BUILTIN_EXTENSION_POINT_CATALOG, type ExtensionPointDescriptorR
 export function installStandaloneManagerAdapter(
   routes: CordisXRouteService,
   extensionPoints: ExtensionPointDescriptorRegistry,
+  slots: CordisXSlotService,
+  generation: string,
 ): { dispose(): void } {
   const unregisterCatalog = extensionPoints.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
+  // The Manager has no native composer. Keep the real control contract in a
+  // not-mounted state so plugin registration does not invent a native seat.
+  const reasoning = new ReasoningIntensityControlBinding()
+  const controls = new ControlledSurfaceCoordinator(
+    CORDISX_CODEX_CONTROL_CATALOG,
+    { [REASONING_CONTROL_POINT]: reasoning },
+    generation,
+    undefined,
+    (candidate, view) => slots.controlGenerationVisible(candidate, view),
+    candidate => slots.controlGenerationCallable(candidate),
+  )
+  reasoning.connect(controls)
   const undeclare: Array<() => void> = []
   const outlets = [
     {
@@ -54,7 +75,10 @@ export function installStandaloneManagerAdapter(
         outlet.path,
       ))
     }
+    slots.setControlCoordinator(controls)
   } catch (error) {
+    reasoning.dispose()
+    controls.dispose()
     for (const remove of undeclare.reverse()) remove()
     unregisterCatalog()
     throw error
@@ -64,6 +88,7 @@ export function installStandaloneManagerAdapter(
     dispose() {
       if (disposed) return
       disposed = true
+      reasoning.dispose()
       for (const remove of undeclare.reverse()) remove()
       unregisterCatalog()
     },

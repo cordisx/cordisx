@@ -91,6 +91,8 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererLifecycle?: ServiceRendererLifecycle
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
+  /** Owner-issued per-renderer durable document bridge. */
+  readonly rendererDocuments?: ManagerRendererChannel
   readonly rendererManagementAuthority?: Pick<ServiceRendererBootstrap, 'managementRequest' | 'allowsManagementWrite'>
   /** Owner resource retirement must finish before a renderer revocation is acknowledged. */
   readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
@@ -137,6 +139,11 @@ export async function openProductionPluginManagementComposition(input: {
       || !input.rendererParticipants || !input.rendererLifecycle || !input.reserveServiceClients)
   ) throw new Error('manager-consumer-fence-scope-invalid')
   if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
+    throw new Error('manager-consumer-fence-scope-invalid')
+  }
+  if (
+    input.rendererDocuments && (input.mode !== 'service' || !input.rendererParticipants || !input.rendererBootstrap)
+  ) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
   if (input.rendererLifecycle && !input.rendererParticipants?.isBoundTo(input.rendererLifecycle)) {
@@ -289,6 +296,7 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererBootstrap === undefined
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),
+      ...(input.rendererDocuments === undefined ? [] : [['owner-document', input.rendererDocuments] as const]),
       ...(rendererManagedServiceUI === undefined
         ? []
         : [['managed-service-ui', rendererManagedServiceUI] as const]),

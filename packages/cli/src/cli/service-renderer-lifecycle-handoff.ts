@@ -18,6 +18,7 @@ import type { ServiceRendererParticipants } from './service-renderer-participant
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
 import { emptyPluginConfig } from './desktop-manager-config-eligibility.js'
 import { revalidateDesktopLifecycleConfig } from './desktop-lifecycle-config-proof.js'
+import type { ServiceRendererDocuments } from './service-renderer-documents.js'
 import type {
   ServiceRendererBootstrapEntry,
   ServiceRendererConfiguredChannelInput,
@@ -74,6 +75,7 @@ export class ServiceRendererLifecycleHandoff {
         peers: readonly ManagerRendererCommandPeer[],
       ) => Promise<DesktopConfigurationReservation>
       readonly readLifetimes: ManagerRendererReadLifetimes
+      readonly documents?: ServiceRendererDocuments
       readonly configuredChannel: () => ServiceRendererConfiguredChannelInput | undefined
       readonly serviceOwnerBundledChannel?: boolean
       readonly snapshot: () => ServiceRendererSnapshot
@@ -320,12 +322,14 @@ export class ServiceRendererLifecycleHandoff {
       authorizationDecision = { ...decision, identity: { ...owner, source: alias } }
     }
     if (!reservation.current()) throw new Error('renderer-lifecycle-handoff-unavailable')
+    const ownerDocumentBindings = this.input.documents?.candidate(context, entry, mutation)
     return {
       ...stage,
       previous: pending.projectedPrevious,
       candidate: pending.projectedCandidate,
       ...(pkg === undefined ? {} : { package: pkg }),
       ...(authorizationDecision === undefined ? {} : { authorizationDecision }),
+      ...(ownerDocumentBindings === undefined ? {} : { ownerDocumentBindings }),
     }
   }
 

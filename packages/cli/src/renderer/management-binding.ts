@@ -1,4 +1,6 @@
 import type {
+  PluginManagementCatalogDetail,
+  PluginManagementCatalogLookup,
   PluginManagementConfigRequest,
   PluginManagementLegacySourceMigration,
   PluginManagementMigrationResult,
@@ -12,7 +14,7 @@ const RECEIVER = '__cordisxPluginManagementReceiveV1'
 
 export type PluginManagementLifecycleRequest = Extract<
   PluginManagementRequest,
-  { readonly kind: 'plugin-enable' | 'plugin-disable' | 'plugin-uninstall' }
+  { readonly kind: 'plugin-enable' | 'plugin-disable' | 'plugin-uninstall' | 'plugin-plan-marketplace' }
 >
 
 declare global {
@@ -28,6 +30,7 @@ export interface PluginManagementBinding {
   mutate(request: PluginManagementConfigRequest, expectedRevision: number): Promise<PluginManagementResult>
   planLifecycle?(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult>
   executeLifecycle?(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult>
+  pluginInfo?(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined>
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult>
 }
 
@@ -70,6 +73,10 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     return result
   }
 
+  pluginInfo(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined> {
+    return this.send({ kind: 'plugin-info', query })
+  }
+
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult> {
     return this.send({ kind: 'migrate-legacy-sources', input })
   }
@@ -97,11 +104,13 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     const requestId = typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `management-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const value = operation as { readonly kind?: string; readonly request?: { readonly kind?: string } }
+    const timeout = value.kind === 'execute' && value.request?.kind === 'plugin-execute-plan' ? 230_000 : 60_000
     return new Promise<Value>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('plugin management request timed out'))
-      }, 60_000)
+      }, timeout)
       this.pending.set(requestId, { resolve: value => resolve(value as Value), reject, timer })
       try {
         binding(JSON.stringify({ version: 1, requestId, token: this.token, profileId: this.profileId, operation }))

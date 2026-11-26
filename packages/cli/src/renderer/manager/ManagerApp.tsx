@@ -389,7 +389,13 @@ export function ManagerApp(
     succeeded: productLocale(snapshot.localization.locale) === 'zh-CN'
       ? '插件安装完成'
       : 'Plugin installation complete',
-  }, { document: triggerSeat.ownerDocument, feedbackActive: open })
+  }, {
+    document: triggerSeat.ownerDocument,
+    feedbackActive: open,
+    ...(standaloneMode && pluginManagement
+      ? { standalone: { binding: pluginManagement, snapshot: management.snapshot } }
+      : {}),
+  })
   const previousOpen = useRef(open)
   const managerMain = useRef<HTMLElement>(null)
   useEffect(() => {

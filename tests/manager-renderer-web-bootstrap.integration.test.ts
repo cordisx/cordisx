@@ -11,6 +11,70 @@ import { managerRendererGraphFixture } from './fixtures/manager-renderer-graph.j
 
 const secret = () => randomBytes(32).toString('hex')
 
+it('admits the owner document channel and forwards only valid document operations', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([
+      ['plugin-management', {
+        prepare: () => {
+          throw new Error('unused')
+        },
+      }],
+      ['owner-document', {
+        prepare: payload => {
+          const request = JSON.parse(String(payload)) as { requestId: string; operation: string }
+          return {
+            mode: request.operation === 'load' ? 'read' as const : 'write' as const,
+            dispatch: async () => ({ requestId: request.requestId, ok: true, value: request.operation }),
+          }
+        },
+      }],
+    ]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    const opened = await post('/api/renderer/open', {}, token)
+    expect(opened.status).toBe(200)
+    expect((await opened.json() as { channels: string[] }).channels).toContain('owner-document')
+    for (const operation of ['load', 'replace']) {
+      const response = await post('/api/renderer/binding', {
+        channel: 'owner-document',
+        payload: JSON.stringify({ requestId: 'document-1', operation }),
+      }, token)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ ok: true, value: operation })
+    }
+    expect(
+      (await post('/api/renderer/binding', {
+        channel: 'owner-document',
+        payload: JSON.stringify({ requestId: 'document-1', operation: 'delete' }),
+      }, token)).status,
+    ).toBe(400)
+  } finally {
+    authority.dispose()
+    await web.close()
+  }
+})
+
 it('opens a new Manager after earlier retired sessions filled the legacy owner limit', async () => {
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
   const authority = new ManagerRendererSessions({

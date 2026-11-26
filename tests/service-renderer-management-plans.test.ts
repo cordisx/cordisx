@@ -50,6 +50,86 @@ it('continues cleaning owner plans if one cleanup fails', () => {
   expect(attempts).toEqual([first, second])
 })
 
+it('binds an exact Marketplace selection to one renderer and reports an unavailable review without applying it', async () => {
+  const plans = new ServiceRendererManagementPlans(vi.fn())
+  const otherPlans = new ServiceRendererManagementPlans(vi.fn())
+  const active = { profileId: 'default', revision: 0, plugins: [] }
+  const ownerSnapshot = () => ({ active, registryEpoch: 1 }) as any
+  const snapshot = {
+    profileId: 'default',
+    revision: 4,
+    activationRevision: 0,
+    plugins: [],
+    sources: [],
+    hiddenCatalogEntries: [],
+    migrations: { legacyBrowserSourcesV2: false },
+    runtime: { kind: 'active', runtimeGeneration: 'owner', mode: 'service' },
+  } as any
+  const entry = (book: ServiceRendererManagementPlans): ManagementProjectionEntry => ({
+    confirmed: true,
+    current: () => true,
+    unchanged: async () => true,
+    identity: undefined,
+    aliases: undefined,
+    snapshot: ownerSnapshot(),
+    scopedLifecycle: true,
+    restricted: { writableIds: new Set(), plans: book },
+  })
+  const context = {
+    profileId: 'default',
+    rendererId: 'one',
+    ownerGeneration: 'owner',
+    signal: new AbortController().signal,
+    admitted: true,
+  }
+  const intent = {
+    kind: 'plugin-plan-marketplace' as const,
+    pluginId: 'example',
+    sourceUrl: 'https://example.test/marketplace.json',
+    version: '1.0.0',
+    expectedCanonicalSource: 'https://example.test/example',
+    expectedArtifactIntegrity: `sha256:${'a'.repeat(64)}`,
+  }
+  const operation = { kind: 'plan' as const, request: intent }
+  expect(allowsManagementWrite(entry(plans), operation as any)).toBe(true)
+  expect(allowsManagementWrite(entry(plans), { kind: 'plan', request: { ...intent, version: '' } } as any)).toBe(false)
+  const owner = ownerToken()
+  const planned = await projectManagementRequest({
+    context,
+    operation: operation as any,
+    entry: () => entry(plans),
+    ownerSnapshot,
+    dispatch: async () => ({
+      status: 'planned',
+      request: intent,
+      snapshot,
+      executionRequest: { kind: 'plugin-execute-plan', executionToken: owner },
+    }),
+  }) as any
+  expect(planned.status).toBe('planned')
+  expect(JSON.stringify(planned)).not.toContain(owner)
+  const execute = { kind: 'execute' as const, request: planned.executionRequest, expectedRevision: 4 }
+  expect(allowsManagementWrite(entry(otherPlans), execute)).toBe(false)
+  const reviewed = await projectManagementRequest({
+    context,
+    operation: execute,
+    entry: () => entry(plans),
+    ownerSnapshot,
+    dispatch: async () => ({
+      status: 'permission-review-required',
+      request: intent,
+      snapshot,
+      candidateId: 'private-candidate',
+      permissionPlan: {},
+    }),
+  }) as any
+  expect(reviewed).toMatchObject({ status: 'rejected', error: { code: 'permission-review-unavailable' } })
+  expect(JSON.stringify(reviewed)).not.toContain('private-candidate')
+  expect(allowsManagementWrite(entry(plans), execute)).toBe(false)
+  plans.close()
+  otherPlans.close()
+})
+
 it('projects only a safe dependency closure and consumes the originating page plan once', async () => {
   const item = (id: string, dependencies: readonly { id: string; version: string }[] = []) => ({
     id,

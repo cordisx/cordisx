@@ -802,7 +802,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       runtimeScope.iconThemeRegistry()!.subscribe(runtimeScope.notifyFrom()!('icon-themes')),
     )
     runtimeScope.adapterHandle = runtimeScope.metadata()!.managerPresentationMode === 'standalone'
-      ? installStandaloneManagerAdapter(runtimeScope.routeService, runtimeScope.extensionPointDescriptors()!)
+      ? installStandaloneManagerAdapter(
+        runtimeScope.routeService,
+        runtimeScope.extensionPointDescriptors()!,
+        runtimeScope.slotService,
+        runtimeScope.generation()!,
+      )
       : runtimeScope.metadata()!.hostKind === 'playground'
       ? installPlaygroundAdapter(
         document,

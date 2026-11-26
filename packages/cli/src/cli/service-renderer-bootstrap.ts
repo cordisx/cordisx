@@ -53,6 +53,8 @@ import { restrictedLifecycleIds } from './service-renderer-management-eligibilit
 import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
 import { closeBootstrapFences } from './service-renderer-bootstrap-cleanup.js'
+import { createServiceRendererBootstrapChannel } from './service-renderer-bootstrap-channel.js'
+import { ServiceRendererDocuments } from './service-renderer-documents.js'
 import {
   type ConfiguredChannelHandoffResult,
   mutateServiceRendererConfiguredChannel,
@@ -91,6 +93,7 @@ export class ServiceRendererBootstrap {
   private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
   private readonly ownerStartupConfig: NonNullable<HomeConfigProfile['managedServiceStartupConfig']>
   private readonly lifecycleHandoff: ServiceRendererLifecycleHandoff
+  private readonly documents: ServiceRendererDocuments | undefined
   /** Owner-only policy projection and handoff; never exposed to the browser. */
   readonly permissionAccess: ServiceRendererPermissionAccess
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
@@ -167,6 +170,16 @@ export class ServiceRendererBootstrap {
     this.pluginConfigFence = input.protectProfileInputs
       ? new SharedProfilePluginConfigFence(input.configPath, input.profileId)
       : undefined
+    this.documents = input.restrictedManagement && input.protectProfileInputs
+      ? new ServiceRendererDocuments({
+        homeDir: input.homeDir,
+        profileId: input.profileId,
+        generation: input.generation,
+        entries: this.entries,
+        current: (rendererId, entry) => this.current(rendererId, entry),
+        snapshot: () => input.lifecycle.snapshot(),
+      })
+      : undefined
     this.permissionAccess = new ServiceRendererPermissionAccess({
       profileId: input.profileId,
       generation: input.generation,
@@ -198,6 +211,7 @@ export class ServiceRendererBootstrap {
       adoptSelectedConfiguredPlugins: this.selectedConfiguredPlugins.adopt,
       ...(input.reserveDesktopConfig === undefined ? {} : { reserveDesktopConfig: input.reserveDesktopConfig }),
       readLifetimes: this.readLifetimes,
+      ...(this.documents === undefined ? {} : { documents: this.documents }),
       configuredChannel: () => this.configuredChannel,
       serviceOwnerBundledChannel: input.serviceOwnerBundledChannel === true,
       snapshot: () => input.lifecycle.snapshot(),
@@ -558,7 +572,11 @@ export class ServiceRendererBootstrap {
           current: () => this.current(rendererId, entry),
         })
         const { unavailable, managedOwners } = installed
-        let needsIdentityProjection = installed.needsIdentityProjection
+        // A session which can install a package must already have an
+        // owner-issued identity projection, even when its initial profile is
+        // empty or contains only legacy packages. A later candidate can then
+        // be admitted without exposing its private owner identity.
+        let needsIdentityProjection = installed.needsIdentityProjection || entry.managementPlans !== undefined
         const availablePlugins = plugins.filter(plugin => !unavailable.has(plugin.id))
         const {
           projectedConfigs,
@@ -821,6 +839,9 @@ export class ServiceRendererBootstrap {
           },
           pluginActivation: projectedSnapshot?.active ?? snapshot.active,
           initialRegistryEpoch: snapshot.registryEpoch,
+          ...(this.documents === undefined ? {} : {
+            standaloneOwnerDocumentBindings: entry.identity ? this.documents.initial(context, entry) : [],
+          }),
           pluginManagement: { profileId: this.input.profileId, token: 'renderer-binding-placeholder' },
           ...desktopPackageConfigBundleOptions(
             entry.desktopPackageConfigPlugins,
@@ -934,49 +955,29 @@ export class ServiceRendererBootstrap {
 
   /** Not exposed as a generic browser binding. The sidecar supplies graph mappings. */
   channel(): ManagerRendererChannel {
-    return {
-      prepare: (payload, context) => {
-        if (
-          payload === null || typeof payload !== 'object' || Array.isArray(payload)
-          || context.profileId !== this.input.profileId || context.ownerGeneration !== this.input.generation
-        ) throw new Error('renderer-bootstrap-unavailable')
-        const item = payload as Record<string, unknown>
-        if (item.action === 'prepare' && Object.keys(item).length === 1) {
-          return { mode: 'read', dispatch: async () => await this.prepare(context.rendererId) }
-        }
-        if (item.action === 'status' && Object.keys(item).length === 1) {
-          return {
-            mode: 'read',
-            dispatch: async () => {
-              const peer = this.input.participants.peer(context.rendererId)
-              if (!peer) throw new Error('renderer-bootstrap-unavailable')
-              return await serviceRendererBootstrapStatus({
-                entry: this.entries.get(context.rendererId),
-                current: entry => this.current(context.rendererId, entry),
-                configurationCurrent: async entry => await this.configurationCurrent(context.rendererId, entry),
-                checkManagedServiceUI: () => {
-                  if (!this.managedServiceUI) throw new Error('renderer-bootstrap-unavailable')
-                  this.managedServiceUI.assertStatusCurrent(context)
-                },
-              })
-            },
-          }
-        }
-        if (
-          item.action === 'complete' && Object.keys(item).length === (this.input.permissionProof ? 4 : 3)
-          && typeof item.managerOrigin === 'string' && Array.isArray(item.graphs)
-          && Object.keys(item).every(key => ['action', 'managerOrigin', 'graphs', 'permissionPublicKey'].includes(key))
-          && (this.input.permissionProof === undefined || Object.hasOwn(item, 'permissionPublicKey'))
-        ) {
-          return {
-            mode: 'read',
-            dispatch: async () =>
-              await this.complete(context, item.managerOrigin as string, item.graphs, item.permissionPublicKey),
-          }
-        }
-        throw new Error('renderer-bootstrap-unavailable')
+    return createServiceRendererBootstrapChannel({
+      profileId: this.input.profileId,
+      generation: this.input.generation,
+      permissionProof: this.input.permissionProof !== undefined,
+      prepare: async rendererId => await this.prepare(rendererId),
+      complete: async (context, origin, graphs, key) => await this.complete(context, origin, graphs, key),
+      status: async context => {
+        if (!this.input.participants.peer(context.rendererId)) throw new Error('renderer-bootstrap-unavailable')
+        return await serviceRendererBootstrapStatus({
+          entry: this.entries.get(context.rendererId),
+          current: entry => this.current(context.rendererId, entry),
+          configurationCurrent: async entry => await this.configurationCurrent(context.rendererId, entry),
+          checkManagedServiceUI: () => {
+            if (!this.managedServiceUI) throw new Error('renderer-bootstrap-unavailable')
+            this.managedServiceUI.assertStatusCurrent(context)
+          },
+        })
       },
-    }
+    })
+  }
+
+  documentChannel(): ManagerRendererChannel | undefined {
+    return this.documents?.channel()
   }
 
   close(): Promise<boolean> {

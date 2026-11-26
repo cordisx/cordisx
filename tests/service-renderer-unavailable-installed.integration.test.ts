@@ -121,9 +121,7 @@ it('keeps a supported installed plugin available without loading an unsupported 
       const catalog = await projectManagementRequest({
         context,
         operation: { kind: 'query-catalog' },
-        dispatch: async () => ({
-          plugins: [{ identity: { pluginId: item.id }, canonicalSource: source, installable: true }],
-        }),
+        dispatch: async () => [{ identity: { pluginId: item.id }, canonicalSource: source, installable: true }],
         entry: () => ({
           confirmed: true,
           current: () => true,
@@ -136,7 +134,7 @@ it('keeps a supported installed plugin available without loading an unsupported 
         }),
         ownerSnapshot: () => f.lifecycle.snapshot(),
       }) as any
-      expect(catalog.plugins[0]).toMatchObject({ canonicalSource: alias, installable: false })
+      expect(catalog[0]).toMatchObject({ canonicalSource: alias, installable: false })
       expect(JSON.stringify(catalog)).not.toContain(source)
       const dependent = {
         ...item,

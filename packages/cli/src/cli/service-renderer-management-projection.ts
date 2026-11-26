@@ -1,6 +1,5 @@
 import type {
   PluginManagementCatalogDetail,
-  PluginManagementCatalogSnapshot,
   PluginManagementCatalogSummary,
   PluginManagementPlugin,
   PluginManagementResult,
@@ -42,9 +41,14 @@ export interface ManagementProjectionEntry {
 type Operation = PluginManagementRpcRequest['operation']
 
 function permittedIntent(entry: ManagementProjectionEntry, intent: RestrictedLifecycleIntent): boolean {
-  if (!entry.snapshot || !entry.restricted?.writableIds.has(intent.pluginId)) return false
+  if (!entry.snapshot || !entry.restricted) return false
   const active = entry.snapshot.active.plugins
   const target = active.find(plugin => plugin.id === intent.pluginId)
+  if (intent.kind === 'plugin-plan-marketplace' && !target) return true
+  if (!entry.restricted.writableIds.has(intent.pluginId)) return false
+  if (intent.kind === 'plugin-plan-marketplace' && target?.canonicalSource !== intent.expectedCanonicalSource) {
+    return false
+  }
   if (
     !target || intent.kind === 'plugin-enable' && target.enabled || intent.kind === 'plugin-disable' && !target.enabled
   ) {
@@ -54,7 +58,8 @@ function permittedIntent(entry: ManagementProjectionEntry, intent: RestrictedLif
   try {
     const affected = pluginDependentClosure(active, intent.pluginId)
     return affected.every(id => entry.restricted!.writableIds.has(id))
-      && (intent.kind !== 'plugin-uninstall' || affected.every(id => !entry.restricted!.configuredIds?.has(id)))
+      && (!['plugin-uninstall', 'plugin-plan-marketplace'].includes(intent.kind)
+        || affected.every(id => !entry.restricted!.configuredIds?.has(id)))
   } catch {
     return false
   }
@@ -139,7 +144,12 @@ function resultError(result: PluginManagementResult): { readonly code: string; r
   const code = 'error' in result && /^[a-z0-9-]{1,80}$/u.test(result.error.code)
     ? result.error.code
     : 'operation-unavailable'
-  return { code, message: 'The plugin operation could not be completed. Review the current state.' }
+  const messages: Readonly<Record<string, string>> = {
+    'catalog-unavailable': 'The selected Marketplace source is unavailable.',
+    'catalog-selection-changed': 'The Marketplace selection changed. Refresh and retry.',
+    'artifact-inspection-failed': 'The plugin artifact could not be downloaded or verified.',
+  }
+  return { code, message: messages[code] ?? 'The plugin operation could not be completed. Review the current state.' }
 }
 
 function sameMembers(left: readonly string[], right: readonly string[]): boolean {
@@ -178,7 +188,7 @@ async function projectRestrictedLifecycle(input: {
       if (result.status !== 'planned' || !ownerToken || !attachmentEqual(result.request, intent)) {
         throw new Error('renderer-management-projection-unavailable')
       }
-      const affected = intent.kind === 'plugin-enable'
+      const affected = intent.kind === 'plugin-enable' || intent.kind === 'plugin-plan-marketplace'
         ? undefined
         : pluginDependentClosure(entry.snapshot.active.plugins, intent.pluginId)
       if (
@@ -227,6 +237,17 @@ async function projectRestrictedLifecycle(input: {
     }
     if (result.status === 'rejected' || result.status === 'conflict') {
       return { status: result.status, request: plan.intent, snapshot, error: resultError(result) }
+    }
+    if (result.status === 'permission-review-required' && plan.intent.kind === 'plugin-plan-marketplace') {
+      return {
+        status: 'rejected',
+        request: plan.intent,
+        snapshot,
+        error: {
+          code: 'permission-review-unavailable',
+          message: 'This plugin needs a permission review that is not yet available in the independent Manager.',
+        },
+      }
     }
     throw new Error('renderer-management-projection-unavailable')
   } finally {
@@ -304,9 +325,9 @@ export async function projectManagementRequest(input: {
     return { ...result, snapshot: projectSnapshot(context, entry, result.snapshot as PluginManagementSnapshot) }
   }
   if (kind === 'query-catalog') {
-    const catalog = result as PluginManagementCatalogSnapshot
-    if (!catalog || !Array.isArray(catalog.plugins)) throw new Error('renderer-management-projection-unavailable')
-    return { ...catalog, plugins: catalog.plugins.map(plugin => projectCatalog(plugin)) }
+    const catalog = result as readonly PluginManagementCatalogSummary[]
+    if (!Array.isArray(catalog)) throw new Error('renderer-management-projection-unavailable')
+    return catalog.map(plugin => projectCatalog(plugin))
   }
   return result == null ? result : projectCatalog(result as PluginManagementCatalogDetail)
 }

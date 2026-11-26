@@ -13,6 +13,7 @@ import { constants } from 'node:fs'
 import { connect, createServer, type Server, type Socket } from 'node:net'
 import path from 'node:path'
 import type {
+  PluginManagementCatalogLookup,
   PluginManagementCatalogQuery,
   PluginManagementConfigRequest,
   PluginManagementLegacySourceMigration,
@@ -67,7 +68,7 @@ export type PluginManagementRpcOperation =
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
     readonly kind: 'plugin-info'
-    readonly query: { readonly pluginId: string; readonly sourceUrl?: string; readonly version?: string }
+    readonly query: PluginManagementCatalogLookup
   }
   | { readonly kind: 'plan'; readonly request: PluginManagementRequest }
   | { readonly kind: 'execute'; readonly request: PluginManagementRequest; readonly expectedRevision?: number }
@@ -115,6 +116,18 @@ export interface PluginManagementRpcServer {
 
 /** Manager observation waits are bounded by the owning renderer session, not the ordinary RPC deadline. */
 function managementRpcDeadline(operation: PluginManagementRpcOperation): number {
+  if (
+    operation.kind === 'manager-renderer' && operation.action === 'call'
+    && operation.channel === 'plugin-management' && typeof operation.payload === 'string'
+    && Buffer.byteLength(operation.payload) <= MAX_MANAGEMENT_REQUEST_BYTES
+  ) {
+    try {
+      const value = JSON.parse(operation.payload) as { operation?: { kind?: unknown; request?: { kind?: unknown } } }
+      if (value.operation?.kind === 'execute' && value.operation.request?.kind === 'plugin-execute-plan') {
+        return 210_000
+      }
+    } catch { /* Malformed requests retain the ordinary deadline. */ }
+  }
   if (
     operation.kind === 'manager-renderer' && operation.action === 'call'
     && operation.channel === 'managed-service-ui' && typeof operation.payload === 'string'
