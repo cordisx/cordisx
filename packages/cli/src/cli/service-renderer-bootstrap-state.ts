@@ -64,3 +64,17 @@ export type ServiceRendererBootstrapEntry = {
   completing?: Promise<unknown>
   permissionKey?: string
 }
+
+/** Keep asynchronous admission checks visible to a coordinated write. */
+export async function trackServiceRendererCheck(
+  entry: ServiceRendererBootstrapEntry,
+  operation: () => Promise<boolean>,
+): Promise<boolean> {
+  const check = operation()
+  entry.checks.add(check)
+  try {
+    return await check
+  } finally {
+    entry.checks.delete(check)
+  }
+}

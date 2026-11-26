@@ -70,6 +70,7 @@ function setup() {
     isCurrent: () => true,
     run: async <T>(action: () => Promise<T>) => await action(),
     prepareRendererConfirmation: () => ({ confirm: async () => true }),
+    adopt: vi.fn(async () => true),
     cancel: vi.fn(() => true),
     fence: vi.fn(),
   }
@@ -131,6 +132,32 @@ it('keeps a failure after native dispatch uncertain and fenced', async () => {
   f.native.update.mockRejectedValueOnce(new Error('native connection lost'))
   await expect(f.dispatch()).rejects.toThrow('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')
   expect(f.native.update).toHaveBeenCalledOnce()
+  expect(f.handoff.fence).toHaveBeenCalledOnce()
+  expect(f.origin.fence).toHaveBeenCalledOnce()
+})
+
+it('fences the transaction if a configured archive changes native module generation during dispatch', async () => {
+  const f = setup()
+  const configuredSnapshot = { ...snapshot, active: { ...snapshot.active, plugins: [] } }
+  const artifact = { version: '1.0.0', integrity: 'sha256:' + 'b'.repeat(64) }
+  f.handoff.snapshot = configuredSnapshot
+  f.handoff.plugin = {
+    ...plugin,
+    package: undefined,
+    configuredArchiveDigest: 'sha256:' + 'c'.repeat(64),
+    distributionArtifact: artifact,
+  }
+  const before = {
+    ...proof,
+    snapshot: configuredSnapshot,
+    plugin: { ...proof.plugin, package: undefined, configured: { ...artifact, moduleGeneration: 'old-module' } },
+  }
+  const after = structuredClone(before)
+  after.plugin.configured.moduleGeneration = 'new-module'
+  f.native.proof.mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+  f.native.update.mockResolvedValueOnce({ status: 'rejected', reason: 'revision-conflict' })
+  await expect(f.dispatch()).rejects.toThrow('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')
+  expect(f.handoff.adopt).not.toHaveBeenCalled()
   expect(f.handoff.fence).toHaveBeenCalledOnce()
   expect(f.origin.fence).toHaveBeenCalledOnce()
 })

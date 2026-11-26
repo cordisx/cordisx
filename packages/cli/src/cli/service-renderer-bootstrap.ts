@@ -59,15 +59,18 @@ import {
 } from './service-renderer-channel-handoff.js'
 import {
   type DesktopConfigProjector,
+  DesktopConfiguredSelection,
   desktopPackageConfigBundleOptions,
   emptyPluginConfig,
   preflightDesktopManagerConfigs,
+  prepareDesktopConfiguredConfigWrites,
   prepareDesktopManagerConfigs,
 } from './desktop-manager-config-eligibility.js'
-import type {
-  ServiceRendererBootstrapEntry as Entry,
-  ServiceRendererConfiguredChannelInput as ConfiguredChannel,
-  ServiceRendererSnapshot as Snapshot,
+import {
+  type ServiceRendererBootstrapEntry as Entry,
+  type ServiceRendererConfiguredChannelInput as ConfiguredChannel,
+  type ServiceRendererSnapshot as Snapshot,
+  trackServiceRendererCheck,
 } from './service-renderer-bootstrap-state.js'
 const MAX_INITIAL_GRAPHS = 256
 const MANAGED_STARTUP_WAIT_MS = 45_000
@@ -92,7 +95,7 @@ export class ServiceRendererBootstrap {
   readonly permissionAccess: ServiceRendererPermissionAccess
   private managedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
   private configuredChannel: ConfiguredChannel | undefined
-  private readonly selectedConfiguredPlugins: readonly CordisXConfigPlugin[] | undefined
+  private readonly selectedConfiguredPlugins: DesktopConfiguredSelection
   private closed = false
   private closing: Promise<boolean> | undefined
 
@@ -155,9 +158,7 @@ export class ServiceRendererBootstrap {
         || !(input.lifecycle instanceof ServiceRendererLifecycle))
     ) throw new Error('renderer-permission-handoff-unavailable')
     this.ownerStartupConfig = structuredClone(input.ownerStartupConfig ?? {})
-    this.selectedConfiguredPlugins = input.selectedConfiguredPlugins === undefined
-      ? undefined
-      : structuredClone(input.selectedConfiguredPlugins)
+    this.selectedConfiguredPlugins = new DesktopConfiguredSelection(input.selectedConfiguredPlugins)
     this.configuredChannel = input.experimentalConfiguredChannel
     this.managedServiceUI = input.managedServiceUI
     this.permissionFence = input.protectProfileInputs
@@ -194,6 +195,7 @@ export class ServiceRendererBootstrap {
         this.input.projectPluginConfig?.remember?.(snapshot, plugin, proof) === true,
       canCoordinatePluginConfig: async (snapshot, plugin) =>
         await this.input.projectPluginConfig?.canCoordinateLifecycle?.(snapshot, plugin) === true,
+      adoptSelectedConfiguredPlugins: this.selectedConfiguredPlugins.adopt,
       ...(input.reserveDesktopConfig === undefined ? {} : { reserveDesktopConfig: input.reserveDesktopConfig }),
       readLifetimes: this.readLifetimes,
       configuredChannel: () => this.configuredChannel,
@@ -246,19 +248,9 @@ export class ServiceRendererBootstrap {
     return await readOwnerProfileInputs(this.input, this.ownerStartupConfig, snapshot)
   }
 
-  private async trackCheck(entry: Entry, operation: () => Promise<boolean>): Promise<boolean> {
-    const check = operation()
-    entry.checks.add(check)
-    try {
-      return await check
-    } finally {
-      entry.checks.delete(check)
-    }
-  }
-
   /** Detect stale startup configuration without comparing the live package epoch. */
   private async configurationCurrent(rendererId: string, entry: Entry): Promise<boolean> {
-    return await this.trackCheck(entry, async () => {
+    return await trackServiceRendererCheck(entry, async () => {
       try {
         if (
           !this.current(rendererId, entry) || !entry.config || !entry.policies || !entry.packageInputs
@@ -292,7 +284,7 @@ export class ServiceRendererBootstrap {
   }
 
   private async unchanged(rendererId: string, entry: Entry): Promise<boolean> {
-    return await this.trackCheck(entry, async () => {
+    return await trackServiceRendererCheck(entry, async () => {
       try {
         if (
           !this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies
@@ -317,10 +309,7 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
-        if (
-          this.selectedConfiguredPlugins !== undefined
-          && !attachmentEqual(config.plugins, this.selectedConfiguredPlugins)
-        ) return false
+        if (!this.selectedConfiguredPlugins.matches(config.plugins)) return false
         if (entry.managedContext) this.managedServiceUI?.projectInitial(entry.managedContext)
         return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
           && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
@@ -535,10 +524,9 @@ export class ServiceRendererBootstrap {
         const config = configRead.value
         const plugins = pluginsRead.value
         const policies = policiesRead.value
-        if (
-          this.selectedConfiguredPlugins !== undefined
-          && !attachmentEqual(config.plugins, this.selectedConfiguredPlugins)
-        ) throw new Error('renderer-bootstrap-plugin-unsupported')
+        if (!this.selectedConfiguredPlugins.matches(config.plugins)) {
+          throw new Error('renderer-bootstrap-plugin-unsupported')
+        }
         // Channel requires its live service owner. Other enabled archives are
         // independently checked before their graph can join this projection.
         const activeConfigured = config.plugins.filter(plugin => plugin.enabled)
@@ -613,6 +601,15 @@ export class ServiceRendererBootstrap {
             ? { projectConfiguration: async plugin => await this.input.projectPluginConfig!.project(snapshot, plugin) }
             : {}),
         })
+        desktopPackageConfigPlugins.push(
+          ...await prepareDesktopConfiguredConfigWrites(
+            this.input,
+            snapshot,
+            configuredPlugins,
+            entry.configuredPlugins,
+            () => this.current(rendererId, entry),
+          ),
+        )
         entry.snapshot = snapshot
         entry.config = config
         entry.plugins = plugins

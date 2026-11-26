@@ -12,10 +12,17 @@ import {
   isOwnedServiceChange,
   type OwnedServiceWrite,
 } from './owned-profile-service-write.js'
+import {
+  createOwnedConfiguredWrite,
+  isOwnedConfiguredChange,
+  isOwnedHomeConfiguredChange,
+  type OwnedConfiguredWrite,
+} from './owned-profile-configured-write.js'
 
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 const ownedServiceWrites = new AsyncLocalStorage<OwnedServiceWrite>()
+const ownedConfiguredWrites = new AsyncLocalStorage<OwnedConfiguredWrite>()
 const ownedPackageWrites = new AsyncLocalStorage<OwnedPackageWrite>()
 const currentOwnedPackageWrite = () => ownedPackageWrites.getStore()
 // The Home document is JSON; structuredClone does not retain null prototypes.
@@ -35,11 +42,18 @@ export function captureOwnedHomeServiceWriteCheck(
   previous: HomeConfig,
 ): (candidate: HomeConfig) => void {
   if (currentOwnedPackageWrite()) throw new ProfilePluginConfigFenceBusyError()
-  const owner = ownedServiceWrites.getStore()
-  if (!owner) return () => {}
+  const service = ownedServiceWrites.getStore()
+  const configured = ownedConfiguredWrites.getStore()
+  if (service && configured) throw new ProfilePluginConfigFenceBusyError()
+  if (!service && !configured) return () => {}
   const baseline = structuredClone(previous)
   return candidate => {
-    if (ownedServiceWrites.getStore() !== owner || !isOwnedHomeServiceChange(owner, configPath, baseline, candidate)) {
+    if (
+      service && (ownedServiceWrites.getStore() !== service
+          || !isOwnedHomeServiceChange(service, configPath, baseline, candidate))
+      || configured && (ownedConfiguredWrites.getStore() !== configured
+          || !isOwnedHomeConfiguredChange(configured, configPath, baseline, candidate))
+    ) {
       throw new ProfilePluginConfigFenceBusyError()
     }
   }
@@ -53,7 +67,10 @@ async function runOwnedServiceWrite<T>(input: {
   readonly serviceId: string
   readonly isCurrent: () => boolean
 }, action: () => Promise<T>): Promise<T> {
-  if (hasOwnedProfileWrite() || ownedServiceWrites.getStore() !== undefined || currentOwnedPackageWrite()) {
+  if (
+    hasOwnedProfileWrite() || ownedServiceWrites.getStore() !== undefined
+    || ownedConfiguredWrites.getStore() !== undefined || currentOwnedPackageWrite()
+  ) {
     throw new Error('owned service write is unavailable')
   }
   let accepting = true
@@ -130,6 +147,33 @@ async function runOwnedPackageWrite<T>(input: {
   return value as T
 }
 
+/** Only the held profile fence can install this configured-plugin write context. */
+async function runOwnedConfiguredWrite<T>(input: {
+  readonly configPath: string
+  readonly profileId: string
+  readonly pluginId: string
+  readonly isCurrent: () => boolean
+}, action: () => Promise<T>): Promise<T> {
+  if (
+    hasOwnedProfileWrite() || ownedServiceWrites.getStore() !== undefined
+    || ownedConfiguredWrites.getStore() !== undefined || currentOwnedPackageWrite()
+  ) throw new Error('owned configured plugin write is unavailable')
+  const scope = createOwnedConfiguredWrite(input)
+  if (!scope.owner.current()) throw new Error('owned configured plugin write is unavailable')
+  let value: T | undefined
+  let failure: unknown
+  let failed = false
+  try {
+    value = await runOwnedProfileWrite(async () => await ownedConfiguredWrites.run(scope.owner, action))
+  } catch (error) {
+    failed = true
+    failure = error
+  }
+  await scope.finish()
+  if (failed) throw failure
+  return value as T
+}
+
 async function directory(configPath: string): Promise<string> {
   const result = path.join(path.dirname(path.resolve(configPath)), 'run', 'profile-plugin-config-fences')
   await mkdir(result, { recursive: true, mode: 0o700 })
@@ -165,7 +209,9 @@ export async function fencePackageProfileWrite(
 ): Promise<() => Promise<void>> {
   if (!PROFILE.test(profileId)) throw new Error('invalid plugin configuration profile id')
   // A configured Home service authority does not authorize installed-package state.
-  if (ownedServiceWrites.getStore() !== undefined) throw new ProfilePluginConfigFenceBusyError()
+  if (ownedServiceWrites.getStore() !== undefined || ownedConfiguredWrites.getStore() !== undefined) {
+    throw new ProfilePluginConfigFenceBusyError()
+  }
   const owner = currentOwnedPackageWrite()
   if (owner) {
     if (
@@ -239,9 +285,14 @@ export async function fenceChangedConfiguredPlugins(
   candidateStartup: readonly ProfileManagedStartupInput[] = [],
 ): Promise<() => Promise<void>> {
   if (currentOwnedPackageWrite()) throw new ProfilePluginConfigFenceBusyError()
-  const owner = ownedServiceWrites.getStore()
+  const service = ownedServiceWrites.getStore()
+  const configured = ownedConfiguredWrites.getStore()
+  if (service && configured) throw new ProfilePluginConfigFenceBusyError()
+  const owner = service ?? configured
   if (
-    owner && (!isOwnedServiceChange(owner, configPath, previous, candidate)
+    owner && (!(service
+      ? isOwnedServiceChange(service, configPath, previous, candidate)
+      : isOwnedConfiguredChange(configured!, configPath, previous, candidate))
       || !equalJson(previousStartup, candidateStartup))
   ) {
     throw new ProfilePluginConfigFenceBusyError()
@@ -328,6 +379,26 @@ export class SharedProfilePluginConfigFence extends SharedProfileFence {
     return await this.runWhileHeld(async held =>
       await runOwnedPackageWrite({
         homeDir: path.dirname(path.resolve(this.configPath)),
+        profileId: this.profileId,
+        pluginId: input.pluginId,
+        isCurrent: () => held() && input.isCurrent(),
+      }, action)
+    )
+  }
+
+  /** Host-only: borrow the held profile lock for one configured plugin's profile state. */
+  async runConfiguredMutation<T>(input: {
+    readonly pluginId: string
+    readonly isCurrent: () => boolean
+  }, action: () => Promise<T>): Promise<T> {
+    if (
+      process.platform !== 'darwin' && process.platform !== 'linux' || hasOwnedProfileWrite()
+      || !PROFILE.test(this.profileId) || !LOCAL_ID.test(input.pluginId)
+      || ownedServiceWrites.getStore() !== undefined || currentOwnedPackageWrite()
+    ) throw new Error('owned configured plugin write is unavailable')
+    return await this.runWhileHeld(async held =>
+      await runOwnedConfiguredWrite({
+        configPath: this.configPath,
         profileId: this.profileId,
         pluginId: input.pluginId,
         isCurrent: () => held() && input.isCurrent(),

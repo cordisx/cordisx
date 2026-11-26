@@ -66,6 +66,10 @@ export class ServiceRendererLifecycleHandoff {
         snapshot: ServiceRendererSnapshot,
         plugin: CordisXConfigPlugin,
       ) => Promise<boolean>
+      readonly adoptSelectedConfiguredPlugins: (
+        previous: readonly CordisXConfigPlugin[],
+        next: readonly CordisXConfigPlugin[],
+      ) => boolean
       readonly reserveDesktopConfig?: (
         peers: readonly ManagerRendererCommandPeer[],
       ) => Promise<DesktopConfigurationReservation>
@@ -113,6 +117,7 @@ export class ServiceRendererLifecycleHandoff {
         ...(this.input.pluginFence === undefined ? {} : { pluginFence: this.input.pluginFence }),
         rememberPluginConfig: this.input.rememberPluginConfig,
         canCoordinatePluginConfig: this.input.canCoordinatePluginConfig,
+        adoptSelectedConfiguredPlugins: this.input.adoptSelectedConfiguredPlugins,
         readInputs: async snapshot => await this.readInputs(snapshot),
         current: this.input.current,
       },

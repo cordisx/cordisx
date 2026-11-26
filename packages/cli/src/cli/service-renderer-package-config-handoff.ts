@@ -20,7 +20,21 @@ type Inputs = {
   readonly inputs: Map<string, string>
 }
 
-/** Coordinate admitted Managers and one service-free package while its Desktop owner applies configuration. */
+/** Confirm that this page owns the same configured archive as the Desktop selection. */
+function matchesConfiguredBinding(entry: ServiceRendererBootstrapEntry, plugin: CordisXConfigPlugin): boolean {
+  try {
+    const matches = entry.configuredPlugins?.filter(item => item.pluginId === plugin.id) ?? []
+    if (matches.length !== 1 || !matches[0]!.isCurrent()) return false
+    const binding = matches[0]!.permissionBinding(matches[0]!.permissionContext())
+    return binding.original.source === plugin.source && binding.digest === plugin.configuredArchiveDigest
+      && binding.original.digest === plugin.configuredArchiveDigest && binding.lease.pluginId === plugin.id
+      && attachmentEqual(binding.artifact, plugin.distributionArtifact)
+  } catch {
+    return false
+  }
+}
+
+/** Coordinate admitted Managers and one service-free plugin while its Desktop owner applies configuration. */
 export async function reserveServiceRendererPackageConfig(
   input: {
     readonly homeDir: string
@@ -39,6 +53,10 @@ export async function reserveServiceRendererPackageConfig(
       snapshot: ServiceRendererSnapshot,
       plugin: CordisXConfigPlugin,
     ) => Promise<boolean>
+    readonly adoptSelectedConfiguredPlugins: (
+      previous: readonly CordisXConfigPlugin[],
+      next: readonly CordisXConfigPlugin[],
+    ) => boolean
     readonly readInputs: (snapshot: ServiceRendererSnapshot) => Promise<Inputs>
     readonly current: (rendererId: string, entry: ServiceRendererBootstrapEntry) => boolean
   },
@@ -64,13 +82,19 @@ export async function reserveServiceRendererPackageConfig(
   const source = cohort.find(item => item.id === origin.rendererId)
   if (!source || cohort.length === 0) throw new Error('renderer-package-config-unavailable')
   const entry = source.entry
-  if (!entry.snapshot || !entry.plugins) throw new Error('renderer-package-config-unavailable')
-  const plugin = entry.plugins.find(value => value.id === pluginId)
+  if (!entry.snapshot || !entry.plugins || !entry.config) throw new Error('renderer-package-config-unavailable')
+  const installed = entry.plugins.filter(value => value.id === pluginId)
+  const configured = entry.config.plugins.filter(value => value.id === pluginId)
+  if (installed.length + configured.length !== 1) throw new Error('renderer-package-config-unavailable')
+  const isConfigured = configured.length === 1
+  const plugin = (isConfigured ? configured[0] : installed[0])!
   const manifest = plugin?.manifest
   if (
-    !plugin?.enabled || !plugin.package
-    || manifest?.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1
-    || manifest.capabilities.length !== 0 || entry.managedOwners?.has(pluginId)
+    !plugin.enabled || entry.managedOwners?.has(pluginId)
+    || isConfigured && (pluginId === 'channel' || plugin.package !== undefined
+        || cohort.some(item => !matchesConfiguredBinding(item.entry, plugin)))
+    || !isConfigured && (!plugin.package || manifest?.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1
+        || manifest.schemaVersion !== 1 || manifest.capabilities.length !== 0)
   ) throw new Error('renderer-package-config-unavailable')
   const snapshot = entry.snapshot
   const transition = {
@@ -110,7 +134,7 @@ export async function reserveServiceRendererPackageConfig(
         || !attachmentEqual(before.policies, item.entry.policies)
         || !attachmentEqual(before.inputs, item.entry.packageInputs) || item.entry.managedOwners?.has(pluginId)
       )
-      || !await hasNoPackageServiceState(input.homeDir, input.profileId, pluginId)
+      || !isConfigured && !await hasNoPackageServiceState(input.homeDir, input.profileId, pluginId)
     ) throw new Error('renderer-package-config-unavailable')
     const otherPlugins = (values: readonly CordisXConfigPlugin[]) => values.filter(value => value.id !== pluginId)
     const otherInputs = (values: Map<string, string>) => new Map([...values].filter(([id]) => id !== pluginId))
@@ -118,12 +142,18 @@ export async function reserveServiceRendererPackageConfig(
       const { config: _config, revision: _revision, ...identity } = value
       return identity
     }
+    const withoutConfiguredValue = (value: CordisXConfig) => ({
+      ...value,
+      plugins: value.plugins.map(item => item.id === pluginId ? withoutConfig(item) : item),
+    })
     return {
       snapshot,
       plugin,
       isCurrent: current,
       run: async <T>(action: () => Promise<T>) =>
-        await pluginFence.runPackageMutation({ pluginId, isCurrent: current }, action),
+        isConfigured
+          ? await pluginFence.runConfiguredMutation({ pluginId, isCurrent: current }, action)
+          : await pluginFence.runPackageMutation({ pluginId, isCurrent: current }, action),
       async adopt(
         expected: unknown,
         proof: DesktopManagerConfigProof | undefined,
@@ -132,28 +162,42 @@ export async function reserveServiceRendererPackageConfig(
       ): Promise<boolean> {
         try {
           const after = await input.readInputs(snapshot)
-          const target = after.plugins.find(value => value.id === pluginId)
+          const target = (isConfigured ? after.config.plugins : after.plugins).find(value => value.id === pluginId)
           if (
             !current() || !proof || !target || !attachmentEqual(input.lifecycle.snapshot(), snapshot)
-            || !attachmentEqual(after.config, before.config) || !attachmentEqual(after.policies, before.policies)
-            || !attachmentEqual(otherPlugins(after.plugins), otherPlugins(before.plugins))
-            || !attachmentEqual(otherInputs(after.inputs), otherInputs(before.inputs))
+            || !attachmentEqual(after.policies, before.policies)
+            || (isConfigured
+              ? !attachmentEqual(withoutConfiguredValue(after.config), withoutConfiguredValue(before.config))
+                || !attachmentEqual(after.plugins, before.plugins) || !attachmentEqual(after.inputs, before.inputs)
+              : !attachmentEqual(after.config, before.config)
+                || !attachmentEqual(otherPlugins(after.plugins), otherPlugins(before.plugins))
+                || !attachmentEqual(otherInputs(after.inputs), otherInputs(before.inputs)))
             || !attachmentEqual(withoutConfig(target), withoutConfig(plugin))
             || target.revision !== (plugin.revision ?? 0) + (applied ? 1 : 0)
             // Package storage uses null-prototype records; compare the JSON
             // value rather than object prototypes after a confirmed commit.
             || !attachmentEqual(JSON.parse(JSON.stringify(target.config)), JSON.parse(JSON.stringify(expectedStored)))
             || !attachmentEqual(projectDesktopManagerConfig(snapshot, target, proof), expected)
-            || !await hasNoPackageServiceState(input.homeDir, input.profileId, pluginId)
+            || !isConfigured && !await hasNoPackageServiceState(input.homeDir, input.profileId, pluginId)
             || !current()
           ) return false
           if (applied && !input.rememberPluginConfig(snapshot, target, proof)) return false
-          const configured = Object.keys(target.config as Record<string, unknown>).length > 0
-          const lifecycle = configured && await input.canCoordinatePluginConfig(snapshot, target)
+          const hasConfig = Object.keys(target.config as Record<string, unknown>).length > 0
+          const lifecycle = !isConfigured && hasConfig && await input.canCoordinatePluginConfig(snapshot, target)
           if (!current()) return false
+          if (
+            isConfigured && applied
+            && !input.adoptSelectedConfiguredPlugins(before.config.plugins, after.config.plugins)
+          ) {
+            return false
+          }
           for (const item of cohort) {
             item.entry.plugins = after.plugins
             item.entry.packageInputs = new Map(after.inputs)
+            if (isConfigured) {
+              item.entry.config = after.config
+              continue
+            }
             const projections = new Map(item.entry.projectedConfigs)
             if (
               target.config !== null && typeof target.config === 'object' && Object.keys(target.config).length === 0

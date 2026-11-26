@@ -1,4 +1,5 @@
 import type { CordisXConfigPlugin } from '../launcher/config.js'
+import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import type { DesktopManagerConfigProjection } from './desktop-manager-config-projection.js'
 import type { ServiceRendererSnapshot } from './service-renderer-bootstrap-state.js'
@@ -9,6 +10,25 @@ export type DesktopConfigProjector =
   & Partial<
     Pick<DesktopManagerConfigProjection, 'projectForAdmission' | 'canWrite' | 'canCoordinateLifecycle' | 'remember'>
   >
+
+/** Retain the Desktop owner's exact configured selection across confirmed writes. */
+export class DesktopConfiguredSelection {
+  private plugins: readonly CordisXConfigPlugin[] | undefined
+
+  constructor(plugins: readonly CordisXConfigPlugin[] | undefined) {
+    this.plugins = plugins === undefined ? undefined : structuredClone(plugins)
+  }
+
+  matches(plugins: readonly CordisXConfigPlugin[]): boolean {
+    return this.plugins === undefined || attachmentEqual(this.plugins, plugins)
+  }
+
+  readonly adopt = (previous: readonly CordisXConfigPlugin[], next: readonly CordisXConfigPlugin[]): boolean => {
+    if (this.plugins === undefined || !attachmentEqual(this.plugins, previous)) return false
+    this.plugins = structuredClone(next)
+    return true
+  }
+}
 
 export function emptyPluginConfig(value: unknown): boolean {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
@@ -102,4 +122,29 @@ export async function prepareDesktopManagerConfigs(
     }
   }
   return { projectedConfigs, writablePlugins, lifecyclePlugins }
+}
+
+/** Only graphs already admitted by the owner may receive configured-plugin write capability. */
+export async function prepareDesktopConfiguredConfigWrites(
+  input: {
+    readonly projectPluginConfig?: DesktopConfigProjector
+    readonly desktopPackageConfigEnabled?: () => boolean
+  },
+  snapshot: ServiceRendererSnapshot,
+  plugins: readonly CordisXConfigPlugin[],
+  configured: readonly { readonly pluginId: string }[],
+  current: () => boolean,
+): Promise<string[]> {
+  const canWrite = input.projectPluginConfig?.canWrite?.bind(input.projectPluginConfig)
+  if (!input.desktopPackageConfigEnabled?.() || !canWrite) return []
+  const eligible = new Set(configured.map(item => item.pluginId))
+  const writable: string[] = []
+  for (const plugin of plugins) {
+    if (!eligible.has(plugin.id)) continue
+    try {
+      if (await canWrite(snapshot, plugin)) writable.push(plugin.id)
+    } catch { /* An unproved configured archive remains read-only. */ }
+    if (!current()) throw new Error('renderer-bootstrap-stale')
+  }
+  return writable
 }

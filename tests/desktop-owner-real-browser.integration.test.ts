@@ -57,6 +57,7 @@ import {
   verifyDesktopActivationViews,
   verifyDesktopConfiguredNavigation,
   verifyDesktopConfiguredPlugins,
+  verifyDesktopConfiguredWrite,
   waitForDesktopRetirement,
 } from './suites/desktop-configured-plugin-browser.js'
 import { verifyDesktopSharedModelServices } from './suites/desktop-model-services-browser.js'
@@ -104,6 +105,7 @@ async function exerciseDesktopOwner(
   lifecycleFixture = false,
   extraConfiguredFixture = false,
   privateWriteFixture = false,
+  configuredWriteFixture = false,
 ) {
   if (archive !== undefined && !path.isAbsolute(archive)) throw new Error('fixture archive must be absolute')
   const root = await mkdtemp('/tmp/cx-desktop-real-browser-')
@@ -469,7 +471,7 @@ async function exerciseDesktopOwner(
     first = await connect(firstTarget.targetId)
     await first.send('Page.navigate', { url: url(web.url) })
     await ready(first)
-    if (writeFixture && !privateWriteFixture) {
+    if (writeFixture && !privateWriteFixture && !configuredWriteFixture) {
       expect(
         await first.evaluate(`globalThis.__cordisxRuntime.snapshot().plugins
         .find(item => item.id === 'desktop-config-fixture')?.configuration.writable`),
@@ -553,6 +555,10 @@ async function exerciseDesktopOwner(
         await ready(second)
         return second
       })
+      return
+    }
+    if (configuredWriteFixture) {
+      await verifyDesktopConfiguredWrite(first, second, desktop, configPath, ready)
       return
     }
     if (writeFixture) {
@@ -932,6 +938,12 @@ it.skipIf(chrome === undefined)(
 it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
   'projects a proven configured archive into two Desktop Manager pages',
   async () => await exerciseDesktopOwner(undefined, false, false, false, false, true),
+  180_000,
+)
+
+it.skipIf(chrome === undefined || process.platform !== 'darwin' && process.platform !== 'linux')(
+  'saves a configured archive setting and synchronizes two Desktop Manager pages',
+  async () => await exerciseDesktopOwner(undefined, false, false, true, false, true, false, true),
   180_000,
 )
 

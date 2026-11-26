@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { expect, vi } from 'vitest'
+import { loadHomeConfig } from '../../packages/cli/src/config/home-config.js'
 import type { CordisXConfigPlugin } from '../../packages/cli/src/launcher/config.js'
 import { PackagePluginConfigStore } from '../../packages/cli/src/launcher/package-plugin-config.js'
 import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -150,6 +151,82 @@ export async function verifyDesktopConfiguredPlugins(
       ).toBe(true)
     }, { timeout: 15_000 })
   }
+}
+
+/** Save an ordinary field through the existing Manager and retain the owner's private field. */
+export async function verifyDesktopConfiguredWrite(
+  first: CdpClient,
+  second: CdpClient,
+  desktop: CdpClient,
+  configPath: string,
+  ready: (page: CdpClient) => Promise<void>,
+): Promise<void> {
+  const id = 'configured-proved'
+  const form = `[data-plugin-config-form=${id}]`
+  const value = (label: string) => ({ label })
+  const snapshot = `globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === '${id}')?.configuration`
+  const open = async (page: CdpClient) => {
+    await vi.waitFor(async () => {
+      expect(await page.evaluate(`Boolean(document.querySelector('[data-plugin-id=${id}]'))`)).toBe(true)
+    }, { timeout: 15_000 })
+    await page.evaluate(`document.querySelector('[data-plugin-id=${id}]').click()`)
+    await vi.waitFor(async () => {
+      expect(await page.evaluate('Boolean(document.querySelector("[data-plugin-detail-tab=config]"))')).toBe(true)
+    }, { timeout: 15_000 })
+    await page.evaluate('document.querySelector("[data-plugin-detail-tab=config]").click()')
+    await vi.waitFor(async () => {
+      expect(await page.evaluate(`Boolean(document.querySelector('${form} [data-config-path=label] input'))`)).toBe(
+        true,
+      )
+    }, { timeout: 15_000 })
+  }
+  const save = async (page: CdpClient, label: string) => {
+    await open(page)
+    await page.evaluate(`(() => {
+      const input = document.querySelector('${form} [data-config-path=label] input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(label)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`)
+    await vi.waitFor(async () => {
+      expect(await page.evaluate(`!document.querySelector('${form} button[type=submit]').disabled`)).toBe(true)
+    }, { timeout: 10_000 })
+    await page.evaluate(`document.querySelector('${form} button[type=submit]').click()`)
+  }
+  const confirm = async (revision: number, label: string) => {
+    await vi.waitFor(async () => {
+      const stored = (await loadHomeConfig(configPath)).plugins.find(plugin => plugin.id === id)?.profiles?.default
+      expect(stored).toEqual({ revision, config: { label, token: 'synthetic-proved-secret' } })
+      for (const page of [first, second, desktop]) {
+        expect(await page.evaluate(`${snapshot}?.revision`)).toBe(revision)
+        expect(await page.evaluate(`${snapshot}?.value`)).toEqual(value(label))
+      }
+      for (const page of [first, second]) {
+        expect(
+          await page.evaluate('JSON.stringify(globalThis.__cordisxRuntime.snapshot()) + document.body.textContent'),
+        )
+          .not.toContain('synthetic-proved-secret')
+      }
+    }, { timeout: 30_000 })
+  }
+  for (const page of [first, second]) {
+    expect(await page.evaluate(`${snapshot}?.writable`)).toBe(true)
+  }
+  await first.evaluate("globalThis.__configuredWriteMarker = 'same-document'")
+  await save(first, 'first configured update')
+  await confirm(1, 'first configured update')
+  expect(await first.evaluate('globalThis.__configuredWriteMarker')).toBe('same-document')
+  await second.evaluate('globalThis.__configuredBeforeReload = true')
+  await second.send('Page.reload')
+  await vi.waitFor(async () => {
+    expect(await second.evaluate('globalThis.__configuredBeforeReload === undefined')).toBe(true)
+  }, { timeout: 15_000 })
+  await ready(second)
+  expect(await second.evaluate(`${snapshot}?.value`)).toEqual(value('first configured update'))
+  expect(await second.evaluate(`${snapshot}?.writable`)).toBe(true)
+  await save(second, 'second configured update')
+  await confirm(2, 'second configured update')
+  expect(await first.evaluate('globalThis.__configuredWriteMarker')).toBe('same-document')
 }
 
 export async function verifyDesktopActivationViews(pages: readonly CdpClient[], isolated: boolean) {

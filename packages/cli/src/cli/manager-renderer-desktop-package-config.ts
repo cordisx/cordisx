@@ -112,7 +112,8 @@ export function createManagerRendererDesktopPackageConfig(input: {
             const expectedStored = applied ? write.expectedStoredValue() : handoff.plugin.config
             const after = await native.proof(operation.pluginId)
             if (
-              !await handoff.adopt(expected, after, applied, expectedStored) || !native.confirm()
+              !after || !attachmentEqual(proof.plugin.configured, after.plugin.configured)
+              || !await handoff.adopt(expected, after, applied, expectedStored) || !native.confirm()
               || applied && !await confirmation.confirm()
               || !handoff.cancel() || !origin.release()
             ) throw new Error('DESKTOP_PACKAGE_CONFIG_RESULT_UNKNOWN')

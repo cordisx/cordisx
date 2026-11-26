@@ -68,6 +68,8 @@ it('projects a configured archive only from the matching Desktop configuration p
       configuration: {
         namespace: configured.id,
         schemaKind: 'schemastery',
+        applies: 'live',
+        writable: true,
         revision: 4,
         lastGoodRevision: 4,
         value: { label: 'visible' },
@@ -85,7 +87,7 @@ it('projects a configured archive only from the matching Desktop configuration p
     seat: () => Symbol.for('configured-seat'),
     read: async () => native as any,
   })
-  expect(await projector.canWrite(snapshot, configured as any)).toBe(false)
+  expect(await projector.canWrite(snapshot, configured as any)).toBe(true)
   expect(await projector.canCoordinateLifecycle(snapshot, configured as any)).toBe(false)
   for (
     const changed of [

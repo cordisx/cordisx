@@ -86,10 +86,9 @@ function projectedConfig(
   proof: DesktopManagerConfigProof,
 ): ProjectedConfig {
   const value = projectDesktopManagerConfig(snapshot, plugin, proof)
-  if (plugin.package === undefined) return { value, writable: false, lifecycle: false }
   const descriptor = proof.plugin.configuration
   const live = descriptor.applies === 'live' && Buffer.byteLength(JSON.stringify(value)) <= 192 * 1024
-  const lifecycle = live
+  const lifecycle = plugin.package !== undefined && live
     && isDeepStrictEqual(
       normalized(plugin.config),
       normalized(removePaths(plugin.config, descriptor.secrets.map(secret => secret.path))),

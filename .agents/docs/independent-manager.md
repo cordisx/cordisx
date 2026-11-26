@@ -43,7 +43,7 @@ disabled search control and loading results. Navigation remains usable; search
 becomes available after the owner admits the page.
 
 Eligible service and Desktop owners can project initial
-capability-free v1 package graphs and host-owned v14/v15 managed backends whose
+capability-free v1 package graphs and host-owned v14/v15/v16 managed backends whose
 only declared renderer capability is UI extension rendering. These packages
 must have no durable documents or entity templates and must have a verified
 browser graph. In service mode, their plugin configuration must be empty. An
@@ -87,8 +87,8 @@ the operation may require reconciliation. The installed managed packages remain
 read-only in these Manager pages.
 
 The service owner also protects [active terminal leases](terminal-model-services.md#select-an-existing-plugin-service)
-during plugin changes; native adapters and external model API clients are not
-yet included in that guard.
+and in-flight plugin-backed model API requests during plugin changes. Native
+adapter synchronization is not yet included in that guard.
 
 A Desktop owner must own the profile exclusively, have a ready Desktop renderer
 and not be in attach mode. On macOS or Linux, either owner can project one
@@ -111,18 +111,22 @@ with a resolved tenant. The eligible Desktop owner remains read-only. Channel
 policies, logs and sessions
 are not available through this restricted page. Disabled configured plugins can
 coexist with the Channel and appear by ID with no configuration or lifecycle
-actions; their source and credentials stay with the owner. An eligible service-free
-configured archive with empty configuration and no declared capabilities, durable
-documents or entity templates can also contribute Manager pages through its verified
-browser graph. Existing matching permissions are projected
-to a session-local identity. In service mode, an explicit user decision can
+actions; their source and credentials stay with the owner. An eligible, service-free
+configured archive with no declared capabilities, durable documents, or entity
+templates can also contribute Manager pages through its verified browser graph.
+The service owner requires an empty plugin configuration. An eligible Desktop
+owner can project non-sensitive fields after proving the native configuration
+and can save declared live primitive fields and bounded primitive arrays. The
+owner retains private fields and confirms the stored revision and adoption by
+each Manager page. Existing matching permissions are projected to a
+session-local identity. In service mode, an explicit user decision can
 persist, deny, or reset the selected configured archive’s two Manager UI
 permissions. The owner verifies each page’s source and archive and waits for
 all admitted Manager pages to adopt the change. It rechecks the effective
 configuration and selected archive during the write; a changed input fences
 the pages and may require reconciliation. Unaccounted renderers prevent the
-change; Desktop and external adapter consumers are not yet included. Plugin
-configuration, credentials, and lifecycle operations remain unavailable. A
+change; Desktop and external adapter consumers are not yet included. Other
+plugin configuration, credential editing, and lifecycle operations remain unavailable. A
 plugin whose activation fails is shown as
 failed without disconnecting the Manager. An identifiable configured plugin
 that requires currently unsupported configuration or capabilities is also
@@ -134,9 +138,11 @@ not constitute real Codex App validation.
 
 A verified installed package that the standalone Manager cannot project may be
 shown as unavailable. This includes service-free packages and supported managed
-packages with unprojectable configuration or dependencies. Their activation
-records remain intact; their browser graphs, configuration, and permissions are
-not projected. A supported managed backend continues under its owner. Other
+packages with unprojectable configuration or dependencies. A Desktop owner can
+isolate a package whose configuration proof is unavailable while the same
+owner and Desktop seat remain current; loss of that authority prevents admission.
+Their activation records remain intact, while their browser graphs, configuration,
+and permissions are not projected. A supported managed backend continues under its owner. Other
 unsupported packages with services, durable documents, or entity templates still
 prevent admission.
 

@@ -205,7 +205,21 @@ async function assertStandaloneOwner(
       desktopConfig.token !== 'renderer-binding-placeholder' || !Array.isArray(desktopConfig.plugins)
       || desktopConfig.plugins.length === 0 || desktopConfig.plugins.length > 256
       || new Set(desktopConfig.plugins).size !== desktopConfig.plugins.length
-      || desktopConfig.plugins.some(id => !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id) || !byId.has(id))
+      || desktopConfig.plugins.some(id => {
+        if (!/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id)) return true
+        const matches = config.plugins.filter(plugin => plugin.id === id)
+        const plugin = matches[0]
+        if (matches.length !== 1 || !plugin || plugin.standaloneUnavailable === true) return true
+        if (plugin.package !== undefined) return !byId.has(id)
+        const manifest = plugin.manifest
+        return id === 'channel' || !plugin.enabled || !plugin.distributionArtifact || !plugin.runtimeGraph
+          || !manifest || !('services' in manifest) || manifest.services.length !== 0
+          || manifest.capabilities.length !== 0 || !isStandaloneRuntimeGraph(plugin.runtimeGraph, {
+            origin: owner.managerOrigin,
+            pluginId: plugin.id,
+            generation: plugin.runtimeGraph.moduleGeneration,
+          })
+      })
     )
   ) throw new Error('Standalone package configuration projection is invalid')
   for (const item of activation.plugins) {
