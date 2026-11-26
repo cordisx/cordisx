@@ -1,4 +1,5 @@
 import { validateOutboundContentV3 } from '@cordisx/channel-runtime'
+import { validateLegacyRichtextPayload } from './channel-send-richtext-payload.js'
 export type ChannelSendPayload = import('@cordisx/channel-runtime').ChannelOutboundContentV3
 
 export interface ChannelMediaPrepareInput {
@@ -126,6 +127,15 @@ export function validateChannelSendPayload(value: unknown): ChannelSendPayload {
     return { type: 'text', text: boundedText(payload.text) }
   }
   if (payload.type === 'richtext') {
+    const successor = Array.isArray(payload.blocks) && payload.blocks.some(value => {
+      const block = record(value)
+      return block.type === 'inline-code' || block.type === 'code'
+        || Array.isArray(block.nodes) && block.nodes.some(value => {
+            const node = record(value)
+            return node.type === 'link' || node.type === 'image'
+          })
+    })
+    if (!successor) return validateLegacyRichtextPayload(payload)
     try {
       return validateOutboundContentV3(payload)
     } catch {
