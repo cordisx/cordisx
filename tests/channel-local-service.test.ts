@@ -1,10 +1,16 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
-import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
+import { ChannelRuntime } from '../packages/channel-runtime/src/index.js'
+import {
+  SimulatedChannelAdapter,
+  SimulatedPermissionBroker,
+  SIMULATOR_ADAPTER_IDENTITY,
+  SIMULATOR_CHANNEL_SERVICE_CONFIG,
+} from '../packages/channel-runtime/src/simulator.js'
+import { createLocalChannelService, projectLocalChannelManager } from '../packages/cli/src/launcher/channel-service.js'
 import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
 const temporary = new Set<string>()
@@ -158,5 +164,62 @@ describe('built-in local Channel service', () => {
       secretState: 'missing',
     }))
     await service.dispose()
+  })
+
+  it('projects a failed official reconnect as unavailable after an interrupted owner', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-interrupted-'))
+    temporary.add(root)
+    const dataDir = path.join(root, 'runtime')
+    const file = path.join(dataDir, 'transport.json')
+    const ref = { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' }
+    const configuration = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG)
+    configuration.connections.push({
+      ref,
+      adapterKind: 'feishu',
+      enabled: true,
+      transport: { mode: 'websocket' },
+      secretRef: 'host-secret:env/CORDISX_MISSING_TEST_SECRET',
+    })
+
+    const prior = await ChannelRuntime.open({ permissions: new SimulatedPermissionBroker(), storePath: file })
+    const adapter = new SimulatedChannelAdapter({ ref })
+    await prior.activate({
+      descriptor: { ...adapter.descriptor, kind: 'feishu', secretState: 'ready' },
+      start: adapter.start.bind(adapter),
+    }, SIMULATOR_ADAPTER_IDENTITY)
+    const interruptedStore = await readFile(file)
+    await prior.dispose()
+    await writeFile(file, interruptedStore)
+
+    const service = createLocalChannelService({
+      artifactDirectory: channelArtifactDirectory,
+      dataDir,
+      source: pathToFileURL(channelEntry).href,
+      environment: {},
+    })
+    try {
+      await service.start(configuration)
+      const snapshot = service.snapshot()
+      expect(snapshot?.accounts).toContainEqual(expect.objectContaining({
+        ref,
+        connectionState: 'unavailable',
+        secretState: 'missing',
+      }))
+      expect(service.manager.snapshot()?.accounts).toContainEqual(expect.objectContaining({
+        ref,
+        connectionState: 'unavailable',
+      }))
+      expect(
+        projectLocalChannelManager({
+          configuration,
+          revision: 1,
+          lastGoodRevision: 1,
+          writable: false,
+          runtime: snapshot,
+        }).accounts,
+      ).toContainEqual(expect.objectContaining({ ref, connectionState: 'unavailable' }))
+    } finally {
+      await service.dispose()
+    }
   })
 })

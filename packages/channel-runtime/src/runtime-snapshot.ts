@@ -22,7 +22,11 @@ export async function visibleConnections(
   return visible
 }
 
-export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): ChannelRuntimeSnapshot {
+export function runtimeSnapshot(
+  state: ChannelStoreState,
+  observedAt: string,
+  active: ReadonlyMap<string, { readonly generation: number }>,
+): ChannelRuntimeSnapshot {
   const accounts = Object.entries(state.adapters)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, adapter]) => {
@@ -32,7 +36,10 @@ export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): C
         ref: adapter.ref,
         adapterKind: adapter.kind,
         implementationStatus: adapter.implementationStatus,
-        connectionState: adapter.connectionState,
+        // A persisted ready state is not evidence that this runtime still owns a connection.
+        connectionState: adapter.connectionState === 'ready' && active.get(key)?.generation !== adapter.generation
+          ? 'unavailable' as const
+          : adapter.connectionState,
         secretState: adapter.secretState,
         generation: adapter.generation,
         lastGoodRevision: adapter.lastGoodRevision,
