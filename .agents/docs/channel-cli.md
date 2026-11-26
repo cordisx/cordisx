@@ -1,5 +1,17 @@
 # Channel CLI and chat bindings
 
+Historical attachments use configured `resource-status`, `resource-refetch` and
+`resource-read` CLI/RPC entrypoints, not a newly acquired plugin facade. Input is
+`{account,conversationId,kind,messageId,index}`; byte reads also require
+`{offset,length}` (1..65536). The Host rechecks original reply ancestry and remote
+resource association; explicit `resource-read` policy and platform scopes are
+independent of history/send grants. Refetch prepares one bounded resource for up
+to one hour; status does not download. Actual consumption uses base64 chunks and
+truthful `nextOffset`/`hasMore`; decode with the caller's permitted local tools.
+No local path or platform key is disclosed. Caller/actor/generation ownership
+survives turns but not caller changes, expiry or disposal. Unsupported Hosts
+return unavailable; this is not automatic audio/video understanding.
+
 For independently authorized original-message forwarding, see [single/merge forwarding](channel-forward.md). It is not `send`, reply/thread sending, or Agent SDK fallback.
 See [scoped message operations](channel-message-operations.md) for candidate
 edit/recall, pin, read-user/reaction pagination, restricted card updates and

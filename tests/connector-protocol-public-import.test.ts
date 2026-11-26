@@ -3,6 +3,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type {
+  ChannelHistoricalResourceReadRequestV1,
+  ChannelHistoricalResourceRequestV1,
+  ChannelHistoricalResourceResultV1,
+} from '@cordisx/protocol/channel-historical-resources/v1'
+import type {
   BoundConnectorClient,
   BoundConnectorClientResult,
   ConnectorCommand,
@@ -111,6 +116,11 @@ type FormalCardActionSurface = readonly [
   ChannelCardActionEventV1,
 ]
 const formalCardActionSurface = null as unknown as FormalCardActionSurface
+const formalHistoricalResourceSurface = null as unknown as readonly [
+  ChannelHistoricalResourceRequestV1,
+  ChannelHistoricalResourceReadRequestV1,
+  ChannelHistoricalResourceResultV1,
+]
 
 describe('formal Connector Protocol public type import', () => {
   it('pins the Host root, publishable CLI, and lockfile to one exact merged Protocol dependency', async () => {
@@ -131,6 +141,7 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
     expect(formalCardActionSurface).toBeNull()
+    expect(formalHistoricalResourceSurface).toBeNull()
   })
 
   it('rejects stale manifest, lock, and integrity edges', () => {

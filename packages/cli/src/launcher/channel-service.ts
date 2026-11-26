@@ -41,11 +41,13 @@ import type { HostServiceCapabilityOwner } from '../service-capability-ownership
 import { bindDiagnosticContext } from '../diagnostics/context.js'
 import { updateFeishuCard } from './feishu-card-update.js'
 import { channelFeedbackSdk } from './channel-feedback-sdk.js'
+import { ChannelHistoricalResources } from './channel-historical-resources.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
   readonly genericCardActions: ChannelGenericCardActions
+  readonly historicalResources: ChannelHistoricalResources
   readonly threadForward: ReturnType<typeof createChannelThreadForwardService>
   readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
@@ -347,6 +349,7 @@ export function createLocalChannelService(input: {
           genericCardActions: await ChannelGenericCardActions.open(
             path.join(input.dataDir, 'generic-card-actions.json'),
           ),
+          historicalResources: new ChannelHistoricalResources(),
           threadForward: createChannelThreadForwardService({
             filename: path.join(input.dataDir, 'thread-forward.json'),
             channel: request => directory.channel(request.source),
@@ -375,6 +378,7 @@ export function createLocalChannelService(input: {
           directory,
           dispose: async () => {
             current.genericCardActions.dispose()
+            await current.historicalResources.dispose()
             outbound.dispose()
             directory.clear()
             await display.close()
@@ -606,6 +610,27 @@ export function createLocalChannelService(input: {
       }
       return {
         generation: current.generation,
+        historicalResource: (event, messageId, index, prepare, caller, authorize, range, signal) => {
+          const channel = current.directory.channel(event)
+          return current.historicalResources.read(
+            event,
+            messageId,
+            index,
+            prepare,
+            caller,
+            channel,
+            () => {
+              if (disposed || active !== current || current.directory.channel(event) !== channel) {
+                throw new Error(
+                  'CHANNEL_GENERATION_CHANGED',
+                )
+              }
+              authorize()
+            },
+            range,
+            signal,
+          )
+        },
         runtime: current.runtime,
         outbound: current.outbound,
         forward: current.forward,
