@@ -30,10 +30,12 @@ it('keeps a model API request alive until the affected plugin can be changed', a
       timeout: 30_000,
     })
   const abort = new AbortController()
+  let launchAttempted = false
   try {
     await mkdir(home)
     await stageServiceModePlugin(root, home, profile, true)
     await stageServiceModePlugin(root, home, profile, false)
+    launchAttempted = true
     const started = JSON.parse((await command('start')).stdout) as { status: string; modelApiUrl: string }
     expect(started.status).toBe('ready')
     const key = (await readFile(path.join(home, 'run', 'model-api', profile, 'access-key'), 'utf8')).trim()
@@ -74,7 +76,14 @@ it('keeps a model API request alive until the affected plugin can be changed', a
     await vi.waitFor(async () => expect((await disable('fixture-service')).status).toBe('applied'), { timeout: 10_000 })
   } finally {
     abort.abort()
-    await command('stop').catch(() => undefined)
+    let stopConfirmed = !launchAttempted
+    if (launchAttempted) {
+      try {
+        const stopped = JSON.parse((await command('stop')).stdout) as { status: string }
+        stopConfirmed = stopped.status === 'stopped'
+      } catch { /* Preserve the fixture root if shutdown cannot be confirmed. */ }
+    }
+    if (!stopConfirmed) throw new Error('Fixture owner shutdown was not confirmed')
     const allowRemoval = async (directory: string) => {
       await chmod(directory, 0o700)
       for (const entry of await readdir(directory, { withFileTypes: true })) {

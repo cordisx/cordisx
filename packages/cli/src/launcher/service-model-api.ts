@@ -25,16 +25,25 @@ export async function startServiceModelApi(input: {
       environment: mergeHomeEnvironment(input.environment, config.environmentVariables),
     }
   }
-  const connectManaged = (session: NativeManagedGatewayConnectionSession, modelId: string, signal: AbortSignal) => {
+  const connectManaged = (
+    session: NativeManagedGatewayConnectionSession,
+    signal: AbortSignal,
+    options: { readonly modelId?: string; readonly responsesOnly?: boolean; readonly isCurrent?: () => boolean },
+  ) => {
     try {
       signal.throwIfAborted()
-      if (!session.value.models.aliases.some(model => model.gatewayModelId === modelId)) {
+      if (
+        options.modelId !== undefined
+        && !session.value.models.aliases.some(model => model.gatewayModelId === options.modelId)
+      ) {
         throw new Error('Model catalog changed; refresh /v1/models')
       }
+      if (options.isCurrent && !options.isCurrent()) throw new Error('Managed model is unavailable')
       const { endpoint } = session.value
       return {
         baseUrl: `${endpoint.origin}${endpoint.apiPath}`,
         headers: endpoint.auth.scheme === 'bearer' ? { authorization: `Bearer ${endpoint.auth.token}` } : {},
+        ...(options.responsesOnly ? { protocols: ['openai-responses'] } : {}),
         dispose: () => session.dispose(),
       }
     } catch (error) {
@@ -72,16 +81,23 @@ export async function startServiceModelApi(input: {
     async connect(providerId, modelId, signal) {
       return await clients.open(signal, async () => {
         signal.throwIfAborted()
-        if (input.managed?.owns(providerId)) {
-          if (!await input.managed.validateSelection(providerId, modelId)) {
+        const managed = input.managed
+        if (managed?.owns(providerId)) {
+          if (!await managed.validateSelection(providerId, modelId)) {
             throw new Error('Managed model is unavailable')
           }
-          const session = await input.managed.nativeConnection(providerId)
-          return { connection: connectManaged(session, modelId, signal), pluginId: session.value.service.pluginId }
+          const session = await managed.nativeConnection(providerId)
+          return {
+            connection: connectManaged(session, signal, {
+              responsesOnly: true,
+              isCurrent: () => managed.isCurrentNativeConnection(providerId, modelId, session.value),
+            }),
+            pluginId: session.value.service.pluginId,
+          }
         }
         if (input.activation.nativeProviderIds.includes(providerId)) {
           const session = input.activation.prepareNativeConnection(providerId)
-          return { connection: connectManaged(session, modelId, signal), pluginId: session.value.service.pluginId }
+          return { connection: connectManaged(session, signal, { modelId }), pluginId: session.value.service.pluginId }
         }
         const configured = await declarations()
         const provider = configured.providers.find(provider => provider.id === providerId)

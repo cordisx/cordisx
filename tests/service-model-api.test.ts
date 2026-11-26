@@ -80,3 +80,50 @@ it('retains the plugin reservation for the lifetime of a model API WebSocket', a
     await rm(home, { recursive: true, force: true })
   }
 }, 20_000)
+
+it('rejects a plugin model whose gateway catalog changes before connection', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cx-service-model-stale-'))
+  const configPath = path.join(home, 'config.json')
+  await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
+  let opened = 0
+  let disposed = 0
+  const activation = {
+    nativeProviderIds: ['fixture'],
+    prepareNativeConnection() {
+      const model = opened++ === 0 ? 'model' : 'other'
+      return {
+        value: {
+          service: { pluginId: 'fixture-plugin', serviceId: 'gateway', generation: 'one' },
+          endpoint: { origin: 'http://127.0.0.1:1', apiPath: '/v1', auth: { scheme: 'none' } },
+          models: { generation: 'one', defaultAlias: model, aliases: [{ alias: model, gatewayModelId: model }] },
+          cleanup: { authorityId: 'fixture' },
+        },
+        dispose() {
+          disposed++
+        },
+      }
+    },
+  } as unknown as ManagedServiceNativeActivation
+  const api = await startServiceModelApi({
+    homeDir: home,
+    configPath,
+    profileId: 'fixture',
+    environment: { CORDISX_MODEL_API_PORT: '0' },
+    activation,
+  })
+  try {
+    const key = (await readFile(api.accessKeyFile, 'utf8')).trim()
+    const response = await fetch(api.baseUrl + '/responses', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'fixture::model', input: 'synthetic' }),
+    })
+    expect(response.status).toBe(400)
+    expect((await response.json()).error.message).toContain('Model catalog changed')
+    expect(opened).toBe(2)
+    expect(disposed).toBe(2)
+  } finally {
+    await api.close()
+    await rm(home, { recursive: true, force: true })
+  }
+})
