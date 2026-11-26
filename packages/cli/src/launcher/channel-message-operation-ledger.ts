@@ -5,17 +5,38 @@ import path from 'node:path'
 import type { ChannelMessageOperationResultV1 } from '@cordisx/protocol/channel-message-operations/v1'
 import { validateStoredMessageOperation } from './channel-message-operation-store-validation.js'
 
-interface Entry {
+interface Entry<Result> {
   readonly descriptor: string
   readonly createdAt: number
-  readonly result: ChannelMessageOperationResultV1
+  readonly result: Result
 }
 
-export class ChannelMessageOperationLedger {
-  private constructor(private readonly filename: string, private readonly now: () => number) {}
+export class ChannelMessageOperationLedger<
+  Result extends { readonly status: string; readonly operationId?: string } = ChannelMessageOperationResultV1,
+> {
+  private constructor(
+    private readonly filename: string,
+    private readonly now: () => number,
+    private readonly validate: (value: unknown) => void,
+    private readonly uncertain: (code: string, operationId: string) => Result,
+  ) {}
 
   static async open(filename: string, now = Date.now): Promise<ChannelMessageOperationLedger> {
-    const ledger = new ChannelMessageOperationLedger(path.resolve(filename), now)
+    return this.openTyped(
+      filename,
+      validateStoredMessageOperation,
+      (code, operationId): ChannelMessageOperationResultV1 => ({ status: 'unknown', code, operationId }),
+      now,
+    )
+  }
+
+  static async openTyped<Result extends { readonly status: string; readonly operationId?: string }>(
+    filename: string,
+    validate: (value: unknown) => void,
+    uncertain: (code: string, operationId: string) => Result,
+    now = Date.now,
+  ): Promise<ChannelMessageOperationLedger<Result>> {
+    const ledger = new ChannelMessageOperationLedger(path.resolve(filename), now, validate, uncertain)
     await ledger.load()
     return ledger
   }
@@ -24,7 +45,7 @@ export class ChannelMessageOperationLedger {
     return createHash('sha256').update(JSON.stringify([scope, operationId])).digest('hex')
   }
 
-  async receipt(key: string): Promise<ChannelMessageOperationResultV1 | null> {
+  async receipt(key: string): Promise<Result | null> {
     return structuredClone((await this.load())[key]?.result ?? null)
   }
 
@@ -32,8 +53,8 @@ export class ChannelMessageOperationLedger {
     key: string,
     descriptor: unknown,
     operationId: string,
-    effect: () => Promise<ChannelMessageOperationResultV1>,
-  ): Promise<ChannelMessageOperationResultV1> {
+    effect: () => Promise<Result>,
+  ): Promise<Result> {
     if (!/^[a-f0-9]{64}$/u.test(key)) throw new Error('INVALID_REQUEST')
     const hash = createHash('sha256').update(JSON.stringify(descriptor)).digest('hex')
     const lock = await this.lock()
@@ -45,20 +66,20 @@ export class ChannelMessageOperationLedger {
         return structuredClone(existing.result)
       }
       if (Object.keys(entries).length >= 10000) throw new Error('CHANNEL_OPERATION_STORE_FULL')
-      const entry: Entry = {
+      const entry: Entry<Result> = {
         descriptor: hash,
         createdAt: this.now(),
-        result: { status: 'unknown', code: 'CHANNEL_OPERATION_PENDING', operationId },
+        result: this.uncertain('CHANNEL_OPERATION_PENDING', operationId),
       }
       entries[key] = entry
       await this.persist(entries)
-      let result: ChannelMessageOperationResultV1
+      let result: Result
       try {
         result = await effect()
       } catch {
-        result = { status: 'unknown', code: 'CHANNEL_OPERATION_UNCERTAIN', operationId }
+        result = this.uncertain('CHANNEL_OPERATION_UNCERTAIN', operationId)
       }
-      validateStoredMessageOperation(result)
+      this.validate(result)
       if (result.operationId !== operationId) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
       entries[key] = { ...entry, result }
       await this.persist(entries)
@@ -69,7 +90,7 @@ export class ChannelMessageOperationLedger {
     }
   }
 
-  private async load(): Promise<Record<string, Entry>> {
+  private async load(): Promise<Record<string, Entry<Result>>> {
     try {
       const handle = await open(this.filename, constants.O_RDONLY | constants.O_NOFOLLOW)
       try {
@@ -85,21 +106,23 @@ export class ChannelMessageOperationLedger {
           || Object.keys(document.entries).length > 10000
         ) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
         for (const [key, value] of Object.entries(document.entries)) {
-          const entry = value as Entry
+          const entry = value as Entry<Result>
           if (
             !/^[a-f0-9]{64}$/u.test(key) || !entry || typeof entry !== 'object' || Array.isArray(entry)
             || Object.keys(entry).sort().join(',') !== 'createdAt,descriptor,result'
             || typeof entry.descriptor !== 'string' || !/^[a-f0-9]{64}$/u.test(entry.descriptor)
             || !Number.isSafeInteger(entry.createdAt) || entry.createdAt < 0
           ) throw new Error('CHANNEL_OPERATION_STORE_INVALID')
-          validateStoredMessageOperation(entry.result)
+          this.validate(entry.result)
         }
-        return document.entries as Record<string, Entry>
+        return document.entries as Record<string, Entry<Result>>
       } finally {
         await handle.close()
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.create(null) as Record<string, Entry>
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return Object.create(null) as Record<string, Entry<Result>>
+      }
       throw error
     }
   }
@@ -117,7 +140,7 @@ export class ChannelMessageOperationLedger {
     throw new Error('CHANNEL_OPERATION_STORE_BUSY')
   }
 
-  private async persist(entries: Record<string, Entry>): Promise<void> {
+  private async persist(entries: Record<string, Entry<Result>>): Promise<void> {
     const temporary = `${this.filename}.${randomBytes(12).toString('hex')}.tmp`
     const handle = await open(temporary, 'wx', 0o600)
     try {

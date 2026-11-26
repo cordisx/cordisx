@@ -8,6 +8,7 @@ import type {
 import type { FeishuSdkChannel } from './feishu-adapter.js'
 import { renderFeishuTypedContent } from './feishu-outbound-media.js'
 import { MESSAGE_OPERATION_WRITES, MESSAGE_OPERATIONS } from './channel-message-operation-request.js'
+import { safeCardBody } from './feishu-plain-card.js'
 
 const scopes = {
   'message-edit': ['im:message:update', 'im:message:send_as_bot'],
@@ -66,17 +67,6 @@ const bounded = (value: unknown, maximum = 512): string | undefined =>
   typeof value === 'string' && value.length > 0 && value.length <= maximum && !/[\0\r\n]/u.test(value)
     ? value
     : undefined
-
-function safeCardBody(body: string | undefined): boolean {
-  if (!body) return false
-  try {
-    const value = JSON.parse(body) as { elements?: { tag?: string; text?: { tag?: string } }[] }
-    return Array.isArray(value.elements) && value.elements.length > 0
-      && value.elements.every(element => element.tag === 'div' && element.text?.tag === 'plain_text')
-  } catch {
-    return false
-  }
-}
 
 export async function feishuMessageOperation(
   request: ChannelMessageOperationRequestV1,

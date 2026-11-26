@@ -4,6 +4,8 @@ For independently authorized original-message forwarding, see [single/merge forw
 See [scoped message operations](channel-message-operations.md) for candidate
 edit/recall, pin, read-user/reaction pagination, restricted card updates and
 operation-level capability discovery. These are not generic vendor API access.
+See [bounded card actions](channel-card-actions.md) for separately authorized
+notice-action publication and owned normalized callback readback, never task dispatch.
 
 See [media and reactions](channel-media-reactions.md) for candidate reaction CLI
 arguments, completion semantics, capability boundaries and unavailable media APIs.

@@ -5,6 +5,7 @@ import type {
   ChannelMessageSearchResultV1,
 } from '@cordisx/protocol/channel-message-search/v1'
 import type { FeishuSdkChannel } from './feishu-adapter.js'
+import { channelPublicCardContent } from './channel-public-card-content.js'
 
 export type ChannelMessageSearchRequest = Omit<ChannelMessageSearchRequestV1, 'account' | 'pageSize'> & {
   pageSize: number
@@ -134,7 +135,7 @@ export async function channelMessageSearch(
             messageId,
             createTime: item.create_time as string,
             ...text('type', item.msg_type),
-            ...text('content', body.content),
+            ...text('content', channelPublicCardContent(item.msg_type, body.content)),
             ...text('threadId', item.thread_id),
             ...text('rootId', item.root_id),
             ...text('parentId', item.parent_id),

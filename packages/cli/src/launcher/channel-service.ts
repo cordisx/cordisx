@@ -4,6 +4,7 @@ import { channelMessageSearch } from './channel-message-search.js'
 import { channelMessageRead } from './channel-message-read.js'
 import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
 import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
+import { ChannelGenericCardActions } from './channel-generic-card-actions.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -44,6 +45,7 @@ import { channelFeedbackSdk } from './channel-feedback-sdk.js'
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
+  readonly genericCardActions: ChannelGenericCardActions
   readonly threadForward: ReturnType<typeof createChannelThreadForwardService>
   readonly forward: ReturnType<typeof createChannelForwardService>
   readonly outbound: ChannelOutboundRpc
@@ -252,7 +254,10 @@ export function createLocalChannelService(input: {
       source: input.source,
       configurationRevision: sequence,
       identities: current.identities,
-      channelConnected: (ref, channel) => current.directory.connected(ref, channel),
+      channelConnected: (ref, channel) => {
+        current.genericCardActions.invalidate(ref)
+        current.directory.connected(ref, channel)
+      },
       onPairingInput: async (ref, message) => {
         const generation = current.generation
         const result = await pairingHandler?.(ref, generation, message)
@@ -261,6 +266,12 @@ export function createLocalChannelService(input: {
           : { accepted: false, reply: false }
       },
       onCardAction: async (ref, event) => {
+        const generic = current.genericCardActions.observe(
+          ref,
+          event,
+          current.directory.channel(ref),
+        )
+        if (generic) return
         for (const listener of cardListeners) await listener(ref, event)
       },
       onNormalizedInput: async (recordId, message, mentionedBot, persisted, addressing) => {
@@ -333,6 +344,9 @@ export function createLocalChannelService(input: {
         // that account unavailable without preventing the rest of CordisX from
         // starting.
         const current: ActiveRuntime = {
+          genericCardActions: await ChannelGenericCardActions.open(
+            path.join(input.dataDir, 'generic-card-actions.json'),
+          ),
           threadForward: createChannelThreadForwardService({
             filename: path.join(input.dataDir, 'thread-forward.json'),
             channel: request => directory.channel(request.source),
@@ -360,6 +374,7 @@ export function createLocalChannelService(input: {
           identities,
           directory,
           dispose: async () => {
+            current.genericCardActions.dispose()
             outbound.dispose()
             directory.clear()
             await display.close()
@@ -596,13 +611,20 @@ export function createLocalChannelService(input: {
         forward: current.forward,
         threadForward: current.threadForward,
         messageOperations: (operation, request, context) =>
-          channelMessageOperationsRpc(operation, request, {
-            ...context,
-            ledger: current.messageOperations,
-            channel: event => current.directory.channel(event),
-            active: () => active === current && !disposed,
-            ownsPlainCard: (event, messageId) => current.runtime.ownsPlainCard(event, messageId),
-          }),
+          operation.startsWith('card-action-')
+            ? current.genericCardActions.execute(operation, request, {
+              ...context,
+              channel: event => current.directory.channel(event),
+              active: () => active === current && !disposed,
+              ownsPlainCard: (event, messageId) => current.runtime.ownsPlainCard(event, messageId),
+            })
+            : channelMessageOperationsRpc(operation, request, {
+              ...context,
+              ledger: current.messageOperations,
+              channel: event => current.directory.channel(event),
+              active: () => active === current && !disposed,
+              ownsPlainCard: (event, messageId) => current.runtime.ownsPlainCard(event, messageId),
+            }),
         ...feedback,
         accounts: () =>
           (configuration?.connections ?? []).map(connection => ({
