@@ -121,6 +121,7 @@ it('configured CLI dispatches explicit owned action publication/read/receipt thr
       status: 'ok',
       operation: 'card-action-publish',
     })
+    expect(await call('card-action-receipt', { ...target, operationId: 'missing' })).toBeNull()
     service.invalidate(account)
     await expect(call('card-action-read', { ...target, messageId: 'om_notice', version: 1 })).rejects.toThrow(
       'CHANNEL_OPERATION_REJECTED',

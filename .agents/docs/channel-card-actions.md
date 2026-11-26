@@ -54,7 +54,10 @@ This is generation-local observation, not durable event history.
 
 `card-action-receipt` takes `{account,conversationId,kind,operationId}` and returns
 the durable publication result without replay. A null receipt proves neither
-delivery nor absence of an effect. A successful publication receipt does not
+delivery nor absence of an effect.
+The CLI prints a missing receipt as JSON null without treating it as a failed
+lookup or publication success; an unknown stored outcome remains unknown.
+A successful publication receipt does not
 prove that the generation-local registry is still available. An uncertain or
 pending write remains unknown; never retry it with another operationId.
 

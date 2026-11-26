@@ -191,5 +191,6 @@ export async function runConfiguredChannelCommand(
     )
   }
   stdout(JSON.stringify(result))
+  if (operation === 'card-action-receipt' && result === null) return
   if ((result as { status?: string }).status !== 'ok') throw new Error('CHANNEL_OPERATION_REJECTED')
 }
