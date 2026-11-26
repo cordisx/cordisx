@@ -4,6 +4,7 @@ import { richtextRequirements } from '@cordisx/channel-runtime'
 import { CHANNEL_MESSAGE_OPERATION_COMMANDS } from './channel-message-operations-rpc.js'
 import { authorizedChannelMessageOperation } from './channel-message-operation-authority.js'
 import { channelThreadHistoryRpc } from './channel-thread-history-rpc.js'
+import { channelMessageSearchRpc } from './channel-message-search-rpc.js'
 import { channelGroupAccessOperation } from './channel-group-access.js'
 import { channelMemoryCommand } from './channel-memory-command.js'
 import { channelModelPriorityLocal } from './channel-model-priority.js'
@@ -643,6 +644,15 @@ export class ChannelConversationTools {
       }
       if (operation === 'thread-history') {
         return await channelThreadHistoryRpc(input, ref, {
+          current,
+          consumer: this.consumer,
+          source,
+          nativeCaller,
+          active: () => !this.lifetime.signal.aborted && this.access()?.generation === current.generation,
+        })
+      }
+      if (operation === 'message-search') {
+        return await channelMessageSearchRpc(input, ref, {
           current,
           consumer: this.consumer,
           source,
