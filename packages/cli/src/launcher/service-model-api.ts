@@ -5,9 +5,10 @@ import type { NativeManagedGatewayConnectionSession } from './managed-service-na
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { modelServicesOf } from './model-service-projection.js'
 import { startModelApiServer } from './model-api-server.js'
+import { ModelApiLifecycleClients } from './model-api-lifecycle-clients.js'
 import type { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 
-export function startServiceModelApi(input: {
+export async function startServiceModelApi(input: {
   homeDir: string
   configPath: string
   profileId: string
@@ -15,6 +16,7 @@ export function startServiceModelApi(input: {
   activation: ManagedServiceNativeActivation
   managed?: ManagedCatalogComposition
 }) {
+  const clients = new ModelApiLifecycleClients()
   const pluginCatalog = nativeModelProviderCatalog(input.activation)
   const declarations = async () => {
     const config = await loadHomeConfig(input.configPath)
@@ -40,7 +42,7 @@ export function startServiceModelApi(input: {
       throw error
     }
   }
-  return startModelApiServer({
+  const server = await startModelApiServer({
     homeDir: input.homeDir,
     profileId: input.profileId,
     port: Number(input.environment.CORDISX_MODEL_API_PORT ?? 8398),
@@ -68,31 +70,57 @@ export function startServiceModelApi(input: {
       ]
     },
     async connect(providerId, modelId, signal) {
-      signal.throwIfAborted()
-      if (input.managed?.owns(providerId)) {
-        if (!await input.managed.validateSelection(providerId, modelId)) throw new Error('Managed model is unavailable')
-        return connectManaged(await input.managed.nativeConnection(providerId), modelId, signal)
-      }
-      if (input.activation.nativeProviderIds.includes(providerId)) {
-        return connectManaged(input.activation.prepareNativeConnection(providerId), modelId, signal)
-      }
-      const configured = await declarations()
-      const provider = configured.providers.find(provider => provider.id === providerId)
-      if (
-        !provider
-        || !Object.entries(provider.models ?? {}).some(([app, models]) =>
-          (provider.appliesTo === undefined || provider.appliesTo.includes(app)) && models.includes(modelId)
-        )
-      ) throw new Error('Model service is unavailable')
-      const key = configured.environment[provider.apiKeyEnv]
-      if (!key) throw new Error(`Provider credential is unavailable: ${provider.apiKeyEnv}`)
-      return {
-        baseUrl: provider.baseUrl,
-        headers: { authorization: `Bearer ${key}` },
-        protocols: provider.protocols,
-        dispose() {},
-      }
+      return await clients.open(signal, async () => {
+        signal.throwIfAborted()
+        if (input.managed?.owns(providerId)) {
+          if (!await input.managed.validateSelection(providerId, modelId)) {
+            throw new Error('Managed model is unavailable')
+          }
+          const session = await input.managed.nativeConnection(providerId)
+          return { connection: connectManaged(session, modelId, signal), pluginId: session.value.service.pluginId }
+        }
+        if (input.activation.nativeProviderIds.includes(providerId)) {
+          const session = input.activation.prepareNativeConnection(providerId)
+          return { connection: connectManaged(session, modelId, signal), pluginId: session.value.service.pluginId }
+        }
+        const configured = await declarations()
+        const provider = configured.providers.find(provider => provider.id === providerId)
+        if (
+          !provider
+          || !Object.entries(provider.models ?? {}).some(([app, models]) =>
+            (provider.appliesTo === undefined || provider.appliesTo.includes(app)) && models.includes(modelId)
+          )
+        ) throw new Error('Model service is unavailable')
+        const key = configured.environment[provider.apiKeyEnv]
+        if (!key) throw new Error(`Provider credential is unavailable: ${provider.apiKeyEnv}`)
+        return {
+          connection: {
+            baseUrl: provider.baseUrl,
+            headers: { authorization: `Bearer ${key}` },
+            protocols: provider.protocols,
+            dispose() {},
+          },
+        }
+      })
     },
     invocation: () => 'model',
   })
+  return {
+    ...server,
+    reserveForLifecycle: (pluginIds: readonly string[]) => clients.reserveForLifecycle(pluginIds),
+    async close() {
+      let failure: unknown
+      try {
+        clients.close()
+      } catch (error) {
+        failure = error
+      }
+      try {
+        await server.close()
+      } catch (error) {
+        failure ??= error
+      }
+      if (failure !== undefined) throw failure
+    },
+  }
 }

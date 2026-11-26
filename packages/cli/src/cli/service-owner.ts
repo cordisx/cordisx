@@ -10,7 +10,7 @@ import { safeDiagnosticMessage } from '../launcher/diagnostic-redaction.js'
 import { acquireProfileRuntimeOwner } from '../launcher/profile-runtime-owner.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
-import { TerminalLifecycleUnavailable } from '../launcher/plugin-lifecycle-model.js'
+import { ModelApiLifecycleUnavailable, TerminalLifecycleUnavailable } from '../launcher/plugin-lifecycle-model.js'
 import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
@@ -33,9 +33,9 @@ import { openProductionPluginManagementComposition } from './production-plugin-m
 import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
 import { createConfiguredChannelOwner } from './configured-channel-owner.js'
 import {
-  includeTerminalLifecycleFence,
+  includeClientLifecycleFence,
+  lifecycleAffectedPlugins,
   reserveServiceOwnerLifecycle,
-  terminalLifecycleAffectedPlugins,
 } from './service-owner-lifecycle-fence.js'
 import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
 import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
@@ -148,22 +148,41 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         const coordinatorRuntime = new ServiceOwnerLifecycleRuntime({
           runtime: services,
           reserve: mutation => {
-            const terminal = terminalProvider?.reserveForLifecycle(terminalLifecycleAffectedPlugins(mutation))
+            const affected = lifecycleAffectedPlugins(mutation)
+            const terminal = terminalProvider?.reserveForLifecycle(affected)
             if (terminalProvider && !terminal) throw new TerminalLifecycleUnavailable()
-            const releaseTerminal = () => {
-              if (!terminal) return
+            const release = (reservation: typeof terminal) => {
+              if (!reservation) return
               try {
-                if (!terminal.release()) terminal.fence()
+                if (!reservation.release()) reservation.fence()
               } catch {
                 try {
-                  terminal.fence()
+                  reservation.fence()
                 } catch { /* Preserve the original admission failure. */ }
               }
             }
+            let modelApi: ReturnType<NonNullable<typeof api>['reserveForLifecycle']>
+            try {
+              modelApi = api?.reserveForLifecycle(affected)
+              if (api && !modelApi) throw new ModelApiLifecycleUnavailable()
+            } catch (error) {
+              release(terminal)
+              throw error
+            }
+            const releaseClients = () => {
+              release(modelApi)
+              release(terminal)
+            }
+            const withClients = (manager?: import('./service-owner-lifecycle-fence.js').ServiceOwnerLifecycleFence) => {
+              let fence = manager
+              if (terminal) fence = includeClientLifecycleFence(terminal, fence)
+              if (modelApi) fence = includeClientLifecycleFence(modelApi, fence)
+              return fence
+            }
             const managers = management?.lifecycleParticipants
-            if (!managers || !managers.hasLive()) return terminal ? includeTerminalLifecycleFence(terminal) : undefined
+            if (!managers || !managers.hasLive()) return withClients()
             if (!rendererBootstrap || !rendererManagedServiceUI || !rendererLifecycle || !rendererParticipants) {
-              releaseTerminal()
+              releaseClients()
               throw new Error('manager-lifecycle-fence-unavailable')
             }
             return reserveServiceOwnerLifecycle({
@@ -174,9 +193,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               lifecycle: rendererLifecycle,
               participants: rendererParticipants,
             }).then(
-              manager => terminal ? includeTerminalLifecycleFence(terminal, manager) : manager,
+              manager => withClients(manager),
               error => {
-                releaseTerminal()
+                releaseClients()
                 throw error
               },
             )

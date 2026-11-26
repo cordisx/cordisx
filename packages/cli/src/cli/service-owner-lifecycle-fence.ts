@@ -17,7 +17,7 @@ export interface ServiceOwnerLifecycleFence {
 }
 
 /** Include changed packages and their dependents in both activation graphs. */
-export function terminalLifecycleAffectedPlugins(mutation: PluginRuntimePreflight): readonly string[] {
+export function lifecycleAffectedPlugins(mutation: PluginRuntimePreflight): readonly string[] {
   const before = new Map(mutation.previous.plugins.map(plugin => [plugin.id, plugin]))
   const after = new Map(mutation.candidate.plugins.map(plugin => [plugin.id, plugin]))
   const changed = new Set([mutation.targetId])
@@ -32,15 +32,15 @@ export function terminalLifecycleAffectedPlugins(mutation: PluginRuntimePrefligh
   return [...affected]
 }
 
-/** Keep terminal admission closed until the Manager handoff has settled. */
-export function includeTerminalLifecycleFence(
-  terminal: ManagedServiceClientReservation,
+/** Keep client admission closed until the Manager handoff has settled. */
+export function includeClientLifecycleFence(
+  client: ManagedServiceClientReservation,
   manager?: ServiceOwnerLifecycleFence,
 ): ServiceOwnerLifecycleFence {
   let ended = false
   const current = () => {
     try {
-      return !ended && terminal.isCurrent() && (manager?.isCurrent() ?? true)
+      return !ended && client.isCurrent() && (manager?.isCurrent() ?? true)
     } catch {
       return false
     }
@@ -48,7 +48,7 @@ export function includeTerminalLifecycleFence(
   const fence = () => {
     if (ended) return
     ended = true
-    for (const close of [() => manager?.fence(), () => terminal.fence()]) {
+    for (const close of [() => manager?.fence(), () => client.fence()]) {
       try {
         close()
       } catch { /* Continue fencing the other participant. */ }
@@ -56,7 +56,7 @@ export function includeTerminalLifecycleFence(
   }
   const settle = (action: 'cancel' | 'abort') => {
     try {
-      if (current() && (manager?.[action]() ?? true) && terminal.isCurrent() && terminal.release()) {
+      if (current() && (manager?.[action]() ?? true) && client.isCurrent() && client.release()) {
         ended = true
         return true
       }
@@ -71,8 +71,8 @@ export function includeTerminalLifecycleFence(
     finish: async () => {
       try {
         if (
-          current() && (manager === undefined || await manager.finish()) && terminal.isCurrent()
-          && terminal.release()
+          current() && (manager === undefined || await manager.finish()) && client.isCurrent()
+          && client.release()
         ) {
           ended = true
           return true

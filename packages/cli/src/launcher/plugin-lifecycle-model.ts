@@ -321,6 +321,13 @@ export class TerminalLifecycleUnavailable extends Error {
   }
 }
 
+/** Owner-only preflight result for requests using the standalone model API. */
+export class ModelApiLifecycleUnavailable extends Error {
+  constructor() {
+    super('Model API requests are active or unavailable. Finish affected requests and retry.')
+  }
+}
+
 export function safeError(code: CordisXPluginLifecycleErrorCode): string {
   const messages: Record<CordisXPluginLifecycleErrorCode, string> = {
     'invalid-source': 'The selected local package source is unavailable or outside the supported boundary.',

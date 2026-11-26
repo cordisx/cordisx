@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ServiceOwnerLifecycleRuntime } from '../packages/cli/src/cli/service-owner-lifecycle-runtime.js'
 import {
-  includeTerminalLifecycleFence,
-  terminalLifecycleAffectedPlugins,
+  includeClientLifecycleFence,
+  lifecycleAffectedPlugins,
 } from '../packages/cli/src/cli/service-owner-lifecycle-fence.js'
 import type {
   PluginLifecycleRuntime,
@@ -53,7 +53,7 @@ describe('service owner lifecycle coordination', () => {
       previous: { plugins: [base, dependent, other] },
       candidate: { plugins: [{ ...base, enabled: false }, { ...dependent, enabled: false }, other] },
     } as unknown as PluginRuntimePreflight
-    expect(new Set(terminalLifecycleAffectedPlugins(input))).toEqual(new Set(['base', 'dependent']))
+    expect(new Set(lifecycleAffectedPlugins(input))).toEqual(new Set(['base', 'dependent']))
   })
 
   it('keeps terminal admission reserved until Manager adoption finishes', async () => {
@@ -66,7 +66,7 @@ describe('service owner lifecycle coordination', () => {
       fence: vi.fn(),
     }
     const terminal = { isCurrent: () => true, release: vi.fn(() => true), fence: vi.fn() }
-    const combined = includeTerminalLifecycleFence(terminal, manager)
+    const combined = includeClientLifecycleFence(terminal, manager)
     const completion = combined.finish()
     expect(terminal.release).not.toHaveBeenCalled()
     finish(true)
@@ -83,7 +83,7 @@ describe('service owner lifecycle coordination', () => {
       fence: vi.fn(),
     }
     const terminal = { isCurrent: () => true, release: vi.fn(() => true), fence: vi.fn() }
-    expect(await includeTerminalLifecycleFence(terminal, manager).finish()).toBe(false)
+    expect(await includeClientLifecycleFence(terminal, manager).finish()).toBe(false)
     expect(terminal.release).not.toHaveBeenCalled()
     expect(terminal.fence).toHaveBeenCalledOnce()
     expect(manager.fence).toHaveBeenCalledOnce()
@@ -108,7 +108,7 @@ describe('service owner lifecycle coordination', () => {
     const terminal = { isCurrent: () => true, release: () => true, fence: () => {} }
     const wrapped = new ServiceOwnerLifecycleRuntime({
       runtime: { preflight: check } as unknown as PluginLifecycleRuntime,
-      reserve: () => includeTerminalLifecycleFence(terminal),
+      reserve: () => includeClientLifecycleFence(terminal),
     })
     const pending = wrapped.preflight(preflight)
     managerAppeared = true

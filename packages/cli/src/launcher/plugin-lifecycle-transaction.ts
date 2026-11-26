@@ -124,6 +124,7 @@ import {
   impactToken,
   isLegacyPermissionDeclarationV4,
   LifecycleFailure,
+  ModelApiLifecycleUnavailable,
   packageSummary,
   type PendingPermissionReview,
   type PluginLifecycleRuntime,
@@ -356,7 +357,7 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
           ...(input.staged === undefined ? {} : { package: input.staged }),
         })
       } catch (error) {
-        if (error instanceof TerminalLifecycleUnavailable) {
+        if (error instanceof TerminalLifecycleUnavailable || error instanceof ModelApiLifecycleUnavailable) {
           throw new LifecycleFailure('operation-unavailable', error.message)
         }
         throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
