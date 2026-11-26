@@ -4,7 +4,12 @@ import type {
   ChannelTenantRef,
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
-import { validateOutboundFallback } from '@cordisx/channel-runtime'
+import {
+  richtextRequirementsV3,
+  v3MentionContent,
+  validateOutboundContent,
+  validateOutboundFallback,
+} from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import { type ChannelSendPayload, validateChannelSendPayload } from '../cli/channel-send-payload.js'
 import { ChannelOutboundPreparationStore } from './channel-outbound-preparation.js'
@@ -197,7 +202,20 @@ export class ChannelOutboundRpc {
     }
     const payload = validateChannelSendPayload(input.payload ?? input.content)
     const fallback = validateOutboundFallback(input.fallback ?? { mode: 'reject' })
+    let outboundVersion: 3 | undefined
+    try {
+      validateOutboundContent(payload)
+    } catch {
+      outboundVersion = 3
+    }
     return targets.map((target, index) => {
+      if (!prior?.(index)) {
+        for (const handle of richtextRequirementsV3(payload).imageHandles) {
+          if (this.store.descriptor(outboundCallerScope(caller), handle, target).type !== 'image') {
+            throw new Error('INVALID_MEDIA_TYPE')
+          }
+        }
+      }
       if (['image', 'audio', 'video', 'file'].includes(payload.type)) {
         const mediaPayload = payload as Extract<ChannelSendPayload, { handle: string }>
         if (!prior?.(index)) {
@@ -206,13 +224,59 @@ export class ChannelOutboundRpc {
         }
         return { content: mediaPayload, fallback }
       }
-      return { content: payload, fallback }
+      return { content: payload, fallback, ...(outboundVersion === 3 ? { outboundVersion: 3 as const } : {}) }
     })
   }
 
   dispose(): void {
     this.uploads.clear()
     this.store.dispose()
+  }
+
+  validateMediaLimits(
+    content: ChannelSendPayload,
+    caller: ChannelOutboundRpcCaller,
+    target: ChannelThreadRef,
+    maximumBytes: number,
+  ): void {
+    const handles = 'handle' in content ? [content.handle] : richtextRequirementsV3(content).imageHandles
+    let total = 0
+    for (const handle of handles) {
+      const media = this.store.descriptor(outboundCallerScope(caller), handle, target)
+      total += media.size
+      if (
+        !Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || total > maximumBytes
+        || content.type === 'richtext' && media.type !== 'image'
+      ) throw new Error('MEDIA_SIZE_DENIED')
+    }
+  }
+
+  validateTransport(
+    content: ChannelSendPayload,
+    fallback: import('@cordisx/channel-runtime').ChannelOutboundFallback,
+    target: ChannelThreadRef,
+    idempotencyKey: string,
+    version: 2 | 3,
+  ): void {
+    const request = {
+      contract: `cordisx.channel-message-send/v${version}`,
+      schemaVersion: version,
+      target,
+      kind: 'reply',
+      idempotencyKey,
+      content,
+      fallback,
+    }
+    if (Buffer.byteLength(JSON.stringify(request), 'utf8') > 196608) throw new Error('INVALID_CHANNEL_PAYLOAD')
+  }
+
+  async validateMentions(
+    content: ChannelSendPayload,
+    version: 2 | 3,
+    verify: (content: import('@cordisx/channel-runtime').ChannelOutboundContent) => Promise<void>,
+  ): Promise<void> {
+    const mentions = version === 3 ? v3MentionContent(content) : validateOutboundContent(content)
+    if (mentions) await verify(mentions)
   }
 
   private ready(accounts: readonly { ref: ChannelTenantRef; state: string }[], ref: ChannelTenantRef): void {

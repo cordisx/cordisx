@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { validateOutboundMedia } from './outbound-media.js'
 import { validateOutboundContent, validateOutboundFallback } from './outbound-content.js'
+import { richtextRequirementsV3, validateOutboundContentV3 } from './outbound-richtext-v3.js'
 import type {
   ChannelAdapterDescriptor,
   ChannelInboundEnvelope,
@@ -151,7 +152,9 @@ export class JsonChannelStore {
       }
       for (const record of Object.values(parsed.outbox)) {
         if (record.content !== undefined) {
-          const content = validateOutboundContent(record.content)
+          const content = record.outboundVersion === 3
+            ? validateOutboundContentV3(record.content)
+            : validateOutboundContent(record.content)
           const fallback = validateOutboundFallback(record.fallback)
           if (
             record.requestedType !== content.type || record.questionCard !== undefined
@@ -161,6 +164,18 @@ export class JsonChannelStore {
             || ('handle' in content && record.effectiveType !== 'text'
               && (!record.media || record.media.handle !== content.handle || record.media.type !== content.type))
           ) throw new Error('Invalid stored typed delivery')
+          if (record.outboundVersion !== undefined && record.outboundVersion !== 3) {
+            throw new Error('Invalid outbound version')
+          }
+          const handles = record.effectiveType === 'richtext' ? richtextRequirementsV3(content).imageHandles : []
+          const images = record.preparedImages ?? []
+          if (
+            images.length !== handles.length || new Set(images.map(image => image.handle)).size !== images.length
+            || images.some(image => {
+              validateOutboundMedia(image)
+              return image.type !== 'image' || !handles.includes(image.handle)
+            }) || images.length > 0 && record.outboundVersion !== 3
+          ) throw new Error('Invalid stored prepared images')
         }
         if (record.media !== undefined) {
           validateOutboundMedia(record.media)

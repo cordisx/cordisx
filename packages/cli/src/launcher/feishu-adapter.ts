@@ -1,5 +1,7 @@
 import { channelQuestionCard } from './channel-question-card.js'
 import { renderFeishuMarkdown } from './feishu-markdown.js'
+import { prepareFeishuRichtextV3 } from './feishu-richtext-v3.js'
+import { richtextRequirementsV3, validateOutboundContentV3 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import {
   type CardActionEvent,
@@ -331,6 +333,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       }, 1_000)
       interval.unref()
       return {
+        richtextV3: channel.rawClient !== undefined,
         richtext: { paragraphs: channel.rawClient !== undefined, mentions: channel.rawClient !== undefined },
         verifyMentions: (target, userIds) => mentions.verify(target, userIds),
         outboundTypes: channel.rawClient
@@ -343,6 +346,21 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           let messageId: string
           if (channel.rawClient) {
             const rawClient = channel.rawClient
+            const richtextV3 = delivery.outboundVersion === 3 && delivery.content?.type === 'richtext'
+              ? await prepareFeishuRichtextV3(
+                delivery.content,
+                delivery.preparedImages ?? [],
+                delivery.target,
+                input.outboundMediaAuthority ?? resources,
+                { image: async data => ({ code: 0, data: await rawClient.im.v1.image.create({ data }) ?? {} }) },
+                async () => {
+                  await delivery.verifyPreparedImages?.()
+                  if (stopped) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+                  const userIds = richtextRequirementsV3(validateOutboundContentV3(delivery.content)).userIds
+                  if (userIds.length) await mentions.verify(delivery.target, userIds)
+                },
+              )
+              : undefined
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
@@ -359,10 +377,10 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
                 },
               )
               : undefined
-            const rendered = delivery.questionCard
+            const rendered = richtextV3 ? { msg_type: 'post' as const, content: richtextV3 } : delivery.questionCard
               ? { msg_type: 'interactive' as const, content: channelQuestionCard(delivery.questionCard) }
               : delivery.content && !media
-              ? renderFeishuTypedContent(delivery.content)
+              ? renderFeishuTypedContent(delivery.content as import('@cordisx/channel-runtime').ChannelOutboundContent)
               : renderFeishuMarkdown(delivery.text)
             const content = media?.content ?? JSON.stringify(rendered.content)
             const msg_type = media?.msg_type ?? rendered.msg_type

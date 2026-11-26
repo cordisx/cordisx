@@ -8,6 +8,24 @@ import {
 } from '../packages/cli/src/cli/channel-send-payload.js'
 
 describe('configured Channel send payload boundary', () => {
+  it('applies successor aggregate bounds only to successor structure', () => {
+    const blocks = Array(128).fill({ text: 'x'.repeat(4096), style: 'plain' })
+    expect(validateChannelSendPayload({ type: 'richtext', blocks })).toEqual({ type: 'richtext', blocks })
+    const successor = {
+      type: 'richtext',
+      blocks: [{ type: 'inline-code', text: 'literal' }, ...blocks.slice(1)],
+    }
+    expect(() => validateChannelSendPayload(successor)).toThrow('INVALID_CHANNEL_PAYLOAD')
+    const supported = { type: 'richtext', blocks: [{ type: 'code', text: 'return 42', language: 'GO' }] }
+    expect(validateChannelSendPayload(supported)).toEqual(supported)
+    expect(() =>
+      validateChannelSendPayload({
+        type: 'richtext',
+        blocks: [{ type: 'paragraph', nodes: [{ type: 'link', text: 'bad', url: 'https://user@host' }] }],
+      })
+    ).toThrow('INVALID_CHANNEL_PAYLOAD')
+  })
+
   it.each(['send', 'send-many'])('documents richtext preference without changing text semantics: %s', operation => {
     const help = channelCliHelp(operation)
     expect(help).toContain('Prefer richtext for ordinary prose, progress and results')
