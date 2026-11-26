@@ -24,7 +24,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (message.method === 'initialized') return
   if (message.method === 'fixture/exit') process.exit(7)
-  if (['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
+  if (message.method === 'account/read' && process.env.CORDISX_TEST_NATIVE_ACCOUNT === 'api-key') {
+    emit({ id: message.id, result: { account: { type: 'apiKey' }, userId: null, requiresOpenaiAuth: true } })
+  } else if (['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
     const fork = message.method === 'thread/fork'
     if (fork && params.modelProvider !== current) {
       emit({

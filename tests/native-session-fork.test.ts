@@ -68,6 +68,38 @@ describe('native fork source inheritance', () => {
     })
     expect(f.calls.some(call => call.type === 'fork-prepare')).toBe(false)
   })
+  it('uses the shared configured recovery for a native OpenAI fork without replacing an explicit request endpoint', async () => {
+    const f = fixture()
+    const fallback = f.controlCall.getMockImplementation()!
+    f.controlCall.mockImplementation(async (type, value) =>
+      type === 'configured-provider'
+        ? { openai_base_url: 'http://127.0.0.1:1234/opaque' }
+        : await fallback(type, value)
+    )
+    const explicit = { ...request, params: { ...request.params, modelProvider: 'openai', model: 'official' } }
+    expect(await inheritNativeFork(explicit, { ...f, nativeOpenAiRecovery: true })).toMatchObject({ handled: true })
+    expect(f.nativeCall).toHaveBeenLastCalledWith(
+      'thread/fork',
+      expect.objectContaining({
+        config: expect.objectContaining({ openai_base_url: 'http://127.0.0.1:1234/opaque' }),
+      }),
+    )
+    const custom = { ...explicit, params: { ...explicit.params, config: { openai_base_url: 'https://custom.test' } } }
+    expect(await inheritNativeFork(custom, { ...f, nativeOpenAiRecovery: true })).toMatchObject({ handled: true })
+    expect(f.nativeCall).toHaveBeenLastCalledWith(
+      'thread/fork',
+      expect.objectContaining({
+        config: expect.objectContaining({ openai_base_url: 'https://custom.test' }),
+      }),
+    )
+  })
+  it('does not prepare native OpenAI recovery when the experiment is disabled', async () => {
+    const f = fixture()
+    const explicit = { ...request, params: { ...request.params, modelProvider: 'openai', model: 'official' } }
+    expect(await inheritNativeFork(explicit, f)).toMatchObject({ handled: true })
+    expect(f.calls.some(call => call.type === 'configured-provider')).toBe(false)
+    expect(f.nativeCall.mock.calls.map(call => call[0])).toEqual(['thread/fork'])
+  })
   it('leaves unknown or conflicting sources unmodified and releases a failed fork lease', async () => {
     const missing = fixture(undefined)
     missing.controlCall.mockResolvedValue(undefined)

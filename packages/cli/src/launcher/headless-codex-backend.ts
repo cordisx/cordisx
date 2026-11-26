@@ -41,6 +41,8 @@ export async function startHeadlessCodexBackend(input: {
   readonly declaredProviders?: readonly NativeModelProviderCatalogEntry[]
   readonly modelCatalogPath?: string
   readonly modelCatalogPreserveProvider?: boolean
+  readonly forceNativeOpenAiForRecovery?: boolean
+  readonly nativeRecoveryReady?: () => Promise<boolean>
   readonly staticCatalog?: {
     readonly path: string
     readonly bytes: Uint8Array
@@ -72,6 +74,7 @@ export async function startHeadlessCodexBackend(input: {
   }, {
     environment: { ...input.environment ?? process.env, HOME: input.home },
     experimentalApi: true,
+    ...(input.forceNativeOpenAiForRecovery ? { forceNativeOpenAi: true } : {}),
     ...(input.modelCatalogPath ? { modelCatalogPath: input.modelCatalogPath } : {}),
     ...(input.modelCatalogPreserveProvider ? { modelCatalogPreserveProvider: true } : {}),
   })
@@ -179,6 +182,7 @@ export async function startHeadlessCodexBackend(input: {
         catalog,
         input.declaredProviders,
         defaults.length === 1 ? defaults[0]!.model as string : undefined,
+        input.forceNativeOpenAiForRecovery === true && await input.nativeRecoveryReady?.() === true,
       )
       if (operation === 'list' && configuredProviders) return { providers: configuredProviders }
       if (operation === 'list') {
@@ -257,6 +261,7 @@ export async function startHeadlessCodexBackend(input: {
     return {
       ...(catalogReceipt ? { catalogReceipt } : {}),
       nativeRequest: authority.nativeRequest,
+      readRecoveryAccount: () => server.request('account/read', { refreshToken: false }),
       async nativeOwnerIdentity() {
         try {
           const first = nativeOwnerIdentity(

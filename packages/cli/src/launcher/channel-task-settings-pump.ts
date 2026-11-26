@@ -3,6 +3,9 @@ import type { ChannelConversationStore, ChannelTaskRequest } from './channel-con
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import type { ChannelTaskPatch } from './channel-task-config.js'
 import { channelTaskIntentObserved, channelTaskSelectionMatches } from './channel-task-selection.js'
+import { continueChannelTaskProvider } from './channel-task-provider-continuation.js'
+import { taskProviderDestination, taskProviderRequest } from './channel-task-provider-reference.js'
+import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -19,6 +22,7 @@ export class ChannelTaskSettingsPump {
       allowed(event: ChannelEventRef, patch: ChannelTaskPatch, selection: ChannelTaskPatch): boolean
       validate(patch: ChannelTaskPatch, threadId?: string): Promise<ChannelTaskPatch>
       card(request: ChannelTaskRequest): Promise<void>
+      logical?: { appId: string; profileId: string; fence: ChannelNativeSourceFence; claims: Set<string> }
     },
   ) {}
   async pump(): Promise<void> {
@@ -31,7 +35,7 @@ export class ChannelTaskSettingsPump {
           if (!['pending', 'queued'].includes(request.state) || request.expiresAt > Date.now()) continue
           request.state = 'expired'
           expired.push(request.id)
-          const setting = state.taskSettings[request.threadId]
+          const setting = state.taskSettings[taskProviderDestination(state, request) ?? request.threadId]
           if (setting && setting.revision === request.expectedRevision + 1 && setting.application === 'saved') {
             delete setting.pending
             delete setting.pendingPatch
@@ -59,10 +63,7 @@ export class ChannelTaskSettingsPump {
       const selected = [...settings.slice(start), ...settings.slice(0, start)].slice(0, 8)
       this.offset = start + selected.length
       await Promise.all(selected.map(async ([threadId, record]) => {
-        const request = Object.values(this.input.store.snapshot().taskRequests).find(item =>
-          item.threadId === threadId
-          && ['queued', 'submitted'].includes(item.state) && item.expectedRevision + 1 === record.revision
-        )
+        const request = taskProviderRequest(this.input.store.snapshot(), threadId, record.revision)
         if (record.application === 'submitted') {
           try {
             const actual = await native.taskSelection(threadId)
@@ -138,6 +139,69 @@ export class ChannelTaskSettingsPump {
           claimed = true
         })
         if (!claimed) return
+        if (request && this.input.logical) {
+          let continuation: Awaited<ReturnType<typeof continueChannelTaskProvider>>
+          try {
+            continuation = await continueChannelTaskProvider({
+              ...this.input.logical,
+              store: this.input.store,
+              native,
+              request,
+              revision: record.revision,
+              selection: actual,
+            })
+          } catch {
+            continuation = { state: 'unknown', operationId: '' }
+          }
+          if (continuation) {
+            if (continuation.state === 'applied') {
+              if ('navigationReady' in continuation && continuation.navigationReady === false) {
+                await this.input.store.mutate(state => {
+                  const current = state.taskRequests[request.id]
+                  const destination = state.taskSettings[continuation.destination.sessionId]
+                  if (current) {
+                    current.state = 'unknown'
+                    current.code = 'NATIVE_EFFECT_UNCERTAIN'
+                  }
+                  if (destination) {
+                    destination.application = 'unknown'
+                    destination.code = 'NATIVE_EFFECT_UNCERTAIN'
+                  }
+                })
+              }
+              const current = this.input.store.snapshot().taskRequests[request.id]
+              if (current) await this.input.card(current)
+              return
+            }
+            if (continuation.state === 'rejected' && continuation.code === 'SOURCE_BUSY') {
+              await this.input.store.mutate(state => {
+                const latest = state.taskSettings[threadId]
+                if (latest?.revision !== record.revision || latest.application !== 'applying') return
+                latest.application = 'saved'
+                if (state.taskRequests[request.id]?.state === 'applying') {
+                  state.taskRequests[request.id]!.state = 'queued'
+                }
+              })
+              return
+            }
+            const uncertain = continuation.state === 'unknown'
+              || continuation.state === 'rejected' && continuation.code === 'SOURCE_FENCE_UNAVAILABLE'
+            await this.finish(
+              threadId,
+              record.revision,
+              actual,
+              uncertain ? 'unknown' : 'applied',
+              request,
+              uncertain
+                ? 'NATIVE_EFFECT_UNCERTAIN'
+                : 'code' in continuation
+                ? continuation.code
+                : 'NATIVE_EFFECT_UNCERTAIN',
+              uncertain ? 'unknown' : 'denied',
+            )
+            return
+          }
+        }
         const revalidate = async (applied: ChannelTaskPatch = {}) => {
           await this.input.validate(record.pending!, threadId)
           const observed = await native.taskSelection(threadId)

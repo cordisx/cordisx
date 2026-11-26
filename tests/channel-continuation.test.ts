@@ -290,6 +290,10 @@ describe('Channel continuation durability', () => {
     expect(expected?.serviceTier).toBe('default')
     expect(expected?.execution).toMatchObject({ workMode: 'default', networkAccess: true })
     expect(continuationStartMatches(effective, expected)).toBe(true)
+    const inherited = continuationConfiguration({ ...effective, reasoningEffort: null }, undefined)
+    expect(inherited?.execution.effort).toBe('inherit')
+    expect(continuationStartMatches({ ...effective, reasoningEffort: null }, inherited)).toBe(true)
+    expect(continuationConfiguration({ ...effective, reasoningEffort: undefined }, undefined)).toBeUndefined()
     expect(continuationStartMatches({ ...effective, serviceTier: null }, expected)).toBe(false)
     expect(continuationStartMatches({ ...effective, cwd: '/elsewhere' }, expected)).toBe(false)
     for (

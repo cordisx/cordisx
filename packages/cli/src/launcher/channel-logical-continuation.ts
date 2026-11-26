@@ -4,7 +4,10 @@ import {
   bindChannelLogicalContinuation,
   channelLogicalDestinationAvailable,
 } from './channel-logical-continuation-bind.js'
-import { channelLogicalContinuationAdmitted } from './channel-logical-continuation-scope.js'
+import {
+  channelLogicalContinuationAdmitted,
+  type ChannelTaskContinuationClaim,
+} from './channel-logical-continuation-scope.js'
 import { channelLogicalTransactionStore } from './channel-logical-continuation-store.js'
 import { type ChannelConversationState, ChannelConversationStore } from './channel-conversation-store.js'
 import { LogicalContinuationControl, type LogicalContinuationRequest } from './logical-continuation-control.js'
@@ -16,6 +19,7 @@ import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import type { ConversationContinuationPreferenceV1 } from '@cordisx/protocol/conversation-continuation/v1'
 import { resolveLogicalContinuationPreference } from './logical-continuation-preferences.js'
 import { channelLogicalHandoff } from './channel-logical-handoff.js'
+import type { ContinuationConfiguration } from './channel-continuation-config.js'
 import type { acquireChannelLogicalNativeLease } from './channel-logical-native-lease.js'
 
 const object = (value: unknown): Record<string, unknown> =>
@@ -36,6 +40,9 @@ export async function startChannelLogicalContinuation(input: {
     selection: ChannelTaskPatch
     admitted(state: ChannelConversationState): boolean
     consume(state: ChannelConversationState): boolean
+    taskClaim?: ChannelTaskContinuationClaim
+    destinationConfiguration?(source: ContinuationConfiguration): ContinuationConfiguration
+    confirmDestination?(sessionId: string): Promise<boolean>
     group?: { sourceVersion(): Promise<string | undefined> }
   }
 }) {
@@ -73,7 +80,7 @@ export async function startChannelLogicalContinuation(input: {
     request.source.hostId === 'local' && request.source.appId === appId && request.source.profileId === profileId
     && (!!input.automatic?.group
       ? input.automatic.admitted(state)
-      : channelLogicalContinuationAdmitted(state, event, profileId, source))
+      : channelLogicalContinuationAdmitted(state, event, profileId, source, input.automatic?.taskClaim))
   const admitted = (state: ChannelConversationState) =>
     scopeAdmitted(state) && !!observedSelection
     && (request.mode !== 'linked' || request.handoffConsent !== 'checkpoint'
@@ -105,6 +112,7 @@ export async function startChannelLogicalContinuation(input: {
         destination.sessionId,
         request.target,
         !!input.automatic?.group,
+        input.automatic?.taskClaim,
       )
       && (!input.automatic || input.automatic.consume(root)),
     preflight: async caller => {
@@ -135,9 +143,17 @@ export async function startChannelLogicalContinuation(input: {
         || selection.effort !== undefined && selection.effort !== sourceConfiguration.execution.effort
         || input.automatic && selection.fast !== (sourceConfiguration.serviceTier === 'priority')
       ) return undefined
+      if (input.automatic?.destinationConfiguration) {
+        try {
+          input.automatic.destinationConfiguration(sourceConfiguration)
+        } catch {
+          return undefined
+        }
+      }
       if (
         request.mode === 'fork' && (request.target.providerId !== sourceConfiguration.providerId
           || request.target.model !== sourceConfiguration.model)
+        && await native.supportsCrossProviderFork?.(request.target) !== true
       ) return undefined
       if (
         request.mode === 'fork'
@@ -159,16 +175,24 @@ export async function startChannelLogicalContinuation(input: {
         : undefined
     },
     create: async (current, evidence) => {
+      const destinationEvidence = input.automatic?.destinationConfiguration
+        ? { ...evidence, sourceConfiguration: input.automatic.destinationConfiguration(evidence.sourceConfiguration) }
+        : evidence
       const result = await native.createLogicalDestination(
         current,
-        evidence,
+        destinationEvidence,
         fence,
         destination => channelLogicalDestinationAvailable(store.snapshot(), source, destination),
         nativeLease?.nativeRequest,
       )
       if (result.state === 'rejected') return result
       if ('releaseTarget' in result) releaseTarget = result.releaseTarget
-      if (result.confirmed) confirmed = result.destination.sessionId
+      if (
+        result.confirmed && (!input.automatic?.confirmDestination
+          || await input.automatic.confirmDestination(result.destination.sessionId))
+      ) {
+        confirmed = result.destination.sessionId
+      }
       return { state: 'created' as const, destination: result.destination }
     },
     confirm: async (_request, _evidence, destination) => confirmed === destination.sessionId,
@@ -190,6 +214,19 @@ export async function startChannelLogicalContinuation(input: {
         }
       }
       nativeLease = acquired
+    }
+    if (input.automatic?.taskClaim && !await native.continuationConfiguration(source)) {
+      if (!scopeAdmitted(store.snapshot()) || !input.automatic.admitted(store.snapshot())) {
+        return { state: 'rejected' as const, operationId: request.operationId, code: 'SOURCE_CHANGED_OR_BUSY' }
+      }
+      try {
+        if (!await native.restoreLogicalSource(source, input.automatic.selection, fence)) {
+          return { state: 'rejected' as const, operationId: request.operationId, code: 'PREFLIGHT_UNAVAILABLE' }
+        }
+      } catch {
+        retainFence = true
+        return { state: 'rejected' as const, operationId: request.operationId, code: 'SOURCE_FENCE_UNAVAILABLE' }
+      }
     }
     const result = await control.start(actor, request)
     if (!nativeLease) return result
