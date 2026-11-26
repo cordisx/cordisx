@@ -18,14 +18,20 @@ import type {
   ConnectorSubscribeRuntimeResult,
   ConnectorSubscription,
 } from '@cordisx/protocol/connector-service/v1'
+import type {
+  ChannelCardActionEventV1,
+  ChannelCardActionRequestV1,
+  ChannelCardActionResultV1,
+  ChannelCardActionsV1,
+} from '@cordisx/protocol/channel-card-actions/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.21'
-const protocolSpec = 'github:cordisx/cordisx-protocol#9473991e2a7f9d09f6ef6bac0dcdd56fbf3a1ad3'
+const protocolSpec = 'github:cordisx/cordisx-protocol#43e24704829eb3317b27a1619b0090294a23932f'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#9473991e2a7f9d09f6ef6bac0dcdd56fbf3a1ad3'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#43e24704829eb3317b27a1619b0090294a23932f'
 const protocolIntegrity =
-  'sha512-WoLrf68AmTsAublFCJQ/DUK03tsdk+HOHKSRK2OZFkJ0Cim3NW7er2+tkp/AsxmObSKqXca6tr2t74HbGclNyw=='
+  'sha512-2hfNZ5JXlCwScheSh4Eyt53NSqwYjdxvfQQjD3iy8V7T81bJocDyxApCMM4AU1TDnWhAnihfaqIxDqEPzzdirg=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -103,6 +109,13 @@ type FormalConnectorConsumerSurface = readonly [
 ]
 
 const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsumerSurface
+type FormalCardActionSurface = readonly [
+  ChannelCardActionsV1,
+  ChannelCardActionRequestV1,
+  ChannelCardActionResultV1,
+  ChannelCardActionEventV1,
+]
+const formalCardActionSurface = null as unknown as FormalCardActionSurface
 const formalHistoricalResourceSurface = null as unknown as readonly [
   ChannelHistoricalResourceRequestV1,
   ChannelHistoricalResourceReadRequestV1,
@@ -127,6 +140,7 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolPinViolations(documents)).toEqual([])
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
+    expect(formalCardActionSurface).toBeNull()
     expect(formalHistoricalResourceSurface).toBeNull()
   })
 

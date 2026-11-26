@@ -14,6 +14,8 @@ const READ_ONLY = new Set([
   'message-get',
   'message-capabilities',
   'message-operation-receipt',
+  'card-action-read',
+  'card-action-receipt',
   'pin-list',
   'read-users',
   'reaction-list',

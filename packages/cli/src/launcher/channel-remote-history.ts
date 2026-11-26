@@ -5,6 +5,7 @@ import type {
 } from '@cordisx/protocol/channel-remote-history/v1'
 import type { FeishuSdkChannel } from './feishu-adapter.js'
 import { channelParticipantName } from './channel-message-context.js'
+import { channelPublicCardContent } from './channel-public-card-content.js'
 import { feishuDirectoryFailureCode, feishuFailureDiagnostic } from './feishu-operation-error.js'
 
 export interface ChannelRemoteHistoryRequest
@@ -92,7 +93,7 @@ export async function channelRemoteHistory(
           createTime: item.create_time,
           deleted: item.deleted,
           updated: item.updated,
-          content: item.body?.content,
+          content: channelPublicCardContent(item.msg_type, item.body?.content),
           threadId: item.thread_id,
           rootId: item.root_id,
           parentId: item.parent_id,

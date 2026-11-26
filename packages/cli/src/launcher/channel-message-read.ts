@@ -2,6 +2,7 @@ import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelMessageReadResultV1, ChannelReferencedMessageV1 } from '@cordisx/protocol/channel-message-read/v1'
 import type { FeishuSdkChannel } from './feishu-adapter.js'
 import { channelParticipantName } from './channel-message-context.js'
+import { channelPublicCardContent } from './channel-public-card-content.js'
 
 export type ChannelReferencedMessage = ChannelReferencedMessageV1
 export type ChannelMessageReadResult = ChannelMessageReadResultV1
@@ -44,7 +45,7 @@ export async function channelMessageRead(
     if (!item || item.chat_id !== event.conversationId || item.deleted) {
       return { status: 'unavailable', code: 'CHANNEL_MESSAGE_NOT_ACCESSIBLE' }
     }
-    const body = item.body?.content
+    const body = channelPublicCardContent(item.msg_type, item.body?.content)
     const name = channelParticipantName(item.sender?.sender_name)
       ?? channelParticipantName(item.sender?.sender_i18n_names?.zh_cn)
       ?? channelParticipantName(item.sender?.sender_i18n_names?.en_us)

@@ -25,8 +25,9 @@ export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   },
   {
     capability: 'generic-card-actions',
-    implementation: 'unsupported',
-    reason: 'Only specialized approval/question callbacks exist; card update is not an action lifecycle.',
+    implementation: 'supported',
+    reason:
+      'Explicit CLI/RPC action-notice publication on a verified owned plain card, with owner/version-bound normalized readback. No task dispatch, ctx facade, arbitrary vendor callbacks or durable event-history claim; live permissions remain required.',
   },
   {
     capability: 'richtext-links-inline-images-code-language',

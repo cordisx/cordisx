@@ -5,7 +5,6 @@ import {
   type CardActionEvent,
   createLarkChannel,
   Domain,
-  type LarkChannel,
   type Logger,
   LoggerLevel,
   type NormalizedMessage,
@@ -41,9 +40,8 @@ import {
   resolveLauncherSecret,
 } from './secret-resolver.js'
 
-export type FeishuSdkChannel =
-  & Pick<LarkChannel, 'connect' | 'disconnect' | 'on' | 'send'>
-  & Partial<Pick<LarkChannel, 'rawClient' | 'botIdentity' | 'getChatInfo' | 'updateCard'>>
+import type { FeishuSdkChannel } from './feishu-channel-types.js'
+export type { FeishuSdkChannel } from './feishu-channel-types.js'
 
 export interface FeishuChannelFactoryOptions {
   readonly appId: string

@@ -12,6 +12,9 @@ import type { FeishuSdkChannel } from './feishu-adapter.js'
 import { CHANNEL_MESSAGE_CAPABILITY_INVENTORY } from './channel-message-capability-inventory.js'
 
 export const CHANNEL_MESSAGE_OPERATION_COMMANDS = [
+  'card-action-publish',
+  'card-action-read',
+  'card-action-receipt',
   ...MESSAGE_OPERATIONS,
   'message-capabilities',
   'message-operation-receipt',
