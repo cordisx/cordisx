@@ -50,6 +50,7 @@ const OPERATIONS = [
   'history',
   'remote-history',
   'thread-history',
+  'message-search',
   'message-get',
   'message-capabilities',
   'message-operation-receipt',

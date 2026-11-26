@@ -7,8 +7,9 @@ export const CHANNEL_MESSAGE_CAPABILITY_INVENTORY = Object.freeze([
   },
   {
     capability: 'platform-message-search',
-    implementation: 'unsupported',
-    reason: 'Official body and authorization boundary need separate verification.',
+    implementation: 'supported',
+    reason:
+      'CLI/RPC message-search applies exact conversation/time filters and verifies every authoritative message detail before disclosure; read/search permissions remain required.',
   },
   {
     capability: 'historical-resource-refetch',

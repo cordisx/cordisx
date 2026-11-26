@@ -1,5 +1,6 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
 import { channelThreadHistory } from './channel-thread-history.js'
+import { channelMessageSearch } from './channel-message-search.js'
 import { channelMessageRead } from './channel-message-read.js'
 import { ChannelMessageOperationLedger } from './channel-message-operation-ledger.js'
 import { channelMessageOperationsRpc } from './channel-message-operations-rpc.js'
@@ -701,6 +702,13 @@ export function createLocalChannelService(input: {
           })),
         conversations: ref => current.directory.conversations(ref),
         remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
+        messageSearch: (ref, request, authorize) => {
+          const channel = current.directory.channel(ref)
+          return channelMessageSearch(ref, request, channel, () => {
+            if (current.directory.channel(ref) !== channel) throw new Error('CHANNEL_GENERATION_CHANGED')
+            authorize()
+          })
+        },
         threadHistory: (ref, request, authorize) =>
           channelThreadHistory(ref, request, current.directory.channel(ref), authorize),
         readMessage: async (event, messageId) => {

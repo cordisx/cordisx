@@ -68,6 +68,8 @@ const HELP: Readonly<Record<string, string>> = {
     'Read one remote thread page, including sibling replies. Input: {account,conversationId,kind,threadId,anchorMessageId,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. The anchor must belong to this conversation and report this threadId. No time filters; hasMore/pageToken describe continuation, not full-thread completeness. Requires history policy and platform message read scope.',
   'message-get':
     'Read a Feishu/Lark message. Input: {account,conversationId,kind:"direct"|"group",messageId}. A Channel turn may only read its own reply ancestry; platform read permissions still apply.',
+  'message-search':
+    'Search one authorized conversation and required time window. Input: {account,conversationId,kind,query,startTime,endTime,pageSize?:1..50,pageToken?}. Times are integer Unix seconds as strings; interval is start-inclusive/end-exclusive. Authoritative message details are revalidated before disclosure. Search ranking is platform-defined. Requires history policy and platform read/search scopes.',
   'message-capabilities':
     'Discover implemented operations, restrictions and permission alternatives, not permission success. Input: {account,conversationId,kind}.',
   'message-operation-receipt':
