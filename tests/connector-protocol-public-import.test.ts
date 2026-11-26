@@ -13,14 +13,20 @@ import type {
   ConnectorSubscribeRuntimeResult,
   ConnectorSubscription,
 } from '@cordisx/protocol/connector-service/v1'
+import type {
+  ChannelCardActionEventV1,
+  ChannelCardActionRequestV1,
+  ChannelCardActionResultV1,
+  ChannelCardActionsV1,
+} from '@cordisx/protocol/channel-card-actions/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.21'
-const protocolSpec = 'github:cordisx/cordisx-protocol#76faececfc3a61904b936aecb2bb64eed00e07d0'
+const protocolSpec = 'github:cordisx/cordisx-protocol#43e24704829eb3317b27a1619b0090294a23932f'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#76faececfc3a61904b936aecb2bb64eed00e07d0'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#43e24704829eb3317b27a1619b0090294a23932f'
 const protocolIntegrity =
-  'sha512-enFqdzhJypML+SBws8neylJYQCoAypp7OCxjIMiw4gr+4X7mvTVYl5JET2EN4rw9ahNEKLehLaQRhkCiXyqzNw=='
+  'sha512-2hfNZ5JXlCwScheSh4Eyt53NSqwYjdxvfQQjD3iy8V7T81bJocDyxApCMM4AU1TDnWhAnihfaqIxDqEPzzdirg=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -98,6 +104,13 @@ type FormalConnectorConsumerSurface = readonly [
 ]
 
 const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsumerSurface
+type FormalCardActionSurface = readonly [
+  ChannelCardActionsV1,
+  ChannelCardActionRequestV1,
+  ChannelCardActionResultV1,
+  ChannelCardActionEventV1,
+]
+const formalCardActionSurface = null as unknown as FormalCardActionSurface
 
 describe('formal Connector Protocol public type import', () => {
   it('pins the Host root, publishable CLI, and lockfile to one exact merged Protocol dependency', async () => {
@@ -117,6 +130,7 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolPinViolations(documents)).toEqual([])
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
+    expect(formalCardActionSurface).toBeNull()
   })
 
   it('rejects stale manifest, lock, and integrity edges', () => {
