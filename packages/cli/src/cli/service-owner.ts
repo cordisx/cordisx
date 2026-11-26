@@ -14,6 +14,7 @@ import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-cat
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { createServicePluginRuntime } from '../launcher/service-plugin-runtime.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
+import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
@@ -49,6 +50,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let services: ReturnType<typeof createProductionManagedServiceLifecycle> | undefined
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
+      let terminal: ReturnType<typeof createServiceTerminalProvider> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
       let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
@@ -133,6 +135,10 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           })
         }
         lifetime.signal.throwIfAborted()
+        terminal = createServiceTerminalProvider({
+          activation: services.nativeActivation(),
+          ...(managed === undefined ? {} : { managed }),
+        })
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -142,6 +148,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           mode: 'service',
+          terminalProvider: terminal.request,
           ...(channel?.channel === undefined
             ? {}
             : {
@@ -161,6 +168,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => management?.close(),
+            () => terminal?.close(),
             () => channel?.close(),
             () => services?.dispose(),
             () => managed?.close(),
