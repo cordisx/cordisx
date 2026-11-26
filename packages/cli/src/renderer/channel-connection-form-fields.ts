@@ -1,7 +1,11 @@
 import type { ChannelCredentialRef } from '../launcher/channel-credential-drafts.js'
 import type { ChannelManagerSelectorV2 } from '@cordisx/protocol/channel-manager/v2'
 import type { HostDraftFieldDefinition } from './host-ui/HostDraftFields.js'
-import { channelCredentialFields, validateChannelCredentialValues } from './channel-credential-fields.js'
+import {
+  channelCredentialFields,
+  invalidChannelTenant,
+  validateChannelCredentialValues,
+} from './channel-credential-fields.js'
 
 export interface ChannelConnectionFormValues {
   appId: string
@@ -84,8 +88,15 @@ export function channelConnectionFormFields(input: {
   ]
 }
 
-export function validateChannelConnectionForm(values: ChannelConnectionFormValues, zh: boolean): Map<string, string> {
+export function validateChannelConnectionForm(
+  values: ChannelConnectionFormValues,
+  zh: boolean,
+  pendingTenant: boolean,
+): Map<string, string> {
   const errors = values.secret ? validateChannelCredentialValues(values, zh) : new Map<string, string>()
+  if (pendingTenant && invalidChannelTenant(values.tenantId)) {
+    errors.set('channel-tenantId', zh ? '请检查此项' : 'Please check this value')
+  }
   if (!values.displayName.trim() || values.displayName.length > 240 || /[\u0000-\u001f]/u.test(values.displayName)) {
     errors.set(
       'channel-displayName',

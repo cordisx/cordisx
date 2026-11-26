@@ -108,6 +108,53 @@ describe('unified Host Channel connection form', () => {
       await f.dispose()
     }
   })
+  it('keeps a malformed pending tenant on the field without dispatching a write', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    const snapshot = {
+      displayName: 'Pending',
+      selectors: ['direct'],
+      revision: 2,
+      serviceRevision: 7,
+      writable: true,
+      credentialWritable: false,
+    }
+    const apply = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED' }))
+    try {
+      await f.render(createElement(ChannelConnectionForm, {
+        account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: '' },
+        initial: snapshot,
+        credentialsAvailable: true,
+        locale: 'en',
+        signal: lifetime.signal,
+        subscribe: () => () => {},
+        read: async () => snapshot,
+        apply,
+        resolveTenant: vi.fn(),
+        onResult: vi.fn(),
+      }))
+      for (const value of ['x'.repeat(513), '   ']) {
+        await f.type('#channel-credential-tenantId input', value)
+        await act(async () => {
+          f.document.querySelector('form')!.dispatchEvent(
+            new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+          )
+        })
+        expect(apply).not.toHaveBeenCalled()
+        expect(f.document.querySelector('#channel-credential-tenantId-error')?.textContent).toContain('check')
+      }
+      await f.type('#channel-credential-tenantId input', 'fixture-tenant')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).toHaveBeenCalledOnce()
+      expect(apply).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'fixture-tenant' }), snapshot)
+    } finally {
+      lifetime.abort()
+      await f.dispose()
+    }
+  })
   it('saves settings without a new key and resets every editable field with one footer', async () => {
     const f = reactManagerFixture(), lifetime = new AbortController()
     const snapshot = {

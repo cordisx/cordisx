@@ -131,7 +131,7 @@ export function ChannelConnectionForm(props: {
   }, [props.signal])
   const save = async () => {
     if (!dirty || reviewRequired || resultUnknown || submitting.current || props.signal.aborted) return
-    const invalid = validateChannelConnectionForm(values.current, zh)
+    const invalid = validateChannelConnectionForm(values.current, zh, !props.account.tenantId)
     setErrors(invalid)
     if (invalid.size) return
     submitting.current = true

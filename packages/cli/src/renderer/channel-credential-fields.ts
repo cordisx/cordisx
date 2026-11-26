@@ -7,6 +7,10 @@ export interface ChannelCredentialValues {
   secret: string
 }
 
+export function invalidChannelTenant(value: string): boolean {
+  return value !== '' && !value.trim() || value.length > 512 || /[\u0000-\u001f]/u.test(value)
+}
+
 export function channelCredentialFields(input: {
   readonly account?: ChannelCredentialRef
   readonly values: ChannelCredentialValues
@@ -57,7 +61,8 @@ export function validateChannelCredentialValues(values: ChannelCredentialValues,
   for (const id of ['appId', 'tenantId', 'secret'] as const) {
     const value = values[id]
     if (
-      (id !== 'tenantId' && !value.trim()) || value.length > (id === 'secret' ? 16384 : 512)
+      (id === 'tenantId' ? invalidChannelTenant(value) : !value.trim())
+      || value.length > (id === 'secret' ? 16384 : 512)
       || /[\u0000-\u001f]/u.test(value) || id === 'appId' && !/^cli_[A-Za-z0-9_]+$/u.test(value)
     ) {
       errors.set(`channel-${id}`, zh ? '请检查此项' : 'Please check this value')
