@@ -6,6 +6,7 @@ import {
   type CordisXOwnerDocumentReplaceCommandV1,
   type CordisXOwnerDocumentReplaceResultV1,
   type CordisXOwnerDocumentsV1,
+  ownerDocumentWriteResultUnknown,
 } from '../durable-document-contracts.js'
 import type { CordisXJsonValue, CordisXPluginIdentity } from '../contracts.js'
 
@@ -16,6 +17,9 @@ const MAX_WATCHES = 64
 const MAX_LISTENERS = 256
 const MAX_PENDING_REQUESTS = 64
 const REQUEST_TIMEOUT_MS = 5_000
+// A generation handoff can briefly reject otherwise valid observations. Keep
+// the last known snapshot during that window, but report a sustained outage.
+const WATCH_HANDOFF_GRACE_MS = 10_000
 
 declare global {
   var __cordisxOwnerDocumentRequestV1: ((payload: string) => void) | undefined
@@ -36,6 +40,7 @@ interface DocumentWatch {
   timer: ReturnType<typeof setInterval>
   polling: boolean
   lastKey?: string
+  unavailableSince?: number
 }
 
 export interface OwnerDocumentPrincipalBinding {
@@ -192,6 +197,15 @@ export class BrowserOwnerDocumentBridge {
           documentId: watch.documentId,
         }) as CordisXOwnerDocumentLoadResultV1,
       )
+      if (
+        result.status === 'unavailable' && result.code === 'host-unavailable' && result.recoverable
+        && result.diagnostic === 'owner document request was rejected'
+      ) {
+        watch.unavailableSince ??= Date.now()
+        if (Date.now() - watch.unavailableSince < WATCH_HANDOFF_GRACE_MS) return
+      } else {
+        delete watch.unavailableSince
+      }
       this.#publish(watch, result)
     } catch {
       /* next bounded poll retries launcher availability */
@@ -327,15 +341,20 @@ class BoundOwnerDocuments implements CordisXOwnerDocumentsV1 {
       }
       // The launcher is the commit authority. Once it returns accepted, a
       // concurrent renderer retirement must not rewrite durable success to stale.
-      const result = immutable(
-        await this.#bridge.request(this.#token, {
-          operation: 'replace',
-          documentId: command.documentId,
-          expectedRevision: command.expectedRevision,
-          schemaVersion: command.schemaVersion,
-          value,
-        }) as CordisXOwnerDocumentReplaceResultV1,
-      )
+      let result: CordisXOwnerDocumentReplaceResultV1
+      try {
+        result = immutable(
+          await this.#bridge.request(this.#token, {
+            operation: 'replace',
+            documentId: command.documentId,
+            expectedRevision: command.expectedRevision,
+            schemaVersion: command.schemaVersion,
+            value,
+          }) as CordisXOwnerDocumentReplaceResultV1,
+        )
+      } catch {
+        return ownerDocumentWriteResultUnknown()
+      }
       if (result.status === 'accepted') {
         this.#bridge.publish(this.#token, command.documentId, { status: 'loaded', snapshot: result.snapshot })
       }

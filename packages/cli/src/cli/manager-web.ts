@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import type { ManagerOwner } from './manager-owner.js'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
@@ -19,6 +19,7 @@ import type { ManagerLifecyclePolls } from './manager-lifecycle-polls.js'
 import { handleManagerRendererLifecycleHttp } from './manager-renderer-lifecycle-http.js'
 import { canonicalManagedConsoleBrowserOrigins } from '../launcher/managed-console-browser-gateway.js'
 import { canonicalManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
+import { managerWebBody as body, managerWebJson as json, managerWebObject as object } from './manager-web-http.js'
 import {
   createManagerPublicConsoleMapping,
   parseManagerPublicConsoleRequest,
@@ -83,29 +84,6 @@ const rendererChannelAllowlist = new Set([
   'permission-policy',
   'owner-document',
 ])
-
-function json(response: ServerResponse, status: number, value: unknown): void {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  response.end(JSON.stringify(value))
-}
-
-async function body(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  let length = 0
-  for await (const part of request) {
-    const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part)
-    length += chunk.length
-    if (length > 1_048_576) throw new Error('REQUEST_TOO_LARGE')
-    chunks.push(chunk)
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
-}
-
-function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined
-}
 
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
 export async function startManagerWeb(owner: ManagerOwner, options: {
@@ -658,6 +636,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
+          || input.channel === 'permission-policy'
         if (input.channel === 'owner-document') {
           const write = managerDocumentWrite(input.payload)
           if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
@@ -724,6 +703,16 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (rendererWrite && result?.status === 'unknown') {
           await retireSession(token)
           return json(response, 503, { error: 'OPERATION_RESULT_UNKNOWN' })
+        }
+        if (
+          input.channel === 'permission-policy' && result?.status === 'unavailable'
+          && Object.keys(result).length === 1
+        ) {
+          // The owner returns unavailable only before dispatch. This exact
+          // receipt permits a bounded transport retry of the same user proof.
+          mutationDispatched = false
+          if (!activeSession()) return revoked()
+          return json(response, 503, { error: 'PERMISSION_WRITE_NOT_DISPATCHED' })
         }
         if (
           (input.channel === 'desktop-package-config' || accountToggle) && result?.status === 'unavailable'

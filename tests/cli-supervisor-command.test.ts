@@ -11,6 +11,7 @@ import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { runSupervisorCommand, waitForState } from '../packages/cli/src/cli/supervisor-command.js'
 import {
   acquireSupervisorStartLock,
+  clientSupervisorPaths,
   processStartIdentity,
   readSupervisorState,
   supervisorPaths,
@@ -88,6 +89,41 @@ describe('supervisor management commands', () => {
       pid: null,
       failure: 'CordisX background supervisor exited before renderer readiness',
     })
+  })
+
+  it('does not report an exited service client as connected', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-failed-client-status-'))
+    const output: string[] = []
+    try {
+      await writeSupervisorState(clientSupervisorPaths(root, 'codex', 'default'), {
+        schemaVersion: 1,
+        appId: 'codex',
+        profileId: 'default',
+        clientOfService: true,
+        clientConnection: 'connected',
+        phase: 'failed',
+        pid: process.pid,
+        processStartedAt: (await processStartIdentity(process.pid))!,
+        instanceToken: 'a'.repeat(32),
+        createdAt: new Date().toISOString(),
+        version: cliVersion.version,
+        effectiveConfig: 'fixture',
+        failure: 'fixture failed',
+        failedAt: new Date().toISOString(),
+      })
+      await runSupervisorCommand(parseCordisXCli(['status', '--json']), {
+        env: { CORDISX_HOME: root, CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER: '1' },
+        stdout: value => output.push(value),
+      })
+      expect(JSON.parse(output.pop()!)).toMatchObject({
+        status: 'failed',
+        connection: 'disconnected',
+        pid: null,
+        failure: 'fixture failed',
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('rejects an idempotent start whose effective configuration differs', async () => {

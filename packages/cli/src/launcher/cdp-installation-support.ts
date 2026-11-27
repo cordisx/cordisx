@@ -81,7 +81,7 @@ export {
   persistIconThemePreference,
 } from './icon-theme-rpc.js'
 export type { LauncherMarketplaceCertifiedAuthority } from './marketplace-certified-authority.js'
-export { fetchMarketplaceFeed } from './marketplace.js'
+import { fetchMarketplaceFeed } from './marketplace.js'
 export { MARKETPLACE_ARTIFACT_BINDING, MARKETPLACE_ARTIFACT_RECEIVER } from './marketplace-artifact-cdp.js'
 export {
   inspectMarketplaceArtifactPackage,
@@ -318,6 +318,7 @@ export interface InstalledScript {
   readonly lifecycleController?: AbortController
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
+  readonly marketplaceArtifactBindingInstalled?: boolean
   readonly managementController?: AbortController
   readonly removeManagementBindingListener?: () => void
   readonly unsubscribeManagement?: () => void
@@ -466,7 +467,9 @@ export async function waitForProductionBootstrap(
 export function installedBindingNames(installed: InstalledScript): readonly string[] {
   return [
     MARKETPLACE_BINDING,
-    ...(installed.lifecycleBindingInstalled ? [MARKETPLACE_ARTIFACT_BINDING] : []),
+    ...((installed.marketplaceArtifactBindingInstalled ?? installed.lifecycleBindingInstalled)
+      ? [MARKETPLACE_ARTIFACT_BINDING]
+      : []),
     ...(installed.providerBindingInstalled ? [PROVIDER_BINDING] : []),
     ...(installed.historyBindingInstalled ? [AGENT_HISTORY_BINDING] : []),
     ...(installed.configBindingInstalled ? [CONFIG_BINDING] : []),
@@ -509,6 +512,44 @@ export async function sendMarketplaceBindingResponse(
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${MARKETPLACE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
+/** Bind the bounded Marketplace feed reader to one renderer session. */
+export function installMarketplaceFeedBinding(session: CdpSession, signal: AbortSignal): () => void {
+  let activeRequests = 0
+  return session.onEvent('Runtime.bindingCalled', params => {
+    if (params.name !== MARKETPLACE_BINDING || typeof params.payload !== 'string') return
+    const payload = params.payload
+    void (async () => {
+      let requestId = 'invalid'
+      try {
+        const request = parseMarketplaceBindingRequest(JSON.parse(payload) as unknown)
+        requestId = request.requestId
+        if (activeRequests >= MAX_MARKETPLACE_REQUESTS) {
+          throw new Error('too many concurrent marketplace feed requests')
+        }
+        activeRequests += 1
+        try {
+          const response = await fetchMarketplaceFeed(request.url, signal)
+          await sendMarketplaceBindingResponse(session, {
+            requestId,
+            ok: response.status >= 200 && response.status < 300,
+            status: response.status,
+            url: response.url,
+            text: response.text,
+          })
+        } finally {
+          activeRequests -= 1
+        }
+      } catch (error) {
+        await sendMarketplaceBindingResponse(session, {
+          requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }).catch(() => undefined)
+      }
+    })()
   })
 }
 
@@ -851,7 +892,7 @@ export async function uninstall(
       removeCdpFutureScript(session, installed.identifier, installed.session),
       evaluateRuntimeOperation(session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
       session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
-      ...(installed.lifecycleBindingInstalled
+      ...((installed.marketplaceArtifactBindingInstalled ?? installed.lifecycleBindingInstalled)
         ? [session.send('Runtime.removeBinding', { name: MARKETPLACE_ARTIFACT_BINDING })]
         : []),
       ...(installed.providerBindingInstalled

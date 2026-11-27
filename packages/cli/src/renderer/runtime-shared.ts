@@ -318,6 +318,9 @@ export interface CordisXRuntimeMetadata {
   readonly standaloneWriteUncertain?: (source?: 'permission-policy') => void
   /** One-shot Host registration; removed before metadata reaches runtime or plugins. */
   readonly standalonePolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void
+  /** Service-attached native clients must not fall back to browser-local policy storage. */
+  readonly ownerPermissionSnapshot?: true
+  readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
   /** Session-private signer; removed before metadata reaches runtime or plugins. */
   readonly standalonePermissionSigner?:
     import('../independent-manager/standalone-permission-signer.js').StandalonePermissionSigner
@@ -583,6 +586,8 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   } | undefined
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
+  /** Apply only a service-signed transition for this native adapter session. */
+  adoptOwnerManagerPolicy?(packet: unknown): Promise<boolean>
   /** Adopt an owner-confirmed configuration write without replacing this Manager. */
   adoptStandaloneDesktopPackageConfig?(
     value: import('./standalone-desktop-package-config-binding.js').StandaloneDesktopConfigAdoption,

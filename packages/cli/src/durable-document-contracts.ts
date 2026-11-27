@@ -29,7 +29,7 @@ export type CordisXOwnerDocumentLoadResultV1 =
     readonly code: CordisXOwnerDocumentUnavailableCodeV1
     /** Bounded Host diagnostic. Stored document values are never included. */
     readonly diagnostic: string
-    /** The Host retained the original store for recovery and did not overwrite it. */
+    /** True only when the Host confirmed the original store was retained without replacement. */
     readonly recoverable: boolean
   }
 
@@ -45,6 +45,19 @@ export type CordisXOwnerDocumentReplaceResultV1 =
   | { readonly status: 'accepted'; readonly snapshot: CordisXOwnerDocumentSnapshotV1 }
   | { readonly status: 'conflict'; readonly actualRevision: number }
   | Extract<CordisXOwnerDocumentLoadResultV1, { readonly status: 'unavailable' }>
+
+/** A lost write receipt cannot prove whether the owner committed the replacement. */
+export function ownerDocumentWriteResultUnknown(): Extract<
+  CordisXOwnerDocumentReplaceResultV1,
+  { readonly status: 'unavailable' }
+> {
+  return Object.freeze({
+    status: 'unavailable',
+    code: 'host-unavailable',
+    diagnostic: 'owner document write result is unknown; reload before retrying',
+    recoverable: false,
+  })
+}
 
 /**
  * One Host-bound, profile- and plugin-owner-scoped durable document service.

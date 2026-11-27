@@ -47,6 +47,8 @@ import type {
   ManagedServiceClientIdentity,
   ManagedServiceClientReservation,
 } from '../launcher/managed-service-client-reservation.js'
+import type { OwnerAdapterSessions } from './owner-adapter-sessions.js'
+import { dispatchOwnerAdapterRpcOperation } from './owner-adapter-rpc.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -84,6 +86,8 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
   readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  /** Owner-only adapter sessions; never available through a renderer binding. */
+  readonly ownerAdapterSessions?: OwnerAdapterSessions
   /** Owner-created participant; never supplied by the browser or plugin. */
   readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
   /** Must be the registry that issued rendererParticipant, never page supplied. */
@@ -127,6 +131,8 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererPermissionPolicy?: {
     readonly bootstrap: ServiceRendererBootstrap
     readonly proof: ManagerPermissionProofAuthority
+    readonly reserveAdditionalPeers?: () => Promise<import('./manager-origin-fence.js').ManagerOriginAdditionalFence>
+    readonly onFailure?: (phase: string, error: unknown) => void
     readonly reserveOtherConsumers: (
       origin: ManagerOriginFence,
       evidence: import('./service-renderer-permission-access.js').ServiceRendererPermissionEvidence,
@@ -134,6 +140,7 @@ export async function openProductionPluginManagementComposition(input: {
   }
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
+  if (input.ownerAdapterSessions && input.mode !== 'service') throw new Error('adapter-owner-scope-invalid')
   if (
     input.reserveManagedAccountUI && (input.mode !== 'service' || !input.rendererManagedServiceUI
       || !input.rendererParticipants || !input.rendererLifecycle || !input.reserveServiceClients)
@@ -360,6 +367,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
       managerRenderer: async operation => await dispatchManagerRendererOperation(rendererSessions, operation),
+      ...(input.ownerAdapterSessions === undefined ? {} : {
+        ownerAdapter: async operation => await dispatchOwnerAdapterRpcOperation(input.ownerAdapterSessions!, operation),
+      }),
       permissionReview,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),

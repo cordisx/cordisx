@@ -43,6 +43,48 @@ it('loads documents before admission but waits to write, and rejects oversized w
   }
 })
 
+it.each([
+  new Response(JSON.stringify({ error: 'RENDERER_BINDING_UNAVAILABLE' }), { status: 503 }),
+  new Response(JSON.stringify({
+    requestId: 'read',
+    ok: true,
+    value: {
+      status: 'unavailable',
+      code: 'host-unavailable',
+      diagnostic: 'owner document request was rejected',
+      recoverable: true,
+    },
+  })),
+])('retries a temporarily unavailable document read without replaying a write', async unavailable => {
+  const receive = vi.fn()
+  const lost = vi.fn()
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(unavailable)
+    .mockResolvedValueOnce(new Response(JSON.stringify({ requestId: 'read', ok: true, value: { status: 'missing' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'RENDERER_BINDING_UNAVAILABLE' }), { status: 503 }))
+  const target = { fetch, __cordisxOwnerDocumentReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['owner-document'],
+    rendererAdmission: Promise.resolve(true),
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxOwnerDocumentRequestV1(JSON.stringify({ requestId: 'read', operation: 'load' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(receive.mock.calls[0]![0]).value.status).toBe('missing')
+    target.__cordisxOwnerDocumentRequestV1(JSON.stringify({ requestId: 'write', operation: 'replace' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(2))
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(JSON.parse(receive.mock.calls[1]![0]).code).toBe('INDEPENDENT_HOST_RESULT_UNKNOWN')
+    expect(lost).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
+  }
+})
+
 it('uses the transport id for a managed-service action with a separate domain id', async () => {
   const receive = vi.fn()
   const fetch = vi.fn(async () =>
@@ -220,6 +262,51 @@ it('reuses one observation request while the sidecar yields browser connections'
     expect(new Set(fetch.mock.calls.map(([, options]) => options.body)).size).toBe(1)
     expect(JSON.parse(receive.mock.calls[0]![0])).toEqual({ requestId: 'watch', ok: true, value: 'event' })
     expect(dispose.canResume()).toBe(true)
+  } finally {
+    dispose()
+  }
+})
+
+it('retries a permission decision only after an explicit pre-dispatch rejection', async () => {
+  const receive = vi.fn()
+  const lost = vi.fn()
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'PERMISSION_WRITE_NOT_DISPATCHED' }), { status: 503 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ requestId: 'policy', ok: true, value: [] })))
+  const target = { fetch, __cordisxPermissionPolicyReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['permission-policy'],
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'policy', proof: 'one-use' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls[0]![1].body).toBe(fetch.mock.calls[1]![1].body)
+    expect(JSON.parse(receive.mock.calls[0]![0])).toEqual({ requestId: 'policy', ok: true, value: [] })
+    expect(lost).not.toHaveBeenCalled()
+  } finally {
+    dispose()
+  }
+})
+
+it('does not replay a permission decision when the result may be unknown', async () => {
+  const receive = vi.fn()
+  const lost = vi.fn()
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ error: 'OPERATION_RESULT_UNKNOWN' }), { status: 503 }))
+  const target = { fetch, __cordisxPermissionPolicyReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['permission-policy'],
+    onSessionLost: lost,
+  })
+  try {
+    target.__cordisxPermissionPolicyRequestV1(JSON.stringify({ requestId: 'policy', proof: 'one-use' }))
+    await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith('result-unknown'))
+    expect(fetch).toHaveBeenCalledOnce()
   } finally {
     dispose()
   }

@@ -96,7 +96,9 @@ export interface BuildRendererBundleOptions {
     readonly profileId: string
     readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
     readonly bridgeToken?: string
+    readonly ownerSnapshot?: true
   }
+  readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
 }
 
 export interface RendererCompositionSource {
@@ -578,6 +580,10 @@ export async function buildRendererCompositionSource(
     JSON.stringify(options.executionPlatform ?? (process.platform === 'win32' ? 'win32' : 'posix'))
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${
     JSON.stringify(permission.policies)
+  }${permission.ownerSnapshot === true ? ', ownerPermissionSnapshot: true' : ''}${
+    options.ownerPolicyVerification === undefined
+      ? ''
+      : `, ownerPolicyVerification: ${JSON.stringify(options.ownerPolicyVerification)}`
   }${options.playground === true ? ', hostKind: "playground"' : attachedStandalone ? ', hostKind: "standalone"' : ''}${
     attachedStandalone ? `, standaloneRendererId: ${JSON.stringify(options.standaloneOwner!.rendererId)}` : ''
   }${

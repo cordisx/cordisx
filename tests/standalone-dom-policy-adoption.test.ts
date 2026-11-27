@@ -79,6 +79,53 @@ it('adopts a peer denial and revokes only the changed Manager point lease', asyn
   }
 })
 
+it('adopts an owner-confirmed Manager policy for the native canonical identity', async () => {
+  const native = { id: identity.id, source: 'https://example.com/plugins/channel' }
+  const convert = (value: ReturnType<typeof record>) => ({
+    ...value,
+    key: { ...value.key, identity: { ...value.key.identity, source: native.source } },
+  })
+  const allowed = convert(record(content))
+  const denied = convert(record(content, 'deny-persistent'))
+  const store = new MemoryPermissionPolicyStore([], [], [allowed])
+  const broker = new PermissionBroker(
+    store,
+    { request: async () => 'deny' },
+    () => new Date(),
+    30_000,
+    'default',
+    'owner-1',
+  )
+  broker.register(
+    native,
+    normalizePluginManifest({
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+      schemaVersion: 4,
+      id: native.id,
+      capabilities: [],
+      services: [],
+    }, native.id),
+    { pluginId: native.id, moduleGeneration: generation },
+  )
+  const transition = {
+    requestId: 'request-1',
+    origin: false,
+    identity: native,
+    moduleGeneration: generation,
+    expected: [allowed],
+    updates: [denied],
+    candidate: [denied],
+  }
+  try {
+    expect(await broker.adoptStandaloneDomPolicies(transition)).toBe(false)
+    expect(await broker.adoptOwnerManagerPolicies(transition)).toBe(true)
+    expect(broker.domAccess(native, content)).toMatchObject({ authorized: false, policy: 'deny' })
+    expect(await broker.adoptOwnerManagerPolicies(transition)).toBe(false)
+  } finally {
+    broker.dispose()
+  }
+})
+
 it('rejects stale snapshots, other identities and policy fingerprints without changing the renderer', async () => {
   const { broker } = fixture()
   const initial = [record(navigation), record(content)]

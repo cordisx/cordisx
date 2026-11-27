@@ -1,4 +1,5 @@
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import { randomBytes } from 'node:crypto'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
@@ -13,12 +14,12 @@ import {
 } from './manager-origin-fence.js'
 import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { OwnerAdapterSessions } from './owner-adapter-sessions.js'
 
 /**
- * The service owner has no non-renderer consumer of these Manager UI policies.
- * The origin fence proves that every attached renderer is in the Manager
- * cohort and prevents new attachments. Other policy kinds and owners must
- * provide their own consumer fence.
+ * The origin fence reserves every admitted renderer. Manager UI policies are
+ * applied to service-attached native adapters with a signed, exact handoff;
+ * other policy kinds and owners must provide their own consumer fence.
  */
 export class ServiceOwnerPermissionConsumers {
   private reservation: symbol | undefined
@@ -34,12 +35,17 @@ export class ServiceOwnerPermissionConsumers {
       readonly lifecycle: ServiceRendererLifecycle
       readonly ownerCurrent: () => boolean
       readonly loadPolicies: () => Promise<readonly CordisXPersistedPermissionPolicyRecord[]>
+      readonly nativeAdapters?: OwnerAdapterSessions
     },
   ) {}
 
   reserve(
     origin: ManagerOriginFence,
-    target?: { readonly identity: { readonly id: string; readonly source: string }; readonly isCurrent: () => boolean },
+    target?: {
+      readonly identity: { readonly id: string; readonly source: string }
+      readonly moduleGeneration?: string
+      readonly isCurrent: () => boolean
+    },
   ): ServiceRendererPermissionConsumerFence {
     const identity = target?.identity ?? { id: 'channel', source: this.input.channelSource ?? '' }
     const selected = Object.freeze({ id: identity.id, source: identity.source })
@@ -62,6 +68,7 @@ export class ServiceOwnerPermissionConsumers {
       || typeof selected.source !== 'string' || selected.source.length === 0 || selected.source.length > 4096
       || !targetCurrent()
       || !isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
+      || (origin.additionalPeers?.length ?? 0) > 0 && (!this.input.nativeAdapters || !target?.moduleGeneration)
     ) throw new Error('service-permission-consumers-unavailable')
     const reservation = Symbol('service-permission-consumers')
     this.reservation = reservation
@@ -103,6 +110,47 @@ export class ServiceOwnerPermissionConsumers {
         if (signal.aborted || !current() || !attachmentEqual(readback, candidate)) {
           throw new Error('service-permission-consumers-unavailable')
         }
+        const nativePeers = origin.additionalPeers ?? []
+        if (nativePeers.length > 0) {
+          const relevant = (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
+            records.filter(record =>
+              isPermissionPolicyRecordV3(record) && record.key.profileId === this.input.profileId
+              && record.key.identity.pluginId === selected.id && record.key.identity.source === selected.source
+              && record.key.capability === 'ui.extension-points.render'
+              && record.key.scope.extensionPoints?.length === 1
+              && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+            )
+          const handoffId = randomBytes(32).toString('hex')
+          await Promise.all(nativePeers.map(async peer => {
+            if (!current() || signal.aborted || peer.closed) throw new Error('service-permission-consumers-unavailable')
+            const transition = {
+              profileId: this.input.profileId,
+              ownerGeneration: this.input.generation,
+              rendererId: peer.identity.rendererId,
+              handoffId,
+              requestId: request.requestId,
+              origin: false as const,
+              identity: selected,
+              moduleGeneration: target!.moduleGeneration!,
+              expected: relevant(expected),
+              updates: relevant(updates),
+              candidate: relevant(candidate),
+            }
+            const packet = this.input.nativeAdapters!.signPolicy(peer, transition)
+            const receipt = await peer.request('permission-policy', packet)
+            if (
+              signal.aborted || !current() || !attachmentEqual(receipt, {
+                rendererId: transition.rendererId,
+                ownerGeneration: transition.ownerGeneration,
+                handoffId,
+                requestId: transition.requestId,
+                moduleGeneration: transition.moduleGeneration,
+                adopted: true,
+              })
+            ) throw new Error('service-permission-consumers-unavailable')
+          }))
+        }
+        if (signal.aborted || !current()) throw new Error('service-permission-consumers-unavailable')
         adopted = true
         return {
           profileId: request.profileId,

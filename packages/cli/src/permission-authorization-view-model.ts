@@ -210,6 +210,7 @@ export class PermissionAuthorizationViewModel {
       | CordisXPermissionAuthorizationPlanV4
       | VisualPermissionAuthorizationPlanV5
       | UsagePermissionAuthorizationPlanV6,
+    private readonly options: { readonly sessionOnly?: boolean } = {},
   ) {
     const seen = new Set<CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY | 'usage.read'>()
     for (const item of plan.declarations) {
@@ -226,8 +227,23 @@ export class PermissionAuthorizationViewModel {
         throw new Error(`permission plan exposes forbidden persistent deny: ${item.capability}`)
       }
       seen.add(item.capability)
-      this.#selected.set(item.capability, item.defaultDecision)
+      const allowed = this.available(item.allowedDecisions)
+      if (allowed.length === 0) throw new Error(`permission plan has no session decision: ${item.capability}`)
+      this.#selected.set(
+        item.capability,
+        allowed.includes(item.defaultDecision)
+          ? item.defaultDecision
+          : allowed.includes('deny-once')
+          ? 'deny-once'
+          : allowed[0]!,
+      )
     }
+  }
+
+  private available(decisions: readonly CordisXPermissionDecisionV2[]): readonly CordisXPermissionDecisionV2[] {
+    return this.options.sessionOnly === true
+      ? decisions.filter(decision => decision !== 'allow-persistent' && decision !== 'deny-persistent')
+      : decisions
   }
 
   select(
@@ -236,7 +252,7 @@ export class PermissionAuthorizationViewModel {
   ): void {
     this.assertOpen()
     const item = this.plan.declarations.find(candidate => candidate.capability === capability)
-    if (item === undefined || !item.allowedDecisions.includes(decision)) {
+    if (item === undefined || !this.available(item.allowedDecisions).includes(decision)) {
       throw new Error(`permission decision is not allowed: ${capability}/${decision}`)
     }
     this.#selected.set(capability, decision)
@@ -300,13 +316,15 @@ export class PermissionAuthorizationViewModel {
           }),
         }),
         authorizationLabel: resolve(ui('dialog.authorization-method')),
-        authorizationOptions: Object.freeze(item.allowedDecisions.map(decision =>
-          Object.freeze({
-            value: decision,
-            label: resolve(ui(`dialog.decision.${decision}`)),
-            selected: selected === decision,
-          })
-        )),
+        authorizationOptions: Object.freeze(
+          this.available(item.allowedDecisions).map(decision =>
+            Object.freeze({
+              value: decision,
+              label: resolve(ui(`dialog.decision.${decision}`)),
+              selected: selected === decision,
+            })
+          ),
+        ),
         denialImpact: resolve(ui(item.required ? 'dialog.required-denied' : 'dialog.optional-denied')),
         technical: Object.freeze({
           label: resolve(ui('dialog.technical-details')),

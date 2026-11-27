@@ -183,7 +183,8 @@ export function installIndependentHostBindings(input: {
       const observationWait = channel === 'managed-service-ui'
         && ['next', 'pull', 'closed', 'startupNext'].includes(String(operation))
       const retryBusyRead = channel === 'managed-service-ui'
-        && ['snapshot', 'readCatalog', 'readAccounts'].includes(String(operation))
+          && ['snapshot', 'readCatalog', 'readAccounts'].includes(String(operation))
+        || channel === 'owner-document' && operation === 'load'
       const request: Pending = {
         channel,
         requestId: id,
@@ -257,9 +258,34 @@ export function installIndependentHostBindings(input: {
             referrerPolicy: 'no-referrer',
             signal: controller.signal,
           })
+          if (channel === 'permission-policy' && response.status === 503 && Date.now() < retryDeadline) {
+            const value = await response.clone().json().catch(() => undefined) as { error?: unknown } | undefined
+            if (value && Object.keys(value).length === 1 && value.error === 'PERMISSION_WRITE_NOT_DISPATCHED') {
+              await yieldObservation(controller.signal)
+              continue
+            }
+          }
           if (retryBusyRead && response.status === 503 && Date.now() < retryDeadline) {
             const value = await response.clone().json().catch(() => undefined) as { error?: unknown } | undefined
             if (value && Object.keys(value).length === 1 && value.error === 'RENDERER_BINDING_UNAVAILABLE') {
+              await yieldObservation(controller.signal)
+              continue
+            }
+          }
+          // During an owner handoff, a document read may instead receive the
+          // owner's explicit, recoverable unavailable result. Reads can be
+          // retried safely; replacements must never be replayed here.
+          if (channel === 'owner-document' && operation === 'load' && response.ok && Date.now() < retryDeadline) {
+            const result = await response.clone().json().catch(() => undefined) as {
+              requestId?: unknown
+              ok?: unknown
+              value?: { status?: unknown; code?: unknown; diagnostic?: unknown; recoverable?: unknown }
+            } | undefined
+            if (
+              result?.requestId === id && result.ok === true && result.value?.status === 'unavailable'
+              && result.value.code === 'host-unavailable' && result.value.recoverable === true
+              && result.value.diagnostic === 'owner document request was rejected'
+            ) {
               await yieldObservation(controller.signal)
               continue
             }

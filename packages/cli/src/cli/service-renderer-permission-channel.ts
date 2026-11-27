@@ -1,4 +1,8 @@
-import { fenceManagerOrigin, type ManagerOriginFence } from './manager-origin-fence.js'
+import {
+  fenceManagerOrigin,
+  type ManagerOriginAdditionalFence,
+  type ManagerOriginFence,
+} from './manager-origin-fence.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { createManagerRendererPermissionChannel } from './manager-renderer-permission.js'
 import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
@@ -20,11 +24,18 @@ export function createServiceRendererPermissionChannel(input: {
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: ServiceRendererLifecycle
   readonly sessions: () => ManagerRendererSessions
+  readonly reserveAdditionalPeers?: () => Promise<ManagerOriginAdditionalFence>
+  readonly onFailure?: (phase: string, error: unknown) => void
   readonly reserveOtherConsumers: (
     origin: ManagerOriginFence,
     evidence: ServiceRendererPermissionEvidence,
   ) => Promise<ServiceRendererPermissionConsumerFence>
 }) {
+  const report = (phase: string, error: unknown) => {
+    try {
+      input.onFailure?.(phase, error)
+    } catch { /* Diagnostics must not alter authorization. */ }
+  }
   return createManagerRendererPermissionChannel({
     profileId: input.profileId,
     configPath: input.configPath,
@@ -61,7 +72,7 @@ export function createServiceRendererPermissionChannel(input: {
               || record.key.identity.pluginId !== evidence.ownerIdentity.id
             )
           ) return false
-          return input.proof.authorize({
+          const authorized = input.proof.authorize({
             context,
             requestId: request.requestId,
             // The decision was signed in the renderer's alias, never the private source.
@@ -71,7 +82,10 @@ export function createServiceRendererPermissionChannel(input: {
             artifact: evidence.artifact,
             proof,
           })
+          if (!authorized) report('proof', new Error('permission-proof-rejected'))
+          return authorized
         } catch {
+          report('proof', new Error('permission-proof-rejected'))
           return false
         }
       },
@@ -81,6 +95,10 @@ export function createServiceRendererPermissionChannel(input: {
           participants: input.participants,
           lifecycle: input.lifecycle,
           allowAdditionalManagers: true,
+          ...(input.reserveAdditionalPeers === undefined
+            ? {}
+            : { reserveAdditionalPeers: input.reserveAdditionalPeers }),
+          ...(input.onFailure === undefined ? {} : { onFailure: input.onFailure }),
         })
         let consumers: ServiceRendererPermissionConsumerFence | undefined
         try {
@@ -107,6 +125,7 @@ export function createServiceRendererPermissionChannel(input: {
             consumers,
           )
         } catch (error) {
+          report('permission-reservation', error)
           try {
             consumers?.fence()
           } catch { /* keep fencing the origin */ }

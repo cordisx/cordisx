@@ -160,6 +160,39 @@ describe('owner document renderer client', () => {
     broker.dispose()
   })
 
+  it('reports a lost write receipt as unknown and allows the owner revision to be reloaded', async () => {
+    const { broker, handler } = await setup()
+    const client = broker.bind({ identity, moduleGeneration: 'module-one', active: () => true })
+    globalThis.__cordisxOwnerDocumentRequestV1 = payload => {
+      void (async () => {
+        const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+        const value = request.operation === 'load' ? await handler.load(request) : await handler.replace(request)
+        globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify(
+          request.operation === 'replace'
+            ? { requestId: request.requestId, ok: false, error: 'receipt lost' }
+            : { requestId: request.requestId, ok: true, value },
+        ))
+      })()
+    }
+    await expect(client.replace({
+      contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
+      documentId: 'rooms',
+      expectedRevision: 0,
+      schemaVersion: 1,
+      value: { committed: true },
+    })).resolves.toEqual({
+      status: 'unavailable',
+      code: 'host-unavailable',
+      diagnostic: 'owner document write result is unknown; reload before retrying',
+      recoverable: false,
+    })
+    await expect(client.load('rooms')).resolves.toMatchObject({
+      status: 'loaded',
+      snapshot: { revision: 1, value: { committed: true } },
+    })
+    broker.dispose()
+  })
+
   it('fences authority retirement at commit but never rewrites a completed commit to stale', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-owner-document-fence-'))
     roots.push(home)
@@ -288,6 +321,78 @@ describe('owner document renderer client', () => {
     a()
     b()
     broker.dispose()
+  })
+
+  it('retains a known snapshot across a short handoff but reports a sustained outage', async () => {
+    vi.useFakeTimers()
+    let available = true
+    globalThis.__cordisxOwnerDocumentRequestV1 = payload => {
+      const request = JSON.parse(payload) as { requestId: string }
+      queueMicrotask(() =>
+        globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: true,
+          value: available
+            ? { status: 'missing', revision: 0 }
+            : {
+              status: 'unavailable',
+              code: 'host-unavailable',
+              recoverable: true,
+              diagnostic: 'owner document request was rejected',
+            },
+        }))
+      )
+    }
+    const bridge = new BrowserOwnerDocumentBridge(1_000)
+    const statuses: string[] = []
+    try {
+      bridge.watch('a'.repeat(64), 'rooms', result => statuses.push(result.status), () => true)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(statuses).toEqual(['missing'])
+      available = false
+      await vi.advanceTimersByTimeAsync(4_000)
+      expect(statuses).toEqual(['missing'])
+      available = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(statuses).toEqual(['missing'])
+      available = false
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(statuses).toEqual(['missing', 'unavailable'])
+    } finally {
+      bridge.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('also waits for a fresh watch created during a handoff, then reports a lasting failure', async () => {
+    vi.useFakeTimers()
+    globalThis.__cordisxOwnerDocumentRequestV1 = payload => {
+      const request = JSON.parse(payload) as { requestId: string }
+      queueMicrotask(() =>
+        globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({
+          requestId: request.requestId,
+          ok: true,
+          value: {
+            status: 'unavailable',
+            code: 'host-unavailable',
+            recoverable: true,
+            diagnostic: 'owner document request was rejected',
+          },
+        }))
+      )
+    }
+    const bridge = new BrowserOwnerDocumentBridge(1_000)
+    const statuses: string[] = []
+    try {
+      bridge.watch('a'.repeat(64), 'rooms', result => statuses.push(result.status), () => true)
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(statuses).toEqual([])
+      await vi.advanceTimersByTimeAsync(1_001)
+      expect(statuses).toEqual(['unavailable'])
+    } finally {
+      bridge.dispose()
+      vi.useRealTimers()
+    }
   })
 
   it('bounds standalone document polling while still loading immediately', async () => {

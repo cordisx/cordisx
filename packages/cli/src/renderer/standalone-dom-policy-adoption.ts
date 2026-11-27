@@ -20,12 +20,14 @@ export function prepareStandaloneDomPolicyAdoption(input: {
   readonly expected: readonly unknown[]
   readonly updates: readonly unknown[]
   readonly candidate: readonly unknown[]
+  readonly targetAllowed?: (identity: CordisXPluginIdentity, pointId: string) => boolean
 }): readonly Policy[] | undefined {
   const invalid = () => {
     throw new Error('standalone-policy-adoption-unavailable')
   }
   try {
-    if (!isStandaloneManagerDomTarget(input.identity, 'manager.content')) invalid()
+    const targetAllowed = input.targetAllowed ?? isStandaloneManagerDomTarget
+    if (!targetAllowed(input.identity, 'manager.content')) invalid()
     const normalize = (records: readonly unknown[]): Map<string, Policy> => {
       if (!Array.isArray(records) || records.length > 64) invalid()
       const values = new Map<string, Policy>()
@@ -35,7 +37,7 @@ export function prepareStandaloneDomPolicyAdoption(input: {
         if (
           record.key.profileId !== input.profileId || record.key.identity.pluginId !== input.identity.id
           || record.key.identity.source !== input.identity.source || record.key.scope.extensionPoints?.length !== 1
-          || pointId === undefined || !isStandaloneManagerDomTarget(input.identity, pointId)
+          || pointId === undefined || !targetAllowed(input.identity, pointId)
         ) invalid()
         const key = permissionRecordKeyV3(record)
         if (values.has(key)) invalid()
@@ -51,7 +53,7 @@ export function prepareStandaloneDomPolicyAdoption(input: {
       const point = record.key.scope.extensionPoints?.[0]
       return record.key.profileId === input.profileId && record.key.identity.pluginId === input.identity.id
         && record.key.identity.source === input.identity.source && record.key.scope.extensionPoints?.length === 1
-        && point !== undefined && isStandaloneManagerDomTarget(input.identity, point)
+        && point !== undefined && targetAllowed(input.identity, point)
     }))
     const sorted = (records: Map<string, Policy>) =>
       [...records.values()].sort((a, b) => a.key.localeCompare(b.key)).map(value => value.record)
@@ -93,6 +95,7 @@ export async function prepareStandaloneDomPolicyHandoff<
     readonly isRegistered: (registration: Registration) => boolean
     readonly waitForWrite: () => Promise<void>
     readonly policies: () => readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly targetAllowed?: (identity: CordisXPluginIdentity, pointId: string) => boolean
   },
 ): Promise<
   {
@@ -133,6 +136,7 @@ export async function prepareStandaloneDomPolicyHandoff<
       expected: captured.expected,
       updates: captured.updates,
       candidate: captured.candidate,
+      ...(host.targetAllowed === undefined ? {} : { targetAllowed: host.targetAllowed }),
     })
     if (!changes) return undefined
     return {

@@ -43,6 +43,7 @@ import {
 import { CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
 import { projectCdpDevelopmentState } from './cdp-development-projection.js'
 import { CdpRendererConfiguration } from './cdp-renderer-configuration.js'
+import { projectCdpPluginBundles } from './cdp-plugin-bundle-projection.js'
 import type { RendererConfigOperation } from './renderer-config-management.js'
 
 /** Broadcast one reversible generation transaction to every injected Codex renderer. */
@@ -56,6 +57,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly stagedMutations = new Map<string, PluginRuntimeMutation>()
   private readonly fences = new Map<string, RuntimeGenerationFence>()
   private registryEpoch = 0
+  private ownerEpochInitialized = false
   private permissionIdentities: PluginPermissionIdentityRegistry | undefined
   private ownerDocumentAuthority: {
     readonly leases: OwnerDocumentLeaseRegistry
@@ -161,6 +163,17 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     return this.registryEpoch
   }
 
+  /** Seed a new native client from its already-authenticated service owner before any CDP seat joins. */
+  initializeOwnerRegistryEpoch(epoch: number): void {
+    if (
+      !Number.isSafeInteger(epoch) || epoch < 0 || this.sessions.size !== 0 || this.joining.size !== 0
+      || this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0
+      || this.registryEpoch !== 0 || this.ownerEpochInitialized
+    ) throw new Error('native adapter registry epoch is unavailable')
+    this.registryEpoch = epoch
+    this.ownerEpochInitialized = true
+  }
+
   /** A single admitted renderer owns schema validation and the configuration transaction. */
   readonly pluginConfiguration = (operation: RendererConfigOperation) =>
     this.configuration.pluginConfiguration(operation)
@@ -203,23 +216,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     await this.browserGraphBootstrapRefresh(active, this.registryEpoch)
   }
 
-  private async projectPluginBundles(
-    session: CdpSession,
-    snapshot: CordisXPluginBundleManagerSnapshotV1,
-  ): Promise<Readonly<{ revision: number; pluginRevision: number }>> {
-    return await evaluateRuntimeOperation(
-      session,
-      `(async () => { try {
-      const runtime = globalThis.__cordisxRuntime
-      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-      return { ok: true, result: runtime.adoptPluginBundleSnapshot(${JSON.stringify(snapshot)}) }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
-    )
-  }
-
   async synchronizePluginBundles(snapshot: CordisXPluginBundleManagerSnapshotV1): Promise<void> {
     const acknowledgements = await Promise.all(
-      [...this.sessions].map(async session => await this.projectPluginBundles(session, snapshot)),
+      [...this.sessions].map(async session => await projectCdpPluginBundles(session, snapshot)),
     )
     if (
       acknowledgements.some(ack => (
@@ -232,7 +231,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     session: CdpSession,
     snapshot: CordisXPluginBundleManagerSnapshotV1,
   ): Promise<void> {
-    const acknowledgement = await this.projectPluginBundles(session, snapshot)
+    const acknowledgement = await projectCdpPluginBundles(session, snapshot)
     if (
       acknowledgement.revision !== snapshot.revision
       || acknowledgement.pluginRevision !== snapshot.pluginRevision

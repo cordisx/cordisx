@@ -50,7 +50,7 @@ export interface RendererComposition {
     initialRegistryEpoch: number,
     current?: Readonly<{
       permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
-      pluginBundles: CordisXPluginBundleManagerSnapshotV1
+      pluginBundles?: CordisXPluginBundleManagerSnapshotV1
       channelManager?: ChannelManagerBundleProjection
       startupHostCapability?: { readonly token: string }
       managedServiceUICapabilities?: readonly {
@@ -69,6 +69,7 @@ export interface BuildRendererCompositionOptions {
   readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   readonly profileId?: string
   readonly managerPresentationMode?: 'workspace'
+  readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
   readonly nativeAppVersion?: string
   readonly appId?: string
   readonly iconThemePreference?: HomeConfigIconThemePreference
@@ -78,6 +79,8 @@ export interface BuildRendererCompositionOptions {
     readonly profileId: string
     readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
     readonly persistent: boolean
+    /** Read the service owner's snapshot until a coordinated write bridge exists. */
+    readonly ownerSnapshot?: true
   }
   readonly generation?: string
   readonly pluginLifecycle?: {
@@ -107,6 +110,8 @@ export interface BuildRendererCompositionOptions {
   readonly productionGraph?: boolean
   /** Test or embedder override for the persistent stable Host graph cache. */
   readonly productionGraphCacheRoot?: string
+  /** Independent owner supplies a session-scoped document authority. */
+  readonly ownerDocumentSecret?: string
   /** Opt-in development transport; normal launches keep immutable package delivery. */
   readonly developmentBuild?: typeof buildRendererBundle
 }
@@ -124,7 +129,8 @@ export async function buildRendererComposition(
     : undefined
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
-  const ownerDocumentSecret = randomBytes(32).toString('hex')
+  const ownerDocumentSecret = options.ownerDocumentSecret ?? randomBytes(32).toString('hex')
+  if (!/^[a-f0-9]{64}$/u.test(ownerDocumentSecret)) throw new Error('owner document authority is invalid')
   const serviceConfigBridgeToken = (options.serviceConfigWritable ?? options.writable) === true
     ? randomBytes(32).toString('hex')
     : undefined
@@ -136,6 +142,9 @@ export async function buildRendererComposition(
   const profileId = options.permission?.profileId ?? options.profileId ?? 'development'
   const bundleOptions: BuildRendererBundleOptions = {
     ...(options.managerPresentationMode === 'workspace' ? { managerPresentationMode: 'workspace' as const } : {}),
+    ...(options.ownerPolicyVerification === undefined
+      ? {}
+      : { ownerPolicyVerification: options.ownerPolicyVerification }),
     ...(options.nativeAppVersion === undefined ? {} : { nativeAppVersion: options.nativeAppVersion }),
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
@@ -165,6 +174,7 @@ export async function buildRendererComposition(
         permission: {
           profileId: options.permission.profileId,
           policies: options.permission.policies,
+          ...(options.permission.ownerSnapshot === true ? { ownerSnapshot: true as const } : {}),
           ...(permissionBridgeToken === undefined ? {} : { bridgeToken: permissionBridgeToken }),
         },
       }),
@@ -262,7 +272,7 @@ export async function buildRendererComposition(
           void _pluginBundleSnapshot
           return {
             ...stable,
-            pluginBundleSnapshot: current.pluginBundles,
+            ...(current.pluginBundles === undefined ? {} : { pluginBundleSnapshot: current.pluginBundles }),
             ...(current.channelManager === undefined ? {} : { channelManager: current.channelManager }),
             ...(current.managedServiceUICapabilities === undefined
               ? {}
@@ -327,7 +337,7 @@ export function assertProductionGraphBootstrapSnapshot(
   ) throw new Error('browser graph admission activation snapshot is stale')
 }
 
-function configuredPluginTopology(config: CordisXConfig): string {
+export function configuredPluginTopology(config: CordisXConfig): string {
   return JSON.stringify(config.plugins.map(plugin => ({
     id: plugin.id,
     entry: plugin.entry,
@@ -336,7 +346,7 @@ function configuredPluginTopology(config: CordisXConfig): string {
   })))
 }
 
-function usesIsolatedPackageWorker(plugin: CordisXConfig['plugins'][number]): boolean {
+export function usesIsolatedPackageWorker(plugin: CordisXConfig['plugins'][number]): boolean {
   const manifest = plugin.manifest
   return manifest?.schemaVersion === 7
     || ((manifest?.schemaVersion === 5 || manifest?.schemaVersion === 6)

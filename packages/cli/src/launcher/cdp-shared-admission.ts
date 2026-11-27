@@ -11,6 +11,7 @@ import type {
   RuntimeReadinessObservation,
 } from './plugin-lifecycle-model.js'
 import type { PluginGenerationGraphLease } from './plugin-generation-loader.js'
+import type { OwnerPolicyPacket } from '../owner-policy-handoff.js'
 import { type CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
 import { attachmentEqual } from './renderer-lifecycle-peer.js'
 import {
@@ -65,6 +66,7 @@ export interface CdpSharedAdmission {
   configurationSeat(): CdpSession
   configurationProof(pluginId: string): Promise<DesktopManagerConfigProof | undefined>
   configuration(operation: RendererConfigOperation): Promise<RendererConfigResult>
+  adoptOwnerManagerPolicy(packet: OwnerPolicyPacket): Promise<void>
   prepare(fence: RuntimeGenerationFence): void
   prepareBrowserGraph(active: CordisXPluginActivationRecordV1, fence: RuntimeGenerationFence): Promise<void>
   stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation>
@@ -181,6 +183,24 @@ export function createCdpSharedAdmission(host: SharedAdmissionHost, state: Share
       const result = await evaluateRendererConfig(session, operation)
       if (configurationSeat() !== session) throw new Error('CDP shared configuration is stale')
       return result
+    },
+    async adoptOwnerManagerPolicy(packet) {
+      assertCurrent()
+      if (state.sessions.length === 0) throw new Error('CDP policy handoff has no renderer')
+      const accepted = await Promise.all(
+        state.sessions.map(async session =>
+          await evaluateRuntimeOperation<boolean>(
+            session,
+            `(async () => { try {
+          const runtime = globalThis.__cordisxRuntime
+          if (!runtime?.adoptOwnerManagerPolicy) throw new Error('owner policy handoff is unavailable')
+          return { ok: true, result: await runtime.adoptOwnerManagerPolicy(${JSON.stringify(packet)}) }
+        } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+          )
+        ),
+      )
+      assertCurrent()
+      if (accepted.some(value => value !== true)) throw new Error('CDP policy handoff was rejected')
     },
     prepare,
     async stage(mutation) {

@@ -2,6 +2,7 @@ import { waitForStartupCaller } from './startup-caller-wait.js'
 import { diagnostic, diagnosticError, diagnosticId, diagnosticRef, withDiagnostics } from '../diagnostics/context.js'
 import { journalDirectory, LocalJournal, readJournal } from '../diagnostics/journal.js'
 import { launchFingerprint } from './launch-fingerprint.js'
+import { type ExpectedService, selectServiceClient } from './client-supervisor-selection.js'
 import { randomBytes } from 'node:crypto'
 import { open, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
@@ -14,6 +15,7 @@ import type { CordisXCliInvocation } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
 import {
   acquireSupervisorStartLock,
+  clientSupervisorPaths,
   LegacySupervisorLockError,
   processIdentityStatus,
   processStartIdentity,
@@ -390,11 +392,18 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
   return {
     app: state.appId,
     profile: state.profileId,
-    status: state.phase,
+    status: state.phase === 'failed'
+      ? 'failed'
+      : state.clientConnection === 'disconnected'
+      ? 'disconnected'
+      : state.phase,
     pid: state.phase === 'failed' ? null : state.pid,
     uptime: Math.max(0, Date.now() - Date.parse(state.createdAt)),
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
+    ...(state.clientOfService
+      ? { connection: state.phase === 'failed' ? 'disconnected' : state.clientConnection ?? 'connecting' }
+      : {}),
     ...(state.mode === 'service'
       ? {
         mode: state.mode,
@@ -498,7 +507,7 @@ async function finishReady(
     invocation.createShortcut || runtime.internalShortcutDockRecordPath
     || (process.platform === 'darwin' && ready.target.appId === 'codex')
   ) {
-    const paths = supervisorPaths(
+    const paths = (ready.state.clientOfService ? clientSupervisorPaths : supervisorPaths)(
       path.dirname(ready.target.configPath),
       ready.target.appId,
       ready.target.selection.profileId,
@@ -595,8 +604,33 @@ async function runSelectedSupervisorCommand(
   target: Awaited<ReturnType<typeof selectionFor>>,
   onState?: (ready: ReadyLaunchResult, phase: StartupPhase) => void | Promise<void>,
   launchId?: string,
+  expectedService?: ExpectedService,
 ): Promise<ReadyLaunchResult | undefined> {
-  const paths = supervisorPaths(path.dirname(target.configPath), target.appId, target.selection.profileId)
+  const homeDir = path.dirname(target.configPath)
+  const ownerPaths = supervisorPaths(homeDir, target.appId, target.selection.profileId)
+  const clientPaths = clientSupervisorPaths(homeDir, target.appId, target.selection.profileId)
+  const selectedClient = await selectServiceClient({
+    enabled: invocation.mode !== 'service' && target.appId === 'codex'
+      && target.environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1',
+    action: invocation.action,
+    ownerPaths,
+    clientPaths,
+    ...(expectedService === undefined ? {} : { expectedService }),
+    waitForOwner: async token => await waitForState(ownerPaths, readinessTimeout(runtime), token),
+  })
+  const clientOfService = selectedClient.client
+  if (selectedClient.waited) {
+    // The service can materialize configuration while it starts. Use its
+    // finished configuration when recording the new client's launch intent.
+    const refreshed = await selectionFor(invocation, runtime)
+    if (
+      refreshed.configPath !== target.configPath || refreshed.appId !== target.appId
+      || refreshed.selection.profileId !== target.selection.profileId
+      || refreshed.selection.dataMode !== target.selection.dataMode || refreshed.cwd !== target.cwd
+    ) throw new Error('CordisX client selection changed while the service was starting')
+    target = refreshed
+  }
+  const paths = clientOfService ? clientPaths : ownerPaths
   const json = invocation.options.json
   const initialState = await readSupervisorStateResult(paths)
   if (initialState.status === 'invalid') throw new Error('CordisX supervisor state is invalid')
@@ -690,6 +724,27 @@ async function runSelectedSupervisorCommand(
         state = await readMutableSupervisorState(paths)
       }
     }
+    if (
+      !clientOfService && invocation.mode !== 'service' && target.appId === 'codex'
+      && target.environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1'
+      && state?.mode === 'service' && state.phase !== 'failed'
+    ) {
+      // The service may have acquired the owner lock before publishing its
+      // state. Re-select the client path after releasing that lock, bound to
+      // the exact service generation observed here.
+      await releaseOperation()
+      const refreshed = await selectionFor(invocation, runtime)
+      if (
+        refreshed.configPath !== target.configPath || refreshed.appId !== target.appId
+        || refreshed.selection.profileId !== target.selection.profileId
+        || refreshed.selection.dataMode !== target.selection.dataMode || refreshed.cwd !== target.cwd
+      ) throw new Error('CordisX client selection changed while the service was starting')
+      return await runSelectedSupervisorCommand(invocation, runtime, refreshed, onState, launchId, {
+        pid: state.pid,
+        processStartedAt: state.processStartedAt,
+        instanceToken: state.instanceToken,
+      })
+    }
     if (state !== undefined && state.mode !== invocation.mode) {
       if (
         state.phase === 'failed' && await processIdentityStatus(state.pid, state.processStartedAt) === 'dead'
@@ -740,6 +795,9 @@ async function runSelectedSupervisorCommand(
       state = undefined
     }
     if (state !== undefined) {
+      if (state.clientOfService && state.clientConnection === 'disconnected') {
+        throw new Error('The Codex client lost its CordisX service connection; its App remains open')
+      }
       diagnostic({ event: 'supervisor-reused', supervisorGeneration: diagnosticRef(state.instanceToken) })
       if (state.version !== VERSION || state.effectiveConfig !== target.fingerprint) {
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
@@ -766,6 +824,7 @@ async function runSelectedSupervisorCommand(
     const {
       CORDISX_DOCK_ENTRY: _untrustedDockEntry,
       CORDISX_DOCK_RECORD: _untrustedDockRecord,
+      CORDISX_SUPERVISOR_CLIENT: _untrustedSupervisorClient,
       ...launchEnvironment
     } = target.environment
     const childEnvironment = {
@@ -779,6 +838,7 @@ async function runSelectedSupervisorCommand(
       // The path is not authority. The random token stays in a mode-0600
       // bootstrap file rather than appearing in the child environment.
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+      ...(clientOfService ? { CORDISX_SUPERVISOR_CLIENT: '1' } : {}),
     }
     if (
       invocation.mode !== 'service' && (invocation.createShortcut || runtime.internalShortcutDockRecordPath
@@ -809,6 +869,7 @@ async function runSelectedSupervisorCommand(
       profileId: target.selection.profileId,
       phase: 'starting',
       ...(invocation.mode === 'service' ? { mode: 'service' as const } : {}),
+      ...(clientOfService ? { clientOfService: true as const } : {}),
       pid: child.pid!,
       processStartedAt: startedAt,
       instanceToken,

@@ -88,6 +88,30 @@ async function fixture(input: {
   return { configPath, sessions, open }
 }
 
+it('permits the same proof after the owner rejected it before dispatch, but never after dispatch', async () => {
+  const fake = simulatedAuthority()
+  const authorize = vi.fn(fake.authority.authorize)
+  const test = await fixture({ authority: { ...fake.authority, authorize } })
+  try {
+    const first = await test.open('b'.repeat(64))
+    fake.snapshots.set(first.handle.rendererId, [])
+    const fence = await test.sessions.suspendMutations()
+    const request = payload('one', 'allow')
+    expect(await test.sessions.call(first, 'permission-policy', request)).toEqual({ status: 'unavailable' })
+    expect(authorize).not.toHaveBeenCalled()
+    expect(fence.release()).toBe(true)
+    expect(await test.sessions.call(first, 'permission-policy', request)).toEqual({
+      status: 'ok',
+      value: { requestId: 'one', ok: true, value: [record('allow')] },
+    })
+    expect(authorize).toHaveBeenCalledOnce()
+    expect(await test.sessions.call(first, 'permission-policy', request)).toEqual({ status: 'unavailable' })
+    expect(authorize).toHaveBeenCalledOnce()
+  } finally {
+    test.sessions.dispose()
+  }
+})
+
 it('resolves each renderer alias before a policy write and projects the receipt back', async () => {
   const fake = simulatedAuthority()
   const aliases = new Map<string, string>()

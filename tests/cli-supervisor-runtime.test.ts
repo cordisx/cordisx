@@ -7,6 +7,7 @@ import { createSupervisorRuntime, publishReadyAfterInspectorClose } from '../pac
 import type { StartupNavigationHandoff } from '../packages/cli/src/shortcuts/startup-cover.js'
 import {
   acquireSupervisorStartLock,
+  clientSupervisorPaths,
   processStartIdentity,
   readSupervisorState,
   SupervisorOperationBusyError,
@@ -15,6 +16,52 @@ import {
 } from '../packages/cli/src/cli/supervisor-state.js'
 
 describe('background supervisor publication handshake', () => {
+  it('updates client launch intent only for the same connected, ready generation', async () => {
+    const root = await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'cx-intent-'))
+    const paths = clientSupervisorPaths(root, 'codex', 'work')
+    const token = 'a'.repeat(64)
+    const original = 'b'.repeat(64)
+    const updated = 'c'.repeat(64)
+    await mkdir(paths.directory, { recursive: true })
+    await writeFile(paths.bootstrapToken, token, { mode: 0o600 })
+    const state = {
+      schemaVersion: 1 as const,
+      appId: 'codex',
+      profileId: 'work',
+      clientOfService: true as const,
+      phase: 'starting' as const,
+      pid: process.pid,
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      instanceToken: token,
+      createdAt: new Date().toISOString(),
+      version: 'test',
+      effectiveConfig: original,
+    }
+    await writeSupervisorState(paths, state)
+    const runtime = await createSupervisorRuntime({
+      CORDISX_SUPERVISOR_HOME: root,
+      CORDISX_SUPERVISOR_APP: 'codex',
+      CORDISX_SUPERVISOR_PROFILE: 'work',
+      CORDISX_SUPERVISOR_DATA_MODE: 'shared',
+      CORDISX_SUPERVISOR_CLIENT: '1',
+      CORDISX_SUPERVISOR_FINGERPRINT: original,
+      CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+    })
+    try {
+      expect(await runtime.refreshClientFingerprint(original, updated)).toBe(false)
+      await runtime.markReady(43123)
+      expect(await runtime.refreshClientFingerprint('d'.repeat(64), updated)).toBe(false)
+      expect(await runtime.refreshClientFingerprint(original, updated)).toBe(true)
+      expect((await readSupervisorState(paths))?.effectiveConfig).toBe(updated)
+      expect(await runtime.markClientDisconnected()).toBe(true)
+      expect(await runtime.refreshClientFingerprint(updated, original)).toBe(false)
+      expect((await readSupervisorState(paths))?.effectiveConfig).toBe(updated)
+    } finally {
+      await runtime.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('closes the one-shot main inspector before publishing ready', async () => {
     const events: string[] = []
     await publishReadyAfterInspectorClose(

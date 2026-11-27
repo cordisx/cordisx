@@ -26,6 +26,19 @@ export interface PreparedRunCommand {
   readonly appId: string
 }
 
+/** Select the service-attached adapter before constructing a local profile owner. */
+export async function executePreparedLaunch(
+  prepared: PreparedRunCommand,
+  runtime: CordisXCliRuntime,
+  local: (prepared: PreparedRunCommand, runtime: CordisXCliRuntime) => Promise<void>,
+): Promise<void> {
+  if (prepared.environment.CORDISX_SUPERVISOR_CLIENT === '1') {
+    const { runServiceAttachedClient } = await import('./run-service-attached-client.js')
+    return await runServiceAttachedClient(prepared, runtime)
+  }
+  await local(prepared, runtime)
+}
+
 export async function prepareRunCommand(
   invocation: CordisXCliInvocation,
   runtime: CordisXCliRuntime,

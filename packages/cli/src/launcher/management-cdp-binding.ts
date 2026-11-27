@@ -42,9 +42,10 @@ export async function installManagementCdpBinding(
         const request = parsePluginManagementRpcRequest(JSON.parse(payload) as unknown, management)
         requestId = request.requestId
         if (controller.signal.aborted) throw new Error('plugin management bridge is closed')
-        const value = await lifecycleRequests.exclusive(
-          async () => await handlePluginManagementRpcRequest(management.service, request),
-        )
+        // A remote owner may call back into this CDP fleet before replying.
+        // Holding the local graph gate across that round trip would deadlock.
+        const run = async () => await handlePluginManagementRpcRequest(management.service, request)
+        const value = management.ownerCoordinated ? await run() : await lifecycleRequests.exclusive(run)
         await sendPluginManagementBindingResponse(session, { requestId, ok: true, value })
       } catch (error) {
         await sendPluginManagementBindingResponse(session, {

@@ -386,6 +386,70 @@ it('returns a definite busy response when an account toggle has not been dispatc
   }
 }, 15_000)
 
+it('distinguishes an undispatched permission decision from an uncertain write', async () => {
+  const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+  let writes = 0
+  const authority = new ManagerRendererSessions({
+    profileId: 'fixture',
+    ownerGeneration: 'generation',
+    ownerCurrent: () => true,
+    authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    channels: new Map([['plugin-management', {
+      prepare: () => {
+        throw new Error('unused')
+      },
+    }], ['permission-policy', {
+      prepare: payload => ({
+        mode: 'write' as const,
+        dispatch: async () => {
+          writes++
+          const request = JSON.parse(String(payload)) as { requestId: string }
+          if (request.requestId === 'unknown') throw new Error('lost after dispatch')
+          return { requestId: request.requestId, ok: true, value: [] }
+        },
+      }),
+    }]]),
+  })
+  const web = await startManagerWeb({
+    appId: 'codex',
+    profileId: 'fixture',
+    generation: 'generation',
+    isCurrent: async () => true,
+    request: async operation => await dispatchManagerRendererOperation(authority, operation),
+  }, { rendererGateway: gateway })
+  const origin = new URL(web.url).origin
+  const post = async (route: string, data: unknown, token?: string) =>
+    await fetch(origin + route, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify(data),
+    })
+  try {
+    const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+    const token = (await session.json() as { token: string }).token
+    expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+    const fence = await authority.suspendMutations()
+    const payload = { channel: 'permission-policy', payload: JSON.stringify({ requestId: 'policy' }) }
+    const blocked = await post('/api/renderer/binding', payload, token)
+    expect(blocked.status).toBe(503)
+    expect(await blocked.json()).toEqual({ error: 'PERMISSION_WRITE_NOT_DISPATCHED' })
+    expect(writes).toBe(0)
+    expect(fence.release()).toBe(true)
+    expect((await post('/api/renderer/binding', payload, token)).status).toBe(200)
+    expect(writes).toBe(1)
+    const uncertain = await post('/api/renderer/binding', {
+      channel: 'permission-policy',
+      payload: JSON.stringify({ requestId: 'unknown' }),
+    }, token)
+    expect(uncertain.status).toBe(503)
+    expect(await uncertain.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
+    expect((await post('/api/renderer/binding', payload, token)).status).toBe(401)
+  } finally {
+    authority.dispose()
+    await web.close()
+  }
+}, 15_000)
+
 it('returns a known Desktop configuration rejection when the owner blocks a write before dispatch', async () => {
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
   let writes = 0

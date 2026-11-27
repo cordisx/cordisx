@@ -139,12 +139,15 @@ export function createManagerRendererPermissionChannel(input: {
       const expected = observed.map(item => normalizePersistedPermissionPolicyRecord(item))
       const requestKey = `${context.rendererId}\0${request.requestId}`
       if (requests.has(requestKey) || requests.size >= 4096) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
-      // Mark before dispatch; a lost reply is never replayed as a new write.
-      requests.add(requestKey)
       const authority = input.authority
       return {
         mode: 'write',
         dispatch: async () => {
+          // A busy mutation gate can reject after prepare but before dispatch.
+          // Consume the request only when dispatch actually begins, before the
+          // first await, so an uncertain write can never be replayed.
+          if (requests.has(requestKey) || requests.size >= 4096) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
+          requests.add(requestKey)
           const assertAdmission = async () => {
             if (fenced || context.signal.aborted || !await authority.isAdmitted(context) || context.signal.aborted) {
               throw new Error('MANAGER_PERMISSION_UNAVAILABLE')

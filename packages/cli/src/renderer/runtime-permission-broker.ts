@@ -10,14 +10,21 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
     : undefined
   const broker = new PermissionBroker(
     runtimeScope.permissionStore()!,
-    standalone ? { request: async () => 'deny' as const } : new BrowserPermissionPrompt(),
+    standalone ? { request: async () => 'deny' as const } : new BrowserPermissionPrompt(
+      document,
+      { sessionOnly: runtimeScope.metadata()!.ownerPermissionSnapshot === true },
+    ),
     () => new Date(),
     30000,
     runtimeScope.metadata()!.profileId,
     runtimeScope.generation()!,
     runtimeScope.generationVisibility()!,
     runtimeScope.pluginConsole()!,
-    standalone ? review : new BrowserPermissionAuthorizationPromptV2(document),
+    standalone ? review : new BrowserPermissionAuthorizationPromptV2(
+      document,
+      undefined,
+      runtimeScope.metadata()!.ownerPermissionSnapshot === true ? { sessionOnly: true } : {},
+    ),
     runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
   )
   if (review !== undefined) bindStandaloneDomReview(broker, review)

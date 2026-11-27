@@ -346,6 +346,19 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       readonly onUnknown?: () => void
     },
   ): Promise<boolean> {
+    return await this.adoptManagerDomPolicies(input, false)
+  }
+
+  /** Called only after the native runtime verifies a service-signed policy handoff. */
+  async adoptOwnerManagerPolicies(input: StandaloneDomPolicyAdoption): Promise<boolean> {
+    if (input.origin) return false
+    return await this.adoptManagerDomPolicies(input, true)
+  }
+
+  private async adoptManagerDomPolicies(
+    input: StandaloneDomPolicyAdoption & { readonly signal?: AbortSignal; readonly onUnknown?: () => void },
+    nativeOwner: boolean,
+  ): Promise<boolean> {
     const prepared = await prepareStandaloneDomPolicyHandoff(input, {
       profileId: this.profileId,
       catalogVersion: this.catalog.version,
@@ -353,6 +366,12 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       isRegistered: registration => this.isRegistered(registration),
       waitForWrite: async () => await this.domPolicyCommitTail,
       policies: () => [...this.policyRecords.values()],
+      ...(nativeOwner
+        ? {
+          targetAllowed: (identity: CordisXPluginIdentity, pointId: string) =>
+            identity.source.length > 0 && ['manager.settings.navigation-items', 'manager.content'].includes(pointId),
+        }
+        : {}),
     })
     if (!prepared) return false
     const { captured, registration, changes, updates } = prepared

@@ -132,4 +132,24 @@ describe('renderer permission persistence binding', () => {
       store.dispose?.()
     }
   })
+
+  it('uses the owner snapshot instead of browser-local policies for an attached native client', () => {
+    const record = createPermissionPolicyRecord({
+      profileId: 'work',
+      identity: { source: 'file:///plugins/demo.js', id: 'demo' },
+      capability: 'models.read',
+      scope: {},
+      policy: 'allow',
+    })
+    const store = createRuntimePermissionStore(
+      {
+        hostKind: 'codex',
+        ownerPermissionSnapshot: true,
+        permissionPolicies: [record],
+      } as Parameters<typeof createRuntimePermissionStore>[0],
+    )
+    expect(store.read()).toEqual([record])
+    expect(() => store.write([record])).toThrow('Owner permission writes are unavailable')
+    expect(store.read()).toEqual([record])
+  })
 })

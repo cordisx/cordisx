@@ -2,7 +2,7 @@ import { diagnostic, diagnosticError, diagnosticId, withDiagnostics } from '../d
 import { journalDirectory, LocalJournal } from '../diagnostics/journal.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { readCodexAppVersion } from '../launcher/process.js'
-import { prepareCliCommand, type PreparedRunCommand } from './run-command-dispatch.js'
+import { executePreparedLaunch, prepareCliCommand, type PreparedRunCommand } from './run-command-dispatch.js'
 import { type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
 
 /** The command owns this sink; no process-wide singleton leaks correlation across concurrent runs. */
@@ -23,7 +23,7 @@ export async function runWithLaunchDiagnostics(
   try {
     await withDiagnostics(journal, async () => {
       try {
-        await run(prepared, runtime)
+        await executePreparedLaunch(prepared, runtime, run)
       } catch (error) {
         diagnostic({ event: 'launch-failed', ...diagnosticError(error) })
         throw error

@@ -3,6 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { startHeadlessService } from './headless-service.js'
 import { loadHomeConfig } from '../config/home-config.js'
+import { loadConfig } from '../launcher/config.js'
 import { mergeHomeEnvironment } from '../config/home-config-environment.js'
 import { diagnostic, diagnosticError, diagnosticId, withDiagnostics } from '../diagnostics/context.js'
 import { journalDirectory, LocalJournal } from '../diagnostics/journal.js'
@@ -14,7 +15,12 @@ import { ModelApiLifecycleUnavailable, TerminalLifecycleUnavailable } from '../l
 import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-catalog-composition.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
-import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
+import { attachmentHomeDigest, attachmentRecord } from '../launcher/renderer-lifecycle-peer.js'
+import {
+  handlePluginLifecycleBindingRequest,
+  parsePluginLifecycleBindingRequest,
+} from '../launcher/plugin-lifecycle-rpc.js'
+import { handlePluginManagementRpcRequest, parsePluginManagementRpcRequest } from '../launcher/management-rpc.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { createServiceRendererProjector } from './service-renderer-projection.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
@@ -39,6 +45,13 @@ import {
   reserveServiceOwnerLifecycle,
 } from './service-owner-lifecycle-fence.js'
 import { ServiceOwnerLifecycleRuntime } from './service-owner-lifecycle-runtime.js'
+import { OwnerAdapterSessions } from './owner-adapter-sessions.js'
+import {
+  inspectMarketplaceArtifactPackage,
+  parseMarketplaceArtifactBindingRequest,
+  previewMarketplaceArtifactPackage,
+} from '../launcher/marketplace-artifact.js'
+import { createOwnerAdapterDocuments } from './owner-adapter-documents.js'
 import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
@@ -81,6 +94,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let rendererLifecycle: ServiceRendererLifecycle | undefined
       let rendererParticipants: ServiceRendererParticipants | undefined
+      let nativeAdapters: OwnerAdapterSessions | undefined
       let rendererBootstrap: ServiceRendererBootstrap | undefined
       let rendererReadonlyChannel: ReadonlyChannelRendererBridge | undefined
       let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
@@ -132,8 +146,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             homeDir,
             profileId,
             generation,
-            isLive: identity => rendererParticipants!.isLive(identity),
-            canMutate: identity => rendererParticipants!.canMutate(identity),
+            isLive: identity => rendererParticipants!.isLive(identity) || nativeAdapters?.isLive(identity) === true,
+            canMutate: identity =>
+              rendererParticipants!.canMutate(identity) || nativeAdapters?.isLive(identity) === true,
             canProjectIdentity: identity => rendererBootstrap?.canProjectLifecycle(identity) === true,
             projectIdentity: async (mutation, identity, stage) => {
               if (!rendererBootstrap) throw new Error('renderer-projection-session-unavailable')
@@ -191,39 +206,54 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               modelApi = api?.reserveForLifecycle(affected)
               if (api && !modelApi) throw new ModelApiLifecycleUnavailable()
             } catch (error) {
+              release(modelApi)
               release(terminal)
               throw error
             }
-            const releaseClients = () => {
-              release(modelApi)
-              release(terminal)
-            }
-            const withClients = (manager?: import('./service-owner-lifecycle-fence.js').ServiceOwnerLifecycleFence) => {
-              let fence = manager
-              if (terminal) fence = includeClientLifecycleFence(terminal, fence)
-              if (modelApi) fence = includeClientLifecycleFence(modelApi, fence)
-              return fence
-            }
-            const managers = management?.lifecycleParticipants
-            if (!managers || !managers.hasLive()) return withClients()
-            if (!rendererBootstrap || !rendererManagedServiceUI || !rendererLifecycle || !rendererParticipants) {
-              releaseClients()
-              throw new Error('manager-lifecycle-fence-unavailable')
-            }
-            return reserveServiceOwnerLifecycle({
-              mutation,
-              management: managers,
-              bootstrap: rendererBootstrap,
-              managedUI: rendererManagedServiceUI,
-              lifecycle: rendererLifecycle,
-              participants: rendererParticipants,
-            }).then(
-              manager => withClients(manager),
-              error => {
+            const withAdapters = (adapters?: ReturnType<OwnerAdapterSessions['reserve']>) => {
+              const releaseClients = () => {
+                release(adapters)
+                release(modelApi)
+                release(terminal)
+              }
+              const withClients = (
+                manager?: import('./service-owner-lifecycle-fence.js').ServiceOwnerLifecycleFence,
+              ) => {
+                let fence = manager
+                if (terminal) fence = includeClientLifecycleFence(terminal, fence)
+                if (modelApi) fence = includeClientLifecycleFence(modelApi, fence)
+                if (adapters) fence = includeClientLifecycleFence(adapters, fence)
+                return fence
+              }
+              const managers = management?.lifecycleParticipants
+              if (!managers || !managers.hasLive()) return withClients()
+              if (!rendererBootstrap || !rendererManagedServiceUI || !rendererLifecycle || !rendererParticipants) {
                 releaseClients()
+                throw new Error('manager-lifecycle-fence-unavailable')
+              }
+              return reserveServiceOwnerLifecycle({
+                mutation,
+                management: managers,
+                bootstrap: rendererBootstrap,
+                managedUI: rendererManagedServiceUI,
+                lifecycle: rendererLifecycle,
+                participants: rendererParticipants,
+              }).then(
+                manager => withClients(manager),
+                error => {
+                  releaseClients()
+                  throw error
+                },
+              )
+            }
+            if (management !== undefined && nativeAdapters) {
+              return nativeAdapters.reserveForLifecycle().then(withAdapters, error => {
+                release(modelApi)
+                release(terminal)
                 throw error
-              },
-            )
+              })
+            }
+            return withAdapters()
           },
         })
         const coordinator = new PluginLifecycleCoordinator({
@@ -264,6 +294,63 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         })
         const active = await store.bindRuntimeGeneration()
         rendererLifecycle.initialize(active)
+        if (environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1') {
+          const adapterLifecycleHandler = { token: randomUUID(), profileId, generation, coordinator }
+          const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
+          const documents = createOwnerAdapterDocuments({
+            homeDir,
+            profileId,
+            generation,
+            configured: configured.plugins,
+            snapshot: () => rendererLifecycle!.snapshot(),
+          })
+          nativeAdapters = new OwnerAdapterSessions({
+            scope: rendererScope,
+            adapter: { appId: 'codex', adapterId: 'codex-desktop' },
+            snapshot: () => rendererLifecycle!.snapshot(),
+            attach: async peer => await rendererLifecycle!.attach(peer),
+            document: documents,
+            artifact: async (value, signal) => {
+              const request = parseMarketplaceArtifactBindingRequest(value)
+              if (request.kind === 'cancel') throw new Error('adapter-artifact-request-invalid')
+              return request.kind === 'preview'
+                ? await previewMarketplaceArtifactPackage(adapterLifecycleHandler, request.request, signal)
+                : await inspectMarketplaceArtifactPackage(adapterLifecycleHandler, request.request, signal)
+            },
+            lifecycle: async value => {
+              const envelope = attachmentRecord(value)
+              if (Object.hasOwn(envelope, 'token')) throw new Error('adapter-lifecycle-request-invalid')
+              const request = parsePluginLifecycleBindingRequest(
+                { ...envelope, token: adapterLifecycleHandler.token },
+                adapterLifecycleHandler,
+              )
+              return await handlePluginLifecycleBindingRequest(adapterLifecycleHandler, request)
+            },
+            management: async value => {
+              const operation = attachmentRecord(value)
+              if (
+                ![
+                  'query',
+                  'refresh-catalog',
+                  'query-catalog',
+                  'plugin-info',
+                  'plan',
+                  'execute',
+                  'migrate-legacy-sources',
+                ].includes(String(operation.kind)) || !management
+              ) throw new Error('adapter-management-unavailable')
+              const scope = { token: adapterLifecycleHandler.token, profileId }
+              const request = parsePluginManagementRpcRequest({
+                version: 1,
+                requestId: `adapter-${randomUUID()}`,
+                ...scope,
+                operation,
+              }, scope)
+              return await handlePluginManagementRpcRequest(management.handler.service, request)
+            },
+            ownerCurrent: () => ownerOpen && management !== undefined && !lifetime.signal.aborted,
+          })
+        }
         const startup = await services.initialize(active)
         await startup.coreReady
         terminalProvider = createServiceTerminalProvider({
@@ -342,6 +429,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             lifecycle: rendererLifecycle,
             ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
             loadPolicies,
+            ...(nativeAdapters === undefined ? {} : { nativeAdapters }),
           })
         }
         rendererBootstrap = new ServiceRendererBootstrap({
@@ -416,6 +504,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ...(managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins }),
           token: randomUUID(),
           coordinator,
+          ...(nativeAdapters === undefined ? {} : { ownerAdapterSessions: nativeAdapters }),
           rendererParticipant: rendererParticipants.participant,
           rendererParticipants,
           rendererLifecycle,
@@ -445,9 +534,19 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             rendererPermissionPolicy: {
               bootstrap: rendererBootstrap,
               proof: rendererPermissionProof,
+              onFailure: (phase, error) =>
+                diagnostic({
+                  event: 'service-permission-handoff-failed',
+                  phase,
+                  ...diagnosticError(error),
+                }),
+              ...(nativeAdapters === undefined ? {} : {
+                reserveAdditionalPeers: async () => await nativeAdapters!.reserveForLifecycle(),
+              }),
               reserveOtherConsumers: async (origin, evidence) =>
                 rendererPermissionConsumers!.reserve(origin, {
                   identity: evidence.ownerIdentity,
+                  moduleGeneration: evidence.moduleGeneration,
                   isCurrent: () => rendererBootstrap!.permissionAccess.isCurrentEvidence(evidence),
                 }),
             },
@@ -516,6 +615,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             () => rendererReadonlyChannel?.close(),
             () => rendererManagedServiceUI?.dispose(),
             () => services?.browserConsoleLaunch.close(),
+            () => nativeAdapters?.close(),
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),

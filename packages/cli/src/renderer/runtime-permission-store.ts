@@ -27,7 +27,9 @@ export function createRuntimePermissionStore(
         },
     )
   }
-  if (metadata.hostKind === 'standalone') return ownerSnapshotPermissionStore(metadata.permissionPolicies ?? [])
+  if (metadata.hostKind === 'standalone' || metadata.ownerPermissionSnapshot === true) {
+    return ownerSnapshotPermissionStore(metadata.permissionPolicies ?? [])
+  }
   if (metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined) {
     return new MemoryPermissionPolicyStore(
       metadata.permissionPolicies.filter(record =>

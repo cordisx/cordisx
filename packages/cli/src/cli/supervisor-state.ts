@@ -12,6 +12,9 @@ export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
 export interface SupervisorState {
   readonly schemaVersion: 1
   readonly mode?: 'service'
+  /** Native adapter supervised separately while its profile service owns shared state. */
+  readonly clientOfService?: true
+  readonly clientConnection?: 'connected' | 'disconnected'
   readonly modelApiUrl?: string
   /** Availability of the service-owned Web gateway. */
   readonly webStatus?: 'ready' | 'unavailable' | 'disabled'
@@ -55,8 +58,7 @@ export interface SupervisorPaths {
   readonly bootstrapToken: string
 }
 
-export function supervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
-  const directory = path.join(homeDir, 'run', appId, profileId)
+function supervisorPathsIn(directory: string): SupervisorPaths {
   return {
     directory,
     state: path.join(directory, 'state.json'),
@@ -66,6 +68,16 @@ export function supervisorPaths(homeDir: string, appId: string, profileId: strin
     log: path.join(directory, 'host.log'),
     bootstrapToken: path.join(directory, 'bootstrap.token'),
   }
+}
+
+export function supervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
+  return supervisorPathsIn(path.join(homeDir, 'run', appId, profileId))
+}
+
+/** A native client and its service owner must never publish into each other's state files. */
+export function clientSupervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
+  const scope = createHash('sha256').update(`${appId}\0${profileId}`).digest('hex').slice(0, 20)
+  return supervisorPathsIn(path.join(homeDir, 'run', 'clients', scope))
 }
 
 export function effectiveConfigFingerprint(input: unknown): string {
@@ -143,6 +155,9 @@ function validState(value: unknown): value is SupervisorState {
   const item = value as Record<string, unknown>
   return item.schemaVersion === 1
     && (item.mode === undefined || item.mode === 'service')
+    && (item.clientOfService === undefined || item.clientOfService === true && item.mode === undefined)
+    && (item.clientConnection === undefined || item.clientOfService === true
+        && (item.clientConnection === 'connected' || item.clientConnection === 'disconnected'))
     && (item.modelApiUrl === undefined || typeof item.modelApiUrl === 'string')
     && (item.webStatus === undefined || item.mode === 'service'
         && (item.webStatus === 'ready' || item.webStatus === 'unavailable' || item.webStatus === 'disabled'))

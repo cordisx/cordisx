@@ -51,4 +51,17 @@ describe('host-owned permission prompt', () => {
     )
     await expect(pending).resolves.toBe('deny')
   })
+
+  it('offers only a one-call decision when the owner cannot persist policies', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true })
+    const prompt = new BrowserPermissionPrompt(dom.window.document, { sessionOnly: true })
+    const pending = prompt.request(request)
+    await Promise.resolve()
+    const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')!
+    expect(dialog.querySelector('[data-permission-decision="allow"]')).toBeNull()
+    const once = dialog.querySelector<HTMLButtonElement>('[data-permission-decision="allow-once"]')!
+    expect(dom.window.document.activeElement).toBe(once)
+    once.click()
+    await expect(pending).resolves.toBe('allow-once')
+  })
 })

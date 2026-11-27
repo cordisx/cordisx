@@ -2,9 +2,10 @@ import path from 'node:path'
 import type { CordisXLauncherOptions } from './parse.js'
 import { effectiveConfigFingerprint } from './supervisor-state.js'
 
-function configurationIntent(source: string): string {
+function configurationIntent(source: string, excludePermissions = false): string {
   try {
     const config = JSON.parse(source)
+    if (excludePermissions) delete config.permissions
     for (
       const app of Object.values(config.apps ?? {}) as {
         profiles?: Record<string, {
@@ -53,9 +54,11 @@ export function launchFingerprint(input: {
   dataMode: string
   cwd: string
   codexHome?: string
+  /** Compare the rest of the launch configuration when checking an owner-authorized policy handoff. */
+  excludePermissions?: boolean
 }): string {
   return effectiveConfigFingerprint({
-    source: configurationIntent(input.source),
+    source: configurationIntent(input.source, input.excludePermissions),
     options: {
       system: input.options.system,
       executable: input.options.executable ? path.resolve(input.cwd, input.options.executable) : null,

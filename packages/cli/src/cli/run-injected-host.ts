@@ -74,6 +74,8 @@ export async function completeHostReadiness(
 
 export async function runInjectedHost(input: {
   readonly signal?: AbortSignal
+  /** Loss of an independent owner retires injection but does not close a ready App. */
+  readonly ownerSignal?: AbortSignal
   readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
   readonly source: string | (() => string)
   readonly newDocumentSource?: string | (() => string)
@@ -83,6 +85,8 @@ export async function runInjectedHost(input: {
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
   readonly ownerDocuments?: OwnerDocumentBridgeHandler
+  readonly remoteOwnerDocuments?: WatchInjectionOptions['remoteOwnerDocuments']
+  readonly remoteMarketplaceArtifact?: WatchInjectionOptions['remoteMarketplaceArtifact']
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
@@ -93,6 +97,7 @@ export async function runInjectedHost(input: {
     readonly handler: PluginLifecycleBridgeHandler
     readonly runtime: CdpPluginLifecycleRuntime
   }
+  readonly remotePluginLifecycle?: WatchInjectionOptions['remotePluginLifecycle']
   readonly pluginManagement?: PluginManagementBridgeHandler
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly viteDevelopment?: boolean
@@ -155,12 +160,15 @@ export async function runInjectedHost(input: {
     markReady = resolve
   })
   let reportedReady = false
+  const watcherSignal = input.ownerSignal === undefined
+    ? controller.signal
+    : AbortSignal.any([controller.signal, input.ownerSignal])
   const watcher = watchAndInject({
     ...(input.nativeSubmission === undefined ? {} : { nativeSubmission: input.nativeSubmission }),
     port: input.debugPort,
     source: input.source,
     ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
-    signal: controller.signal,
+    signal: watcherSignal,
     ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
       providerFleet: input.providerFleet,
       providerBridgeToken: input.providerBridgeToken,
@@ -169,6 +177,10 @@ export async function runInjectedHost(input: {
     agentHistoryBridgeToken: input.agentHistoryBridgeToken,
     ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
     ...(input.ownerDocuments === undefined ? {} : { ownerDocuments: input.ownerDocuments }),
+    ...(input.remoteOwnerDocuments === undefined ? {} : { remoteOwnerDocuments: input.remoteOwnerDocuments }),
+    ...(input.remoteMarketplaceArtifact === undefined
+      ? {}
+      : { remoteMarketplaceArtifact: input.remoteMarketplaceArtifact }),
     ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
     ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
@@ -178,6 +190,7 @@ export async function runInjectedHost(input: {
       ? {}
       : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+    ...(input.remotePluginLifecycle === undefined ? {} : { remotePluginLifecycle: input.remotePluginLifecycle }),
     ...(input.pluginManagement === undefined ? {} : { pluginManagement: input.pluginManagement }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
@@ -268,13 +281,22 @@ export async function runInjectedHost(input: {
       launched = input.prelaunchedHost.child
       if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
     }
+    const watchLifetime = watcher.catch(error => {
+      if (!input.ownerSignal?.aborted || controller.signal.aborted || !rendererIsReady) throw error
+      input.stdout('[cordisx] service connection lost; renderer cleanup could not be fully confirmed')
+    }).then(async () => {
+      if (input.ownerSignal?.aborted && !controller.signal.aborted && rendererIsReady && launched) {
+        input.stdout('[cordisx] service connection lost; CordisX is disconnected and the App remains open')
+        await waitForExit(launched)
+      }
+    })
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),
         ready: rendererReady,
         signal: controller.signal,
       }),
-      watcher,
+      watchLifetime,
     ])
   } catch (error) {
     lifecycle({ event: 'lifecycle-failed' })

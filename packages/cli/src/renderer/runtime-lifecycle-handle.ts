@@ -1,6 +1,7 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { createStandaloneDomReviewModel } from './standalone-dom-review-model.js'
 import { configuredStartupGraphGenerations } from './runtime-startup-plugins.js'
+import { verifyOwnerPolicyPacket } from './owner-policy-verification.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -767,6 +768,19 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  adoptOwnerManagerPolicy: async packet => {
+    const metadata = runtimeScope.metadata()
+    const authority = metadata?.ownerPolicyVerification
+    if (runtimeScope.disposed || metadata?.ownerPermissionSnapshot !== true || !authority) return false
+    const transition = await verifyOwnerPolicyPacket(packet, {
+      profileId: metadata.profileId,
+      generation: runtimeScope.generation()!,
+      rendererId: authority.rendererId,
+      key: authority.publicKey,
+    })
+    if (!transition || runtimeScope.disposed) return false
+    return await runtimeScope.broker()!.adoptOwnerManagerPolicies(transition) && !runtimeScope.disposed
+  },
   adoptStandaloneChannelProjection: (projection, revision) => {
     if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
     return adoptStandaloneChannelProjection(
@@ -942,7 +956,8 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
-  permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone',
+  permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone'
+    && runtimeScope.metadata()!.ownerPermissionSnapshot !== true,
   ...(() => {
     const review = createStandaloneDomReviewModel(runtimeScope)
     return review === undefined ? {} : { standaloneDomReview: review }
