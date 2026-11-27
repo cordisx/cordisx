@@ -3,6 +3,7 @@ import { a, channel, fixture, message } from './helpers/channel-conversation-fix
 import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/channel-conversation-policy.js'
 import { recoverConfirmedChannelProvider } from '../packages/cli/src/launcher/channel-confirmed-provider-recovery.js'
 import { ChannelNativeSourceFence } from '../packages/cli/src/launcher/channel-native-source-fence.js'
+import { ChannelNativeProviderRecovery } from '../packages/cli/src/launcher/channel-native-provider-recovery.js'
 
 async function setup() {
   const f = await fixture(), store = f.consumer.profileLogicalOwner().store
@@ -96,4 +97,19 @@ it('does not dispatch if the confirmed selection changes during resume', async (
   expect(await f.run()).toBe(true)
   expect(f.store.snapshot().jobs.j?.state).toBe('reconciliation-required')
   expect(f.fence.isMigrating(a)).toBe(false)
+})
+
+it('does not use an unconfirmed source resume as a configuration observation', async () => {
+  const accept = vi.fn(async (_value: unknown) => true)
+  const native = new ChannelNativeProviderRecovery({
+    nativeRequest: async () => ({ thread: { id: 'other' }, modelProvider: 'source', model: 'model' }),
+    configuration: { captureObservation: () => accept },
+  })
+  const fence = new ChannelNativeSourceFence(() => false), release = fence.beginMigration('thread')!
+  try {
+    expect(await native.restore('thread', 'source', fence)).toBeUndefined()
+    expect(accept).not.toHaveBeenCalled()
+  } finally {
+    release()
+  }
 })

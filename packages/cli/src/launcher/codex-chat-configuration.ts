@@ -52,6 +52,7 @@ export interface CodexConfigurationAuthority {
 export class CodexChatConfiguration {
   private records: Record<string, Configuration> = {}
   private readonly observations = new Map<string, { revision: number; value: Record<string, unknown> }>()
+  private observationGeneration = 0
   private readonly active = new Set<string>()
   private readonly hydrating = new Set<string>()
   private tail: Promise<void> = Promise.resolve()
@@ -189,11 +190,24 @@ export class CodexChatConfiguration {
     await task
   }
   async observe(threadId: string, value: unknown) {
+    this.observationGeneration++
     this.observations.set(threadId, {
       revision: (this.observations.get(threadId)?.revision ?? 0) + 1,
       value: object(value),
     })
     if (this.observations.size > 512) this.observations.delete(this.observations.keys().next().value!)
+  }
+  /** Accept a native readback only if no newer observation can have replaced it. */
+  captureObservation(threadId: string) {
+    const previous = this.observations.get(threadId), generation = this.observationGeneration
+    return async (value: unknown) => {
+      if (
+        this.observations.get(threadId) !== previous
+        || !previous && this.observationGeneration !== generation
+      ) return false
+      await this.observe(threadId, value)
+      return true
+    }
   }
   private async observed(id: string, after: number) {
     for (let attempt = 0; attempt < 40; attempt++) {

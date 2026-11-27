@@ -100,6 +100,23 @@ async function fixture() {
   }
 }
 
+test('a delayed recovery readback cannot overwrite a newer settings observation', async () => {
+  const f = await fixture()
+  try {
+    const late = f.service.captureObservation('chat')
+    await f.service.observe('chat', { serviceTier: 'priority' })
+    expect(await late({ serviceTier: null })).toBe(false)
+    expect(await f.service.call('fast', { sessionId: 'chat' })).toMatchObject({ effective: { fast: true } })
+    const current = f.service.captureObservation('chat')
+    await f.service.observe('another-chat', { serviceTier: 'priority' })
+    expect(await current({ serviceTier: null })).toBe(true)
+    expect(await f.service.call('fast', { sessionId: 'chat' })).toMatchObject({ effective: { fast: false } })
+  } finally {
+    await f.service.close()
+    await f.preferences.close()
+  }
+})
+
 test('local reviewer changes are revision fenced, idle-only and preserve existing execution settings', async () => {
   const f = await fixture()
   await f.preferences.set('local', 'chat', { networkAccess: true }, 0)
