@@ -122,6 +122,9 @@ export class CodexChatConfiguration {
     )
     return result.status === 'applied'
   }
+  hasHeadlessProject(threadId: string) {
+    return !!this.authority.headlessProjects && !!this.records[threadId]?.project
+  }
   /** Verify the persisted headless project still matches its native sandbox. */
   async verifiedProjectSandbox(threadId: string, effective: Record<string, unknown>) {
     const saved = this.records[threadId] && structuredClone(this.records[threadId])
@@ -148,6 +151,7 @@ export class CodexChatConfiguration {
       !actual || actual.cwd !== effective.cwd || !isDeepStrictEqual(actual.sandbox, effective.sandbox)
       || !target?.effective || target.effective.cwd !== effective.cwd
       || !isDeepStrictEqual(target.effective.sandbox, effective.sandbox)
+      || actual.activePermissionProfile !== null || target.effective.activePermissionProfile !== null
       || !await this.verifiedProjectSandbox(source, actual)
     ) return false
     if (

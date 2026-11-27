@@ -13,7 +13,7 @@ type NativeInput = {
   readonly confirmedWorkMode?: (threadId: string) => 'default' | 'plan' | undefined
   readonly configuration?: Pick<
     import('./codex-chat-configuration.js').CodexChatConfiguration,
-    'verifiedProjectSandbox'
+    'hasHeadlessProject' | 'verifiedProjectSandbox'
   >
 }
 type Sessions = {
@@ -38,6 +38,9 @@ export async function readChannelContinuationConfiguration(
   const confirmedMode = input.confirmedWorkMode?.(threadId)
   if (input.confirmedWorkMode && confirmedMode === undefined) return undefined
   const ordinary = continuationConfiguration(record.effective, live, confirmedMode)
+  // Headless project preparation currently clears named native profiles. Never
+  // create a continuation whose later project resume could discard one.
+  if (ordinary?.permissions && input.configuration?.hasHeadlessProject(threadId)) return undefined
   if (ordinary || !record.effective || !input.configuration) return ordinary
   if (!await input.configuration.verifiedProjectSandbox(threadId, record.effective)) return undefined
   await input.execution.settled()

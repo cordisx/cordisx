@@ -6,6 +6,8 @@ import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { ChatExecutionPreferences } from '../packages/cli/src/launcher/chat-execution-preferences.js'
 import { CodexChatConfiguration } from '../packages/cli/src/launcher/codex-chat-configuration.js'
 import { HeadlessProjectCatalog } from '../packages/cli/src/launcher/headless-project-catalog.js'
+import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
+import { continuationConfiguration } from '../packages/cli/src/launcher/channel-continuation-config.js'
 
 describe('headless workspace projects', () => {
   it('lists only repository roots contained in the explicitly configured workspace', async () => {
@@ -54,6 +56,7 @@ describe('headless workspace projects', () => {
       cwd: root,
       model: 'model',
       modelProvider: 'openai',
+      activePermissionProfile: null,
       sandbox: { type: 'workspaceWrite', writableRoots: [root], networkAccess: false },
     }
     const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
@@ -156,6 +159,27 @@ describe('headless workspace projects', () => {
           'sandbox_workspace_write.exclude_slash_tmp': true,
         },
       })
+      await preferences.observe('thread', {
+        ...actual,
+        activePermissionProfile: { id: 'restricted' },
+        approvalPolicy: 'on-request',
+        reasoningEffort: 'medium',
+        approvalsReviewer: 'user',
+        serviceTier: null,
+        collaborationMode: { mode: 'default' },
+      })
+      const native = new ChannelNativeSessions({
+        bridge: () => undefined,
+        cwd: root,
+        nativeRequest: request as never,
+        execution: preferences,
+        configuration,
+      })
+      expect(
+        continuationConfiguration(preferences.read('local', 'thread')?.effective, undefined, 'default')?.permissions,
+      )
+        .toBe('restricted')
+      expect(await native.continuationConfiguration('thread')).toBeUndefined()
       await rm(path.join(project, '.git'))
       expect(await configuration.verifiedProjectSandbox('thread', effective)).toBe(false)
       await expect(configuration.prepare('turn/start', { threadId: 'thread' })).rejects.toThrow('PROJECT_UNAVAILABLE')
