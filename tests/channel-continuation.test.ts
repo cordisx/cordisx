@@ -317,6 +317,44 @@ describe('Channel continuation durability', () => {
     expect(continuationConfiguration(unknownMode, undefined, 'default')?.execution.workMode).toBe('default')
     expect(continuationConfiguration(effective, undefined, 'plan')).toBeUndefined()
   })
+  it('admits an exact project sandbox only after project verification', () => {
+    const effective = {
+      cwd: '/workspace',
+      modelProvider: 'source',
+      model: 'model',
+      reasoningEffort: 'medium',
+      serviceTier: null,
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      workMode: 'default',
+      activePermissionProfile: null,
+      sandbox: {
+        type: 'workspaceWrite',
+        writableRoots: ['/mailbox'],
+        networkAccess: false,
+        excludeTmpdirEnvVar: true,
+        excludeSlashTmp: true,
+      },
+    }
+    expect(continuationConfiguration(effective, undefined)).toBeUndefined()
+    expect(continuationConfiguration(effective, undefined, 'default', true)?.sandbox).toEqual(effective.sandbox)
+    expect(
+      continuationConfiguration(
+        { ...effective, sandbox: { ...effective.sandbox, unknown: true } },
+        undefined,
+        'default',
+        true,
+      ),
+    ).toBeUndefined()
+    expect(
+      continuationConfiguration(
+        { ...effective, sandbox: { ...effective.sandbox, writableRoots: ['relative'] } },
+        undefined,
+        'default',
+        true,
+      ),
+    ).toBeUndefined()
+  })
   it('moves every binding and queued job once, retaining the old checkpoint and future policy', async () => {
     const f = await fixture()
     try {

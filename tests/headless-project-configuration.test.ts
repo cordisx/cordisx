@@ -57,9 +57,9 @@ describe('headless workspace projects', () => {
       sandbox: { type: 'workspaceWrite', writableRoots: [root], networkAccess: false },
     }
     const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
-      if (method === 'thread/read') return { thread: { ...actual } }
+      if (method === 'thread/read') return { thread: { ...actual, id: params.threadId } }
       if (method === 'thread/settings/update') {
-        actual = { ...actual, ...params, sandbox: params.sandboxPolicy }
+        actual = { ...actual, ...params, ...(params.sandboxPolicy ? { sandbox: params.sandboxPolicy } : {}) }
         await configuration.observe('thread', actual)
         return {}
       }
@@ -76,12 +76,20 @@ describe('headless workspace projects', () => {
       })
       const [{ projectId }] = await configuration.projects()
       expect(projectId).toBeDefined()
+      await preferences.recordModelSelection('thread', { providerId: 'openai', model: 'model' })
       const result = await configuration.applyChannel('project-set', {
         sessionId: 'thread',
         projectId,
         expectedRevision: 0,
       }, async () => true)
       expect(result).toMatchObject({ status: 'applied', application: 'applied' })
+      expect(
+        await configuration.applyChannel(
+          'fast-set',
+          { sessionId: 'thread', fast: false, expectedRevision: 1 },
+          async () => true,
+        ),
+      ).toMatchObject({ status: 'applied', application: 'applied' })
       expect(actual.cwd).toBe(project)
       expect(actual.sandbox).toMatchObject({
         type: 'workspaceWrite',
@@ -97,7 +105,59 @@ describe('headless workspace projects', () => {
       const final = await (configuration as unknown as { finalize(method: string, params: object): Promise<object> })
         .finalize('turn/start', prepared)
       expect(final).toMatchObject({ cwd: project, sandboxPolicy: { writableRoots: [project, mailbox] } })
+      await preferences.observe('thread', actual)
+      const effective = preferences.read('local', 'thread')?.effective!
+      expect(await configuration.verifiedProjectSandbox('thread', effective)).toBe(true)
+      expect(await configuration.inheritVerifiedProject('thread', 'wrong', { cwd: project, sandbox: {} }, () => true))
+        .toBe(false)
+      await preferences.recordModelSelection('destination', { providerId: 'openai', model: 'model' })
+      await preferences.observe('destination', actual)
+      await preferences.recordModelSelection('raced', { providerId: 'openai', model: 'model' })
+      await preferences.observe('raced', actual)
+      let checks = 0
+      expect(
+        await configuration.inheritVerifiedProject('thread', 'raced', {
+          cwd: effective.cwd,
+          sandbox: effective.sandbox,
+        }, () => ++checks === 1),
+      ).toBe(false)
+      expect(await configuration.prepare('thread/resume', { threadId: 'raced' })).toEqual({ threadId: 'raced' })
+      expect(
+        await configuration.inheritVerifiedProject('thread', 'destination', {
+          cwd: effective.cwd,
+          sandbox: effective.sandbox,
+        }, () => true),
+      )
+        .toBe(true)
+      expect(
+        await configuration.inheritVerifiedProject('thread', 'destination', {
+          cwd: effective.cwd,
+          sandbox: effective.sandbox,
+        }, () => true),
+      )
+        .toBe(false)
+      await configuration.close()
+      configuration = await CodexChatConfiguration.open({
+        preferences,
+        file: path.join(root, 'configuration.json'),
+        request,
+        headlessProjects: projects,
+        sandboxAuxiliaryRoot: mailbox,
+      })
+      expect(await configuration.call('fast', { sessionId: 'destination' })).toMatchObject({ fast: false })
+      const resume = await preferences.prepare('thread/resume', { threadId: 'destination' })
+      expect(resume.params).toMatchObject({
+        cwd: project,
+        sandbox: 'workspace-write',
+        config: {
+          'sandbox_workspace_write.writable_roots': [project, mailbox],
+          'sandbox_workspace_write.network_access': false,
+          'sandbox_workspace_write.exclude_tmpdir_env_var': true,
+          'sandbox_workspace_write.exclude_slash_tmp': true,
+        },
+      })
       await rm(path.join(project, '.git'))
+      expect(await configuration.verifiedProjectSandbox('thread', effective)).toBe(false)
       await expect(configuration.prepare('turn/start', { threadId: 'thread' })).rejects.toThrow('PROJECT_UNAVAILABLE')
     } finally {
       await configuration?.close()

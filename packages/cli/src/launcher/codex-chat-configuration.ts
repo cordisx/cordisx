@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
@@ -121,6 +122,62 @@ export class CodexChatConfiguration {
     )
     return result.status === 'applied'
   }
+  /** Verify the persisted headless project still matches its native sandbox. */
+  async verifiedProjectSandbox(threadId: string, effective: Record<string, unknown>) {
+    const saved = this.records[threadId] && structuredClone(this.records[threadId])
+    if (
+      !saved?.project || !this.authority.headlessProjects
+      || !projectMatches(saved.project, effective, this.authority.sandboxAuxiliaryRoot)
+    ) return false
+    return await this.membership(threadId, saved.project.projectId)
+      && isDeepStrictEqual(this.records[threadId], saved)
+      && isDeepStrictEqual(this.authority.preferences.read('local', threadId)?.effective, effective)
+  }
+  /** Preserve a verified project on a confirmed, still-unbound continuation. */
+  async inheritVerifiedProject(
+    source: string,
+    destination: string,
+    effective: { cwd: unknown; sandbox: unknown },
+    available: () => boolean,
+  ) {
+    const saved = this.records[source] && structuredClone(this.records[source])
+    if (!saved?.project || !this.authority.headlessProjects) return true
+    const actual = this.authority.preferences.read('local', source)?.effective
+    const target = this.authority.preferences.read('local', destination)
+    if (
+      !actual || actual.cwd !== effective.cwd || !isDeepStrictEqual(actual.sandbox, effective.sandbox)
+      || !target?.effective || target.effective.cwd !== effective.cwd
+      || !isDeepStrictEqual(target.effective.sandbox, effective.sandbox)
+      || !await this.verifiedProjectSandbox(source, actual)
+    ) return false
+    if (
+      saved.fast !== undefined && ![null, 'default', 'priority'].includes(target.effective.serviceTier as string | null)
+    ) {
+      return false
+    }
+    if (saved.reviewer !== undefined && target.effective.approvalsReviewer !== saved.reviewer) return false
+    try {
+      await this.save(
+        destination,
+        {
+          revision: 0,
+          project: saved.project,
+          application: 'applied',
+          ...(saved.fast === undefined ? {} : { fast: target.effective.serviceTier === 'priority' }),
+          ...(saved.reviewer === undefined ? {} : { reviewer: saved.reviewer }),
+        },
+        () =>
+          available() && !this.records[destination] && isDeepStrictEqual(this.records[source], saved)
+          && isDeepStrictEqual(this.authority.preferences.read('local', source)?.effective, actual)
+          && isDeepStrictEqual(this.authority.preferences.read('local', destination), target),
+      )
+      return available() && isDeepStrictEqual(this.records[source], saved)
+        && isDeepStrictEqual(this.authority.preferences.read('local', source)?.effective, actual)
+        && isDeepStrictEqual(this.authority.preferences.read('local', destination), target)
+    } catch {
+      return false
+    }
+  }
   /** Host-only authorization seam for the exact approval pump and first-turn project binding. */
   async applyChannel(
     operation: 'fast-set' | 'project-set',
@@ -170,8 +227,9 @@ export class CodexChatConfiguration {
     )
     return service
   }
-  private async save(id: string, value: Configuration) {
+  private async save(id: string, value: Configuration, guard?: () => boolean) {
     const task = this.tail.then(async () => {
+      if (guard && !guard()) throw new Error('CHAT_CONFIGURATION_CHANGED')
       const next = { ...this.records, [id]: value }, temporary = `${this.authority.file}.${randomUUID()}.tmp`
       await mkdir(path.dirname(temporary), { recursive: true, mode: 0o700 })
       try {
@@ -180,6 +238,7 @@ export class CodexChatConfiguration {
           JSON.stringify({ schema: 'cordisx.codex-chat-configuration/v1', records: next }) + '\n',
           { mode: 0o600, flag: 'wx' },
         )
+        if (guard && !guard()) throw new Error('CHAT_CONFIGURATION_CHANGED')
         await rename(temporary, this.authority.file)
         this.records = next
       } finally {
@@ -302,11 +361,19 @@ export class CodexChatConfiguration {
     const project = this.records[params.threadId]?.project
     if (!project) return params
     const native = await this.nativeThread(params.threadId)
-    const sandbox = projectSandbox(
-      project,
-      params.sandboxPolicy ?? native.sandboxPolicy ?? native.sandbox,
-      this.authority.sandboxAuxiliaryRoot,
-    )
+    const currentSandbox = params.sandboxPolicy ?? native.sandboxPolicy ?? native.sandbox
+    const currentPolicy = object(currentSandbox)
+    const knownWorkspacePolicy = currentPolicy.type !== 'workspaceWrite'
+      || Object.keys(currentPolicy).every(key =>
+          ['type', 'writableRoots', 'networkAccess', 'excludeTmpdirEnvVar', 'excludeSlashTmp'].includes(key)
+        ) && typeof currentPolicy.networkAccess === 'boolean'
+    const sandbox = this.authority.headlessProjects && knownWorkspacePolicy && projectMatches(
+        project,
+        { ...native, sandboxPolicy: currentSandbox, sandbox: currentSandbox },
+        this.authority.sandboxAuxiliaryRoot,
+      )
+      ? object(currentSandbox)
+      : projectSandbox(project, currentSandbox, this.authority.sandboxAuxiliaryRoot)
     const selected: Record<string, unknown> = method === 'thread/resume'
       ? {
         ...params,

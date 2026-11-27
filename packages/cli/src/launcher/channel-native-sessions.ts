@@ -35,7 +35,11 @@ import {
   type ContinuationPolicy,
   ContinuationUsage,
 } from './channel-continuation.js'
-import { type ContinuationConfiguration, continuationStartMatches } from './channel-continuation-config.js'
+import {
+  type ContinuationConfiguration,
+  continuationStartMatches,
+  workspaceSandboxOverrides,
+} from './channel-continuation-config.js'
 import {
   readChannelContinuationConfiguration,
   restoreChannelLogicalSource,
@@ -239,10 +243,18 @@ export class ChannelNativeSessions {
         return { ...result, confirmed: false }
       }
       if (!available(destination)) return { ...result, confirmed: false }
+      const observe = this.input.configuration?.captureObservation(destination)
+      const sandbox = evidence.sourceConfiguration.permissions
+        ? undefined
+        : workspaceSandboxOverrides(evidence.sourceConfiguration.sandbox, evidence.sourceConfiguration.cwd)
       const resumed = object(
         await native.nativeRequest(
           'thread/resume',
-          fence.allowOwned('thread/resume', destination, { threadId: destination, excludeTurns: true }),
+          fence.allowOwned('thread/resume', destination, {
+            threadId: destination,
+            excludeTurns: true,
+            ...(sandbox ? { cwd: evidence.sourceConfiguration.cwd, sandbox: 'workspace-write', config: sandbox } : {}),
+          }),
         ),
       )
       if (
@@ -251,6 +263,7 @@ export class ChannelNativeSessions {
       ) {
         return { ...result, confirmed: false }
       }
+      await observe?.(resumed)
       if (request.mode === 'fork') {
         if (
           await logicalHistoryContentVersion(native, request.source)
@@ -275,6 +288,14 @@ export class ChannelNativeSessions {
       // Persist it before binding so a later cold resume cannot fall back to the source.
       await execution.recordModelSelection(destination, request.target)
       if (!available(destination)) return { ...result, confirmed: false }
+      if (
+        this.input.configuration && !await this.input.configuration.inheritVerifiedProject(
+          request.source.sessionId,
+          destination,
+          evidence.sourceConfiguration,
+          () => available(destination),
+        )
+      ) return { ...result, confirmed: false }
       retained = true
       return { ...result, confirmed: true, releaseTarget }
     } catch {
