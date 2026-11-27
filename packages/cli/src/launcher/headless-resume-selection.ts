@@ -57,7 +57,18 @@ export async function headlessResumeSelection(input: {
     if (entry.application !== 'applied' || entry.pending !== undefined || entry.pendingPatch !== undefined) return
     requested = selection(entry.settings)
   } else if (bound) {
-    return
+    // Older bindings need not have Channel task settings. Only a separately
+    // confirmed execution selection for this exact thread may fill the gap.
+    const pending = Object.values(object(channel.taskRequests)).some(value => {
+      const request = object(value)
+      return request.threadId === input.threadId && !['applied', 'denied', 'expired'].includes(String(request.state))
+    })
+    if (pending) throw new Error('RESUME_SELECTION_UNCONFIRMED')
+    if (
+      row?.application !== 'applied' || row.appliedRevision !== undefined && row.appliedRevision !== row.revision
+      || !explicit || effective.modelProvider !== explicit.providerId || effective.model !== explicit.model
+    ) return
+    requested = explicit
   } else if (explicit) {
     requested = explicit
   } else {

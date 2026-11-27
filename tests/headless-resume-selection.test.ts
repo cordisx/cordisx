@@ -53,6 +53,16 @@ it('recovers only a matching applied selection for the exact bound or migrated t
     await expect(resolve()).rejects.toThrow('RESUME_SELECTION_UNCONFIRMED')
     await channel({ bindings: { active: { state: 'active', sessionId: 'thread' } } })
     expect(await resolve()).toBeUndefined()
+    const explicit = { ...execution, modelSelection: { status: 'confirmed' as const, ...selected } }
+    expect(await resolve(explicit)).toEqual(selected)
+    expect(await resolve({ ...explicit, application: 'unknown' })).toBeUndefined()
+    expect(await resolve({ ...explicit, effective: { modelProvider: 'other', model: selected.model } }))
+      .toBeUndefined()
+    await channel({
+      bindings: { active: { state: 'active', sessionId: 'thread' } },
+      taskRequests: { pending: { threadId: 'thread', state: 'queued' } },
+    })
+    await expect(resolve(explicit)).rejects.toThrow('RESUME_SELECTION_UNCONFIRMED')
     await channel({
       bindings: { active: { state: 'active', sessionId: 'thread' } },
       taskSettings: { thread: { application: 'applied', settings: selected } },
