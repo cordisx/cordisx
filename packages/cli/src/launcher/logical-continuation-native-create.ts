@@ -37,7 +37,9 @@ export async function createLogicalNativeDestination(
     ...(config.permissions ? { permissions: config.permissions } : {}),
     ...(request.mode === 'linked' ? { dynamicTools: [LOGICAL_CONTINUATION_HISTORY_TOOL] } : {}),
     ...(request.mode === 'linked' && sourceProjectId ? { projectId: sourceProjectId } : {}),
-    ...(request.mode === 'fork' ? { threadId: request.source.sessionId } : {}),
+    // The full history is verified separately. Returning it in the fork receipt
+    // can exceed the RPC line limit after the native destination was created.
+    ...(request.mode === 'fork' ? { threadId: request.source.sessionId, excludeTurns: true } : {}),
   }
   const response = object(
     await native.nativeRequest(

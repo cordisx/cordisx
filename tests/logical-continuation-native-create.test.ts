@@ -243,6 +243,9 @@ describe('native logical destination creation', () => {
       confirmed: true,
       destination: { sessionId: 'fork' },
     })
-    expect(native.nativeRequest).toHaveBeenCalledWith('thread/fork', expect.objectContaining({ threadId: 'source' }))
+    expect(native.nativeRequest).toHaveBeenCalledWith(
+      'thread/fork',
+      expect.objectContaining({ threadId: 'source', excludeTurns: true }),
+    )
   })
 })
