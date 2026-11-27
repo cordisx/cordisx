@@ -1,7 +1,7 @@
 import { headlessConfiguredProviders } from './headless-configured-providers.js'
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from './agent-bridge.js'
 import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/codex-app-server.js'
-import { JsonLineRpcError } from '../providers/json-line-rpc.js'
+import { nativeResumeProviderMismatch } from './native-resume-provider-mismatch.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
@@ -13,22 +13,7 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 
 /** A native preflight refusal is safe to report; transport failures remain uncertain. */
 function providerSwitchRefused(error: unknown, current: unknown, requested: string): boolean {
-  if (
-    !(error instanceof JsonLineRpcError) || error.rpcCode !== -32600
-    || typeof current !== 'string' || current === requested
-  ) return false
-  const data = error.rpcData && typeof error.rpcData === 'object' && !Array.isArray(error.rpcData)
-    ? error.rpcData as Record<string, unknown>
-    : undefined
-  if (
-    data?.type === 'modelProviderMismatch'
-    && data.modelProvider === current && data.currentModelProvider === requested
-  ) return true
-  // Codex 0.171 rejects an explicit provider override before loading the thread,
-  // but returns no structured data for this particular resume rejection.
-  const refusal = /cannot change this thread['’]s model provider from (.+?) to (.+?) on resume/iu.exec(error.message)
-  const unquote = (value: string) => value.replace(/^[`'"“”]+|[`'"“”]+$/gu, '')
-  return refusal !== null && unquote(refusal[1]!) === current && unquote(refusal[2]!) === requested
+  return typeof current === 'string' && nativeResumeProviderMismatch(error, requested) === current
 }
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */

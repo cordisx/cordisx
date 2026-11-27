@@ -3,8 +3,36 @@ import { startHeadlessCodexBackend } from '../packages/cli/src/launcher/headless
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
 import { createHeadlessCodexOperations } from '../packages/cli/src/launcher/headless-codex-operations.js'
 import { JsonLineRpcError } from '../packages/cli/src/providers/json-line-rpc.js'
+import { nativeResumeProviderMismatch } from '../packages/cli/src/launcher/native-resume-provider-mismatch.js'
 
 describe('headless Codex backend', () => {
+  it('extracts the source only from an exact native resume refusal', () => {
+    const refusal = new JsonLineRpcError(
+      "thread/resume failed: cannot change this thread's model provider from old to new on resume",
+      -32600,
+    )
+    expect(nativeResumeProviderMismatch(refusal, 'new')).toBe('old')
+    expect(nativeResumeProviderMismatch(refusal, 'other')).toBeUndefined()
+    expect(nativeResumeProviderMismatch(new JsonLineRpcError(refusal.message, -32603), 'new')).toBeUndefined()
+    expect(nativeResumeProviderMismatch(new JsonLineRpcError('RPC request timed out: thread/resume'), 'new'))
+      .toBeUndefined()
+    expect(nativeResumeProviderMismatch(
+      new JsonLineRpcError('refused', -32600, {
+        type: 'modelProviderMismatch',
+        modelProvider: 'old',
+        currentModelProvider: 'new',
+      }),
+      'new',
+    )).toBe('old')
+    expect(nativeResumeProviderMismatch(
+      new JsonLineRpcError('refused', -32600, {
+        type: 'modelProviderMismatch',
+        modelProvider: '../old',
+        currentModelProvider: 'new',
+      }),
+      'new',
+    )).toBeUndefined()
+  })
   it('checks the native owner twice and returns only a digest', async () => {
     let userId = 'user'
     const request = vi.fn(async (method: string) => {

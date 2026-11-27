@@ -16,7 +16,11 @@ import {
   parseChannelTaskConfig,
   parseChannelTaskPatch,
 } from './channel-task-config.js'
-import { ChannelConversationStore, type ChannelTaskRequest } from './channel-conversation-store.js'
+import {
+  type ChannelConversationJob,
+  ChannelConversationStore,
+  type ChannelTaskRequest,
+} from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { ChannelAgentAccess } from './channel-agent-access.js'
@@ -29,6 +33,8 @@ import {
 } from './channel-task-selection.js'
 import { ChannelTaskSettingsPump } from './channel-task-settings-pump.js'
 import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
+import { recoverConfirmedChannelProvider } from './channel-confirmed-provider-recovery.js'
+import { ChannelRecoveryScheduler } from './channel-recovery-scheduler.js'
 
 const same = (left: ChannelEventRef, right: ChannelEventRef) =>
   ['adapterId', 'accountId', 'tenantId', 'conversationId']
@@ -39,6 +45,7 @@ const object = (value: unknown): Record<string, unknown> =>
 /** Commands, MCP, local CLI and Host forms share the same exact model-change authority. */
 export class ChannelTaskSettings {
   private readonly application: ChannelTaskSettingsPump
+  private readonly recovery = new ChannelRecoveryScheduler()
   private readonly cardUpdates = new Map<string, Promise<void>>()
   constructor(
     private readonly input: {
@@ -47,6 +54,7 @@ export class ChannelTaskSettings {
       access(): ChannelConversationAccess | undefined
       agent: ChannelAgentAccess
       notify?(event: ChannelEventRef, text: string, operationId: string): Promise<unknown>
+      report?(code: string): void
       logical?: { appId: string; profileId: string; fence: ChannelNativeSourceFence; claims: Set<string> }
     },
   ) {
@@ -78,6 +86,36 @@ export class ChannelTaskSettings {
   ready(threadId: string): boolean {
     const setting = this.input.store.snapshot().taskSettings[threadId]
     return !setting || !['saved', 'applying', 'unknown'].includes(setting.application)
+  }
+  async recover(job: ChannelConversationJob, event: ChannelEventRef): Promise<boolean> {
+    const native = this.input.native(), logical = this.input.logical
+    if (!native?.providerRecovery || !logical || !job.sessionId) return false
+    return await this.recovery.run(job.id, async () => {
+      try {
+        return await recoverConfirmedChannelProvider({
+          store: this.input.store,
+          native,
+          access: this.input.access,
+          ...logical,
+          event,
+          job,
+          ...(this.input.report === undefined ? {} : { report: this.input.report }),
+        })
+      } catch {
+        await this.input.store.mutate(state => {
+          const current = state.jobs[job.id]
+          if (current?.state === 'queued' && current.sessionId === job.sessionId) {
+            current.state = 'reconciliation-required'
+            current.code = 'CONFIRMED_PROVIDER_RECOVERY_UNCERTAIN'
+            current.failureNotice ??= 'pending'
+          }
+        })
+        return true
+      }
+    })
+  }
+  async close(): Promise<void> {
+    await this.recovery.close()
   }
   private bound(event: ChannelEventRef, threadId: string): boolean {
     return Object.values(this.input.store.snapshot().bindings).some(binding =>

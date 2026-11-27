@@ -28,11 +28,21 @@ const initialModeUnset = process.env.CORDISX_LOGICAL_NATIVE_UNSET_MODE === '1'
 const longSource = process.env.CORDISX_LOGICAL_NATIVE_LONG_SOURCE === '1'
 const personaMode = process.env.CORDISX_LOGICAL_NATIVE_PERSONA === '1'
 const crossOfficial = process.env.CORDISX_LOGICAL_NATIVE_CROSS_OFFICIAL === '1'
-const automatic = process.env.CORDISX_LOGICAL_NATIVE_AUTOMATIC === '1'
+const configuredAutomatic = process.env.CORDISX_LOGICAL_NATIVE_CONFIGURED_AUTO === '1'
+const automatic = process.env.CORDISX_LOGICAL_NATIVE_AUTOMATIC === '1' || configuredAutomatic
+const legacyExecutable = process.env.CORDISX_LOGICAL_NATIVE_LEGACY_EXECUTABLE
+const legacyNoModelSelection = process.env.CORDISX_LOGICAL_NATIVE_LEGACY_NO_MODEL_SELECTION === '1'
+const lostResumeReceipt = process.env.CORDISX_LOGICAL_NATIVE_LOST_RESUME_RECEIPT === '1'
+const lostForkReceipt = process.env.CORDISX_LOGICAL_NATIVE_LOST_FORK_RECEIPT === '1'
+const noChannelSettings = process.env.CORDISX_LOGICAL_NATIVE_NO_CHANNEL_SETTINGS === '1'
+const legacyGroup = process.env.CORDISX_LOGICAL_NATIVE_LEGACY_GROUP === '1'
+const groupMemberStart = process.env.CORDISX_LOGICAL_NATIVE_GROUP_MEMBER_START === '1'
+const nativeReview = process.env.CORDISX_LOGICAL_NATIVE_AUTO_REVIEW === '1'
 describe.skipIf(!executable)('isolated native Channel continuation', () => {
   it('moves a real owned native session and retrieves authorized synthetic history', async () => {
     if (
-      automatic && (!crossOfficial || !forkMode || realTarget)
+      automatic && (!(crossOfficial || configuredAutomatic) || !forkMode || realTarget)
+      || configuredAutomatic && crossOfficial
       || crossOfficial && (!forkMode || realTarget)
       || forkMode && (realTarget || initialModeUnset || checkpointMode || chainMode) || checkpointMode && realTarget
       || chainMode && (realTarget || initialModeUnset || checkpointMode || longSource)
@@ -58,6 +68,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       },
     })
     let modelCalls = 0, markerReturned = false, checkpointObserved = false, chainPromptContainedMarker = false
+    let legacyRecoveryStarted = false, groupHistoryRequested = false, otherHistoryLeaked = false
     let rejectedEncrypted = 0, retriedWithoutEncrypted = false, reverseSawHistory = false
     let personaObservedOnTarget = false
     const reports: string[] = []
@@ -71,7 +82,11 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       const bytes = Buffer.concat(chunks)
       const body = (request.headers['content-encoding'] === 'zstd' ? zstdDecompressSync(bytes) : bytes).toString()
       modelCalls++
-      if (automatic && modelCalls > 3 && !request.url?.startsWith('/official/') && body.includes('PAPERKITE')) {
+      if (legacyGroup && legacyRecoveryStarted && body.includes('SYNTHETIC_OTHER_SCOPE')) otherHistoryLeaked = true
+      if (
+        automatic && modelCalls > (configuredAutomatic ? 2 : 3) && !request.url?.startsWith('/official/')
+        && body.includes('PAPERKITE')
+      ) {
         reverseSawHistory = true
       }
       const parsedBody = JSON.parse(body) as { input?: Array<{ type?: string; encrypted_content?: string }> }
@@ -122,8 +137,11 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
             text: JSON.stringify(item.output).slice(0, 240),
           })),
       })
-      const requestPage = !forkMode && (modelCalls === toolCallNumber
-        || modelCalls > toolCallNumber && !body.includes('PAPERKITE') && !!nextCursor)
+      const requestPage = legacyGroup
+        ? legacyRecoveryStarted && !groupHistoryRequested
+        : !forkMode && (modelCalls === toolCallNumber
+          || modelCalls > toolCallNumber && !body.includes('PAPERKITE') && !!nextCursor)
+      if (legacyGroup && requestPage) groupHistoryRequested = true
       const item = requestPage
         ? {
           type: 'function_call',
@@ -191,9 +209,40 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       const provider = (id: string) =>
         '[model_providers.' + id + ']\nname="fixture"\nbase_url="http://127.0.0.1:'
         + address.port + '/v1"\nenv_key="FIXTURE_API_KEY"\nwire_api="responses"\n'
+      if (nativeReview) {
+        const metadata = {
+          display_name: 'Fixture',
+          description: 'Synthetic fixture',
+          input_modalities: ['text'],
+          supported_in_api: true,
+          visibility: 'list',
+          priority: 1,
+          shell_type: 'shell_command',
+          base_instructions: 'You are a helpful assistant.',
+          supported_reasoning_levels: [],
+          experimental_supported_tools: [],
+          supports_reasoning_summaries: false,
+          supports_reasoning_summary_parameter: false,
+          support_verbosity: false,
+          supports_parallel_tool_calls: false,
+          requires_sandboxed_review: false,
+          truncation_policy: { mode: 'tokens', limit: 10000 },
+          model_messages: { auto_review: { policy_template: 'Review: {{policy}}', policy: 'Allow read-only.' } },
+        }
+        await writeFile(
+          path.join(root, 'models.json'),
+          JSON.stringify({
+            models: [
+              { ...metadata, slug: 'fixture-model', auto_review_model_override: 'fixture-review' },
+              { ...metadata, slug: 'fixture-review' },
+            ],
+          }),
+        )
+      }
       await writeFile(
         path.join(root, 'config.toml'),
         'model_provider="source"\nmodel="fixture-model"\n'
+          + (nativeReview ? `approvals_reviewer="auto_review"\nmodel_catalog_json="${root}/models.json"\n` : '')
           + (crossOfficial ? `openai_base_url="http://127.0.0.1:${address.port}/official/v1"\n` : '')
           + provider('source') + provider('target'),
       )
@@ -232,7 +281,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           }],
         }),
       )
-      const launch = () =>
+      const launch = (nativeExecutable = executable!) =>
         startHeadlessService({
           configPath,
           homeDir: root,
@@ -240,7 +289,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           profileId: 'fixture',
           userHome: root,
           codexHome: root,
-          codexExecutable: executable!,
+          codexExecutable: nativeExecutable,
           cwd: root,
           generation: 'fixture',
           report: code => {
@@ -264,7 +313,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
             CORDISX_HEADLESS_EXTRA_MODELS: realTarget ? 'gpt-6.1-terra' : 'fixture-model',
           },
         })
-      service = await launch()
+      service = await launch(legacyExecutable ?? executable!)
       let consumer = service.channel!.consumer!
       if (personaMode) {
         await consumer.personas.profile('atlas', 'SYNTHETIC_ATLAS', 'Synthetic original persona', 0)
@@ -275,8 +324,14 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         enabled: true,
         autoCreate: true,
         autoReply: false,
+        ...(legacyGroup ? { groupReception: 'all' } : {}),
         rules: [
-          { id: 'dispatch', action: 'dispatch', effect: 'allow', userIds: ['ou_actor'] },
+          {
+            id: 'dispatch',
+            action: 'dispatch',
+            effect: 'allow',
+            userIds: legacyGroup ? ['ou_actor', 'ou_other'] : ['ou_actor'],
+          },
           { id: 'commands', action: 'command', effect: 'allow', userIds: ['ou_actor'] },
         ],
       }, 0)
@@ -301,19 +356,20 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           effort: 'low',
         },
       })
-      const emit = async (id: string, text: string) =>
+      const emit = async (id: string, text: string, sender = 'ou_actor') =>
         handlers.message!(
           await normalize({
-            sender: { sender_id: { open_id: 'ou_actor' }, sender_type: 'user', tenant_key: 'fixture' },
+            sender: { sender_id: { open_id: sender }, sender_type: 'user', tenant_key: 'fixture' },
             message: {
               message_id: id,
-              chat_id: 'oc_direct',
-              chat_type: 'p2p',
+              chat_id: legacyGroup ? 'oc_group' : 'oc_direct',
+              chat_type: legacyGroup ? 'group' : 'p2p',
               create_time: String(Date.now()),
               message_type: 'text',
-              content: JSON.stringify({ text }),
+              content: JSON.stringify({ text: legacyGroup ? '@_user_1 ' + text : text }),
+              ...(legacyGroup ? { mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bot' }] } : {}),
             },
-          } as never, { includeRaw: true }),
+          } as never, { includeRaw: true, ...(legacyGroup ? { botIdentity: { openId: 'ou_bot', name: 'Bot' } } : {}) }),
         )
       await emit('om_source', longSource ? 'Remember PAPERKITE ' + 'x'.repeat(10000) : 'Remember PAPERKITE')
       await vi.waitFor(async () => {
@@ -351,6 +407,161 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(Object.values(state.jobs).some((job: any) => job.sessionId === source && job.state === 'completed'))
           .toBe(true)
       }, { timeout: 30000 })
+      if (legacyExecutable) {
+        // An older native version had already confirmed the target while its
+        // rollout still retained the source provider. No business input is replayed.
+        const target = { providerId: 'target', model: 'fixture-model' }
+        const native = (consumer as any).extraNative()
+        if (nativeReview) {
+          const configuration = await native.continuationConfiguration(source)
+          expect(configuration.approvalsReviewer).toBe('auto_review')
+          expect(configuration.execution.approval).toBe('on-request')
+        }
+        if (legacyGroup) {
+          // A native input without a Channel origin must not enter a group projection.
+          await native.input.nativeRequest('turn/start', {
+            threadId: source,
+            input: [{ type: 'text', text: 'SYNTHETIC_OTHER_SCOPE', text_elements: [] }],
+          })
+          await vi.waitFor(async () => expect(await native.idle(source, true)).toBe(true), { timeout: 10000 })
+        }
+        await native.executionPreferences().recordModelSelection(source, target)
+        if (legacyNoModelSelection) {
+          // Existing pre-marker records retain an applied effective selection only.
+          await native.executionPreferences().recordModelSelection(source, null)
+          expect(native.executionPreferences().read('local', source)).toMatchObject({
+            application: 'applied',
+            effective: { modelProvider: target.providerId, model: target.model },
+          })
+          expect(native.executionPreferences().read('local', source)?.modelSelection).toBeUndefined()
+        }
+        if (!noChannelSettings) {
+          await (consumer as any).store.mutate((state: any) => {
+            state.taskSettings[source] = { revision: 1, application: 'applied', settings: target }
+          })
+        }
+        if (legacyGroup && groupMemberStart) {
+          await (consumer as any).store.mutate((state: any) => {
+            const origin = Object.values(state.inputs).map((row: any) => row.input.source.event)
+              .find((row: any) => row.actor?.userId === 'ou_actor')
+            const now = Date.now()
+            state.taskRequests.aaaaaaaa = {
+              id: 'aaaaaaaa',
+              token: 'a'.repeat(48),
+              source: origin,
+              threadId: source,
+              patch: target,
+              selection: target,
+              baseSelection: { providerId: 'source', model: 'fixture-model' },
+              createdAt: now - 1000,
+              expiresAt: now + 300000,
+              expectedRevision: 0,
+              state: 'applied',
+              approvedBy: origin,
+            }
+          })
+        }
+        await service.close()
+        service = await launch()
+        consumer = service.channel!.consumer!
+        legacyRecoveryStarted = true
+        const reloaded = (consumer as any).extraNative()
+        expect(await reloaded.providerRecovery.target(source)).toEqual(target)
+        expect(await reloaded.supportsCrossProviderFork(target)).toBe(true)
+        let uncertainEffects = 0
+        if (lostResumeReceipt || lostForkReceipt) {
+          const request = reloaded.providerRecovery.input.nativeRequest
+          reloaded.providerRecovery.input.nativeRequest = async (method: string, params: Record<string, unknown>) => {
+            if (
+              lostResumeReceipt && method === 'thread/resume' && params.modelProvider === 'source'
+              || lostForkReceipt && method === 'thread/fork'
+            ) {
+              uncertainEffects++
+              await request(method, params)
+              throw new Error('synthetic lost native receipt')
+            }
+            return await request(method, params)
+          }
+        }
+        await emit(
+          'om_legacy_followup',
+          'What codeword did I ask you to remember? Reply only with the codeword.',
+          legacyGroup && groupMemberStart ? 'ou_other' : 'ou_actor',
+        )
+        if (lostResumeReceipt || lostForkReceipt) {
+          await vi.waitFor(async () => {
+            await consumer.pump()
+            const state = JSON.parse(await readFile(statePath, 'utf8'))
+            expect(
+              Object.values(state.jobs).some((job: any) =>
+                job.code === 'CONFIRMED_PROVIDER_RECOVERY_UNCERTAIN' && job.state === 'reconciliation-required'
+              ),
+            ).toBe(true)
+          }, { timeout: 10000 })
+          await consumer.pump()
+          expect(uncertainEffects).toBe(1)
+          expect(consumer.bindings()[0]!.sessionId).toBe(source)
+          const callsBeforeRestart = modelCalls
+          await service.close()
+          service = await launch()
+          consumer = service.channel!.consumer!
+          await consumer.pump()
+          const reopened = JSON.parse(await readFile(statePath, 'utf8'))
+          expect(
+            Object.values(reopened.jobs).some((job: any) =>
+              job.code === 'CONFIRMED_PROVIDER_RECOVERY_UNCERTAIN' && job.state === 'reconciliation-required'
+            ),
+          ).toBe(true)
+          expect(modelCalls).toBe(callsBeforeRestart)
+          expect(consumer.bindings()[0]!.sessionId).toBe(source)
+          return
+        }
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const state = JSON.parse(await readFile(statePath, 'utf8'))
+          const binding = consumer.bindings()[0]!
+          expect(binding.sessionId).not.toBe(source)
+          expect(
+            Object.values(state.jobs).some((job: any) =>
+              job.sessionId === binding.sessionId && job.state === 'completed'
+            ),
+          ).toBe(true)
+        }, { timeout: 10000 })
+        expect(markerReturned).toBe(true)
+        if (legacyGroup) {
+          const state = JSON.parse(await readFile(statePath, 'utf8'))
+          const intents = Object.values(state.logicalContinuations.intents) as any[]
+          expect(
+            intents.some(intent =>
+              intent.groupProjection?.entries.some((entry: any) => entry.text.includes('PAPERKITE'))
+            ),
+          ).toBe(true)
+          expect(groupHistoryRequested).toBe(true)
+          expect(otherHistoryLeaked).toBe(false)
+        }
+        const destination = consumer.bindings()[0]!.sessionId
+        if (nativeReview) {
+          const destinationNative = (consumer as any).extraNative()
+          const configuration = await destinationNative.continuationConfiguration(destination)
+          expect(configuration.approvalsReviewer).toBe('auto_review')
+          expect(configuration.execution.approval).toBe('on-request')
+        }
+        await service.close()
+        service = await launch()
+        consumer = service.channel!.consumer!
+        await emit('om_after_restart', 'Continue the task.', legacyGroup ? 'ou_other' : 'ou_actor')
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const current = JSON.parse(await readFile(statePath, 'utf8'))
+          expect(consumer.bindings()[0]!.sessionId).toBe(destination)
+          expect(
+            Object.values(current.jobs).filter((row: any) => row.sessionId === destination && row.state === 'completed')
+              .length,
+          ).toBeGreaterThanOrEqual(2)
+        }, { timeout: 10000 })
+        if (legacyGroup) expect(otherHistoryLeaked).toBe(false)
+        return
+      }
       if (automatic) {
         // Exercise the same persisted session after the owned app-server has restarted.
         await service.close()
@@ -406,7 +617,9 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       await emit(
         'om_migrate',
         automatic
-          ? '/model --provider openai --model gpt-6.1-sol'
+          ? configuredAutomatic
+            ? '/model --provider target --model fixture-model'
+            : '/model --provider openai --model gpt-6.1-sol'
           : crossOfficial
           ? '/continue-provider fork openai gpt-6.1-sol --history=inherit --no-checkpoint'
           : forkMode
@@ -530,7 +743,12 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         const state = JSON.parse(await readFile(statePath, 'utf8'))
         expect(Object.values(state.logicalContinuations.relations)).toHaveLength(2)
         const reversed = finalTarget
-        await emit('om_third_switch', '/model --provider openai --model gpt-6.1-sol')
+        await emit(
+          'om_third_switch',
+          configuredAutomatic
+            ? '/model --provider target --model fixture-model'
+            : '/model --provider openai --model gpt-6.1-sol',
+        )
         await vi.waitFor(async () => {
           await consumer.pump()
           const current = JSON.parse(await readFile(statePath, 'utf8'))

@@ -3,12 +3,25 @@ import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChannelContinuationManager, ContinuationReservation } from './channel-continuation-manager.js'
 import type { ContinuationConfiguration } from './channel-continuation-config.js'
 import {
+  type ChannelConversationInput,
   type ChannelConversationJob,
   type ChannelConversationState,
   ChannelConversationStore,
 } from './channel-conversation-store.js'
 import { channelReplyDefaults } from './channel-reply-routing.js'
 import { channelLogicalHandoffForJob, reserveChannelLogicalHandoff } from './channel-logical-handoff.js'
+import { type ChannelConversationPolicy, channelWakePrefix } from './channel-conversation-policy.js'
+
+export function classifyChannelInput(record: ChannelConversationInput, policy: ChannelConversationPolicy) {
+  const event = record.input.source.event
+  const text = record.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
+  const prefix = channelWakePrefix(policy, event, text)
+  return {
+    received: event.kind === 'direct' || policy.groupReception === 'all' || record.mentionedBot,
+    addressed: event.kind === 'direct' || record.mentionedBot || prefix !== undefined,
+    command: /^\/([a-z-]+)(?:\s+(.*))?$/u.exec(prefix === undefined ? text : text.slice(prefix.length).trim()),
+  }
+}
 
 /** No native effect occurred, so release this job's checkpoint reservation. */
 export function failChannelLogicalPersona(state: ChannelConversationState, jobId: string) {

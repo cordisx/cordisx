@@ -6,28 +6,22 @@ export type { ChannelNativeReconciliationResult, ChannelNativeTurnResult } from 
 import { channelDispatchFence, channelModelPriorityProbes } from './channel-model-preflight.js'
 import { readChannelCompletion } from './channel-legacy-completion.js'
 import { channelPersonaTask } from './channel-memory-personas.js'
-import { type ChannelMemoryModelConnection, channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
+import { channelUserMemoryAnalyzer } from './channel-user-memory-model.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { createHash, randomBytes } from 'node:crypto'
 import { channelAttachmentTicket } from './channel-inbound-resources.js'
 import { channelPrincipalSource, signalChannelSource, waitForChannelSource } from './channel-source-principal.js'
 import { channelSteerObserved } from './channel-native-steer.js'
 import { channelNativeContextOperations } from './channel-native-context-operations.js'
-import type { AgentBridge } from './agent-bridge.js'
-import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
 import { channelContinuationHistory } from './channel-continuation-history.js'
 import { ChannelLogicalHandoffPermits } from './channel-logical-handoff-permits.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { ChannelReplyDefaults } from './channel-reply-routing.js'
-import {
-  channelCliPreparationInstructions,
-  channelCliSendInstructions,
-  type ChannelNativeCliContext,
-} from './channel-cli-context.js'
+import { channelCliPreparationInstructions, channelCliSendInstructions } from './channel-cli-context.js'
 import { channelNativeLivePrompt, channelNativeMessagePrompt } from './channel-native-message-prompt.js'
 import { ChannelChatOrganization, channelChatTitle } from './channel-chat-organization.js'
-import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import type { ChannelNativeSessionsInput } from './channel-native-sessions-input.js'
 import { configuredChannelApprovalOperation } from './channel-cli-approval.js'
 import type { ChannelMessageContext } from './channel-message-context.js'
 import {
@@ -41,7 +35,11 @@ import {
   type ContinuationPolicy,
   ContinuationUsage,
 } from './channel-continuation.js'
-import { type ContinuationConfiguration, continuationStartMatches } from './channel-continuation-config.js'
+import {
+  type ContinuationConfiguration,
+  continuationStartMatches,
+  workspaceSandboxOverrides,
+} from './channel-continuation-config.js'
 import {
   readChannelContinuationConfiguration,
   restoreChannelLogicalSource,
@@ -56,11 +54,13 @@ import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import { channelLogicalJointSourceRoot, channelLogicalSourceSnapshot } from './channel-logical-source-snapshot.js'
 import { logicalPresentation, placeLogicalDestination } from './logical-continuation-presentation.js'
 import { channelNativeCreationSelection } from './channel-native-creation-selection.js'
+import { ChannelNativeProviderRecovery } from './channel-native-provider-recovery.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 /** Uses the launch's authenticated native backend and existing provider/credential preparation. */
 export class ChannelNativeSessions {
+  readonly providerRecovery: ChannelNativeProviderRecovery
   readonly logicalHandoffPermits = new ChannelLogicalHandoffPermits()
   private personaRegistry?: import('./channel-memory-personas.js').ChannelMemoryPersonas
   private readonly personaEpochs = new Map<string, string>()
@@ -90,43 +90,8 @@ export class ChannelNativeSessions {
       preparationExpiresAt?: number
     }
   >()
-  constructor(
-    private readonly input: {
-      readonly bridge: () => AgentBridge | undefined
-      readonly nativeRequest: (
-        method: NativeBridgeMethod,
-        params: Readonly<Record<string, unknown>>,
-      ) => Promise<unknown>
-      readonly cwd: string
-      readonly nativeVersion?: string
-      readonly logicalHandoffWriteGuardReady?: () => boolean
-      readonly logicalMigrationLease?: (
-        source: string,
-      ) => ReturnType<typeof import('./channel-logical-native-lease.js').acquireChannelLogicalNativeLease>
-      readonly logicalOwnerIdentity?: () => Promise<string | undefined>
-      readonly providerId?: string
-      readonly model?: string
-      readonly fallbackProviderId?: string
-      readonly fallbackModel?: string
-      readonly crossProviderForkReady?: (target: { providerId: string; model: string }) => Promise<boolean>
-      readonly memoryConnect?: ChannelMemoryModelConnection | undefined
-      readonly cli?: ChannelNativeCliContext
-      readonly execution?: ChatExecutionPreferences
-      readonly configuration?: import('./codex-chat-configuration.js').CodexChatConfiguration
-      readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
-      readonly confirmedWorkMode?: (threadId: string) => 'default' | 'plan' | undefined
-      readonly models?: (operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) => Promise<unknown>
-      readonly sourceConfiguration?: (
-        threadId: string,
-      ) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>
-      readonly name?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
-      readonly sectionName?: () => string | undefined
-      readonly report?: (code: string) => void
-      readonly subscribeApprovals?: (listener: (event: Record<string, unknown>) => void) => () => void
-      readonly subscribeContinuationEvents?: (listener: (method: string, params: unknown) => void) => () => void
-      readonly respondApproval?: (input: Record<string, unknown>) => Promise<unknown>
-    },
-  ) {
+  constructor(private readonly input: ChannelNativeSessionsInput) {
+    this.providerRecovery = new ChannelNativeProviderRecovery(input)
     this.organization = new ChannelChatOrganization(input)
     input.subscribeContinuationEvents?.((method, params) => {
       this.continuationUsage.notification(method, params)
@@ -278,10 +243,18 @@ export class ChannelNativeSessions {
         return { ...result, confirmed: false }
       }
       if (!available(destination)) return { ...result, confirmed: false }
+      const observe = this.input.configuration?.captureObservation(destination)
+      const sandbox = evidence.sourceConfiguration.permissions
+        ? undefined
+        : workspaceSandboxOverrides(evidence.sourceConfiguration.sandbox, evidence.sourceConfiguration.cwd)
       const resumed = object(
         await native.nativeRequest(
           'thread/resume',
-          fence.allowOwned('thread/resume', destination, { threadId: destination, excludeTurns: true }),
+          fence.allowOwned('thread/resume', destination, {
+            threadId: destination,
+            excludeTurns: true,
+            ...(sandbox ? { cwd: evidence.sourceConfiguration.cwd, sandbox: 'workspace-write', config: sandbox } : {}),
+          }),
         ),
       )
       if (
@@ -290,6 +263,7 @@ export class ChannelNativeSessions {
       ) {
         return { ...result, confirmed: false }
       }
+      await observe?.(resumed)
       if (request.mode === 'fork') {
         if (
           await logicalHistoryContentVersion(native, request.source)
@@ -314,6 +288,14 @@ export class ChannelNativeSessions {
       // Persist it before binding so a later cold resume cannot fall back to the source.
       await execution.recordModelSelection(destination, request.target)
       if (!available(destination)) return { ...result, confirmed: false }
+      if (
+        this.input.configuration && !await this.input.configuration.inheritVerifiedProject(
+          request.source.sessionId,
+          destination,
+          evidence.sourceConfiguration,
+          () => available(destination),
+        )
+      ) return { ...result, confirmed: false }
       retained = true
       return { ...result, confirmed: true, releaseTarget }
     } catch {
