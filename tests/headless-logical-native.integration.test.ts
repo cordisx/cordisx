@@ -31,6 +31,7 @@ const crossOfficial = process.env.CORDISX_LOGICAL_NATIVE_CROSS_OFFICIAL === '1'
 const configuredAutomatic = process.env.CORDISX_LOGICAL_NATIVE_CONFIGURED_AUTO === '1'
 const automatic = process.env.CORDISX_LOGICAL_NATIVE_AUTOMATIC === '1' || configuredAutomatic
 const legacyExecutable = process.env.CORDISX_LOGICAL_NATIVE_LEGACY_EXECUTABLE
+const legacyNoModelSelection = process.env.CORDISX_LOGICAL_NATIVE_LEGACY_NO_MODEL_SELECTION === '1'
 const lostResumeReceipt = process.env.CORDISX_LOGICAL_NATIVE_LOST_RESUME_RECEIPT === '1'
 const lostForkReceipt = process.env.CORDISX_LOGICAL_NATIVE_LOST_FORK_RECEIPT === '1'
 const noChannelSettings = process.env.CORDISX_LOGICAL_NATIVE_NO_CHANNEL_SETTINGS === '1'
@@ -425,6 +426,15 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           await vi.waitFor(async () => expect(await native.idle(source, true)).toBe(true), { timeout: 10000 })
         }
         await native.executionPreferences().recordModelSelection(source, target)
+        if (legacyNoModelSelection) {
+          // Existing pre-marker records retain an applied effective selection only.
+          await native.executionPreferences().recordModelSelection(source, null)
+          expect(native.executionPreferences().read('local', source)).toMatchObject({
+            application: 'applied',
+            effective: { modelProvider: target.providerId, model: target.model },
+          })
+          expect(native.executionPreferences().read('local', source)?.modelSelection).toBeUndefined()
+        }
         if (!noChannelSettings) {
           await (consumer as any).store.mutate((state: any) => {
             state.taskSettings[source] = { revision: 1, application: 'applied', settings: target }
