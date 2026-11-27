@@ -43,6 +43,7 @@ import {
   channelContinuationArguments,
   channelDispatchHandoff,
   claimChannelDispatch,
+  classifyChannelInput,
 } from './channel-conversation-dispatch.js'
 import { ensureChannelLogicalPersona } from './channel-logical-persona.js'
 import {
@@ -80,7 +81,6 @@ import {
   channelPolicyAllows,
   channelRecord,
   channelText,
-  channelWakePrefix,
 } from './channel-conversation-policy.js'
 import type * as Conversation from './channel-conversation-store.js'
 import { ChannelConversationStore } from './channel-conversation-store.js'
@@ -500,16 +500,12 @@ export class ChannelConversationConsumer {
   private async route(record: Conversation.ChannelConversationInput): Promise<void> {
     if (this.lifetime.signal.aborted) return
     const state = this.store.snapshot(), event = record.input.source.event, policy = state.policy
-    const text = record.input.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim()
-    const prefix = channelWakePrefix(policy, event, text)
-    const received = event.kind === 'direct' || policy.groupReception === 'all' || record.mentionedBot
+    const { received, addressed, command } = classifyChannelInput(record, policy)
     if (received) {
       await this.store.mutate(state => {
         state.inputs[record.recordId]!.accepted = true
       })
     }
-    const addressed = event.kind === 'direct' || record.mentionedBot || prefix !== undefined
-    const command = /^\/([a-z-]+)(?:\s+(.*))?$/u.exec(prefix === undefined ? text : text.slice(prefix.length).trim())
     if (
       received && addressed && policy.enabled && command
     ) {
@@ -805,6 +801,7 @@ export class ChannelConversationConsumer {
       if (
         job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')
       ) return
+      if (await this.taskSettings.recover(job, event)) return
       if (
         this.input.logicalRuntime && this.store.hasCommitBarrier() && await attemptChannelGroupPriority({
           store: this.store,
@@ -990,6 +987,7 @@ export class ChannelConversationConsumer {
     this.sessionCommands.dispose()
     this.approvals.dispose()
     this.continuation.dispose()
+    await this.taskSettings.close()
     this.logicalOwner.desktopChannelGrants.clear()
     this.logicalOwner.idlePriorityOffers.clear()
     await this.store.close()

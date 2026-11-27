@@ -61,6 +61,9 @@ const f = vi.hoisted(() => ({
   persistedProvider: undefined as string | undefined,
   accountReads: 0,
   recoveryAccount: undefined as unknown,
+  crossProviderForkReady: undefined as
+    | undefined
+    | ((target: { providerId: string; model: string }) => Promise<boolean>),
 }))
 vi.mock('../packages/cli/src/launcher/model-service-projection.js', async importOriginal => ({
   ...await importOriginal<typeof import('../packages/cli/src/launcher/model-service-projection.js')>(),
@@ -188,6 +191,9 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
 }))
 vi.mock('../packages/cli/src/launcher/channel-native-sessions.js', () => ({
   ChannelNativeSessions: class {
+    constructor(input: { crossProviderForkReady?: typeof f.crossProviderForkReady }) {
+      f.crossProviderForkReady = input.crossProviderForkReady
+    }
     isPreparing() {
       return false
     }
@@ -278,6 +284,7 @@ describe('headless service lifecycle', () => {
     f.persistedProvider = undefined
     f.accountReads = 0
     f.recoveryAccount = undefined
+    f.crossProviderForkReady = undefined
   })
   it('passes profile review routing to the native backend before ingress and closes its snapshot', async () => {
     f.reviewSettings = { providerId: 'gateway' }
@@ -289,6 +296,45 @@ describe('headless service lifecycle', () => {
     expect(f.events.slice(0, 2)).toEqual(['review-bound:gateway', 'backend-start'])
     await service.close()
     expect(f.events).toContain('review-close')
+  })
+  it('permits configured Responses fork recovery without an OpenAI account', async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'headless-configured-fork-'))
+    const executable = path.join(codexHome, 'codex')
+    await writeFile(executable, '#!/bin/sh\nprintf "codex-cli 0.172.0\\n"\n', { mode: 0o755 })
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '[model_providers.fixture]',
+        'base_url="http://127.0.0.1:12345/v1"',
+        'env_key="FIXTURE_KEY"',
+        'wire_api="responses"',
+      ].join('\n'),
+    )
+    f.providers = [{
+      id: 'fixture',
+      kind: 'model-service',
+      displayName: 'Fixture',
+      baseUrl: 'http://127.0.0.1:12345/v1',
+      apiKeyEnv: 'FIXTURE_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['model'] },
+    }]
+    let service: Awaited<ReturnType<typeof startHeadlessService>> | undefined
+    try {
+      service = await startHeadlessService({
+        ...input,
+        codexHome,
+        codexExecutable: executable,
+        environment: { FIXTURE_KEY: 'synthetic' },
+      })
+      expect(f.crossProviderForkReady).toBeDefined()
+      expect(await f.crossProviderForkReady!({ providerId: 'fixture', model: 'model' })).toBe(true)
+      expect(await f.crossProviderForkReady!({ providerId: 'openai', model: 'model' })).toBe(false)
+      expect(f.accountReads).toBe(0)
+    } finally {
+      await service?.close()
+      await rm(codexHome, { recursive: true, force: true })
+    }
   })
   it('uses the shared recovery transport for a persisted headless Responses session', async () => {
     const codexHome = await mkdtemp(path.join(os.tmpdir(), 'headless-recovery-'))

@@ -117,6 +117,7 @@ export async function reconcileChannelJob(
   }
   if (
     job.code === 'CONTINUATION_EFFECT_UNCERTAIN' || job.code === 'CONTINUATION_BUSINESS_TURN_PENDING'
+    || job.code === 'CONFIRMED_PROVIDER_RECOVERY_UNCERTAIN'
     || job.sessionId && store.snapshot().continuations[job.sessionId]?.intent?.state === 'unknown'
   ) return
   if (job.turnId && job.sessionId) {

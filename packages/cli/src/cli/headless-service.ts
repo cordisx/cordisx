@@ -24,6 +24,7 @@ import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
 import { headlessKnownNewThreadDefault } from '../launcher/headless-work-mode.js'
 import { headlessModelSelection } from '../launcher/headless-model-selection.js'
+import { headlessResumeSelection } from '../launcher/headless-resume-selection.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
 import { channelMemoryServiceConnection } from '../launcher/channel-user-memory-connection.js'
@@ -235,9 +236,10 @@ export async function startHeadlessService(input: {
       cleanup.push(reviewCatalog.close)
       authority.execution?.bindReviewProvider(reviewCatalog.providerId, reviewCatalog.modelIds)
     }
-    // Keep the Channel's configured default while allowing the native owner to resolve its OpenAI account.
-    const forceNativeOpenAiForRecovery = nativeOpenAiRecovery && version === 'codex-cli 0.172.0'
-      && !catalog && !reviewCatalog
+    // Configured Responses routes can recover independently of a native OpenAI account.
+    // When native recovery is opted in, preserve the Channel default while resolving that account.
+    const configuredRecoveryAvailable = version === 'codex-cli 0.172.0' && !catalog && !reviewCatalog
+    const forceNativeOpenAiForRecovery = nativeOpenAiRecovery && configuredRecoveryAvailable
     const nativeRecoveryReady = async () => {
       if (!forceNativeOpenAiForRecovery || !backend) return false
       try {
@@ -249,7 +251,7 @@ export async function startHeadlessService(input: {
     }
     const crossProviderRecoveryReady = async (target: { providerId: string; model: string }) => {
       if (target.providerId === 'openai') return nativeRecoveryReady()
-      if (!forceNativeOpenAiForRecovery) return false
+      if (!configuredRecoveryAvailable) return false
       try {
         const overrides = await responsesRecovery.prepareConfigured(target.providerId)
         const route = overrides[`model_providers.${target.providerId}`]
@@ -373,9 +375,15 @@ export async function startHeadlessService(input: {
           fallbackModel: input.environment.CORDISX_HEADLESS_MODEL_ID,
         }
         : {}),
-      ...(forceNativeOpenAiForRecovery
+      ...(configuredRecoveryAvailable
         ? {
           crossProviderForkReady: crossProviderRecoveryReady,
+          confirmedResumeTarget: (threadId: string) =>
+            headlessResumeSelection({
+              profileDirectory: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId),
+              threadId,
+              execution: authority.execution?.read('local', threadId),
+            }),
         }
         : {}),
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
