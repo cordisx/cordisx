@@ -24,6 +24,7 @@ export async function recoverConfirmedChannelProvider(input: {
   access: () => ChannelConversationAccess | undefined
   event: ChannelEventRef
   job: ChannelConversationJob
+  report?: (code: string) => void
 }): Promise<boolean> {
   const { store, native, fence, claims, event, job, appId, profileId } = input
   const source = job.sessionId
@@ -46,8 +47,14 @@ export async function recoverConfirmedChannelProvider(input: {
   const release = fence.beginMigration(source)
   if (!release) return true
   claims.add(source)
-  let held = true
-  const unknown = async () => {
+  let held = true, phase = 'TARGET_CHECK'
+  const diagnostic = (code: string) => {
+    try {
+      input.report?.(`CHANNEL_PROVIDER_RECOVERY_${code}`)
+    } catch { /* Diagnostics must not affect task handling. */ }
+  }
+  const unknown = async (reason: string) => {
+    diagnostic(reason)
     await store.mutate(state => {
       const current = state.jobs[job.id]
       if (current?.state === 'queued' && current.sessionId === source) {
@@ -59,19 +66,23 @@ export async function recoverConfirmedChannelProvider(input: {
   }
   try {
     if (!isDeepStrictEqual(await native.providerRecovery.target(source), target)) return true
+    phase = 'TARGET_PROBE'
     const probe = await native.providerRecovery.probe(source, target, fence)
     if (probe.state === 'resumed') {
+      phase = 'TARGET_READBACK'
       if (!isDeepStrictEqual(await native.providerRecovery.target(source), target)) {
-        await unknown()
+        await unknown('TARGET_CHANGED')
         return true
       }
       return false
     }
     if (probe.state !== 'mismatch') {
-      await unknown()
+      await unknown('TARGET_PROBE_UNCONFIRMED')
       return true
     }
+    phase = 'TARGET_RECHECK'
     if (!isDeepStrictEqual(await native.providerRecovery.target(source), target)) return true
+    phase = 'SAVE_TARGET'
     const preserved = await store.mutate(state => {
       const current = state.jobs[job.id], setting = state.taskSettings[source]
       if (
@@ -89,13 +100,13 @@ export async function recoverConfirmedChannelProvider(input: {
     const savedSetting = structuredClone(store.snapshot().taskSettings[source]!)
     const execution = native.executionPreferences()
     if (!execution) {
-      await unknown()
+      await unknown('EXECUTION_UNAVAILABLE')
       return true
     }
     await execution.settled()
     const beforeRestore = execution.read('local', source)
     if (!execution.observationConfirmed(source)) {
-      await unknown()
+      await unknown('OBSERVATION_PENDING')
       return true
     }
     if (beforeRestore?.modelSelection === undefined) {
@@ -107,7 +118,7 @@ export async function recoverConfirmedChannelProvider(input: {
         || beforeRestore.effective?.modelProvider !== target.providerId
         || beforeRestore.effective?.model !== target.model
       ) {
-        await unknown()
+        await unknown('LEGACY_SELECTION_UNCONFIRMED')
         return true
       }
       await execution.recordModelSelection(source, target, { value: undefined, record: beforeRestore })
@@ -116,12 +127,13 @@ export async function recoverConfirmedChannelProvider(input: {
       || beforeRestore.modelSelection.providerId !== target.providerId
       || beforeRestore.modelSelection.model !== target.model
     ) {
-      await unknown()
+      await unknown('SELECTION_CHANGED')
       return true
     }
+    phase = 'SOURCE_RESUME'
     const original = await native.providerRecovery.restore(source, probe.sourceProvider, fence)
     if (!original || !await native.idle(source, true)) {
-      await unknown()
+      await unknown('SOURCE_RESUME_UNCONFIRMED')
       return true
     }
     await execution.settled()
@@ -133,21 +145,22 @@ export async function recoverConfirmedChannelProvider(input: {
       || !isDeepStrictEqual({ providerId: previous.providerId, model: previous.model }, target)
         && !isDeepStrictEqual({ providerId: previous.providerId, model: previous.model }, original)
     ) {
-      await unknown()
+      await unknown('SOURCE_EXECUTION_CHANGED')
       return true
     }
     if (previous.providerId !== original.providerId || previous.model !== original.model) {
       await execution.recordModelSelection(source, original, { value: previous })
     }
+    phase = 'SOURCE_SELECTION'
     const selection = await native.taskSelection(source)
     if (selection.providerId !== original.providerId || selection.model !== original.model) {
-      await unknown()
+      await unknown('SOURCE_SELECTION_MISMATCH')
       return true
     }
     const before = store.snapshot(), sourceRef = { hostId: 'local' as const, appId, profileId, sessionId: source }
     const logicalId = logicalConversationIdentity(before.logicalContinuations, sourceRef)
     if (!logicalId) {
-      await unknown()
+      await unknown('LOGICAL_ID_UNAVAILABLE')
       return true
     }
     const admin = event.kind === 'group'
@@ -172,7 +185,7 @@ export async function recoverConfirmedChannelProvider(input: {
         : undefined
     const projection = capture()
     if (event.kind === 'group' && (!admin || !projection)) {
-      await unknown()
+      await unknown('GROUP_HISTORY_UNAVAILABLE')
       return true
     }
     const current = (state: ReturnType<ChannelConversationStore['snapshot']>) =>
@@ -187,7 +200,7 @@ export async function recoverConfirmedChannelProvider(input: {
         ? isDeepStrictEqual(confirmedGroupRecoveryScope(state, event, profileId, source, job, target, selection), admin)
         : channelLogicalBindingAdmitted(state, event, profileId, source))
     if (!current(before)) {
-      await unknown()
+      await unknown('SOURCE_STATE_CHANGED')
       return true
     }
     // Release and reacquire synchronously inside start; no other JavaScript task
@@ -195,6 +208,7 @@ export async function recoverConfirmedChannelProvider(input: {
     claims.delete(source)
     release()
     held = false
+    phase = 'CONTINUATION'
     const result = await startChannelLogicalContinuation({
       ...input,
       request: {
@@ -216,6 +230,7 @@ export async function recoverConfirmedChannelProvider(input: {
       automatic: {
         selection,
         admitted: current,
+        diagnostic,
         destinationConfiguration: configuration => {
           const effort = savedSetting.settings.effort === undefined
             ? undefined
@@ -260,10 +275,21 @@ export async function recoverConfirmedChannelProvider(input: {
         },
       },
     })
-    if (result.state !== 'applied' || 'navigationReady' in result && result.navigationReady === false) await unknown()
+    if (result.state !== 'applied' || 'navigationReady' in result && result.navigationReady === false) {
+      const reason = result.state === 'rejected' && [
+          'SOURCE_BUSY',
+          'SOURCE_FENCE_UNAVAILABLE',
+          'PREFLIGHT_UNAVAILABLE',
+          'PREFLIGHT_CHANGED',
+          'SOURCE_CHANGED_OR_BUSY',
+        ].includes(result.code)
+        ? result.code
+        : 'CONTINUATION_UNCONFIRMED'
+      await unknown(reason)
+    }
     return true
   } catch {
-    await unknown().catch(() => {})
+    await unknown(`${phase}_ERROR`).catch(() => {})
     return true
   } finally {
     if (held) release()

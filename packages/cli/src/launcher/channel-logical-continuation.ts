@@ -40,6 +40,7 @@ export async function startChannelLogicalContinuation(input: {
     selection: ChannelTaskPatch
     admitted(state: ChannelConversationState): boolean
     consume(state: ChannelConversationState): boolean
+    diagnostic?(code: string): void
     taskClaim?: ChannelTaskContinuationClaim
     destinationConfiguration?(source: ContinuationConfiguration): ContinuationConfiguration
     confirmDestination?(sessionId: string): Promise<boolean>
@@ -99,6 +100,23 @@ export async function startChannelLogicalContinuation(input: {
     && (!!input.automatic?.group
       || !channelTaskFields(target).some(command => channelCommandDenied(state.policy, event, command))
         && channelTaskChangeAllowed(state.taskConfig, state.policy, event, target, { ...observedSelection, ...target }))
+  const diagnose = (code: string) => {
+    try {
+      input.automatic?.diagnostic?.(code)
+    } catch { /* Diagnostics must not change the continuation decision. */ }
+  }
+  const unavailable = (code: string) => {
+    diagnose(code)
+    return undefined
+  }
+  const inspect = async <T>(code: string, action: () => Promise<T>): Promise<T> => {
+    try {
+      return await action()
+    } catch (error) {
+      diagnose(code)
+      throw error
+    }
+  }
   const control = new LogicalContinuationControl(channelLogicalTransactionStore(store), {
     state: root => root.logicalContinuations!,
     admitted: (root, caller) => isDeepStrictEqual(caller, actor) && admitted(root),
@@ -116,63 +134,90 @@ export async function startChannelLogicalContinuation(input: {
       )
       && (!input.automatic || input.automatic.consume(root)),
     preflight: async caller => {
-      if (!isDeepStrictEqual(caller, actor) || !scopeAdmitted(store.snapshot())) return undefined
-      if (input.automatic && !await native.idle(source, true)) return undefined
-      const catalog = object(await native.modelOperation('list', {})).providers
+      if (!isDeepStrictEqual(caller, actor) || !scopeAdmitted(store.snapshot())) return unavailable('PREFLIGHT_SCOPE')
+      if (input.automatic && !await inspect('PREFLIGHT_IDLE_ERROR', () => native.idle(source, true))) {
+        return unavailable('PREFLIGHT_SOURCE_NOT_IDLE')
+      }
+      const catalog = object(
+        await inspect('PREFLIGHT_CATALOG_ERROR', () => native.modelOperation('list', {})),
+      ).providers
       if (
         !Array.isArray(catalog)
         || !catalog.map(object).some(provider =>
           provider.providerId === request.target.providerId && Array.isArray(provider.models)
           && provider.models.map(object).some(model => model.id === request.target.model)
         )
-      ) return undefined
-      const selection = await native.taskSelection(source)
-      if (input.automatic && !isDeepStrictEqual(input.automatic.selection, selection)) return undefined
-      if (observedSelection && !isDeepStrictEqual(observedSelection, selection)) return undefined
+      ) return unavailable('PREFLIGHT_TARGET_UNAVAILABLE')
+      const selection = await inspect('PREFLIGHT_SELECTION_ERROR', () => native.taskSelection(source))
+      if (input.automatic && !isDeepStrictEqual(input.automatic.selection, selection)) {
+        return unavailable('PREFLIGHT_SELECTION_CHANGED')
+      }
+      if (observedSelection && !isDeepStrictEqual(observedSelection, selection)) {
+        return unavailable('PREFLIGHT_SELECTION_CHANGED')
+      }
       observedSelection ??= selection
       if (request.mode === 'linked' && request.handoffConsent === 'checkpoint') {
         const handoff = channelLogicalHandoff(store.snapshot(), request)
-        if (!handoff || handoffDigest && handoffDigest !== handoff.digest) return undefined
+        if (!handoff || handoffDigest && handoffDigest !== handoff.digest) return unavailable('PREFLIGHT_HANDOFF')
         handoffDigest ??= handoff.digest
       }
-      if (!admitted(store.snapshot())) return undefined
-      const sourceConfiguration = await native.continuationConfiguration(source)
-      if (
-        !sourceConfiguration || selection.providerId !== sourceConfiguration.providerId
-        || selection.model !== sourceConfiguration.model
-        || selection.effort !== undefined && selection.effort !== sourceConfiguration.execution.effort
-        || input.automatic && selection.fast !== (sourceConfiguration.serviceTier === 'priority')
-      ) return undefined
+      const current = store.snapshot()
+      if (!admitted(current)) {
+        if (
+          !input.automatic?.group
+          && !channelTaskFields(target).some(command => channelCommandDenied(current.policy, event, command))
+          && !channelTaskChangeAllowed(current.taskConfig, current.policy, event, target, { ...selection, ...target })
+        ) return unavailable('PREFLIGHT_TASK_CHANGE_NOT_ALLOWED')
+        return unavailable('PREFLIGHT_AUTHORITY')
+      }
+      const sourceConfiguration = await inspect(
+        'PREFLIGHT_CONFIG_ERROR',
+        () => native.continuationConfiguration(source),
+      )
+      if (!sourceConfiguration) {
+        return unavailable('PREFLIGHT_CONFIG_UNAVAILABLE')
+      }
+      if (selection.providerId !== sourceConfiguration.providerId) return unavailable('PREFLIGHT_PROVIDER_MISMATCH')
+      if (selection.model !== sourceConfiguration.model) return unavailable('PREFLIGHT_MODEL_MISMATCH')
+      if (selection.effort !== undefined && selection.effort !== sourceConfiguration.execution.effort) {
+        return unavailable('PREFLIGHT_EFFORT_MISMATCH')
+      }
+      if (input.automatic && selection.fast !== (sourceConfiguration.serviceTier === 'priority')) {
+        return unavailable('PREFLIGHT_FAST_MISMATCH')
+      }
       if (input.automatic?.destinationConfiguration) {
         try {
           input.automatic.destinationConfiguration(sourceConfiguration)
         } catch {
-          return undefined
+          return unavailable('PREFLIGHT_DESTINATION_CONFIG')
         }
       }
       if (
         request.mode === 'fork' && (request.target.providerId !== sourceConfiguration.providerId
           || request.target.model !== sourceConfiguration.model)
         && await native.supportsCrossProviderFork?.(request.target) !== true
-      ) return undefined
+      ) return unavailable('PREFLIGHT_FORK_UNAVAILABLE')
       if (
         request.mode === 'fork'
         && Object.values(store.snapshot().logicalContinuations?.relations ?? {}).some(parent =>
           parent.mode === 'linked' && isDeepStrictEqual(parent.destination, request.source)
         )
-      ) return undefined
-      const sourceHistoryVersion = sourceConfiguration && (input.automatic?.group
-        ? await input.automatic.group.sourceVersion()
-        : await native.logicalSourceVersion(request.source))
-      return sourceConfiguration && sourceHistoryVersion
-        ? {
-          sourceConfiguration,
-          sourceHistoryVersion,
-          ...(handoffDigest
-            ? { handoff: 'checkpoint' as const, handoffDigest }
-            : { handoff: 'none' as const }),
-        }
-        : undefined
+      ) return unavailable('PREFLIGHT_LINKED_ANCESTOR')
+      const sourceHistoryVersion = await inspect(
+        'PREFLIGHT_HISTORY_ERROR',
+        () =>
+          input.automatic?.group ? input.automatic.group.sourceVersion() : native.logicalSourceVersion(request.source),
+      )
+      if (!sourceHistoryVersion) {
+        return unavailable('PREFLIGHT_HISTORY_UNAVAILABLE')
+      }
+      return {
+        sourceConfiguration,
+        sourceHistoryVersion,
+        ...(handoffDigest
+          ? { handoff: 'checkpoint' as const, handoffDigest }
+          : { handoff: 'none' as const }),
+      }
     },
     create: async (current, evidence) => {
       const destinationEvidence = input.automatic?.destinationConfiguration
