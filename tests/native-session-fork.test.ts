@@ -151,3 +151,35 @@ it('honors explicit config service tier without inventing precedence for unknown
     expect(other.nativeCall).not.toHaveBeenCalled()
   }
 })
+
+it('accepts an explicit default-tier fork readback but rejects priority or unknown readback', async () => {
+  for (
+    const [requested, observed, accepted] of [
+      [null, 'default', true],
+      [null, null, true],
+      [null, 'priority', false],
+      [null, undefined, false],
+      [null, 'unknown', false],
+      ['priority', 'priority', true],
+      ['priority', 'default', false],
+    ] as const
+  ) {
+    const f = fixture()
+    f.nativeCall.mockImplementation(async (_method: string, params: any) => ({
+      thread: { id: 'child' },
+      modelProvider: params.modelProvider,
+      model: params.model,
+      reasoningEffort: params.config.model_reasoning_effort,
+      serviceTier: observed,
+    }))
+    const result = await inheritNativeFork({ ...request, params: { ...request.params, serviceTier: requested } }, f)
+    expect(result).toMatchObject(
+      accepted ? { handled: true, result: { thread: { id: 'child' } } } : {
+        handled: true,
+        error: { code: -32000 },
+      },
+    )
+    expect(f.nativeCall).toHaveBeenCalledTimes(1)
+    expect(f.calls.at(-1)?.value).toMatchObject({ succeeded: accepted })
+  }
+})
