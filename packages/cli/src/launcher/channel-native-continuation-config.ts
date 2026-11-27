@@ -11,6 +11,10 @@ type NativeInput = {
   readonly execution?: ChatExecutionPreferences
   readonly sourceConfiguration?: (threadId: string) => Promise<NativeSourceConfiguration | undefined>
   readonly confirmedWorkMode?: (threadId: string) => 'default' | 'plan' | undefined
+  readonly configuration?: Pick<
+    import('./codex-chat-configuration.js').CodexChatConfiguration,
+    'hasHeadlessProject' | 'verifiedProjectSandbox'
+  >
 }
 type Sessions = {
   idle(threadId: string, requireObservedIdle?: boolean): Promise<boolean>
@@ -33,7 +37,18 @@ export async function readChannelContinuationConfiguration(
   if (!record || record.application !== 'applied' || !input.execution?.observationConfirmed(threadId)) return undefined
   const confirmedMode = input.confirmedWorkMode?.(threadId)
   if (input.confirmedWorkMode && confirmedMode === undefined) return undefined
-  return continuationConfiguration(record.effective, live, confirmedMode)
+  const ordinary = continuationConfiguration(record.effective, live, confirmedMode)
+  // Headless project preparation currently clears named native profiles. Never
+  // create a continuation whose later project resume could discard one.
+  if (ordinary?.permissions && input.configuration?.hasHeadlessProject(threadId)) return undefined
+  if (ordinary || !record.effective || !input.configuration) return ordinary
+  if (!await input.configuration.verifiedProjectSandbox(threadId, record.effective)) return undefined
+  await input.execution.settled()
+  if (
+    !input.execution.observationConfirmed(threadId)
+    || !isDeepStrictEqual(input.execution.read('local', threadId), record)
+  ) return undefined
+  return continuationConfiguration(record.effective, live, confirmedMode, true)
 }
 
 /** Reload only the same idle source and verify its provider and work mode. */

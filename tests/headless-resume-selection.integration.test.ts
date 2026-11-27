@@ -137,7 +137,14 @@ it('reads the applied project after restoring the original provider without a se
     report: () => {},
   })
   const execution = owner.authority.execution!
-  const sandbox = { type: 'workspaceWrite', writableRoots: [root], networkAccess: false }
+  const mailbox = path.join(root, 'mailbox')
+  const sandbox = {
+    type: 'workspaceWrite',
+    writableRoots: [mailbox],
+    networkAccess: false,
+    excludeTmpdirEnvVar: true,
+    excludeSlashTmp: true,
+  }
   const settings = {
     modelProvider: original.providerId,
     model: original.model,
@@ -148,6 +155,7 @@ it('reads the applied project after restoring the original provider without a se
     activePermissionProfile: null,
     serviceTier: null,
     reasoningEffort: 'medium',
+    collaborationMode: { mode: 'default' },
   }
   await execution.recordModelSelection('thread', target)
   await execution.observe('thread', { ...settings, modelProvider: target.providerId, model: target.model })
@@ -182,6 +190,7 @@ it('reads the applied project after restoring the original provider without a se
     file: path.join(profile, 'codex-chat-configuration.json'),
     request: request as never,
     headlessProjects: { project: async () => project } as never,
+    sandboxAuxiliaryRoot: mailbox,
   })
   const sessions = new ChannelNativeSessions({
     bridge: () => undefined,
@@ -201,7 +210,20 @@ it('reads the applied project after restoring the original provider without a se
       fast: false,
     })
     expect(execution.read('local', 'thread')?.modelSelection).toEqual({ status: 'confirmed', ...original })
+    expect(execution.read('local', 'thread')?.submittedSettings).toEqual({})
+    expect((await sessions.continuationConfiguration('thread'))?.sandbox).toEqual(sandbox)
     expect(requests.filter(method => method === 'thread/resume')).toHaveLength(1)
+    expect(raw).toHaveBeenCalledWith(
+      'thread/resume',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          'sandbox_workspace_write.writable_roots': [mailbox],
+          'sandbox_workspace_write.network_access': false,
+          'sandbox_workspace_write.exclude_tmpdir_env_var': true,
+          'sandbox_workspace_write.exclude_slash_tmp': true,
+        }),
+      }),
+    )
   } finally {
     release()
     await configuration.close()

@@ -1,5 +1,5 @@
 import { nativeExecutionStart } from '../chat-execution-settings.js'
-import { continuationStartMatches } from './channel-continuation-config.js'
+import { continuationStartMatches, workspaceSandboxOverrides } from './channel-continuation-config.js'
 import type { LogicalContinuationEvidence, LogicalContinuationRequest } from './logical-continuation-control.js'
 import { LOGICAL_CONTINUATION_HISTORY_TOOL } from './logical-continuation-tool.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
@@ -27,6 +27,10 @@ export async function createLogicalNativeDestination(
   const config = evidence.sourceConfiguration
   const settings = nativeExecutionStart(config.execution)
   if (config.permissions) delete settings.sandbox
+  if (!config.permissions) {
+    const sandbox = workspaceSandboxOverrides(config.sandbox, config.cwd)
+    if (sandbox) settings.config = { ...object(settings.config), ...sandbox }
+  }
   const params = {
     ...settings,
     cwd: config.cwd,

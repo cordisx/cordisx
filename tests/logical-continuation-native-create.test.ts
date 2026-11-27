@@ -203,6 +203,62 @@ describe('native logical destination creation', () => {
       .toMatchObject({ state: 'rejected' })
     expect(native.nativeRequest).not.toHaveBeenCalled()
   })
+  it('passes the exact verified project sandbox to native fork', async () => {
+    const sandbox = {
+      type: 'workspaceWrite',
+      writableRoots: ['/mailbox'],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
+    }
+    const sourceConfiguration = {
+      ...evidence.sourceConfiguration,
+      sandbox,
+      execution: {
+        ...evidence.sourceConfiguration.execution,
+        execution: 'workspace-write' as const,
+        networkAccess: false,
+      },
+    }
+    const native = {
+      nativeRequest: vi.fn(async () => ({
+        thread: { id: 'fork', forkedFromId: 'source', ephemeral: false, status: { type: 'idle' } },
+        modelProvider: 'old',
+        model: 'old',
+        cwd: '/workspace',
+        serviceTier: 'default',
+        approvalsReviewer: 'user',
+        approvalPolicy: 'on-request',
+        reasoningEffort: 'low',
+        sandbox,
+        activePermissionProfile: null,
+      })),
+    }
+    const fork: LogicalContinuationRequest = {
+      contract: request.contract,
+      operationId: request.operationId,
+      logicalConversationId: request.logicalConversationId,
+      source: request.source,
+      expectedRevision: request.expectedRevision,
+      target: { providerId: 'old', model: 'old' },
+      mode: 'fork',
+      historyConsent: 'inherit',
+    }
+    expect(
+      await createLogicalNativeDestination(native, fork, { ...evidence, sourceConfiguration }, (_id, params) => params),
+    ).toMatchObject({ state: 'created', confirmed: true })
+    expect(native.nativeRequest).toHaveBeenCalledWith(
+      'thread/fork',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          'sandbox_workspace_write.writable_roots': ['/mailbox'],
+          'sandbox_workspace_write.network_access': false,
+          'sandbox_workspace_write.exclude_tmpdir_env_var': true,
+          'sandbox_workspace_write.exclude_slash_tmp': true,
+        }),
+      }),
+    )
+  })
   it('permits only an explicitly fenced same-model full fork and verifies its ancestry', async () => {
     const native = {
       nativeRequest: vi.fn(async () => ({
