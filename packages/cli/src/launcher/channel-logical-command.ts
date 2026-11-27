@@ -47,8 +47,9 @@ async function defaultMode(
   const linkedParent = Object.values(state.logicalContinuations?.relations ?? {}).some(relation =>
     relation.mode === 'linked' && isDeepStrictEqual(relation.destination, source)
   )
-  return native.supportsLogicalFork?.() === true && !linkedParent
-      && config.providerId === target.providerId && config.model === target.model
+  const same = config.providerId === target.providerId && config.model === target.model
+  const supported = same || await native.supportsCrossProviderFork?.(target) === true
+  return native.supportsLogicalFork?.() === true && !linkedParent && supported
     ? 'fork' as const
     : 'linked' as const
 }
@@ -225,7 +226,7 @@ export async function channelLogicalCommand(input: {
     || !['--history=user,assistant', '--history=inherit'].includes(parts[3] ?? '')
     || !['--no-checkpoint', '--checkpoint'].includes(parts[4] ?? '')
   ) {
-    return '用法：linked 使用 --history=user,assistant，允许按需读取文本，形似内部上下文凭据的字符串可能被遮蔽；--checkpoint 还发送已保存的任务检查点。fork 使用 --history=inherit --no-checkpoint，继承完整原生历史（包括工具内容等），仅支持相同服务商和模型且来源没有更早的按需接续。原对话均会保留。'
+    return '用法：linked 使用 --history=user,assistant，允许按需读取文本，形似内部上下文凭据的字符串可能被遮蔽；--checkpoint 还发送已保存的任务检查点。fork 使用 --history=inherit --no-checkpoint，继承完整原生历史（包括工具内容等）；跨服务商需运行环境支持，且来源没有更早的按需接续。原对话均会保留。'
   }
   if (!input.native || !input.appId || input.event.kind !== 'direct') return '当前环境不支持此操作。'
   const state = input.store.snapshot(), operationId = `channel-logical:${identity(input.recordId)}`

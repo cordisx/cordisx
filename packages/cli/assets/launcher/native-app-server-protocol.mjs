@@ -6,6 +6,7 @@ import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { createNativeManagedModelListRecovery } from './native-managed-model-list-recovery.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
 import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
+import { prepareNativeResponsesRecovery } from './native-responses-recovery.mjs'
 import { withStableComputerUseCli } from './native-computer-use-config.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
@@ -20,7 +21,7 @@ import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
 import { dispatchNativeTaskTool, normalizeNativeTaskFirstTurn } from './native-task-dispatch.mjs'
 import { dispatchLogicalHistory, forwardLogicalTurn } from './native-logical-history.mjs'
 import { dispatchNativeBridgeRequest, dispatchNativeIdle } from './native-bridge-methods.mjs'
-import { dispatchNativeOwnerIdentity } from './native-owner-account.mjs'
+import { dispatchNativeOwnerIdentity, dispatchNativeRecoveryAccount } from './native-owner-account.mjs'
 import { NativeLogicalDestinationReservations } from './native-logical-destination-reservations.mjs'
 import { createLogicalTurnEvents } from './native-logical-turn-events.mjs'
 import { prepareManagedNativeDispatch } from './native-managed-dispatch.mjs'
@@ -31,6 +32,7 @@ import {
   NativeLogicalWriteFence,
 } from './native-logical-write-fence.mjs'
 
+const nativeOpenAiRecovery = process.env.CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY === '1'
 const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs, reviewRouting } =
   nativeLaunchConfiguration(
     process.env,
@@ -445,7 +447,7 @@ async function forward(line) {
     return
   }
   if (!managed) {
-    const fork = await inheritNativeFork(message, { nativeCall, controlCall })
+    const fork = await inheritNativeFork(message, { nativeCall, controlCall, nativeOpenAiRecovery })
     if (fork.handled) {
       await write(
         process.stdout,
@@ -566,18 +568,15 @@ async function forward(line) {
       })
       return
     }
-    if (['thread/start', 'thread/resume'].includes(message?.method) && params) {
+    if (['thread/start', 'thread/resume', 'thread/fork'].includes(message?.method) && params) {
       try {
-        let providerId = params.modelProvider
-        if (message.method === 'thread/resume' && providerId === undefined && typeof params.threadId === 'string') {
-          const persisted = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
-          providerId = persisted?.thread?.modelProvider
-        }
-        const overrides = await controlCall('configured-provider', {
-          ...(typeof providerId === 'string' ? { providerId } : {}),
+        const recovered = await prepareNativeResponsesRecovery(message.method, params, {
+          nativeCall,
+          controlCall,
+          nativeOpenAiRecovery,
         })
-        if (object(overrides) && Object.keys(overrides).length) {
-          params.config = configuredOverrides(object(params.config), overrides)
+        if (recovered !== params) {
+          message.params = recovered
           await write(nativeTransport.stdin, message)
           return
         }
@@ -617,6 +616,16 @@ async function forward(line) {
     admitted = true
     turnDiagnostics.selected(message.id, dispatch)
     prepareManagedNativeDispatch(message, params, config, dispatch, marker, { object, configuredOverrides })
+    if (message.method === 'thread/start' && dispatch.providerId === 'openai') {
+      try {
+        const recovered = await prepareNativeResponsesRecovery(message.method, params, {
+          nativeCall,
+          controlCall,
+          nativeOpenAiRecovery,
+        })
+        if (recovered !== params) message.params = params = recovered
+      } catch {}
+    }
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
     if (message.method === 'turn/start' && dispatch.agentTask && dispatch.providerId !== 'openai') {
@@ -952,6 +961,7 @@ readLines(control, line => {
   }
   if (dispatchLogicalFence(message, logicalWriteFence, value => write(control, value), stop)) return
   if (dispatchNativeOwnerIdentity(message, { nativeCall, write, control, stop })) return
+  if (dispatchNativeRecoveryAccount(message, { nativeCall, write, control, stop })) return
   if (
     dispatchNativeBridgeRequest(message, {
       object,

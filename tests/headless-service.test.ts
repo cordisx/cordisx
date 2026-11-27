@@ -13,6 +13,10 @@ vi.mock(
   }),
 )
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createServer } from 'node:http'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
   ChatExecutionPreferences: class {
     static async open() {
@@ -54,6 +58,9 @@ const f = vi.hoisted(() => ({
   declaredProviders: [] as readonly { providerId: string }[],
   projectedProviders: [] as readonly { id: string }[],
   reports: [] as string[],
+  persistedProvider: undefined as string | undefined,
+  accountReads: 0,
+  recoveryAccount: undefined as unknown,
 }))
 vi.mock('../packages/cli/src/launcher/model-service-projection.js', async importOriginal => ({
   ...await importOriginal<typeof import('../packages/cli/src/launcher/model-service-projection.js')>(),
@@ -165,7 +172,14 @@ vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
     f.events.push('backend-start')
     return {
       call: async () => ({}),
-      nativeRequest: async () => ({}),
+      nativeRequest: async (method: string) =>
+        method === 'thread/read'
+          ? { thread: { modelProvider: f.persistedProvider } }
+          : {},
+      readRecoveryAccount: async () => {
+        f.accountReads += 1
+        return f.recoveryAccount ?? {}
+      },
       close: async () => {
         f.events.push('backend-close')
       },
@@ -261,6 +275,9 @@ describe('headless service lifecycle', () => {
     f.projectedProviders = []
     f.declaredProviders = []
     f.reports = []
+    f.persistedProvider = undefined
+    f.accountReads = 0
+    f.recoveryAccount = undefined
   })
   it('passes profile review routing to the native backend before ingress and closes its snapshot', async () => {
     f.reviewSettings = { providerId: 'gateway' }
@@ -272,6 +289,147 @@ describe('headless service lifecycle', () => {
     expect(f.events.slice(0, 2)).toEqual(['review-bound:gateway', 'backend-start'])
     await service.close()
     expect(f.events).toContain('review-close')
+  })
+  it('uses the shared recovery transport for a persisted headless Responses session', async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'headless-recovery-'))
+    const requests: { body: Record<string, unknown>; auth: string | undefined }[] = []
+    const upstream = createServer(async (request, response) => {
+      let raw = ''
+      for await (const chunk of request) raw += chunk
+      requests.push({ body: JSON.parse(raw), auth: request.headers.authorization })
+      if (requests.length === 1) {
+        response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({
+          error: { code: 'invalid_encrypted_content' },
+        }))
+      } else response.writeHead(200).end('recovered')
+    })
+    await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    if (!address || typeof address === 'string') throw new Error('missing test port')
+    const baseUrl = `http://127.0.0.1:${address.port}/v1`
+    f.providers = [{
+      id: 'fixture',
+      kind: 'model-service',
+      displayName: 'Fixture',
+      baseUrl,
+      apiKeyEnv: 'FIXTURE_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['model'] },
+    }]
+    f.persistedProvider = 'fixture'
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        'model_provider="fixture"',
+        '[model_providers.fixture]',
+        `base_url="${baseUrl}"`,
+        'env_key="FIXTURE_KEY"',
+        'wire_api="responses"',
+      ].join('\n'),
+    )
+    let service: Awaited<ReturnType<typeof startHeadlessService>> | undefined
+    try {
+      service = await startHeadlessService({ ...input, codexHome, environment: { FIXTURE_KEY: 'synthetic' } })
+      const history = {
+        model: 'model',
+        input: [
+          { type: 'message', role: 'user', content: 'original' },
+          { type: 'reasoning', encrypted_content: 'foreign', summary: [] },
+          { type: 'message', role: 'user', content: 'follow-up' },
+        ],
+      }
+      await f.backendOptions!.nativeRequest('thread/resume', { threadId: 'saved' }, async prepared => {
+        const config = prepared.config as Record<string, { base_url: string; env_key: string }>
+        const route = config['model_providers.fixture']!
+        expect(route.env_key).toBe('FIXTURE_KEY')
+        const result = await fetch(`${route.base_url}/responses`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer synthetic' },
+          body: JSON.stringify(history),
+        })
+        expect(await result.text()).toBe('recovered')
+        return {}
+      })
+      expect(requests).toHaveLength(2)
+      expect(requests.map(request => request.auth)).toEqual(['Bearer synthetic', 'Bearer synthetic'])
+      expect(requests[0]!.body.input as unknown[]).toHaveLength(3)
+      expect(requests[1]!.body.input as unknown[]).toEqual([history.input[0], history.input[2]])
+    } finally {
+      await service?.close()
+      upstream.closeAllConnections()
+      await new Promise<void>(resolve => upstream.close(() => resolve()))
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+  it('keeps native OpenAI recovery opt-in and uses the shared transport when enabled', async () => {
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'headless-native-recovery-'))
+    const requests: { auth: string | undefined; input: unknown[] }[] = []
+    const upstream = createServer(async (request, response) => {
+      let raw = ''
+      for await (const chunk of request) raw += chunk
+      requests.push({ auth: request.headers.authorization, input: JSON.parse(raw).input })
+      if (requests.length === 1) {
+        response.writeHead(400).end(JSON.stringify({ error: { code: 'invalid_encrypted_content' } }))
+      } else response.writeHead(200).end('recovered')
+    })
+    await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    if (!address || typeof address === 'string') throw new Error('missing test port')
+    await writeFile(path.join(codexHome, 'config.toml'), `openai_base_url="http://127.0.0.1:${address.port}/v1"\n`)
+    f.recoveryAccount = { account: { type: 'apiKey' } }
+    let service: Awaited<ReturnType<typeof startHeadlessService>> | undefined
+    try {
+      service = await startHeadlessService({ ...input, codexHome, environment: {} })
+      await f.backendOptions!.nativeRequest('thread/start', { modelProvider: 'openai' }, async prepared => {
+        expect(prepared.config).toBeUndefined()
+        return {}
+      })
+      expect(f.accountReads).toBe(0)
+      await service!.close()
+      service = await startHeadlessService({
+        ...input,
+        codexHome,
+        environment: { CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1' },
+      })
+      const original = [{ type: 'message', role: 'user', content: 'original' }, {
+        type: 'reasoning',
+        encrypted_content: 'foreign',
+        summary: [],
+      }]
+      await f.backendOptions!.nativeRequest('thread/start', { modelProvider: 'openai' }, async prepared => {
+        const route = (prepared.config as { openai_base_url: string }).openai_base_url
+        const response = await fetch(`${route}/responses`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer synthetic' },
+          body: JSON.stringify({ input: original }),
+        })
+        expect(await response.text()).toBe('recovered')
+        return {}
+      })
+      expect(requests).toEqual([
+        { auth: 'Bearer synthetic', input: original },
+        { auth: 'Bearer synthetic', input: [original[0]] },
+      ])
+      expect(f.accountReads).toBeGreaterThan(1)
+      expect(f.backendEnvironment?.CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY).toBeUndefined()
+      await service!.close()
+      f.recoveryAccount = { account: null, requiresOpenaiAuth: false }
+      service = await startHeadlessService({
+        ...input,
+        codexHome,
+        environment: { CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1' },
+      })
+      await f.backendOptions!.nativeRequest('thread/start', { modelProvider: 'openai' }, async prepared => {
+        expect(prepared.config).toBeUndefined()
+        return {}
+      })
+      expect(requests).toHaveLength(2)
+    } finally {
+      await service?.close()
+      upstream.closeAllConnections()
+      await new Promise<void>(resolve => upstream.close(() => resolve()))
+      await rm(codexHome, { recursive: true, force: true })
+    }
   })
   it('attaches the consumer before ingress and disposes in reverse order once', async () => {
     const service = await startHeadlessService(input)

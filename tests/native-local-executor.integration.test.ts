@@ -39,6 +39,18 @@ async function fixture(layout = 'codex-cli/bin/codex') {
   return { root, contents, executable, cli, args }
 }
 
+it.skipIf(process.platform !== 'darwin')('passes the recovery experiment to the Desktop intermediary', async () => {
+  const f = await fixture()
+  const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+    environment: { ...process.env, CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1' },
+  })
+  try {
+    expect(bootstrap.environment.CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY).toBe('1')
+  } finally {
+    await bootstrap.close()
+  }
+})
+
 it.skipIf(process.platform !== 'darwin').each(['codex', 'codex-cli/bin/codex'])(
   'keeps chat connected while the local executor uses the selected bundled %s',
   async layout => {

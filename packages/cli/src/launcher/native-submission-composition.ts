@@ -1,4 +1,4 @@
-import { approvalReviewCatalogEnvironment } from './approval-review-catalog.js'
+import { nativeSubmissionEnvironment } from './native-submission-environment.js'
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
 import { createDesktopLogicalServices } from './desktop-logical-composition.js'
 import { desktopLogicalDispatchIdentity } from './desktop-logical-identity.js'
@@ -18,8 +18,7 @@ import { startupProviderAdmission } from './startup-provider-admission.js'
 import { adapterStoreRoot } from './codex-adapter/store.js'
 import { resolveHomeConfigPath } from '../config/home-config.js'
 import { defaultNativeSubmissionCacheDirectory, startNativeAdapterPreparation } from './native-adapter-analysis.js'
-import { startResponsesEncryptedReplay } from './responses-encrypted-replay.js'
-import { configuredEncryptedReplay } from './configured-encrypted-replay.js'
+import { selectNativeRecovery, startResponsesRecovery } from './responses-recovery-composition.js'
 import { diagnostic } from '../diagnostics/context.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { type CliModelExportResult, exportCliModelCatalog } from './model-catalog/cli-export.js'
@@ -87,7 +86,6 @@ import {
   PluginPreferenceAuthority,
   PluginPreferenceManagementAdapter,
 } from '../model-catalog/plugin-preference-authority.js'
-
 type NativeSubmissionActivation =
   & Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
   & {
@@ -97,7 +95,6 @@ type NativeSubmissionActivation =
   }
 
 const attachDesktopContext = desktopContext.attachDesktopNativeContextObserver
-
 export interface NativeSubmissionInstallation {
   readonly authority: NativeSubmissionCdpAuthority
   readonly adapterLifecycle?: {
@@ -216,7 +213,7 @@ export async function prepareNativeSubmissionBootstrap(
     adapterStoreRoot(path.dirname(resolveHomeConfigPath({ env: options.environment ?? process.env }))),
     { signal: lifetime.signal },
   )
-  let encryptedReplay: Awaited<ReturnType<typeof startResponsesEncryptedReplay>> | undefined
+  let encryptedReplay: Awaited<ReturnType<typeof startResponsesRecovery>> | undefined
   let remote: RemoteTerminalProviderClient | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
@@ -282,19 +279,11 @@ export async function prepareNativeSubmissionBootstrap(
         }
       }
     })()
-  const environment = {
-    CODEX_CLI_PATH: nativeEntry.executable,
-    // Dot must not open a second connection to the chat intermediary's control socket.
-    CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH: options.environment?.CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH || cli,
-    CORDISX_NATIVE_CONTROL_SOCKET: control.socketPath,
-    CORDISX_NATIVE_CONTROL_NONCE: control.nonce,
-    CORDISX_NATIVE_REAL_CODEX_PATH: cli,
-    CORDISX_NATIVE_CLI_ENTRY_PATH: nativeEntry.executable,
-    CORDISX_NATIVE_NODE_PATH: node,
-    CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
-    ...desktopContext.desktopStaticCatalogEnvironment(options.staticCatalog),
-    ...approvalReviewCatalogEnvironment(options.reviewCatalog),
-  }
+  const recovery = selectNativeRecovery(
+    { ...process.env, ...options.environment },
+    () => control.nativeRecoveryAccount(),
+  )
+  const environment = nativeSubmissionEnvironment({ nativeEntry, cli, node, control, agentModels, options, recovery })
   return {
     environment,
     bindLogicalFenceOwner: owner => control.bindLogicalFenceOwner(owner),
@@ -700,12 +689,12 @@ export async function prepareNativeSubmissionBootstrap(
             () => chatConfiguration?.catalog() ?? catalog(),
           ),
         })
-        encryptedReplay = await startResponsesEncryptedReplay()
-        const prepareConfiguredProvider = configuredEncryptedReplay(
+        encryptedReplay = await startResponsesRecovery(
           codexHome,
-          encryptedReplay.route,
           completeOptions.declaredProviders,
+          recovery.readAccount,
         )
+        const prepareConfiguredProvider = encryptedReplay.prepareConfigured
         control.bindConfiguredProvider(prepareConfiguredProvider)
         controller = createNativeSubmissionController({
           ...(logicalComposition.preparation ? { logicalTurns: logicalComposition.preparation } : {}),
@@ -894,6 +883,8 @@ export async function prepareNativeSubmissionBootstrap(
           controller,
           channelModelSelection: (input, metadata) =>
             completeOptions.channel?.('task-model-select', input, metadata) ?? Promise.resolve(undefined),
+          sessionExecutionGuard: async (a, m) =>
+            await completeOptions.chatSettingsGuard?.('session-start-execution', a, m),
           sessions: async (app, operation, input) => {
             if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
             return await agentBridge.call(app, operation, input)

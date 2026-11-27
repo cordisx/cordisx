@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
 import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { zstdDecompressSync } from 'node:zlib'
 import { describe, expect, it, vi } from 'vitest'
 import { type EventMap, normalize } from '@larksuiteoapi/node-sdk'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
@@ -25,10 +27,14 @@ const chainMode = process.env.CORDISX_LOGICAL_NATIVE_CHAIN === '1'
 const initialModeUnset = process.env.CORDISX_LOGICAL_NATIVE_UNSET_MODE === '1'
 const longSource = process.env.CORDISX_LOGICAL_NATIVE_LONG_SOURCE === '1'
 const personaMode = process.env.CORDISX_LOGICAL_NATIVE_PERSONA === '1'
+const crossOfficial = process.env.CORDISX_LOGICAL_NATIVE_CROSS_OFFICIAL === '1'
+const automatic = process.env.CORDISX_LOGICAL_NATIVE_AUTOMATIC === '1'
 describe.skipIf(!executable)('isolated native Channel continuation', () => {
   it('moves a real owned native session and retrieves authorized synthetic history', async () => {
     if (
-      forkMode && (realTarget || initialModeUnset || checkpointMode || chainMode) || checkpointMode && realTarget
+      automatic && (!crossOfficial || !forkMode || realTarget)
+      || crossOfficial && (!forkMode || realTarget)
+      || forkMode && (realTarget || initialModeUnset || checkpointMode || chainMode) || checkpointMode && realTarget
       || chainMode && (realTarget || initialModeUnset || checkpointMode || longSource)
     ) {
       throw new Error('FIXTURE_CONFIGURATION_INVALID')
@@ -52,6 +58,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       },
     })
     let modelCalls = 0, markerReturned = false, checkpointObserved = false, chainPromptContainedMarker = false
+    let rejectedEncrypted = 0, retriedWithoutEncrypted = false, reverseSawHistory = false
     let personaObservedOnTarget = false
     const reports: string[] = []
     const historyDiagnostics: Array<
@@ -59,9 +66,29 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
     > = []
     const modelDiagnostics: unknown[] = []
     const model = createServer(async (request, response) => {
-      let body = ''
-      for await (const chunk of request) body += chunk
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      const bytes = Buffer.concat(chunks)
+      const body = (request.headers['content-encoding'] === 'zstd' ? zstdDecompressSync(bytes) : bytes).toString()
       modelCalls++
+      if (automatic && modelCalls > 3 && !request.url?.startsWith('/official/') && body.includes('PAPERKITE')) {
+        reverseSawHistory = true
+      }
+      const parsedBody = JSON.parse(body) as { input?: Array<{ type?: string; encrypted_content?: string }> }
+      const encrypted = parsedBody.input?.some(item =>
+        item.type === 'reasoning'
+        && item.encrypted_content === 'synthetic-sealed'
+      ) === true
+      if (crossOfficial && request.url?.startsWith('/official/') && encrypted) {
+        rejectedEncrypted++
+        response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({
+          error: { type: 'invalid_request_error', code: 'invalid_encrypted_content', message: 'synthetic rejection' },
+        }))
+        return
+      }
+      if (crossOfficial && request.url?.startsWith('/official/') && rejectedEncrypted > 0 && !encrypted) {
+        retriedWithoutEncrypted = body.includes('PAPERKITE')
+      }
       if (personaMode && modelCalls > 1 && body.includes('SYNTHETIC_ATLAS')) personaObservedOnTarget = true
       if (chainMode && modelCalls === 3) chainPromptContainedMarker = body.includes('PAPERKITE')
       const toolCallNumber = chainMode || initialModeUnset ? 3 : 2
@@ -118,11 +145,14 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           }],
         }
       if ((forkMode ? modelCalls > 1 : modelCalls > toolCallNumber) && body.includes('PAPERKITE')) markerReturned = true
+      const items = crossOfficial && modelCalls === 1
+        ? [{ id: 'rs_fixture', type: 'reasoning', summary: [], encrypted_content: 'synthetic-sealed' }, item]
+        : [item]
       const complete = {
         id: 'resp_fixture',
         object: 'response',
         status: 'completed',
-        output: [item],
+        output: items,
         usage: {
           input_tokens: 10,
           output_tokens: 2,
@@ -133,7 +163,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       }
       const events = [
         { type: 'response.created', response: { id: 'resp_fixture', status: 'in_progress', output: [] } },
-        { type: 'response.output_item.done', output_index: 0, item },
+        ...items.map((item, output_index) => ({ type: 'response.output_item.done', output_index, item })),
         { type: 'response.completed', response: complete },
       ]
       response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -148,12 +178,23 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         await copyFile(path.join(os.homedir(), '.codex', 'auth.json'), path.join(root, 'auth.json'))
         await chmod(path.join(root, 'auth.json'), 0o600)
       }
+      if (crossOfficial) {
+        await writeFile(
+          path.join(root, 'auth.json'),
+          JSON.stringify({
+            auth_mode: 'apikey',
+            OPENAI_API_KEY: 'synthetic-official-key',
+          }),
+          { mode: 0o600 },
+        )
+      }
       const provider = (id: string) =>
         '[model_providers.' + id + ']\nname="fixture"\nbase_url="http://127.0.0.1:'
         + address.port + '/v1"\nenv_key="FIXTURE_API_KEY"\nwire_api="responses"\n'
       await writeFile(
         path.join(root, 'config.toml'),
         'model_provider="source"\nmodel="fixture-model"\n'
+          + (crossOfficial ? `openai_base_url="http://127.0.0.1:${address.port}/official/v1"\n` : '')
           + provider('source') + provider('target'),
       )
       const configPath = path.join(root, 'config.json')
@@ -191,37 +232,40 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           }],
         }),
       )
-      service = await startHeadlessService({
-        configPath,
-        homeDir: root,
-        appId: 'codex',
-        profileId: 'fixture',
-        userHome: root,
-        codexHome: root,
-        codexExecutable: executable!,
-        cwd: root,
-        generation: 'fixture',
-        report: code => {
-          reports.push(code)
-        },
-        environment: {
-          PATH: process.env.PATH,
-          TMPDIR: process.env.TMPDIR,
-          NO_PROXY: '127.0.0.1,localhost',
-          HTTP_PROXY: realTarget ? process.env.HTTP_PROXY : 'http://127.0.0.1:9',
-          HTTPS_PROXY: realTarget ? process.env.HTTPS_PROXY : 'http://127.0.0.1:9',
-          ALL_PROXY: realTarget ? process.env.ALL_PROXY : undefined,
-          HOME: root,
-          CODEX_HOME: root,
-          FIXTURE_API_KEY: 'fixture',
-          CHANNEL_KEY: 'fixture',
-          CORDISX_HEADLESS_PROVIDER_ID: 'source',
-          CORDISX_HEADLESS_MODEL_ID: 'fixture-model',
-          CORDISX_HEADLESS_EXTRA_PROVIDER: realTarget ? 'openai' : 'target',
-          CORDISX_HEADLESS_EXTRA_MODELS: realTarget ? 'gpt-6.1-terra' : 'fixture-model',
-        },
-      })
-      const consumer = service.channel!.consumer!
+      const launch = () =>
+        startHeadlessService({
+          configPath,
+          homeDir: root,
+          appId: 'codex',
+          profileId: 'fixture',
+          userHome: root,
+          codexHome: root,
+          codexExecutable: executable!,
+          cwd: root,
+          generation: 'fixture',
+          report: code => {
+            reports.push(code)
+          },
+          environment: {
+            PATH: process.env.PATH,
+            TMPDIR: process.env.TMPDIR,
+            NO_PROXY: '127.0.0.1,localhost',
+            HTTP_PROXY: realTarget ? process.env.HTTP_PROXY : 'http://127.0.0.1:9',
+            HTTPS_PROXY: realTarget ? process.env.HTTPS_PROXY : 'http://127.0.0.1:9',
+            ALL_PROXY: realTarget ? process.env.ALL_PROXY : undefined,
+            HOME: root,
+            CODEX_HOME: root,
+            FIXTURE_API_KEY: 'fixture',
+            CHANNEL_KEY: 'fixture',
+            ...(crossOfficial ? { CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1' } : {}),
+            CORDISX_HEADLESS_PROVIDER_ID: 'source',
+            CORDISX_HEADLESS_MODEL_ID: 'fixture-model',
+            CORDISX_HEADLESS_EXTRA_PROVIDER: realTarget ? 'openai' : 'target',
+            CORDISX_HEADLESS_EXTRA_MODELS: realTarget ? 'gpt-6.1-terra' : 'fixture-model',
+          },
+        })
+      service = await launch()
+      let consumer = service.channel!.consumer!
       if (personaMode) {
         await consumer.personas.profile('atlas', 'SYNTHETIC_ATLAS', 'Synthetic original persona', 0)
         await consumer.personas.profile('nova', 'SYNTHETIC_NOVA', 'Synthetic new persona', 0)
@@ -239,7 +283,12 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       await consumer.taskSettings.call('task-config-set', {
         config: {
           defaults: { providerId: 'source', model: 'fixture-model' },
-          permissions: [{ id: 'grant', effect: 'allow', userIds: ['ou_actor'], fields: ['providerId', 'model'] }],
+          permissions: [{
+            id: 'grant',
+            effect: 'allow',
+            userIds: ['ou_actor'],
+            fields: ['providerId', 'model', 'effort'],
+          }],
         },
         expectedRevision: 0,
       })
@@ -273,6 +322,8 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(modelCalls).toBeGreaterThanOrEqual(1)
       }, { timeout: 30000 })
       const source = consumer.bindings()[0]!.sessionId
+      let sourcePath: string | undefined, sourceDigest: string | undefined
+      let sourceBefore: Buffer | undefined
       let sectionId: string | undefined
       let projectId: string | undefined
       if (projectMode) {
@@ -300,6 +351,24 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(Object.values(state.jobs).some((job: any) => job.sessionId === source && job.state === 'completed'))
           .toBe(true)
       }, { timeout: 30000 })
+      if (automatic) {
+        // Exercise the same persisted session after the owned app-server has restarted.
+        await service.close()
+        service = await launch()
+        consumer = service.channel!.consumer!
+      }
+      if (crossOfficial) {
+        const native = (consumer as any).extraNative()
+        sourcePath = (await native.input.nativeRequest('thread/read', { threadId: source, includeTurns: false }))
+          .thread.path
+        sourceBefore = await readFile(sourcePath!)
+        sourceDigest = createHash('sha256').update(sourceBefore).digest('hex')
+        const catalog = await native.modelOperation('list', {})
+        expect(catalog.providers.find((provider: any) => provider.providerId === 'openai').models)
+          .toEqual(expect.arrayContaining([expect.objectContaining({ id: 'gpt-6.1-sol' })]))
+        expect(await native.supportsCrossProviderFork({ providerId: 'openai', model: 'gpt-6.1-sol' })).toBe(true)
+        expect(await native.taskSelection(source)).toMatchObject({ providerId: 'source', model: 'fixture-model' })
+      }
       if (personaMode) await consumer.personas.bind(ref, 'nova', 1)
       if (initialModeUnset) {
         await emit(
@@ -336,7 +405,11 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       }
       await emit(
         'om_migrate',
-        forkMode
+        automatic
+          ? '/model --provider openai --model gpt-6.1-sol'
+          : crossOfficial
+          ? '/continue-provider fork openai gpt-6.1-sol --history=inherit --no-checkpoint'
+          : forkMode
           ? '/continue-provider fork source fixture-model --history=inherit --no-checkpoint'
           : realTarget
           ? '/continue-provider linked openai gpt-6.1-terra --history=user,assistant --no-checkpoint'
@@ -345,7 +418,15 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
       )
       await vi.waitFor(async () => {
         await consumer.pump()
-        expect(consumer.bindings()[0]!.sessionId !== source || replies.some(text => text.includes('结果尚未确认')))
+        const state = JSON.parse(await readFile(statePath, 'utf8'))
+        const stopped = automatic
+          && Object.values(state.taskRequests ?? {}).some((row: any) =>
+            ['denied', 'unknown', 'expired'].includes(row.state)
+          )
+        expect(
+          consumer.bindings()[0]!.sessionId !== source || stopped
+            || replies.some(text => text.includes('结果尚未确认')),
+        )
           .toBe(true)
       }, { timeout: 30000 })
       expect(consumer.bindings()[0]!.sessionId).not.toBe(source)
@@ -390,7 +471,7 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         const state = JSON.parse(await readFile(statePath, 'utf8'))
         expect(Object.values(state.jobs).some((job: any) => job.sessionId === target && job.state === 'completed'))
           .toBe(true)
-      }, { timeout: realTarget ? 90000 : 10000 })
+      }, { timeout: realTarget ? 90000 : crossOfficial ? 45000 : 10000 })
       if (personaMode) {
         expect((await consumer.personas.bootstrap(target, ref)).personaId).toBe('atlas')
         expect(personaObservedOnTarget).toBe(true)
@@ -424,6 +505,54 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         }, { timeout: 5000, interval: 250 })
       }
       let finalTarget = target
+      if (automatic) {
+        await emit('om_reverse', '/model --provider source --model fixture-model')
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const state = JSON.parse(await readFile(statePath, 'utf8'))
+          const stopped = Object.values(state.taskRequests ?? {}).some((row: any) =>
+            ['denied', 'unknown', 'expired'].includes(row.state)
+          )
+          expect(consumer.bindings()[0]!.sessionId !== target || stopped).toBe(true)
+        }, { timeout: 30000 })
+        finalTarget = consumer.bindings()[0]!.sessionId
+        expect(finalTarget).not.toBe(target)
+        await emit('om_reverse_followup', 'What codeword did I ask you to remember? Reply only with the codeword.')
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const state = JSON.parse(await readFile(statePath, 'utf8'))
+          expect(reverseSawHistory).toBe(true)
+          expect(
+            Object.values(state.jobs).some((job: any) => job.sessionId === finalTarget && job.state === 'completed'),
+          )
+            .toBe(true)
+        }, { timeout: 30000 })
+        const state = JSON.parse(await readFile(statePath, 'utf8'))
+        expect(Object.values(state.logicalContinuations.relations)).toHaveLength(2)
+        const reversed = finalTarget
+        await emit('om_third_switch', '/model --provider openai --model gpt-6.1-sol')
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const current = JSON.parse(await readFile(statePath, 'utf8'))
+          const stopped = Object.values(current.taskRequests ?? {}).some((row: any) =>
+            ['denied', 'unknown', 'expired'].includes(row.state)
+          )
+          expect(consumer.bindings()[0]!.sessionId !== reversed || stopped).toBe(true)
+        }, { timeout: 30000 })
+        finalTarget = consumer.bindings()[0]!.sessionId
+        expect(finalTarget).not.toBe(reversed)
+        await emit('om_third_followup', 'What codeword did I ask you to remember? Reply only with the codeword.')
+        await vi.waitFor(async () => {
+          await consumer.pump()
+          const current = JSON.parse(await readFile(statePath, 'utf8'))
+          expect(
+            Object.values(current.jobs).some((job: any) => job.sessionId === finalTarget && job.state === 'completed'),
+          )
+            .toBe(true)
+        }, { timeout: 30000 })
+        const afterThird = JSON.parse(await readFile(statePath, 'utf8'))
+        expect(Object.values(afterThird.logicalContinuations.relations)).toHaveLength(3)
+      }
       if (chainMode) {
         await emit(
           'om_migrate_again',
@@ -459,6 +588,17 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         expect(historyDiagnostics.some(page => page.success && page.marker)).toBe(true)
       }
       const native = (consumer as any).extraNative()
+      if (crossOfficial) {
+        expect(await native.taskSelection(finalTarget)).toMatchObject({
+          providerId: 'openai',
+          model: 'gpt-6.1-sol',
+        })
+        expect(rejectedEncrypted).toBe(automatic ? 2 : 1)
+        expect(retriedWithoutEncrypted).toBe(true)
+        const sourceAfter = await readFile(sourcePath!)
+        if (automatic) expect(sourceAfter.subarray(0, sourceBefore!.length).equals(sourceBefore!)).toBe(true)
+        else expect(createHash('sha256').update(sourceAfter).digest('hex')).toBe(sourceDigest)
+      }
       if (realTarget) expect(await native.logicalOwnerIdentity()).toMatch(/^desktop:[a-f0-9]{64}$/u)
       const read = await native.input.nativeRequest('thread/read', { threadId: finalTarget, includeTurns: true })
       const messages = read.thread.turns.flatMap((turn: any) => turn.items)
@@ -487,6 +627,37 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
         'utf8',
       )
         .then(text => JSON.parse(text)).catch(() => ({}))
+      const diagnosticNative = (service?.channel?.consumer as any)?.extraNative?.()
+      const sourceId = (Object.values(state.bindings ?? {})[0] as any)?.sessionId
+      const diagnostic = diagnosticNative && sourceId
+        ? {
+          selection: await diagnosticNative.taskSelection(sourceId).catch(() => undefined),
+          idle: await diagnosticNative.idle(sourceId).catch(() => undefined),
+          loaded: await diagnosticNative.idle(sourceId, true).catch(() => undefined),
+          configuration: await diagnosticNative.continuationConfiguration(sourceId).catch(() => undefined),
+          mode: diagnosticNative.input.confirmedWorkMode?.(sourceId),
+          execution: diagnosticNative.input.execution?.read('local', sourceId),
+        }
+        : undefined
+      const destinationId = (Object.values(state.logicalContinuations?.intents ?? {}) as any[])
+        .find(intent => intent.state === 'unknown' && intent.destination)?.destination?.sessionId
+      const destination = diagnosticNative && destinationId
+        ? {
+          selection: await diagnosticNative.taskSelection(destinationId).catch(() => undefined),
+          thread: await diagnosticNative.input.nativeRequest('thread/read', {
+            threadId: destinationId,
+            includeTurns: false,
+          })
+            .then((result: any) => ({
+              model: result.thread?.model,
+              provider: result.thread?.modelProvider,
+              status: result.thread?.status,
+              effort: result.thread?.reasoningEffort,
+              forked: !!result.thread?.forkedFromId,
+            })).catch(() => undefined),
+          execution: diagnosticNative.input.execution?.read('local', destinationId),
+        }
+        : undefined
       console.error(
         'Fixture state:',
         JSON.stringify({
@@ -495,7 +666,21 @@ describe.skipIf(!executable)('isolated native Channel continuation', () => {
           replies,
           historyDiagnostics,
           modelDiagnostics,
+          diagnostic,
+          destination,
           jobs: Object.values(state.jobs ?? {}).map((job: any) => ({ state: job.state, code: job.code })),
+          settings: Object.values(state.taskSettings ?? {}).map((setting: any) => ({
+            application: setting.application,
+            code: setting.code,
+            settings: setting.settings,
+            pending: setting.pending,
+          })),
+          requests: Object.values(state.taskRequests ?? {}).map((request: any) => ({
+            state: request.state,
+            code: request.code,
+            patch: request.patch,
+            selection: request.selection,
+          })),
           intents: Object.values(state.logicalContinuations?.intents ?? {}).map((intent: any) => ({
             state: intent.state,
             code: intent.code,

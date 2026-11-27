@@ -41,11 +41,11 @@ import {
   type ContinuationPolicy,
   ContinuationUsage,
 } from './channel-continuation.js'
+import { type ContinuationConfiguration, continuationStartMatches } from './channel-continuation-config.js'
 import {
-  type ContinuationConfiguration,
-  continuationConfiguration,
-  continuationStartMatches,
-} from './channel-continuation-config.js'
+  readChannelContinuationConfiguration,
+  restoreChannelLogicalSource,
+} from './channel-native-continuation-config.js'
 import { ChannelLiveTurnControl } from './channel-live-turn-control.js'
 import { logicalHistoryContentVersion } from './logical-continuation-snapshot.js'
 import { logicalNativeHistoryPage } from './logical-continuation-native-page.js'
@@ -55,6 +55,7 @@ import type { LogicalContinuationEvidence, LogicalContinuationRequest } from './
 import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
 import { channelLogicalJointSourceRoot, channelLogicalSourceSnapshot } from './channel-logical-source-snapshot.js'
 import { logicalPresentation, placeLogicalDestination } from './logical-continuation-presentation.js'
+import { channelNativeCreationSelection } from './channel-native-creation-selection.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -105,6 +106,9 @@ export class ChannelNativeSessions {
       readonly logicalOwnerIdentity?: () => Promise<string | undefined>
       readonly providerId?: string
       readonly model?: string
+      readonly fallbackProviderId?: string
+      readonly fallbackModel?: string
+      readonly crossProviderForkReady?: (target: { providerId: string; model: string }) => Promise<boolean>
       readonly memoryConnect?: ChannelMemoryModelConnection | undefined
       readonly cli?: ChannelNativeCliContext
       readonly execution?: ChatExecutionPreferences
@@ -176,6 +180,11 @@ export class ChannelNativeSessions {
   }
   supportsLogicalFork() {
     return this.input.nativeVersion === 'codex-cli 0.171.0-alpha.13'
+      || this.input.nativeVersion === 'codex-cli 0.172.0' && this.input.crossProviderForkReady !== undefined
+  }
+  async supportsCrossProviderFork(target: { providerId: string; model: string }) {
+    return this.input.nativeVersion === 'codex-cli 0.172.0'
+      && await this.input.crossProviderForkReady?.(target) === true
   }
   supportsLogicalHandoff() {
     return this.input.logicalHandoffWriteGuardReady?.() === true
@@ -194,17 +203,15 @@ export class ChannelNativeSessions {
     threadId: string,
     allowActive = false,
   ): Promise<ContinuationConfiguration | undefined> {
-    if (!allowActive && !await this.idle(threadId)) return undefined
-    await this.input.execution?.settled()
-    const live = await this.input.sourceConfiguration?.(threadId).catch(() => undefined)
-    const record = this.input.execution?.read('local', threadId)
-    if (!live && record?.modelSelection?.status === 'unknown') return undefined
-    if (!record || record.application !== 'applied' || !this.input.execution?.observationConfirmed(threadId)) {
-      return undefined
-    }
-    const confirmedMode = this.input.confirmedWorkMode?.(threadId)
-    if (this.input.confirmedWorkMode && confirmedMode === undefined) return undefined
-    return continuationConfiguration(record.effective, live, confirmedMode)
+    return await readChannelContinuationConfiguration(this.input, this, threadId, allowActive)
+  }
+  /** Reload only the same idle source and verify its provider and work mode. */
+  async restoreLogicalSource(
+    threadId: string,
+    selection: import('./channel-task-config.js').ChannelTaskPatch,
+    fence: ChannelNativeSourceFence,
+  ): Promise<boolean> {
+    return await restoreChannelLogicalSource(this.input, this, threadId, selection, fence)
   }
   async continuationTurnActive(threadId: string, turnId: string): Promise<boolean> {
     const thread = await codexThreadMetadata(this.input, threadId)
@@ -241,12 +248,18 @@ export class ChannelNativeSessions {
     const native = nativeRequest ? { ...this.input, nativeRequest } : this.input
     const source = await logicalPresentation(native, request.source.sessionId).catch(() => undefined)
     if (!source) return { state: 'rejected' as const, code: 'SOURCE_PRESENTATION_UNAVAILABLE' }
+    const crossProviderFork = request.mode === 'fork'
+      && (request.target.providerId !== evidence.sourceConfiguration.providerId
+        || request.target.model !== evidence.sourceConfiguration.model)
+    const crossProviderReady = crossProviderFork && await this.supportsCrossProviderFork(request.target)
+    if (crossProviderFork && !crossProviderReady) return { state: 'rejected' as const, code: 'NATIVE_MODE_UNAVAILABLE' }
     const result = await createLogicalNativeDestination(
       native,
       request,
       evidence,
       fence ? (threadId, params) => fence.allowFork(threadId, params) : undefined,
       source.projectId,
+      crossProviderReady,
     )
     if (result.state !== 'created' || !result.confirmed) return result
     if (!fence || !available) return { ...result, confirmed: false }
@@ -297,6 +310,10 @@ export class ChannelNativeSessions {
       if (!isDeepStrictEqual(saved.override, evidence.sourceConfiguration.execution) || !available(destination)) {
         return { ...result, confirmed: false }
       }
+      // A confirmed fork is a new native selection, not a rename of the old provider.
+      // Persist it before binding so a later cold resume cannot fall back to the source.
+      await execution.recordModelSelection(destination, request.target)
+      if (!available(destination)) return { ...result, confirmed: false }
       retained = true
       return { ...result, confirmed: true, releaseTarget }
     } catch {
@@ -484,25 +501,7 @@ export class ChannelNativeSessions {
   }
   async creationSelection(): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
     const defaults = (await this.input.execution?.creationDefaults())?.settings ?? {}
-    const selection = {
-      ...(defaults.providerId ? { providerId: defaults.providerId } : {}),
-      ...(defaults.model && (!this.input.providerId || this.input.providerId === defaults.providerId)
-        ? { model: defaults.model }
-        : {}),
-      ...(this.input.providerId ? { providerId: this.input.providerId } : {}),
-      ...(this.input.model ? { model: this.input.model } : {}),
-      ...(defaults.fast === undefined ? {} : { fast: defaults.fast }),
-    }
-    if (!selection.providerId || !selection.model) {
-      const providers = object(await this.modelOperation('list', {})).providers
-      const rows = Array.isArray(providers) ? providers.map(object) : []
-      const provider = rows.find(row => row.providerId === (selection.providerId ?? 'openai'))
-      if (provider) {
-        selection.providerId ??= String(provider.providerId)
-        if (!selection.model && typeof provider.defaultModelId === 'string') selection.model = provider.defaultModelId
-      }
-    }
-    return selection
+    return await channelNativeCreationSelection(defaults, this.input, () => this.modelOperation('list', {}))
   }
   readonly analyzeUserMemory = channelUserMemoryAnalyzer(() => this.input, () => this.modelOperation('list', {}))
   projects(caller?: string) {

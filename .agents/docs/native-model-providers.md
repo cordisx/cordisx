@@ -802,12 +802,25 @@ acceptance remain separate from an experimental local candidate.
 
 ## Encrypted reasoning recovery
 
-The launch-scoped Responses transport preserves the configured provider ID,
-model and native authentication. Config-backed routes override only
+Desktop and headless Channel launches use the same launch-scoped Responses
+recovery transport. It preserves the configured provider ID, model and native
+authentication. Config-backed routes override only
 `model_providers.<id>.base_url` in the native request; managed routes retain
-their existing credential lease. The native OpenAI default and non-Responses
-routes remain unchanged. No installed application, persistent configuration or
-conversation history is rewritten.
+their existing credential lease. Non-Responses routes remain unchanged. No
+installed application, persistent configuration or conversation history is
+rewritten.
+
+Native OpenAI traffic remains unchanged by default. The isolated experiment
+`CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY=1` permits a recovery route only
+when native account and, for ChatGPT, workspace routing are available. When
+the native default provider is a separate service, `account/read` can return
+no OpenAI account despite a valid login; in that case no OpenAI recovery route
+is installed and a cross-provider request can still fail. In eligible headless
+direct chats, an explicit provider selection uses the shared logical
+continuation to fork the complete native history automatically. The original
+thread remains; this does not implement same-ID migration. See the
+[Channel settings guide](channel-cli.md#provider-model-effort-fast-and-project)
+for eligibility and failure behavior.
 
 Resuming an idle or unloaded managed thread refreshes its launch-scoped routing
 lease even when the native client still recognizes its historical provider table.
@@ -834,6 +847,8 @@ HTTP model request bodies have no fixed CordisX byte cap. The replay path
 still buffers and parses the complete body when it examines encrypted history;
 this does not remove upstream byte or model-context limits. Redirects are rejected rather than forwarding credentials to a
 new destination. Routes and requests are retired with the launch.
+Zstd-compressed requests retain their encoding on replay, and ordinary native
+OpenAI request bodies are forwarded without configured-provider adaptation.
 
 Transport and native-request composition checks do not establish real-provider
 login, every model's history compatibility, or installed Desktop acceptance.

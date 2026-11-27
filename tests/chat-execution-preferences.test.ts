@@ -136,6 +136,25 @@ describe('user-owned chat execution preferences', () => {
     })
     expect(turn.params).toMatchObject({ approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } })
   })
+  it('does not carry a restricted network default into an explicitly full-access first turn', async () => {
+    const { service } = await fixture()
+    await service.setDefaults({ execution: 'workspace-write', networkAccess: false }, 0)
+    const start = await service.prepare('thread/start', { cwd: '/tmp', sandbox: 'danger-full-access' })
+    await service.complete(start.captureId!, true, {
+      thread: { id: 'new-full-access' },
+      cwd: '/tmp',
+      sandbox: { type: 'dangerFullAccess' },
+    })
+    const record = service.read('local', 'new-full-access')
+    expect(record?.capturedDefaults).toMatchObject({ execution: 'full-access', networkAccess: true })
+    expect(record?.pendingCreation).not.toHaveProperty('networkAccess')
+    const turn = await service.prepare('turn/start', {
+      threadId: 'new-full-access',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    })
+    expect(turn.params).toMatchObject({ sandboxPolicy: { type: 'dangerFullAccess' } })
+    expect((await service.defaults()).settings).toEqual({ execution: 'workspace-write', networkAccess: false })
+  })
   it('does not invent a model or writable root; work mode preserves the captured developer instruction', () => {
     expect(() => nativeExecutionTurn({ workMode: 'plan' }, {}, {})).toThrow('WORK_MODE_MODEL_UNAVAILABLE')
     expect(() => nativeExecutionTurn({ execution: 'workspace-write' }, {}, {})).toThrow('EXECUTION_CONTEXT_UNAVAILABLE')

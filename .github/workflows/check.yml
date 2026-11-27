@@ -45,12 +45,9 @@ jobs:
         env:
           BROWSER: ${{ steps.scope.outputs.browser }}
           EVENT: ${{ github.event_name }}
-        run: |
-          if [[ "$EVENT" == push || "$BROWSER" == true ]]; then
-            echo 'matrix={"project":["core","renderer","integration","browser"]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"project":["core","renderer","integration"]}' >> "$GITHUB_OUTPUT"
-          fi
+          FULL: ${{ steps.scope.outputs.full }}
+          NODE_ALL: ${{ steps.scope.outputs.node_all }}
+        run: node scripts/ci-test-matrix.mjs >> "$GITHUB_OUTPUT"
 
   changed-quality:
     needs: scope
@@ -165,7 +162,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
@@ -201,8 +198,12 @@ jobs:
           EVENT: ${{ github.event_name }}
           FULL: ${{ needs.scope.outputs.full }}
           NODE_ALL: ${{ needs.scope.outputs.node_all }}
+          SHARD: ${{ matrix.shard || '' }}
         run: |
           args=(run --project "$PROJECT" --reporter=default --reporter=json --outputFile=test-result.json)
+          if [[ -n "$SHARD" ]]; then
+            args+=(--shard "$SHARD")
+          fi
           # Browser selection includes dynamic bundler paths that --changed cannot discover.
           if [[ "$EVENT" == pull_request && "$FULL" != true && "$NODE_ALL" != true && "$PROJECT" != browser ]]; then
             args+=(--changed "$BASE_SHA" --passWithNoTests)
@@ -232,7 +233,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-result-${{ matrix.project }}-${{ github.run_attempt }}
+          name: test-result-${{ matrix.project }}-${{ matrix.shard_id || 'all' }}-${{ github.run_attempt }}
           path: |
             test-result.json
             dynamic-test-result.json

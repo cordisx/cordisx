@@ -6,6 +6,7 @@ export function headlessConfiguredProviders(
   nativeModels: NativeModelProviderCatalogEntry['models'],
   declared: readonly NativeModelProviderCatalogEntry[] = [],
   nativeDefault?: string,
+  includeNativeOpenAi = false,
 ): readonly NativeModelProviderCatalogEntry[] | undefined {
   const primary = environment.CORDISX_HEADLESS_PROVIDER_ID, model = environment.CORDISX_HEADLESS_MODEL_ID
   const extra = environment.CORDISX_HEADLESS_EXTRA_PROVIDER, models = environment.CORDISX_HEADLESS_EXTRA_MODELS
@@ -62,5 +63,14 @@ export function headlessConfiguredProviders(
       }
     }),
     ...declared.filter(provider => !legacy.some(item => item.providerId === provider.providerId)),
+    ...(includeNativeOpenAi && !legacy.some(item => item.providerId === 'openai')
+        && !declared.some(item => item.providerId === 'openai')
+      ? [{
+        providerId: 'openai',
+        pluginId: 'codex',
+        models: nativeModels,
+        ...(nativeDefault === undefined ? {} : { defaultModelId: nativeDefault }),
+      }]
+      : []),
   ]
 }

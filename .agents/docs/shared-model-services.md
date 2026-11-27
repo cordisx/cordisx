@@ -199,7 +199,7 @@ an `app` argument (`"codex"` or `"claude"`). A new app is a new `app` value,
 not new tool names. Results carry `codex://` or `claude://` links. Both apps
 also have `list_model_providers`, which returns the same shape on either side.
 
-Every declared argument does something on both sides; a tool never accepts a
+Declared arguments are either honored or explicitly rejected; a tool never accepts a
 value it ignores.
 
 | Argument                             | Codex                                                              | Claude                                                                   |
@@ -207,6 +207,17 @@ value it ignores.
 | `read_session.limit`                 | newest `limit` transcript entries, on top of the 60k-character cap | same                                                                     |
 | `start_session.title`                | `thread/name/set` right after `thread/start`                       | written into the session record `list_sessions` reads                    |
 | `start_session.providerId` / `model` | a catalog provider and one of its models                           | a `model-service` declared for Claude and one of its `models.claude` ids |
+| `start_session.execution`            | per-session execution settings passed to the first turn            | rejected                                                                 |
+
+When an authorized user requests explicit execution settings for a Codex
+session, supply `execution` to the Codex MCP `start_session` tool; omitted fields
+inherit the profile defaults. The bridge sends these settings with both thread
+creation and the first turn without asking for confirmation. Its optional
+`executionVerifiedBeforeTurn` result reports whether the thread-start response
+matched; missing or mismatched readback does not prevent the first turn. That
+readback alone does not prove the first turn's effective permissions. This option
+is unavailable to Claude and Channel callers. A dry run validates the request
+without observing permissions.
 
 `list_sessions.searchTerm` matches message content as well as titles and returns
 `matchedIn` plus a short `match` excerpt and role. Codex searches at most eight

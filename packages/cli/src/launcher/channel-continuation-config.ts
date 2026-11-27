@@ -4,6 +4,10 @@ import { isDeepStrictEqual } from 'node:util'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+// Native Codex may materialize an explicitly inherited normal tier as "default".
+const matchesServiceTier = (actual: unknown, expected: unknown): boolean =>
+  actual === 'priority' ? expected === 'priority' : (actual === null || actual === 'default')
+    && (expected === null || expected === 'default')
 
 export interface ContinuationConfiguration {
   readonly providerId: string
@@ -27,7 +31,9 @@ export function continuationConfiguration(
   if (live && (effective.modelProvider !== live.providerId || effective.model !== live.model)) return undefined
   const providerId = live?.providerId ?? effective.modelProvider
   const model = live?.model ?? effective.model
-  const effort = live?.reasoningEffort ?? effective.reasoningEffort
+  const observedEffort = live?.reasoningEffort ?? effective.reasoningEffort
+  // A native null is an observed inherited choice; an absent field remains unknown.
+  const effort = observedEffort === null ? 'inherit' : observedEffort
   const serviceTier = live ? live.serviceTier : effective.serviceTier
   const cwd = effective.cwd
   const profile = effective.activePermissionProfile
@@ -84,9 +90,12 @@ export function continuationStartMatches(value: unknown, expected: unknown): boo
   return typeof requested.providerId === 'string' && started.modelProvider === requested.providerId
     && typeof requested.model === 'string' && started.model === requested.model
     && typeof requested.cwd === 'string' && started.cwd === requested.cwd
-    && Object.hasOwn(requested, 'serviceTier') && started.serviceTier === requested.serviceTier
+    && Object.hasOwn(requested, 'serviceTier') && matchesServiceTier(started.serviceTier, requested.serviceTier)
     && started.approvalsReviewer === requested.approvalsReviewer && started.approvalPolicy === execution.approval
-    && started.reasoningEffort === execution.effort
+    && (execution.effort === 'inherit'
+      ? started.reasoningEffort === null
+        || typeof started.reasoningEffort === 'string' && started.reasoningEffort.length > 0
+      : started.reasoningEffort === execution.effort)
     && isDeepStrictEqual(started.sandbox, requested.sandbox)
     && isDeepStrictEqual(started.activePermissionProfile, requested.permissionProfile)
 }

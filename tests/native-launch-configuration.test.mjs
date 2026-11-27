@@ -10,6 +10,7 @@ describe('owned native launch configuration', () => {
     const environment = {
       CORDISX_NATIVE_CONTROL_SOCKET: '/socket',
       CORDISX_NATIVE_CONTROL_NONCE: 'secret',
+      CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY: '1',
       CORDISX_NATIVE_REAL_CODEX_PATH: '/codex',
       CORDISX_NATIVE_CLI_ENTRY_PATH: '/entry',
       CORDISX_NATIVE_AGENT_MODELS_BINDING: '/binding',

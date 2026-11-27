@@ -52,7 +52,11 @@ describe('native logical destination creation', () => {
     expect(await native.logicalTurnActive('target', 'turn')).toBe(false)
   })
   it('persists source execution choices before accepting the target', async () => {
-    const execution = { read: () => ({ revision: 0 }), set: vi.fn(async (_host, _id, override) => ({ override })) }
+    const execution = {
+      read: () => ({ revision: 0 }),
+      set: vi.fn(async (_host, _id, override) => ({ override })),
+      recordModelSelection: vi.fn(async () => {}),
+    }
     const fence = new ChannelNativeSourceFence(() => false)
     const releaseSource = fence.beginMigration('source')!
     const target = { id: 'new-thread', name: null as string | null, projectId: null, section: null }
@@ -74,7 +78,7 @@ describe('native logical destination creation', () => {
           modelProvider: 'target',
           model: 'new',
           cwd: '/workspace',
-          serviceTier: null,
+          serviceTier: 'default',
           approvalsReviewer: 'user',
           approvalPolicy: 'on-request',
           reasoningEffort: 'low',
@@ -95,6 +99,7 @@ describe('native logical destination creation', () => {
     if ('releaseTarget' in created) created.releaseTarget()
     expect(fence.isMigrating('new-thread')).toBe(false)
     expect(execution.set).toHaveBeenCalledWith('local', 'new-thread', evidence.sourceConfiguration.execution, 0)
+    expect(execution.recordModelSelection).toHaveBeenCalledWith('new-thread', request.target)
     execution.set.mockRejectedValueOnce(new Error('unavailable'))
     expect(await native.createLogicalDestination(request, evidence, fence, () => true)).toMatchObject({
       state: 'created',
@@ -145,7 +150,7 @@ describe('native logical destination creation', () => {
         modelProvider: 'target',
         model: 'new',
         cwd: '/workspace',
-        serviceTier: null,
+        serviceTier: 'default',
         approvalsReviewer: 'user',
         approvalPolicy: 'on-request',
         reasoningEffort: 'low',
@@ -205,7 +210,7 @@ describe('native logical destination creation', () => {
         modelProvider: 'old',
         model: 'old',
         cwd: '/workspace',
-        serviceTier: null,
+        serviceTier: 'default',
         approvalsReviewer: 'user',
         approvalPolicy: 'on-request',
         reasoningEffort: 'low',

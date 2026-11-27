@@ -13,6 +13,8 @@ export interface CodexAppServerOptions {
   readonly modelCatalogPath?: string
   /** Review-only catalogs preserve the selected native provider. */
   readonly modelCatalogPreserveProvider?: boolean
+  /** Experimental owner: make the native account visible without rewriting Codex configuration. */
+  readonly forceNativeOpenAi?: boolean
   /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
   readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
 }
@@ -61,7 +63,11 @@ export function codexAppServerArguments(
 }
 
 /** Local App Server uses the existing Codex login/configuration and receives no injected credential. */
-export function localCodexAppServerArguments(modelCatalogPath?: string, preserveProvider = false): readonly string[] {
+export function localCodexAppServerArguments(
+  modelCatalogPath?: string,
+  preserveProvider = false,
+  forceNativeOpenAi = false,
+): readonly string[] {
   return Object.freeze([
     'app-server',
     '--stdio',
@@ -71,9 +77,9 @@ export function localCodexAppServerArguments(modelCatalogPath?: string, preserve
       ? [
         '-c',
         `model_catalog_json=${tomlString(modelCatalogPath)}`,
-        ...(preserveProvider ? [] : ['-c', 'model_provider="openai"']),
       ]
       : []),
+    ...(forceNativeOpenAi || modelCatalogPath && !preserveProvider ? ['-c', 'model_provider="openai"'] : []),
   ])
 }
 
@@ -174,7 +180,11 @@ export async function startLocalCodexAppServer(
   const launch = options.spawnProcess ?? spawn
   const child = launch(
     config.codexExecutable,
-    localCodexAppServerArguments(options.modelCatalogPath, options.modelCatalogPreserveProvider),
+    localCodexAppServerArguments(
+      options.modelCatalogPath,
+      options.modelCatalogPreserveProvider,
+      options.forceNativeOpenAi,
+    ),
     {
       cwd: config.codexHome,
       env: { ...environment, CODEX_HOME: config.codexHome },

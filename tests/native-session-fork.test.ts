@@ -68,6 +68,38 @@ describe('native fork source inheritance', () => {
     })
     expect(f.calls.some(call => call.type === 'fork-prepare')).toBe(false)
   })
+  it('uses the shared configured recovery for a native OpenAI fork without replacing an explicit request endpoint', async () => {
+    const f = fixture()
+    const fallback = f.controlCall.getMockImplementation()!
+    f.controlCall.mockImplementation(async (type, value) =>
+      type === 'configured-provider'
+        ? { openai_base_url: 'http://127.0.0.1:1234/opaque' }
+        : await fallback(type, value)
+    )
+    const explicit = { ...request, params: { ...request.params, modelProvider: 'openai', model: 'official' } }
+    expect(await inheritNativeFork(explicit, { ...f, nativeOpenAiRecovery: true })).toMatchObject({ handled: true })
+    expect(f.nativeCall).toHaveBeenLastCalledWith(
+      'thread/fork',
+      expect.objectContaining({
+        config: expect.objectContaining({ openai_base_url: 'http://127.0.0.1:1234/opaque' }),
+      }),
+    )
+    const custom = { ...explicit, params: { ...explicit.params, config: { openai_base_url: 'https://custom.test' } } }
+    expect(await inheritNativeFork(custom, { ...f, nativeOpenAiRecovery: true })).toMatchObject({ handled: true })
+    expect(f.nativeCall).toHaveBeenLastCalledWith(
+      'thread/fork',
+      expect.objectContaining({
+        config: expect.objectContaining({ openai_base_url: 'https://custom.test' }),
+      }),
+    )
+  })
+  it('does not prepare native OpenAI recovery when the experiment is disabled', async () => {
+    const f = fixture()
+    const explicit = { ...request, params: { ...request.params, modelProvider: 'openai', model: 'official' } }
+    expect(await inheritNativeFork(explicit, f)).toMatchObject({ handled: true })
+    expect(f.calls.some(call => call.type === 'configured-provider')).toBe(false)
+    expect(f.nativeCall.mock.calls.map(call => call[0])).toEqual(['thread/fork'])
+  })
   it('leaves unknown or conflicting sources unmodified and releases a failed fork lease', async () => {
     const missing = fixture(undefined)
     missing.controlCall.mockResolvedValue(undefined)
@@ -117,5 +149,37 @@ it('honors explicit config service tier without inventing precedence for unknown
     const other = fixture()
     expect(await inheritNativeFork({ ...request, params }, other)).toEqual({ handled: false })
     expect(other.nativeCall).not.toHaveBeenCalled()
+  }
+})
+
+it('accepts an explicit default-tier fork readback but rejects priority or unknown readback', async () => {
+  for (
+    const [requested, observed, accepted] of [
+      [null, 'default', true],
+      [null, null, true],
+      [null, 'priority', false],
+      [null, undefined, false],
+      [null, 'unknown', false],
+      ['priority', 'priority', true],
+      ['priority', 'default', false],
+    ] as const
+  ) {
+    const f = fixture()
+    f.nativeCall.mockImplementation(async (_method: string, params: any) => ({
+      thread: { id: 'child' },
+      modelProvider: params.modelProvider,
+      model: params.model,
+      reasoningEffort: params.config.model_reasoning_effort,
+      serviceTier: observed,
+    }))
+    const result = await inheritNativeFork({ ...request, params: { ...request.params, serviceTier: requested } }, f)
+    expect(result).toMatchObject(
+      accepted ? { handled: true, result: { thread: { id: 'child' } } } : {
+        handled: true,
+        error: { code: -32000 },
+      },
+    )
+    expect(f.nativeCall).toHaveBeenCalledTimes(1)
+    expect(f.calls.at(-1)?.value).toMatchObject({ succeeded: accepted })
   }
 })

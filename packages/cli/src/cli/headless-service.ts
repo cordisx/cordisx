@@ -22,6 +22,7 @@ import { startHeadlessCodexBackend } from '../launcher/headless-codex-backend.js
 import type { AgentBridge } from '../launcher/agent-bridge.js'
 import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
+import { headlessKnownNewThreadDefault } from '../launcher/headless-work-mode.js'
 import { headlessModelSelection } from '../launcher/headless-model-selection.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
@@ -37,6 +38,8 @@ import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { availableHeadlessModelServices, prepareHeadlessModelServices } from '../launcher/headless-model-services.js'
 import { declarationCatalogEntry, projectModelServicesToCodex } from '../launcher/model-service-projection.js'
 import { modelServiceRuntimeEnvironment } from '../launcher/model-service-runtime.js'
+import { nativeOpenAiRecoveryEnabled, startResponsesRecovery } from '../launcher/responses-recovery-composition.js'
+import { prepareResponsesRecoveryRequest } from '../../assets/launcher/native-responses-recovery.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -174,12 +177,25 @@ export async function startHeadlessService(input: {
     ])
     const availableServices = availableHeadlessModelServices(modelServices, credentialEnvironment, input.report)
     const backendEnvironment = { ...modelServiceRuntimeEnvironment(availableServices, credentialEnvironment) }
+    delete backendEnvironment.CORDISX_EXPERIMENTAL_NATIVE_OPENAI_RECOVERY
     if (availableServices.length > 0) {
       const projection = await projectModelServicesToCodex(availableServices, input.codexHome)
       if (projection.providerIds.length !== availableServices.length) {
         throw new Error('HEADLESS_MODEL_SERVICE_PROJECTION_FAILED')
       }
     }
+    const nativeOpenAiRecovery = nativeOpenAiRecoveryEnabled(input.environment)
+    let backend: Awaited<ReturnType<typeof startHeadlessCodexBackend>> | undefined
+    const readRecoveryAccount = async () => {
+      if (!backend) throw new Error('HEADLESS_BACKEND_UNAVAILABLE')
+      return await backend.readRecoveryAccount()
+    }
+    const responsesRecovery = await startResponsesRecovery(
+      input.codexHome,
+      availableServices,
+      nativeOpenAiRecovery ? readRecoveryAccount : undefined,
+    )
+    cleanup.push(() => responsesRecovery.close())
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
@@ -204,7 +220,7 @@ export async function startHeadlessService(input: {
       appId: input.appId,
       profileId: input.profileId,
       report: input.report,
-      knownNewThreadDefault: ['codex-cli 0.149.1', 'codex-cli 0.167.0-alpha.3.2'].includes(version),
+      knownNewThreadDefault: headlessKnownNewThreadDefault(version),
     })
     cleanup.push(() => nativeAuthority.close())
     const authority = nativeAuthority.authority
@@ -239,12 +255,38 @@ export async function startHeadlessService(input: {
       cleanup.push(reviewCatalog.close)
       authority.execution?.bindReviewProvider(reviewCatalog.providerId, reviewCatalog.modelIds)
     }
+    // Keep the Channel's configured default while allowing the native owner to resolve its OpenAI account.
+    const forceNativeOpenAiForRecovery = nativeOpenAiRecovery && version === 'codex-cli 0.172.0'
+      && !catalog && !reviewCatalog
+    const nativeRecoveryReady = async () => {
+      if (!forceNativeOpenAiForRecovery || !backend) return false
+      try {
+        const overrides = await responsesRecovery.prepareConfigured('openai', await readRecoveryAccount())
+        return typeof overrides.openai_base_url === 'string'
+      } catch {
+        return false
+      }
+    }
+    const crossProviderRecoveryReady = async (target: { providerId: string; model: string }) => {
+      if (target.providerId === 'openai') return nativeRecoveryReady()
+      if (!forceNativeOpenAiForRecovery) return false
+      try {
+        const overrides = await responsesRecovery.prepareConfigured(target.providerId)
+        const route = overrides[`model_providers.${target.providerId}`]
+        if (!route || typeof route !== 'object' || Array.isArray(route)) return false
+        const value = route as Record<string, unknown>
+        return value.wire_api === 'responses' && typeof value.base_url === 'string'
+          && /^http:\/\/127\.0\.0\.1:\d+\//u.test(value.base_url)
+      } catch {
+        return false
+      }
+    }
     let native: ChannelNativeSessions | undefined
     let channelTools: ChannelConversationTools | undefined
     let logicalHistory: ((params: unknown) => Promise<unknown>) | undefined
     let guardNativeSource: ((method: string, params: Readonly<Record<string, unknown>>) => () => void) | undefined
     let guardNativeHandoff: ((method: string, params: Readonly<Record<string, unknown>>) => void) | undefined
-    const backend = await startHeadlessCodexBackend({
+    backend = await startHeadlessCodexBackend({
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
@@ -252,6 +294,7 @@ export async function startHeadlessService(input: {
       declaredProviders: availableServices.map(service => declarationCatalogEntry(service, 'codex')),
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
       ...(reviewCatalog ? { modelCatalogPath: reviewCatalog.path, modelCatalogPreserveProvider: true } : {}),
+      ...(forceNativeOpenAiForRecovery ? { forceNativeOpenAiForRecovery, nativeRecoveryReady } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
       contextObserver,
       onRequest: (method, params, id) =>
@@ -270,10 +313,23 @@ export async function startHeadlessService(input: {
         const release = guardNativeSource?.(method, params)
         let effectPossible = false, settled = false
         try {
-          const guarded = (prepared: Readonly<Record<string, unknown>>) => {
-            guardNativeHandoff?.(method, prepared)
+          const guarded = async (prepared: Readonly<Record<string, unknown>>) => {
+            let recovered = prepared
+            try {
+              recovered = await prepareResponsesRecoveryRequest(method, prepared, {
+                readThread: threadId => {
+                  if (!backend) throw new Error('HEADLESS_BACKEND_UNAVAILABLE')
+                  return backend.nativeRequest('thread/read', { threadId, includeTurns: false }) as Promise<
+                    { thread?: { modelProvider?: unknown } }
+                  >
+                },
+                ...(nativeOpenAiRecovery ? { readAccount: readRecoveryAccount } : {}),
+                prepare: responsesRecovery.prepareConfigured,
+              })
+            } catch {}
+            guardNativeHandoff?.(method, recovered)
             effectPossible = true
-            return next(prepared)
+            return next(recovered)
           }
           const result =
             await (authority.nativeRequest ? authority.nativeRequest(method, params, guarded) : guarded(params))
@@ -330,6 +386,18 @@ export async function startHeadlessService(input: {
       configuration: chatConfiguration,
       cwd: workspace || input.cwd,
       nativeVersion: version,
+      ...(forceNativeOpenAiForRecovery && input.environment.CORDISX_HEADLESS_PROVIDER_ID
+          && input.environment.CORDISX_HEADLESS_MODEL_ID
+        ? {
+          fallbackProviderId: input.environment.CORDISX_HEADLESS_PROVIDER_ID,
+          fallbackModel: input.environment.CORDISX_HEADLESS_MODEL_ID,
+        }
+        : {}),
+      ...(forceNativeOpenAiForRecovery
+        ? {
+          crossProviderForkReady: crossProviderRecoveryReady,
+        }
+        : {}),
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,
       name: event => service.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),

@@ -71,6 +71,14 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     const initialOwner = await readSupervisorState(supervisorPaths(home, 'codex', profile))
     expect(initialOwner).toMatchObject({ pid: ready.pid, mode: 'service', serviceCleanup: 'pending' })
     owners.set(ready.pid, initialOwner!.processStartedAt)
+    expect(JSON.parse(await cmd('cli', '--list', '--profile', profile))).toMatchObject({
+      kind: 'list',
+      providers: expect.arrayContaining([expect.objectContaining({
+        providerId: 'fixture-provider',
+        managed: true,
+        models: expect.arrayContaining([expect.objectContaining({ id: 'fixture-model' })]),
+      })]),
+    })
     expect(JSON.parse(await cmd('codex', 'capabilities', '--profile', profile))).toMatchObject({
       status: 'ok',
       capabilities: { modelServices: true, providerCatalog: false, executionSettings: true },

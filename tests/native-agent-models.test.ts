@@ -39,6 +39,32 @@ function fixture() {
 const target = { threadId: 'target-thread', providerId: 'configured', model: 'shared-model' }
 
 describe('Agent model-provider tools', () => {
+  it('checks source authority before forwarding explicit session execution settings', async () => {
+    const f = fixture(), sessions = vi.fn(async () => ({ status: 'started' }))
+    const guard = vi.fn(async (_input: unknown, metadata: unknown) =>
+      (metadata as Record<string, unknown>)?.['openai/threadId'] === 'bound'
+        ? { status: 'rejected', code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' }
+        : undefined
+    )
+    const handler = createNativeAgentModelsHandler({ ...f.authority, sessions, sessionExecutionGuard: guard })
+    const args = { app: 'codex', prompt: 'work', execution: { execution: 'full-access', approval: 'never' } }
+    expect(await handler('session:start_session', args, { 'openai/threadId': 'bound' }))
+      .toMatchObject({ code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' })
+    expect(await handler('session:start_session', args, { 'cordisx/channelContext': 'token' }))
+      .toMatchObject({ code: 'CHANNEL_SESSION_EXECUTION_UNAVAILABLE' })
+    expect(sessions).not.toHaveBeenCalled()
+    expect(await handler('session:start_session', { ...args, app: 'claude' }))
+      .toMatchObject({ reason: 'invalid-arguments' })
+    expect(await handler('session:start_session', args, { 'openai/threadId': 'local' }))
+      .toMatchObject({ status: 'started' })
+    expect(sessions).toHaveBeenCalledExactlyOnceWith('codex', 'start_session', {
+      prompt: 'work',
+      execution: { execution: 'full-access', approval: 'never' },
+      callerSessionId: 'local',
+      verifyExecutionBeforeFirstTurn: true,
+    }, { 'openai/threadId': 'local' })
+  })
+
   it('restricts preparation callers to the bounded history and ready tools', async () => {
     const f = fixture(), channel = vi.fn(async () => ({ status: 'ok' }))
     const handler = createNativeAgentModelsHandler({ ...f.authority, preparing: () => true, channel })
@@ -313,6 +339,11 @@ describe('Agent model-provider tools', () => {
         'channel_policy_set',
       ])
       const startSchema = JSON.stringify(advertised.find((tool: any) => tool.name === 'start_session').inputSchema)
+      expect(advertised.find((tool: any) => tool.name === 'start_session').inputSchema.properties.execution.properties)
+        .toMatchObject({
+          execution: { enum: expect.arrayContaining(['full-access']) },
+          networkAccess: { type: 'boolean' },
+        })
       expect(advertised.find((tool: any) => tool.name === 'channel_remote_history').inputSchema.required)
         .toEqual(['account', 'conversationId', 'kind', 'startTime', 'endTime'])
       const channelSendSchema = advertised.find((tool: any) => tool.name === 'channel_send').inputSchema

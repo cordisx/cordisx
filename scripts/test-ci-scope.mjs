@@ -8,6 +8,42 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const classifier = path.join(root, 'scripts/ci-scope.sh')
+const matrixScript = path.join(root, 'scripts/ci-test-matrix.mjs')
+
+function testMatrix(env) {
+  const output = execFileSync(process.execPath, [matrixScript], { env: { ...process.env, ...env }, encoding: 'utf8' })
+  assert.ok(output.startsWith('matrix='))
+  return JSON.parse(output.slice('matrix='.length))
+}
+
+test('full suites split integration into two distinct shards', () => {
+  for (
+    const env of [
+      { EVENT: 'push', BROWSER: 'false', FULL: 'false', NODE_ALL: 'false' },
+      { EVENT: 'pull_request', BROWSER: 'true', FULL: 'true', NODE_ALL: 'false' },
+      { EVENT: 'pull_request', BROWSER: 'false', FULL: 'false', NODE_ALL: 'true' },
+    ]
+  ) {
+    const matrix = testMatrix(env)
+    assert.ok(matrix.project.includes('integration'))
+    assert.deepEqual(matrix.exclude, [{ project: 'integration' }])
+    assert.deepEqual(matrix.include, [
+      { project: 'integration', shard: '1/2', shard_id: '1' },
+      { project: 'integration', shard: '2/2', shard_id: '2' },
+    ])
+    assert.equal(matrix.project.includes('browser'), env.EVENT === 'push' || env.BROWSER === 'true')
+  }
+})
+
+test('affected PRs keep dynamic integration selection in one job', () => {
+  for (const browser of ['true', 'false']) {
+    const matrix = testMatrix({ EVENT: 'pull_request', BROWSER: browser, FULL: 'false', NODE_ALL: 'false' })
+    assert.ok(matrix.project.includes('integration'))
+    assert.equal(matrix.project.includes('browser'), browser === 'true')
+    assert.equal(matrix.exclude, undefined)
+    assert.equal(matrix.include, undefined)
+  }
+})
 
 function classify({ initial = {}, changes = {}, rename, remove = [], empty = false, outputFile = true }) {
   const cwd = mkdtempSync(path.join(tmpdir(), 'cordisx-ci-scope-'))
@@ -175,8 +211,10 @@ test('empty diff fails closed to the full gate', () => {
 test('CI shares preparation and preserves independent full delivery checks', () => {
   const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
   assert.equal([...workflow.matchAll(/run: npm ci\n/g)].length, 1)
-  assert.match(workflow, /max-parallel: 4/)
+  assert.match(workflow, /max-parallel: 5/)
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs.scope.outputs.matrix\) \}\}/)
+  assert.match(workflow, /args\+=\(--shard "\$SHARD"\)/)
+  assert.ok(workflow.includes("matrix.shard_id || 'all'"))
   for (
     const command of ['check:clean-dev', 'typecheck', 'build', 'check:release', 'check:package', 'check:installed']
   ) {

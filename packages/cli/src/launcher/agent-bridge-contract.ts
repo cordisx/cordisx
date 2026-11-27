@@ -301,6 +301,7 @@ export interface DryRunChecks {
   readonly model: 'ok' | 'remembered' | 'not-requested'
   readonly cwd: 'ok' | 'remembered'
   readonly key: 'ok' | 'remembered' | 'not-required'
+  readonly execution?: 'valid-not-observed'
 }
 
 /** One app + provider + model + cwd combination a start proved works. */
