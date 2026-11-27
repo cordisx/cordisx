@@ -191,6 +191,65 @@ it(
         previous: { revision: 1 },
         candidate: { revision: 2 },
       })
+      const dependentDirectory = await localPackage({
+        root,
+        id: 'dependent',
+        dependencies: [{ id: beforeItem.id, version: beforeItem.version }],
+      })
+      const dependentManifestFile = path.join(dependentDirectory, 'cordisx.plugin.json')
+      const dependentManifest = JSON.parse(await readFile(dependentManifestFile, 'utf8'))
+      await writeFile(
+        dependentManifestFile,
+        JSON.stringify({
+          ...dependentManifest,
+          canonicalSource: 'https://example.test/dependent',
+        }),
+      )
+      const dependentPackage = await stageLocalPluginPackage(homeDir, dependentDirectory)
+      staged.push(dependentPackage)
+      const disabledBase = { ...beforeItem, enabled: false }
+      const disabledDependent = { ...item(dependentPackage, 'dependent-1'), enabled: false }
+      const disabled = { ...before, revision: 5, lastGoodRevision: 5, plugins: [disabledBase, disabledDependent] }
+      const thirdContext = { ...firstContext, rendererId: '3'.repeat(64) }
+      const third = new ServiceRendererIdentityProjection({ homeDir, context: thirdContext, isCurrent: () => true })
+      for (const [activation, pkg] of [[disabledBase, existing!], [disabledDependent, dependentPackage]] as const) {
+        await third.issueInstalled(thirdContext, {
+          id: activation.id,
+          entry: stagedPluginModulePath(homeDir, activation.digest),
+          source: pkg.identitySource,
+          enabled: activation.enabled,
+          config: {},
+          revision: 0,
+          manifest: pkg.manifest.runtimeManifest,
+          package: {
+            version: activation.version,
+            digest: activation.digest,
+            moduleGeneration: activation.moduleGeneration,
+            dependencies: activation.dependencies,
+            canonicalSource: activation.canonicalSource,
+          },
+        }, activation)
+      }
+      const enabled = {
+        ...disabled,
+        recordKind: 'candidate' as const,
+        transactionId: 'enable-with-dependent',
+        revision: 6,
+        plugins: [{ ...disabledBase, enabled: true, moduleGeneration: 'existing-2' }, disabledDependent],
+      }
+      const enable = {
+        transactionId: 'enable-with-dependent',
+        targetId: disabledBase.id,
+        previous: disabled,
+        candidate: enabled,
+      }
+      await expect(third.prepareCandidate(thirdContext, { ...enable, affectedPluginIds: [disabledBase.id] }))
+        .rejects.toThrow('renderer-identity-unavailable')
+      await expect(third.prepareCandidate(thirdContext, {
+        ...enable,
+        affectedPluginIds: [disabledDependent.id, disabledBase.id],
+      })).resolves.toMatchObject({ candidate: { revision: 6 } })
+      third.close()
       firstController.abort()
       expect(() => first.resolve(firstContext, finalAlias, afterItem.id)).toThrow()
       second.close()

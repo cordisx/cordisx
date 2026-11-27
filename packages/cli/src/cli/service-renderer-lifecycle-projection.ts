@@ -1,6 +1,7 @@
 import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import { pluginAffectedClosure } from '../launcher/plugin-activation.js'
 import type { ManagerRendererCommandMethod, OwnerCommandProjection } from './manager-renderer-peer.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
@@ -40,6 +41,15 @@ function record(value: unknown): Record<string, unknown> {
     throw new Error('renderer-identity-lifecycle-unavailable')
   }
   return value as Record<string, unknown>
+}
+
+/** Preflight and execution may enumerate the same owner-validated impact differently. */
+function sameAffectedIds(value: unknown, expected: readonly string[]): value is string[] {
+  if (!Array.isArray(value) || value.length !== expected.length || value.some(id => typeof id !== 'string')) {
+    return false
+  }
+  const actual = new Set(value)
+  return actual.size === expected.length && expected.every(id => actual.has(id))
 }
 
 function activated(candidate: CordisXPluginActivationRecordV1): CordisXPluginActivationRecordV1 {
@@ -141,10 +151,10 @@ export class ServiceRendererLifecycleProjection {
     const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
       !attachmentEqual(before.get(id), after.get(id))
     )
+    const affected = pluginAffectedClosure(input.previous.plugins, input.candidate.plugins)
     if (
-      after.size !== input.candidate.plugins.length || input.affectedPluginIds.length !== changed.length
-      || new Set(input.affectedPluginIds).size !== changed.length || !changed.includes(input.targetId)
-      || changed.some(id => !input.affectedPluginIds.includes(id))
+      after.size !== input.candidate.plugins.length || !changed.includes(input.targetId)
+      || !sameAffectedIds(input.affectedPluginIds, affected)
     ) throw new Error('renderer-identity-lifecycle-unavailable')
     this.assertPair(input.candidate, input.projectedCandidate)
     this.candidate = {
@@ -328,7 +338,7 @@ export class ServiceRendererLifecycleProjection {
         candidate.phase !== 'prepared' || payload.transactionId !== candidate.id
         || payload.transactionEpoch !== candidate.epoch || payload.expectedRegistryEpoch !== this.owner.registryEpoch
         || payload.afterRegistryEpoch !== this.owner.registryEpoch + 1 || payload.targetId !== candidate.targetId
-        || !attachmentEqual(payload.affectedPluginIds, candidate.affected)
+        || !sameAffectedIds(payload.affectedPluginIds, candidate.affected)
         || !attachmentEqual(payload.previous, this.renderer.active)
         || !attachmentEqual(payload.candidate, candidate.renderer)
       ) throw new Error('renderer-identity-lifecycle-unavailable')
@@ -338,7 +348,7 @@ export class ServiceRendererLifecycleProjection {
         transactionEpoch: candidate.epoch,
         expectedRegistryEpoch: this.owner.registryEpoch,
         afterRegistryEpoch: this.owner.registryEpoch + 1,
-        affectedPluginIds: candidate.affected,
+        affectedPluginIds: [...payload.affectedPluginIds as string[]],
         observation: candidate.renderer,
       }
       return this.confirmed(payload, receipt, { ...receipt, observation: candidate.owner }, () => {

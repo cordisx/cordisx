@@ -23,7 +23,9 @@ import {
   readSupervisorState,
   readSupervisorStateResult,
   removeSupervisorState,
+  removeSupervisorStateIfCurrent,
   type SupervisorPaths,
+  supervisorPaths,
   type SupervisorState,
   writeSupervisorState,
 } from './supervisor-state.js'
@@ -96,7 +98,7 @@ async function lock(paths: SupervisorPaths): Promise<() => Promise<void>> {
   }
 }
 
-async function managerPaths(profile?: string): Promise<{ paths: SupervisorPaths; profileId: string }> {
+async function managerPaths(profile?: string): Promise<{ paths: SupervisorPaths; profileId: string; homeDir: string }> {
   const { homeDir, profileId } = await resolveManagerProfile(profile)
   // The owner namespace is run/<app>/<profile>. Keep this sidecar outside it,
   // even if an existing or future adapter itself is named "manager".
@@ -104,6 +106,7 @@ async function managerPaths(profile?: string): Promise<{ paths: SupervisorPaths;
   return {
     paths,
     profileId,
+    homeDir,
   }
 }
 
@@ -152,7 +155,7 @@ export async function ensureManager(
   deploymentFile?: string,
 ): Promise<{ paths: SupervisorPaths; state: SupervisorState }> {
   if (process.platform === 'win32') throw new Error('MANAGER_PRIVATE_ENTRY_UNSUPPORTED')
-  const { paths, profileId } = await managerPaths(profile)
+  const { paths, profileId, homeDir } = await managerPaths(profile)
   const deploymentPath = deploymentFile === undefined ? undefined : path.resolve(deploymentFile)
   let handoffs = 0
   for (;;) {
@@ -165,6 +168,14 @@ export async function ensureManager(
         : await loadManagerDeploymentConfig(deploymentPath, owner.managerConsoleOrigins?.length ?? 0)
       const ownerFingerprint = fingerprint(owner)
       const requestedFingerprint = fingerprint(owner, deployment)
+      const service = await readSupervisorState(supervisorPaths(homeDir, owner.appId, profileId))
+      const serviceOwner = service?.mode === 'service' && service.pid === owner.pid
+        && service.processStartedAt === owner.processStartedAt
+      if (serviceOwner) {
+        if (service.phase === 'starting') throw new Error('MANAGER_OWNER_STARTING')
+        if (service.webStatus === 'disabled') throw new Error('MANAGER_SERVICE_WEB_DISABLED')
+        if (service.webStatus === 'unavailable') throw new Error('MANAGER_SERVICE_WEB_UNAVAILABLE')
+      }
       const active = await inspectActiveState(paths)
       const existing = active?.state
       if (existing) {
@@ -188,6 +199,7 @@ export async function ensureManager(
         retiring = existing
         handoffs++
       } else {
+        if (serviceOwner && service.webStatus !== undefined) throw new Error('MANAGER_SERVICE_WEB_UNAVAILABLE')
         await removeSupervisorState(paths)
         await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
         await chmod(path.dirname(paths.socket), 0o700)
@@ -230,6 +242,140 @@ export async function ensureManager(
         // Node's kill ultimately targets a PID: fence it against process reuse.
         await terminateCreatedManagerChild(child, childIdentity)
         throw new Error('MANAGER_START_TIMEOUT')
+      }
+    } finally {
+      await release()
+    }
+    if (!retiring || !await waitForManagerExit(retiring, 10_000)) throw new Error('MANAGER_STOP_UNCONFIRMED')
+  }
+}
+
+/** Start the Web gateway inside the service owner and retire it with that owner. */
+export async function startServiceManager(input: {
+  readonly homeDir: string
+  readonly profileId: string
+  readonly appId: string
+  readonly generation: string
+  readonly environment: NodeJS.ProcessEnv
+  readonly onUnavailable: () => void
+}): Promise<{ readonly origin: string; close(): Promise<void> }> {
+  const paths = managerRendererGatewayPaths(input.homeDir, input.profileId)
+  let handoffs = 0
+  for (;;) {
+    const release = await lock(paths)
+    let retiring: SupervisorState | undefined
+    try {
+      const owner = await openManagerOwner(input.profileId, input.environment)
+      if (owner.appId !== input.appId || owner.generation !== input.generation || !await owner.isCurrent()) {
+        throw new Error('MANAGER_OWNER_CHANGED')
+      }
+      const deploymentFile = input.environment.CORDISX_WEB_DEPLOYMENT
+      const deployment = deploymentFile === undefined
+        ? undefined
+        : await loadManagerDeploymentConfig(path.resolve(deploymentFile), owner.managerConsoleOrigins?.length ?? 0)
+      const active = await inspectActiveState(paths)
+      if (active) {
+        if (active.state.managerOwnerFingerprint === fingerprint(owner) || handoffs !== 0) {
+          throw new Error('MANAGER_ALREADY_RUNNING')
+        }
+        // An older gateway owns its own shutdown. Do not interrupt its process.
+        retiring = active.state
+        handoffs++
+      } else {
+        await removeSupervisorState(paths)
+        await mkdir(path.dirname(paths.socket), { recursive: true, mode: 0o700 })
+        await chmod(path.dirname(paths.socket), 0o700)
+        const entryDirectory = path.join(paths.directory, 'entries')
+        await recoverManagerEntries(entryDirectory)
+        const startedAt = await processStartIdentity(process.pid)
+        if (!startedAt) throw new Error('MANAGER_PROCESS_UNVERIFIABLE')
+        const instanceToken = randomBytes(32).toString('hex')
+        const web = await startManagerWeb(owner, {
+          rendererGateway: { pid: process.pid, processStartedAt: startedAt, instanceToken },
+          onUnavailable: input.onUnavailable,
+          ...(deployment === undefined ? {} : { publicOrigin: deployment.publicOrigin }),
+          ...(deployment?.publicConsoleOriginTemplates?.length
+            ? { publicConsoleOriginTemplates: deployment.publicConsoleOriginTemplates }
+            : {}),
+        })
+        const ingress = deployment === undefined ? undefined : await startManagerPublicIngress({
+          manager: { publicOrigin: web.origin, localOrigin: web.localOrigin },
+          ...(web.consoleMapping === undefined ? {} : { consoles: web.consoleMapping }),
+          listeners: deployment.listeners,
+          onUnavailable: input.onUnavailable,
+        }).catch(async error => await rejectManagerStartup(error, [async () => await web.close()]))
+        const control = await startSupervisorControlServer({
+          socketPath: paths.socket,
+          token: instanceToken,
+          // The service owns this listener; the Manager command cannot stop it.
+          stop: () => {},
+          canStop: () => false,
+          issueManagerLink: async () => {
+            if (!await owner.isCurrent()) throw new Error('MANAGER_OWNER_CHANGED')
+            return web.issueUrl()
+          },
+          issueManagerEntry: async () => {
+            if (!await owner.isCurrent()) throw new Error('MANAGER_OWNER_CHANGED')
+            return await createManagerEntry(entryDirectory, web)
+          },
+        }).catch(async error =>
+          await rejectManagerStartup(error, [async () => await ingress?.close(), async () => await web.close()])
+        )
+        const state: SupervisorState = {
+          schemaVersion: 1,
+          appId: 'manager',
+          profileId: input.profileId,
+          phase: 'ready',
+          pid: process.pid,
+          processStartedAt: startedAt,
+          instanceToken,
+          createdAt: new Date().toISOString(),
+          version: 'manager-v1',
+          effectiveConfig: fingerprint(owner, deployment),
+          managerOwnerFingerprint: fingerprint(owner),
+          managerPublicOrigin: web.origin,
+          managerOwnedByService: true,
+        }
+        await writeSupervisorState(paths, state).catch(async error =>
+          await rejectManagerStartup(error, [
+            async () => await ingress?.close(),
+            async () => await web.close(),
+            async () => await control.close(),
+          ])
+        )
+        let closed = false
+        return {
+          origin: web.origin,
+          async close() {
+            if (closed) return
+            closed = true
+            const releaseClose = await lock(paths)
+            const errors: unknown[] = []
+            try {
+              const current = await readSupervisorState(paths)
+              const same = current?.instanceToken === instanceToken && current.pid === process.pid
+              for (
+                const close of [
+                  async () => await ingress?.close(),
+                  async () => await web.close(),
+                  async () => await control.close({ preserveSocket: !same }),
+                  async () => {
+                    if (same) await removeSupervisorStateIfCurrent(paths, state)
+                  },
+                ]
+              ) {
+                try {
+                  await close()
+                } catch (error) {
+                  errors.push(error)
+                }
+              }
+            } finally {
+              await releaseClose()
+            }
+            if (errors.length > 0) throw new AggregateError(errors, 'MANAGER_CLEANUP_FAILED')
+          },
+        }
       }
     } finally {
       await release()
@@ -376,6 +522,7 @@ export async function stopManager(profile?: string): Promise<boolean> {
   try {
     state = await activeState(paths)
     if (!state) return false
+    if (state.managerOwnedByService) throw new Error('MANAGER_SERVICE_OWNED')
     if (!await requestSupervisorStop(paths.socket, state.instanceToken)) throw new Error('MANAGER_STOP_UNCONFIRMED')
   } finally {
     await release()

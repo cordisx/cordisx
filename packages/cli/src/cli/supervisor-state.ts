@@ -13,6 +13,8 @@ export interface SupervisorState {
   readonly schemaVersion: 1
   readonly mode?: 'service'
   readonly modelApiUrl?: string
+  /** Availability of the service-owned Web gateway. */
+  readonly webStatus?: 'ready' | 'unavailable' | 'disabled'
   /** Service-owner cleanup receipt for this supervisor generation. */
   readonly serviceCleanup?: 'pending' | 'completed' | 'failed'
   readonly appId: string
@@ -28,6 +30,8 @@ export interface SupervisorState {
   readonly managerOwnerFingerprint?: string
   /** Browser-facing Manager origin, separate from its local owner listener. */
   readonly managerPublicOrigin?: string
+  /** The Manager gateway shares the service owner's process and lifetime. */
+  readonly managerOwnedByService?: boolean
   /** Separate detached group launched by the supervisor, when Host startup reached spawn. */
   readonly hostPid?: number
   readonly hostProcessStartedAt?: string
@@ -140,6 +144,8 @@ function validState(value: unknown): value is SupervisorState {
   return item.schemaVersion === 1
     && (item.mode === undefined || item.mode === 'service')
     && (item.modelApiUrl === undefined || typeof item.modelApiUrl === 'string')
+    && (item.webStatus === undefined || item.mode === 'service'
+        && (item.webStatus === 'ready' || item.webStatus === 'unavailable' || item.webStatus === 'disabled'))
     && (item.serviceCleanup === undefined || item.mode === 'service'
         && (item.serviceCleanup === 'pending' || item.serviceCleanup === 'completed'
           || item.serviceCleanup === 'failed'))
@@ -156,6 +162,7 @@ function validState(value: unknown): value is SupervisorState {
       || typeof item.managerOwnerFingerprint === 'string' && /^[a-f0-9]{64}$/u.test(item.managerOwnerFingerprint))
     && (item.managerPublicOrigin === undefined
       || typeof item.managerPublicOrigin === 'string' && isManagerBrowserOrigin(item.managerPublicOrigin))
+    && (item.managerOwnedByService === undefined || item.managerOwnedByService === true)
     && (item.hostPid === undefined || (Number.isSafeInteger(item.hostPid) && (item.hostPid as number) > 0))
     && (item.hostProcessStartedAt === undefined || typeof item.hostProcessStartedAt === 'string')
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')

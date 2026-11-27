@@ -1,9 +1,9 @@
-# Independent manager
+# CordisX Web (independent manager candidate)
 
 Status: implementation candidate. Publication, real Desktop validation and user
 acceptance are separate gates. The existing injected Manager remains unchanged.
-The candidate supports macOS and Linux; it cannot yet start on Windows because
-user-private entry-file ACLs have not been implemented or verified there.
+The Web gateway supports macOS and Linux. On Windows, service mode still starts,
+but Web is unavailable because private entry-file ACLs have not been verified.
 
 The independent manager is a browser client of one existing profile owner.
 It uses the same management RPC for plugin/source operations and shared model
@@ -12,25 +12,44 @@ When exactly one admitted App renderer is available, plugin configuration and
 service configuration use its existing schema validation and transactional
 apply/rollback path. A renderer that cannot be identified is unavailable.
 
+In service mode, the owner starts the Web gateway in the same process by
+default. The startup result includes `webOrigin` and a one-time `webEntry` file
+URL; open this private entry within 60 seconds. Running the start command again
+reuses the existing service and issues a new entry. Status reports the origin
+without issuing a credential. The gateway stops when the service stops.
+Set `CORDISX_WEB_ENABLED=0` on service startup to disable Web. Service status
+reports Web as `ready`, `disabled`, or `unavailable`. If a running Web listener
+fails, the service continues running and reports Web as `unavailable`; restart
+the service to restore it.
+
 ```bash
-cordisx manager                         # start or reuse the manager; open the browser
+cordisx start --mode service
+cordisx status --mode service
+cordisx stop --mode service
+```
+
+The existing `manager` commands remain available. When targeting a service owner,
+`manager` opens its existing gateway, and `manager stop` cannot stop it separately.
+It also cannot start a separate gateway when the service has disabled Web.
+For a Desktop owner, these commands still manage a separate gateway:
+
+```bash
+cordisx manager                         # open the browser
 cordisx manager open --profile default
-cordisx manager start --profile default  # start without opening a page
+cordisx manager start --profile default  # reuse or start the Desktop gateway
 cordisx manager status --profile default
-cordisx manager stop --profile default   # stop the manager, not the profile owner
+cordisx manager stop --profile default   # Desktop gateway only
 ```
 
 `manager` is a reserved top-level command. An adapter with that name must use the
 explicit `cordisx start manager` form rather than bare `cordisx manager`.
 
-The profile owner must already be running. The manager does not silently start
-or replace an App or service owner. Current App and service modes still acquire
-exclusive profile ownership; this page does not claim concurrent App attachment
-or infer that an adapter is connected. If the owner disappears or is replaced,
-the manager sidecar shuts down. Opening it against a replacement owner waits
-briefly for the previous sidecar to exit; its browser sessions are not reused.
-If that exit cannot be confirmed, opening fails rather than starting another
-sidecar. A new owner must already be running.
+The profile owner must already be running before `manager` opens it. Current App
+and service modes still acquire exclusive profile ownership; this page does not
+claim concurrent App attachment or infer that an adapter is connected. When an
+owner disappears or is replaced, its gateway shuts down and browser sessions are
+not reused. A replacement waits briefly for the previous gateway to exit and
+fails if retirement is unconfirmed.
 
 An owner-private adapter admission primitive can reserve its attached cohort,
 reject new grants and fence remaining peers after a disconnect. The reservation
@@ -174,15 +193,15 @@ unavailable while the fence is held, except for the coordinated Desktop subset
 described above. The separate, explicitly coordinated configured-Channel
 service update retains its existing owner and receipt checks.
 
-By default, the sidecar and managed console gateways listen only on loopback.
-The sidecar communicates with the owner through its private management socket.
+By default, Web and managed console gateways listen only on loopback.
+Web communicates with the owner through its private management socket.
 An optional deployment file adds explicitly configured browser-facing listeners.
 This network mode remains a candidate; it has not been verified on a remote device.
 
 ## Optional network deployment
 
-Start the existing profile owner first. For an HTTPS reverse proxy, a deployment
-file can route the public Manager and console hostnames to one loopback listener:
+For an HTTPS reverse proxy, a deployment file can route the public Manager and
+console hostnames to one loopback listener:
 
 ```json
 {
@@ -191,6 +210,14 @@ file can route the public Manager and console hostnames to one loopback listener
   "listeners": [{ "host": "127.0.0.1", "port": 8787 }]
 }
 ```
+
+```bash
+CORDISX_WEB_DEPLOYMENT=./manager-deployment.json cordisx start --mode service
+```
+
+The service reads this setting on startup; restart the service to change the deployment.
+For a Desktop owner, start the owner first and select the same file when starting
+its separate gateway:
 
 ```bash
 cordisx manager start --profile default --deployment ./manager-deployment.json
@@ -234,13 +261,13 @@ cookies stay in the ingress; each browser view gets a separate origin-scoped
 credential. Configure the service to permit the Manager origin
 when needed. CORS and iframe embedding are separate browser policies.
 
-A running Manager is reused when no deployment file is specified. Starting it
-with a different explicit deployment fails until that Manager is stopped; this
-does not stop the profile owner.
+A running gateway is reused when no deployment file is specified. A different
+explicit deployment is rejected until the owning gateway is restarted. In service
+mode, restarting the service changes both the gateway and owner together.
 
 ## Browser sessions
 
-The sidecar verifies the owner’s startup bundle before serving it. A compatible
+The gateway verifies the owner’s startup bundle before serving it. A compatible
 resource worker can receive the pre-compressed Brotli representation and check
 its decoded length, while older workers and browsers without Brotli support
 receive uncompressed bytes.
@@ -266,7 +293,7 @@ This includes a hard reload, where the fixed resource worker reclaims the page
 before the new authenticated session binds. Requests still queued before owner
 admission are cancelled rather than treated as dispatched writes.
 If an admitted, idle Manager page loses its lifecycle poll connection, it can
-continue when the sidecar confirms that the poll was sealed before dispatch or
+continue when the gateway confirms that the poll was sealed before dispatch or
 completed without offering a command, and the owner confirms the same renderer.
 This recovery is bounded. Otherwise, the same tab may request a refresh using
 its short-lived recovery grant; the owner must confirm that the old renderer
@@ -294,14 +321,15 @@ the manager exits. Browser origin
 checks and Host header checks fence management requests; no API key is placed in
 the URL. The command asks the OS to open the default browser without logging the
 URL. On macOS and Linux the opener receives a temporary HTML file path, not the
-token URL; the sidecar maintains a mode-0700 directory and mode-0600 file until
+token URL; the gateway maintains a mode-0700 directory and mode-0600 file until
 exchange, expiration or shutdown. This protects against other OS users, not
 malicious processes running as the same user. A successful opener command does
 not prove the file was opened in a browser or redeemed. On a trusted local
 terminal without a graphical launcher, an operator may run
 `cordisx manager open --print-url`; that URL is a temporary credential and should
-be transferred only to the device being authorized. Closing the tab clears its browser storage but does not itself stop
-the sidecar; use `manager stop` to stop it.
+be transferred only to the device being authorized. Closing the tab clears its
+browser storage but does not stop Web. Stop the service to retire its gateway, or
+use `manager stop` for a separate Desktop gateway.
 
 The Manager reuses the existing model-service and Marketplace pages. The
 owner-advertised capabilities and eligibility limits above determine which

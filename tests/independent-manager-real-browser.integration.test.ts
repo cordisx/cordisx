@@ -15,6 +15,7 @@ import {
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
+import { assertOwnedServicesStopped, captureOwnedService } from './fixtures/owned-service-cleanup.js'
 import { localPackage } from './suites/plugin-lifecycle.fixtures.js'
 
 const exec = promisify(execFile)
@@ -77,6 +78,9 @@ it.skipIf(chrome === undefined)(
     let first: CdpClient | undefined
     let second: CdpClient | undefined
     let third: CdpClient | undefined
+    let startupRequested = false
+    let failed = false
+    const owners: Awaited<ReturnType<typeof captureOwnedService>>[] = []
     const run = async (...args: string[]) =>
       await exec(process.execPath, [cli!, ...args], { env, cwd: root, timeout: 30_000 })
     try {
@@ -111,15 +115,16 @@ it.skipIf(chrome === undefined)(
       }
       await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), 'dir')
       cli = path.join(root, 'package', 'dist', 'src', 'cli.js')
-      expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
-        .toMatchObject({ status: 'ready', mode: 'service' })
+      startupRequested = true
+      const service = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
+      owners.push(await captureOwnedService(homeDir))
+      expect(service).toMatchObject({ status: 'ready', mode: 'service', webEntry: expect.stringMatching(/^file:/u) })
       const open = async () => {
         const link = new URL((await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!)
         expect(link.search).toBe('')
         return link.href
       }
-      const firstUrl = await open()
-      const secondUrl = await open()
+      const firstUrl = service.webEntry as string
       const launched = launchChrome(chrome!, profile)
       browser = launched.browser
       first = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
@@ -128,7 +133,7 @@ it.skipIf(chrome === undefined)(
       // The startup migration is a real write. Its localStorage removal is the
       // renderer's acknowledgement that the write and readback completed.
       await first.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: `if (location.origin === ${JSON.stringify(new URL(firstUrl).origin)}) {
+        source: `if (location.origin === ${JSON.stringify(service.webOrigin)}) {
           globalThis.__fixtureDialogRoots = []
           const attachShadow = Element.prototype.attachShadow
           Element.prototype.attachShadow = function(options) {
@@ -136,23 +141,22 @@ it.skipIf(chrome === undefined)(
             globalThis.__fixtureDialogRoots.push(root)
             return root
           }
-          let managementReceiver
-          const stableManagementReceiver = raw => {
-            const response = JSON.parse(raw)
-            if (response.ok && response.value?.status === 'applied'
-              && response.value.request?.kind === 'plugin-disable') globalThis.__fixtureDisableApplied = true
-            managementReceiver?.(raw)
-          }
-          Object.defineProperty(window, '__cordisxPluginManagementReceiveV1', {
-            configurable: true,
-            get: () => managementReceiver ? stableManagementReceiver : undefined,
-            set: value => { managementReceiver = value },
-          })
           if (!sessionStorage.getItem('fixture-migration-seeded')) {
             sessionStorage.setItem('fixture-migration-seeded', '1')
             localStorage.setItem('cordisx.manager.marketplaceSources.v2', '[]')
           }
-          const original = window.fetch.bind(window)
+          globalThis.__fixtureHttpFailures = []
+          const send = window.fetch.bind(window)
+          const original = (request, options) => {
+            const result = send(request, options)
+            if (typeof request === 'string' && request.startsWith('/api/')) {
+              const route = request.split('?')[0].replace(/[a-f0-9]{64}/g, '[id]')
+              result.then(response => {
+                if (!response.ok) globalThis.__fixtureHttpFailures.push({ route, status: response.status })
+              }, () => globalThis.__fixtureHttpFailures.push({ route, status: 0 }))
+            }
+            return result
+          }
           window.fetch = (request, options) => {
             if (request === '/api/session' && !sessionStorage.getItem('fixture-exchange-issued')) {
               return original(request, options).then(response => {
@@ -180,7 +184,9 @@ it.skipIf(chrome === undefined)(
         }`,
       })
       await first.send('Page.navigate', { url: firstUrl })
-      const ready = async (page: CdpClient) =>
+      let readinessCheckpoint = 0
+      const ready = async (page: CdpClient) => {
+        const checkpoint = ++readinessCheckpoint
         await vi.waitFor(async () => {
           const state = await page.evaluate<{ ready: boolean; status: string }>(`({
         ready: document.documentElement.dataset.cordisxReady === 'true' && !!globalThis.__cordisxRuntime
@@ -188,7 +194,10 @@ it.skipIf(chrome === undefined)(
         status: document.querySelector('p[role=status]')?.textContent ?? ''
       })`)
           expect(state.ready, state.status).toBe(true)
-        }, { timeout: 45_000 })
+        }, { timeout: 45_000 }).catch(error => {
+          throw new Error(`Browser readiness checkpoint ${checkpoint} failed`, { cause: error })
+        })
+      }
       // The server consumed the bootstrap, but the browser lost the first
       // response. Reload must retry the same tab attempt before bootstrapping.
       await vi.waitFor(async () => {
@@ -360,7 +369,7 @@ it.skipIf(chrome === undefined)(
       expect(resumeCookies.length).toBe(1)
       expect(resumeCookies[0]?.path === `/api/session/resume/${currentResume}`).toBe(true)
       const firstTarget = await first.send('Target.getTargetInfo') as { targetInfo: { targetId: string } }
-      const created = await first.send('Target.createTarget', { url: secondUrl }) as { targetId: string }
+      const created = await first.send('Target.createTarget', { url: await open() }) as { targetId: string }
       const port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
       const socketFor = async (targetId: string): Promise<string> => {
         let socket = ''
@@ -589,18 +598,49 @@ it.skipIf(chrome === undefined)(
         expect(description).toContain('first-browser-plugin')
         expect(description).toContain('dependent-browser-plugin')
       }, { timeout: 20_000 })
+      // A renderer can publish its staged snapshot before the owner finishes
+      // committing. Observe the actual management receipt before the next write.
+      await first.evaluate(`(() => {
+        const send = window.fetch.bind(window)
+        window.fetch = (resource, options) => {
+          const result = send(resource, options)
+          try {
+            const envelope = JSON.parse(options?.body ?? '{}')
+            const payload = JSON.parse(envelope.payload ?? '{}')
+            if (resource === '/api/renderer/binding' && envelope.channel === 'plugin-management'
+              && payload.operation?.kind === 'execute') {
+              result.then(async response => {
+                try {
+                  const receipt = await response.clone().json()
+                  globalThis.__fixtureDisableReceipt = response.ok && receipt.ok
+                    && receipt.value?.status === 'applied' && receipt.value?.request?.kind === 'plugin-disable'
+                      ? 'applied' : 'rejected'
+                } catch {
+                  globalThis.__fixtureDisableReceipt = 'unavailable'
+                }
+              }, () => globalThis.__fixtureDisableReceipt = 'unavailable')
+            }
+          } catch {}
+          return result
+        }
+      })()`)
       await first.evaluate([
         'globalThis.__fixtureDialogRoots',
         "  .find(root => root.querySelector('dialog[open] [data-action=confirm]'))",
         "  .querySelector('[data-action=confirm]').click()",
       ].join('\n'))
-      await vi.waitFor(async () => expect(await first!.evaluate('globalThis.__fixtureDisableApplied')).toBe(true), {
-        timeout: 45_000,
-      })
-      for (const page of [first, second]) {
-        expect((await snapshot(page)).active.plugins.map((item: { enabled: boolean }) => item.enabled))
-          .toEqual([false, false])
-      }
+      await vi.waitFor(
+        async () => expect(await first!.evaluate('globalThis.__fixtureDisableReceipt')).toBe('applied'),
+        {
+          timeout: 45_000,
+        },
+      )
+      await vi.waitFor(async () => {
+        for (const page of [first!, second!]) {
+          expect((await snapshot(page)).active.plugins.map((item: { enabled: boolean }) => item.enabled))
+            .toEqual([false, false])
+        }
+      }, { timeout: 45_000 })
       await change('plugin-enable', 'first-browser-plugin')
       await change('plugin-enable', 'dependent-browser-plugin')
       // pagehide sends a keepalive revoke asynchronously. Wait for its owner
@@ -720,14 +760,41 @@ it.skipIf(chrome === undefined)(
           expect(active.find(item => item.id === 'headless-after-browser')?.enabled).toBe(true)
         }
       }, { timeout: 20_000 })
+    } catch (error) {
+      failed = true
+      if (process.env.CORDISX_TEST_RETAIN_ON_FAILURE === '1') {
+        const pages = await Promise.all([first, second, third].map(async page => {
+          if (!page) return undefined
+          const state = await page.evaluate(`({
+            status: document.querySelector('p[role=status]')?.textContent ?? '',
+            ready: document.documentElement.dataset.cordisxManagerReady ?? '',
+            runtime: !!globalThis.__cordisxRuntime,
+            failures: globalThis.__fixtureHttpFailures ?? [],
+          })`).catch(() => undefined)
+          return { state, diagnostics: page.diagnostics }
+        }))
+        await writeFile(path.join(root, 'browser-diagnostics.json'), JSON.stringify({ pages }), { mode: 0o600 })
+      }
+      throw error
     } finally {
       await first?.close().catch(() => undefined)
       await second?.close().catch(() => undefined)
       await third?.close().catch(() => undefined)
-      if (browser) await stopChrome(browser)
+      let browserCleanupFailure: unknown
+      if (browser) {
+        try {
+          await stopChrome(browser)
+        } catch (error) {
+          browserCleanupFailure = error ?? new Error('test browser exit unconfirmed')
+        }
+      }
       if (cli) {
         await run('manager', 'stop').catch(() => undefined)
         await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(() => undefined)
+      }
+      await assertOwnedServicesStopped(homeDir, owners, startupRequested)
+      if (browserCleanupFailure !== undefined) {
+        throw new Error(`test browser exit unconfirmed; retained ${root}`, { cause: browserCleanupFailure })
       }
       const makeRemovable = async (directory: string): Promise<void> => {
         await chmod(directory, 0o700)
@@ -737,9 +804,13 @@ it.skipIf(chrome === undefined)(
           }
         }
       }
-      await makeRemovable(root)
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      if (failed && process.env.CORDISX_TEST_RETAIN_ON_FAILURE === '1') {
+        console.error(`Retained browser fixture for diagnosis: ${root}`)
+      } else {
+        await makeRemovable(root)
+        await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      }
     }
   },
-  180_000,
+  300_000,
 )

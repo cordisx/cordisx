@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import type { CordisXPluginActivationRecordV1 } from '../../plugin-lifecycle-contracts.js'
-import { PluginActivationStore, pluginDependentClosure, topologicalPluginOrder } from '../plugin-activation.js'
+import { PluginActivationStore, pluginAffectedClosure, topologicalPluginOrder } from '../plugin-activation.js'
 import {
   loadStagedPluginPackage,
   removeStagedPluginPackage,
@@ -296,13 +296,7 @@ function computeImpact(expected: CordisXPluginActivationRecordV1, after: CordisX
   readonly activationOrder: readonly string[]
   readonly drainOrder: readonly string[]
 } {
-  const changed = changedIds(expected, after)
-  const affected = [
-    ...new Set(changed.flatMap(id => [
-      ...pluginDependentClosure(expected.plugins, id),
-      ...pluginDependentClosure(after.plugins, id),
-    ])),
-  ].sort()
+  const affected = pluginAffectedClosure(expected.plugins, after.plugins)
   return {
     affected,
     activationOrder: topologicalPluginOrder(after.plugins).filter(id => affected.includes(id)),

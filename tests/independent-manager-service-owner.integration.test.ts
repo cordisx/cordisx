@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { managerChildEnvironment } from '../packages/cli/src/cli/manager-supervisor.js'
@@ -16,9 +17,11 @@ import {
   usesNamespacedManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import { managerRendererGatewayPaths } from '../packages/cli/src/cli/manager-renderer-gateway.js'
+import { requestSupervisorStop } from '../packages/cli/src/cli/supervisor-control.js'
 import { readSupervisorState } from '../packages/cli/src/cli/supervisor-state.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { MAX_STANDALONE_CONSOLE_ORIGINS } from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
+import { assertOwnedServicesStopped, captureOwnedService } from './fixtures/owned-service-cleanup.js'
 
 const exec = promisify(execFile)
 
@@ -39,6 +42,8 @@ it('connects the independent manager to a real service owner without Channel or 
   env.CORDISX_SUPERVISOR_FINGERPRINT = 'stale'
   env.CORDISX_SUPERVISOR_TOKEN_FILE = path.join(home, 'already-consumed')
   let cli: string | undefined
+  let startupRequested = false
+  const owners: Awaited<ReturnType<typeof captureOwnedService>>[] = []
   const run = async (...args: string[]) =>
     await exec(process.execPath, [cli!, ...args], { env, cwd: home, timeout: 30_000 })
   try {
@@ -70,8 +75,31 @@ it('connects the independent manager to a real service owner without Channel or 
     // Resolve lockfile-installed dependencies without installing or changing the user's system.
     await symlink(path.resolve('node_modules'), path.join(home, 'node_modules'), 'dir')
     cli = path.join(home, 'package', 'dist', 'src', 'cli.js')
-    expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
-      .toMatchObject({ status: 'ready', mode: 'service' })
+    startupRequested = true
+    const service = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
+    owners.push(await captureOwnedService(home))
+    expect(service).toMatchObject({
+      status: 'ready',
+      mode: 'service',
+      webStatus: 'ready',
+      webOrigin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
+      webEntry: expect.stringMatching(/^file:\/\//u),
+      webEntryExpiresInSeconds: 60,
+    })
+    const serviceGateway = await readSupervisorState(managerRendererGatewayPaths(home, 'default'))
+    expect(serviceGateway).toMatchObject({
+      phase: 'ready',
+      pid: service.pid,
+      managerOwnedByService: true,
+      managerPublicOrigin: service.webOrigin,
+    })
+    expect(await readFile(fileURLToPath(service.webEntry), 'utf8')).toContain('location.replace(')
+    expect(
+      await requestSupervisorStop(
+        managerRendererGatewayPaths(home, 'default').socket,
+        serviceGateway!.instanceToken,
+      ),
+    ).toBe(false)
     const endpoint = await readPluginManagementRpcEndpoint(pluginManagementRpcPaths(home, 'codex', 'default'))
     expect(endpoint?.mailboxId).toBeDefined()
     expect(endpoint?.managerConsoleOrigins).toHaveLength(MAX_STANDALONE_CONSOLE_ORIGINS)
@@ -146,6 +174,7 @@ it('connects the independent manager to a real service owner without Channel or 
       profileId: 'default',
       channels: [
         'plugin-management',
+        'owner-document',
         'managed-service-ui',
         'model-services',
         'native-catalog',
@@ -156,7 +185,7 @@ it('connects the independent manager to a real service owner without Channel or 
       generation: expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u),
       rendererId: expect.stringMatching(/^[a-f0-9]{64}$/u),
     })
-    // A separate, authenticated temporary sidecar session exercises the real
+    // A separate, authenticated browser session exercises the real
     // packaged owner's private bootstrap over its bounded Unix socket.
     const managerState = (await readSupervisorState(managerRendererGatewayPaths(home, 'default')))!
     const gateway = {
@@ -308,7 +337,7 @@ it('connects the independent manager to a real service owner without Channel or 
       }),
     ).toEqual({ status: 'unavailable', reason: 'profile-coordination-unavailable' })
     expect(await post('/api/renderer/close', {})).toEqual({ closed: true })
-    // A new sidecar session without a live renderer can apply the same review.
+    // A new browser session without a live renderer can apply the same review.
     const nextLine = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
     const nextUrl = new URL(nextLine)
     expect(nextUrl.origin).toBe(url.origin)
@@ -333,14 +362,20 @@ it('connects the independent manager to a real service owner without Channel or 
         decision,
       }),
     ).toMatchObject({ status: 'ok', result: { outcome: 'applied' } })
-    expect(JSON.parse((await run('manager', 'stop')).stdout)).toEqual({ status: 'stopped' })
+    await expect(run('manager', 'stop')).rejects.toMatchObject({
+      stderr: expect.stringContaining('MANAGER_SERVICE_OWNED'),
+    })
     expect(JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout))
       .toMatchObject({ status: 'ready', mode: 'service' })
+    await run('stop', '--mode', 'service', 'codex', 'default', '--json')
+    expect(await readSupervisorState(managerRendererGatewayPaths(home, 'default'))).toBeUndefined()
+    await expect(fetch(`${url.origin}/`)).rejects.toThrow()
   } finally {
     if (cli) {
       await run('manager', 'stop').catch(() => undefined)
       await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(() => undefined)
     }
+    await assertOwnedServicesStopped(home, owners, startupRequested)
     const makeOwnedFixtureRemovable = async (directory: string): Promise<void> => {
       await chmod(directory, 0o700)
       for (const item of await readdir(directory, { withFileTypes: true })) {

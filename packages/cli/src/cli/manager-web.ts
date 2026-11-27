@@ -115,6 +115,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
   readonly publicOrigin?: string
   /** Browser-facing hostname templates corresponding to the owner's local console listeners. */
   readonly publicConsoleOriginTemplates?: readonly string[]
+  /** A service-owned gateway reports a failed listener to its owner. */
+  readonly onUnavailable?: () => void
 } = {}) {
   type BrowserSession = {
     id: string
@@ -965,6 +967,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       return json(response, 503, { error: category })
     }
   })
+  if (options.onUnavailable) server.on('error', options.onUnavailable)
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {

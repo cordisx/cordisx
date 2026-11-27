@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
-import { normalizePluginActivation } from './plugin-activation.js'
+import { normalizePluginActivation, pluginAffectedClosure } from './plugin-activation.js'
 import {
   type AttachedRendererPeer,
   attachmentEqual,
@@ -206,11 +206,14 @@ export class RendererLifecycleFederation implements PluginLifecycleRuntime {
     try {
       // Candidate generations identify the complete owner-computed impact,
       // including dependents and removed plugins, before any graph is issued.
-      const previous = new Map(input.previous.plugins.map(plugin => [plugin.id, plugin]))
-      const candidate = new Map(input.candidate.plugins.map(plugin => [plugin.id, plugin]))
-      const impacted = [...new Set([...previous.keys(), ...candidate.keys()])]
-        .filter(id => !attachmentEqual(previous.get(id), candidate.get(id)))
-      if (!impacted.includes(input.targetId)) throw new Error('renderer lifecycle candidate has no target change')
+      const impacted = pluginAffectedClosure(input.previous.plugins, input.candidate.plugins)
+      if (
+        !impacted.includes(input.targetId)
+        || attachmentEqual(
+          input.previous.plugins.find(plugin => plugin.id === input.targetId),
+          input.candidate.plugins.find(plugin => plugin.id === input.targetId),
+        )
+      ) throw new Error('renderer lifecycle candidate has no target change')
       const projection: PluginRuntimeMutation = {
         ...input,
         transactionEpoch: `${input.transactionId}:preflight`,

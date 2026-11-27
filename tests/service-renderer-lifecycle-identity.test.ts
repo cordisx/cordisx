@@ -145,6 +145,177 @@ it('accepts only owner-issued document grants for the exact candidate generation
 })
 
 describe('owner-scoped lifecycle identity observations', () => {
+  it('accepts the same affected plugins in execution order without accepting a different impact', () => {
+    const ownerActive = { ...previous, plugins: [provider, extra] }
+    const rendererActive = {
+      ...ownerActive,
+      plugins: [{ ...provider, canonicalSource: alias('1') }, { ...extra, canonicalSource: alias('2') }],
+    }
+    const ownerCandidate: CordisXPluginActivationRecordV1 = {
+      ...ownerActive,
+      recordKind: 'candidate',
+      transactionId: 'disable-1',
+      revision: 4,
+      plugins: ownerActive.plugins.map(item => ({ ...item, enabled: false })),
+    }
+    const rendererCandidate = {
+      ...ownerCandidate,
+      plugins: rendererActive.plugins.map(item => ({ ...item, enabled: false })),
+    }
+    const make = () => {
+      const projection = new ServiceRendererLifecycleProjection({
+        owner: { active: ownerActive, registryEpoch: 7 },
+        renderer: { active: rendererActive, registryEpoch: 7 },
+        rendererId: 'seat',
+        current: () => true,
+        resolve: (value, id) => {
+          const item = value === alias('1') && id === provider.id ? provider : value === alias('2') && id === extra.id
+            ? extra
+            : undefined
+          if (!item) throw new Error('unknown owner-issued alias')
+          return { source: item.canonicalSource, digest: item.digest }
+        },
+      })
+      const sync = projection.project('synchronize', { active: ownerActive, registryEpoch: 7 })
+      sync.receipt!(sync.payload)
+      projection.offer({
+        transactionId: 'disable-1',
+        targetId: 'provider',
+        affectedPluginIds: ['provider', 'extra'],
+        previous: ownerActive,
+        candidate: ownerCandidate,
+        projectedCandidate: rendererCandidate,
+      })
+      const prepare = projection.project('prepare', {
+        transactionId: 'disable-1',
+        transactionEpoch: 'disable-1:epoch',
+        expectedRegistryEpoch: 7,
+      })
+      prepare.receipt!(prepare.payload)
+      return projection
+    }
+    const stage = (affectedPluginIds: string[]) => ({
+      rendererId: 'seat',
+      transactionId: 'disable-1',
+      transactionEpoch: 'disable-1:epoch',
+      expectedRegistryEpoch: 7,
+      afterRegistryEpoch: 8,
+      operation: 'disable',
+      targetId: 'provider',
+      affectedPluginIds,
+      previous: rendererActive,
+      candidate: rendererCandidate,
+      privateGraphs: [],
+    })
+    const affected = ['extra', 'provider']
+    const command = make().project('stage', stage(affected))
+    const receipt = {
+      transactionId: 'disable-1',
+      transactionEpoch: 'disable-1:epoch',
+      expectedRegistryEpoch: 7,
+      afterRegistryEpoch: 8,
+      affectedPluginIds: affected,
+      observation: rendererCandidate,
+    }
+    expect(command.receipt!(receipt)).toEqual({ ...receipt, observation: ownerCandidate })
+    const wrongReceiptOrder = make().project('stage', stage(affected))
+    expect(() => wrongReceiptOrder.receipt!({ ...receipt, affectedPluginIds: ['provider', 'extra'] }))
+      .toThrow('renderer-identity-receipt-invalid')
+    for (const invalid of [['provider', 'provider'], ['provider'], ['provider', 'other']]) {
+      expect(() => make().project('stage', stage(invalid))).toThrow('renderer-identity-lifecycle-unavailable')
+    }
+  })
+
+  it('includes unchanged dependents in the owner-computed impact when enabling a plugin', () => {
+    const disabledProvider = { ...provider, enabled: false }
+    const disabledDependent = {
+      ...extra,
+      enabled: false,
+      dependencies: [{ id: provider.id, version: provider.version }],
+    }
+    const ownerActive = { ...previous, plugins: [disabledProvider, disabledDependent] }
+    const rendererActive = {
+      ...ownerActive,
+      plugins: [
+        { ...disabledProvider, canonicalSource: alias('1') },
+        { ...disabledDependent, canonicalSource: alias('2') },
+      ],
+    }
+    const ownerCandidate: CordisXPluginActivationRecordV1 = {
+      ...ownerActive,
+      recordKind: 'candidate',
+      transactionId: 'enable-1',
+      revision: 4,
+      plugins: [{ ...disabledProvider, enabled: true, moduleGeneration: 'provider-2' }, disabledDependent],
+    }
+    const rendererCandidate = {
+      ...ownerCandidate,
+      plugins: [
+        { ...ownerCandidate.plugins[0]!, canonicalSource: alias('1') },
+        { ...disabledDependent, canonicalSource: alias('2') },
+      ],
+    }
+    const make = () => {
+      const projection = new ServiceRendererLifecycleProjection({
+        owner: { active: ownerActive, registryEpoch: 7 },
+        renderer: { active: rendererActive, registryEpoch: 7 },
+        rendererId: 'seat',
+        current: () => true,
+        resolve: (value, id) => {
+          const item = value === alias('1') && id === provider.id ? provider : value === alias('2') && id === extra.id
+            ? extra
+            : undefined
+          if (!item) throw new Error('unknown owner-issued alias')
+          return { source: item.canonicalSource, digest: item.digest }
+        },
+      })
+      const sync = projection.project('synchronize', { active: ownerActive, registryEpoch: 7 })
+      sync.receipt!(sync.payload)
+      return projection
+    }
+    const offer = (affectedPluginIds: string[]) => ({
+      transactionId: 'enable-1',
+      targetId: 'provider',
+      affectedPluginIds,
+      previous: ownerActive,
+      candidate: ownerCandidate,
+      projectedCandidate: rendererCandidate,
+    })
+    const projection = make()
+    projection.offer(offer(['extra', 'provider']))
+    const prepare = projection.project('prepare', {
+      transactionId: 'enable-1',
+      transactionEpoch: 'enable-1:epoch',
+      expectedRegistryEpoch: 7,
+    })
+    prepare.receipt!(prepare.payload)
+    const command = projection.project('stage', {
+      rendererId: 'seat',
+      transactionId: 'enable-1',
+      transactionEpoch: 'enable-1:epoch',
+      expectedRegistryEpoch: 7,
+      afterRegistryEpoch: 8,
+      operation: 'enable',
+      targetId: 'provider',
+      affectedPluginIds: ['extra', 'provider'],
+      previous: rendererActive,
+      candidate: rendererCandidate,
+      privateGraphs: [],
+    })
+    const receipt = {
+      transactionId: 'enable-1',
+      transactionEpoch: 'enable-1:epoch',
+      expectedRegistryEpoch: 7,
+      afterRegistryEpoch: 8,
+      affectedPluginIds: ['extra', 'provider'],
+      observation: rendererCandidate,
+    }
+    expect(command.receipt!(receipt)).toEqual({ ...receipt, observation: ownerCandidate })
+    expect(() => make().offer(offer(['provider']))).toThrow('renderer-identity-lifecycle-unavailable')
+    expect(() => make().offer(offer(['extra', 'provider', 'other'])))
+      .toThrow('renderer-identity-lifecycle-unavailable')
+  })
+
   it('maps the confirmed stage, publication and cleanup back to the owner and advances the snapshot', () => {
     const f = setup()
     expect(f.projection.confirmedSnapshot()).toEqual({ active: previous, registryEpoch: 7 })

@@ -9,7 +9,7 @@ const MAX_LINE = 8 * 1024
 const DOCK_REFRESH_TIMEOUT_MS = 90_000
 
 export interface SupervisorControlServer {
-  close(): Promise<void>
+  close(options?: { readonly preserveSocket?: boolean }): Promise<void>
 }
 
 /** A mode-0600 Unix-domain control seat; every request carries the instance token. */
@@ -17,6 +17,7 @@ export async function startSupervisorControlServer(input: {
   readonly socketPath: string
   readonly token: string
   readonly stop: () => void
+  readonly canStop?: () => boolean
   readonly readPresentation?: () => Promise<ShortcutPresentation>
   readonly refreshDock?: (recordPath?: string, signal?: AbortSignal) => Promise<boolean>
   readonly issueManagerLink?: () => Promise<string>
@@ -72,7 +73,8 @@ export async function startSupervisorControlServer(input: {
           timer = setTimeout(() => socket.destroy(), DOCK_REFRESH_TIMEOUT_MS)
           socket.end(JSON.stringify({ ok: await input.refreshDock(request.recordPath, controller.signal) }) + '\n')
         } else if (request.command === 'stop') {
-          socket.end('{"ok":true}\n', input.stop)
+          if (input.canStop?.() === false) socket.end('{"ok":false}\n')
+          else socket.end('{"ok":true}\n', input.stop)
         } else throw new Error('unknown control request')
       } catch {
         socket.end('{"ok":false}\n')
@@ -96,13 +98,13 @@ export async function startSupervisorControlServer(input: {
     throw error
   }
   return {
-    async close(): Promise<void> {
+    async close(options): Promise<void> {
       // Presentation must never hold supervisor shutdown behind its deadline.
       for (const socket of connections) socket.destroy()
       await new Promise<void>((resolve, reject) =>
         server.close(error => error === undefined ? resolve() : reject(error))
       )
-      await rm(input.socketPath, { force: true })
+      if (!options?.preserveSocket) await rm(input.socketPath, { force: true })
     },
   }
 }

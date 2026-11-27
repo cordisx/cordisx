@@ -292,11 +292,35 @@ describe('background supervisor publication handshake', () => {
           CORDISX_SUPERVISOR_FINGERPRINT: 'service',
           CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
         }, { platform: 'linux' })
-        await runtime.markServiceReady('http://127.0.0.1:12345', new AbortController().signal)
+        await runtime.markServiceReady('http://127.0.0.1:12345', new AbortController().signal, {
+          status: 'ready',
+          origin: 'http://127.0.0.1:23456',
+        })
         const ready = await readSupervisorState(paths)
-        expect(ready).toMatchObject({ phase: 'ready', serviceCleanup: 'pending' })
+        expect(ready).toMatchObject({
+          phase: 'ready',
+          serviceCleanup: 'pending',
+          webStatus: 'ready',
+          managerPublicOrigin: 'http://127.0.0.1:23456',
+        })
+        await runtime.markServiceWebUnavailable()
+        const withoutWeb = await readSupervisorState(paths)
+        expect(withoutWeb).toMatchObject({
+          phase: 'ready',
+          serviceCleanup: 'pending',
+          webStatus: 'unavailable',
+          modelApiUrl: 'http://127.0.0.1:12345',
+        })
+        expect(withoutWeb?.managerPublicOrigin).toBeUndefined()
         if (outcome === 'replaced') {
-          await writeSupervisorState(paths, { ...ready!, instanceToken: '8'.repeat(64) })
+          await writeSupervisorState(paths, {
+            ...withoutWeb!,
+            instanceToken: '8'.repeat(64),
+            webStatus: 'ready',
+            managerPublicOrigin: 'http://127.0.0.1:23456',
+          })
+          await runtime.markServiceWebUnavailable()
+          expect(await readSupervisorState(paths)).toMatchObject({ webStatus: 'ready' })
         }
         const result = await runtime.markServiceCleanup(
           outcome === 'failed'
@@ -314,6 +338,7 @@ describe('background supervisor publication handshake', () => {
             ...(outcome === 'failed' ? { failure: 'synthetic cleanup failure' } : {}),
           })
           expect(final?.modelApiUrl).toBeUndefined()
+          expect(final?.webStatus).toBeUndefined()
           expect(await runtime.markServiceCleanup({ ok: true })).toBe(false)
         }
       } finally {

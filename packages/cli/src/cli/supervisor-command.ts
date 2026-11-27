@@ -7,6 +7,7 @@ import { open, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
 import { resolveProfileSelection } from './profiles.js'
 import type { CordisXCliInvocation } from './parse.js'
@@ -25,7 +26,9 @@ import {
   updateSupervisorState,
   writeSupervisorState,
 } from './supervisor-state.js'
-import { requestSupervisorStop } from './supervisor-control.js'
+import { requestManagerEntry, requestSupervisorStop } from './supervisor-control.js'
+import { managerRendererGatewayPaths } from './manager-renderer-gateway.js'
+import { validateManagerEntry } from './manager-entry.js'
 import { assertServiceCleanupReceipt } from './service-cleanup-receipt.js'
 import { supervisorEntryArgs } from './supervisor-entry.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
@@ -393,7 +396,13 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
     ...(state.mode === 'service'
-      ? { mode: state.mode, modelApiUrl: state.modelApiUrl ?? null, desktop: 'unavailable' }
+      ? {
+        mode: state.mode,
+        modelApiUrl: state.modelApiUrl ?? null,
+        desktop: 'unavailable',
+        ...(state.webStatus === undefined ? {} : { webStatus: state.webStatus }),
+        ...(state.managerPublicOrigin === undefined ? {} : { webOrigin: state.managerPublicOrigin }),
+      }
       : {}),
     ...(state.startupSurface === undefined ? {} : { startupSurface: state.startupSurface }),
     ...(state.failure === undefined ? {} : { failure: state.failure }),
@@ -466,7 +475,23 @@ async function finishReady(
   ready: ReadyLaunchResult,
 ): Promise<ReadyLaunchResult> {
   if (invocation.mode === 'service') {
-    output(runtime, display(ready.state), invocation.options.json)
+    const paths = managerRendererGatewayPaths(path.dirname(ready.target.configPath), ready.target.selection.profileId)
+    const gateway = await readSupervisorState(paths)
+    let webEntry: string | undefined
+    if (
+      gateway?.managerOwnedByService && gateway.phase === 'ready' && gateway.pid === ready.state.pid
+      && gateway.processStartedAt === ready.state.processStartedAt
+      && gateway.managerPublicOrigin === ready.state.managerPublicOrigin
+    ) {
+      const entry = await requestManagerEntry(paths.socket, gateway.instanceToken)
+      if (entry && await validateManagerEntry(entry, path.join(paths.directory, 'entries'))) {
+        webEntry = pathToFileURL(entry).href
+      }
+    }
+    output(runtime, {
+      ...display(ready.state),
+      ...(webEntry === undefined ? {} : { webEntry, webEntryExpiresInSeconds: 60 }),
+    }, invocation.options.json)
     return ready
   }
   if (

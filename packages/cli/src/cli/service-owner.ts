@@ -31,6 +31,7 @@ import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contr
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
 import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
+import { startServiceManager } from './manager-supervisor.js'
 import { createConfiguredChannelOwner } from './configured-channel-owner.js'
 import {
   includeClientLifecycleFence,
@@ -75,6 +76,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let terminalProvider: ReturnType<typeof createServiceTerminalProvider> | undefined
       let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
       let managerChannel: ReturnType<typeof createManagerChannelCredentials> = undefined
+      let serviceManager: Awaited<ReturnType<typeof startServiceManager>> | undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let rendererLifecycle: ServiceRendererLifecycle | undefined
@@ -86,13 +88,36 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererPermissionConsumers: ServiceOwnerPermissionConsumers | undefined
       let ownerOpen = true
       let serviceReady = false
+      let webUnavailable = false
+      let webRetirement: Promise<void> | undefined
+      let webRetirementFailure: unknown
       let failure: unknown
+      const retireUnavailableWeb = () => {
+        webRetirement ??= (async () => {
+          try {
+            await supervisor.markServiceWebUnavailable()
+          } catch (error) {
+            diagnostic({ event: 'service-web-status-failed', ...diagnosticError(error) })
+          }
+          try {
+            await serviceManager?.close()
+            serviceManager = undefined
+          } catch (error) {
+            webRetirementFailure ??= error ?? new Error('service web cleanup failed')
+            diagnostic({ event: 'service-web-cleanup-failed', ...diagnosticError(error) })
+          }
+        })()
+      }
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
       }
       lifetime.signal.addEventListener('abort', stopServices, { once: true })
       try {
         lifetime.signal.throwIfAborted()
+        const webEnabled = environment.CORDISX_WEB_ENABLED
+        if (webEnabled !== undefined && webEnabled !== '0' && webEnabled !== '1') {
+          throw new Error('invalid CordisX Web setting')
+        }
         releaseRuntimeOwner = await acquireProfileRuntimeOwner(homeDir, profileId)
         const loadPolicies = async () =>
           (await loadHomeConfig(configPath)).permissions.filter(
@@ -447,8 +472,30 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             }),
           codex,
         })
-        await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
+        if (webEnabled !== '0' && process.platform !== 'win32') {
+          serviceManager = await startServiceManager({
+            homeDir,
+            profileId,
+            appId,
+            generation,
+            environment,
+            onUnavailable: () => {
+              webUnavailable = true
+              if (serviceReady) retireUnavailableWeb()
+            },
+          })
+        }
+        const webStatus = webEnabled === '0'
+          ? 'disabled'
+          : webUnavailable || serviceManager === undefined
+          ? 'unavailable'
+          : 'ready'
+        await supervisor.markServiceReady(api.baseUrl, lifetime.signal, {
+          status: webStatus,
+          ...(webStatus === 'ready' ? { origin: serviceManager!.origin } : {}),
+        })
         serviceReady = true
+        if (webUnavailable) retireUnavailableWeb()
         diagnostic({ event: 'service-ready' })
         await waitForAbort(lifetime.signal)
       } catch (error) {
@@ -458,6 +505,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         lifetime.signal.removeEventListener('abort', stopServices)
         for (
           const close of [
+            () => webRetirement,
+            () => serviceManager?.close(),
             () => api?.close(),
             async () => {
               if (rendererBootstrap && !await rendererBootstrap.close()) {
@@ -487,6 +536,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             failure ??= error ?? new Error('service cleanup failed')
           }
         }
+        if (webRetirementFailure !== undefined) failure ??= webRetirementFailure
         let cleanupRecorded = false
         if (serviceReady) {
           try {

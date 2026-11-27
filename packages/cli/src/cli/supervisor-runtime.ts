@@ -103,7 +103,12 @@ export async function createSupervisorRuntime(
     account?: NativeAccountCapabilityDescriptor,
     signal?: AbortSignal,
   ) => Promise<void>
-  readonly markServiceReady: (modelApiUrl: string, signal: AbortSignal) => Promise<void>
+  readonly markServiceReady: (
+    modelApiUrl: string,
+    signal: AbortSignal,
+    web?: { readonly status: 'ready' | 'unavailable' | 'disabled'; readonly origin?: string },
+  ) => Promise<void>
+  readonly markServiceWebUnavailable: () => Promise<void>
   readonly markServiceCleanup: (
     outcome: { readonly ok: true } | { readonly ok: false; readonly failure: string },
   ) => Promise<boolean>
@@ -392,7 +397,7 @@ export async function createSupervisorRuntime(
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
     },
-    async markServiceReady(modelApiUrl, signal) {
+    async markServiceReady(modelApiUrl, signal, web) {
       if (!home || !app || !profile || !supervisorToken || !control) throw new Error('Missing service supervisor owner')
       const paths = supervisorPaths(home, app, profile)
       const owner = await readSupervisorState(paths)
@@ -406,12 +411,30 @@ export async function createSupervisorRuntime(
           owner,
           latest =>
             latest.phase === 'starting' && !signal.aborted
-              ? { ...latest, phase: 'ready', modelApiUrl, serviceCleanup: 'pending' }
+              ? {
+                ...latest,
+                phase: 'ready',
+                modelApiUrl,
+                serviceCleanup: 'pending',
+                ...(web === undefined ? {} : { webStatus: web.status }),
+                ...(web?.origin === undefined ? {} : { managerPublicOrigin: web.origin }),
+              }
               : undefined,
         )
       ) throw new Error('Service supervisor is no longer starting')
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
+    },
+    async markServiceWebUnavailable() {
+      if (!home || !app || !profile || !supervisorToken) return
+      const paths = supervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return
+      await updateSupervisorState(paths, owner, latest => {
+        if (latest.mode !== 'service' || latest.phase !== 'ready') return undefined
+        const { managerPublicOrigin: _managerPublicOrigin, ...withoutOrigin } = latest
+        return { ...withoutOrigin, webStatus: 'unavailable' }
+      })
     },
     async markServiceCleanup(outcome): Promise<boolean> {
       if (!home || !app || !profile || !supervisorToken) return false
@@ -423,7 +446,12 @@ export async function createSupervisorRuntime(
       ) return false
       return await updateSupervisorState(paths, owner, latest => {
         if (latest.mode !== 'service' || latest.serviceCleanup !== 'pending') return undefined
-        const { modelApiUrl: _modelApiUrl, ...withoutEndpoint } = latest
+        const {
+          modelApiUrl: _modelApiUrl,
+          managerPublicOrigin: _managerPublicOrigin,
+          webStatus: _webStatus,
+          ...withoutEndpoint
+        } = latest
         if (outcome.ok) {
           if (latest.phase !== 'ready') return undefined
           return { ...withoutEndpoint, phase: 'stopping', serviceCleanup: 'completed' }
@@ -451,7 +479,13 @@ export async function createSupervisorRuntime(
       ) return
       await updateSupervisorState(paths, current, latest => {
         if (latest.phase === 'stopping' || latest.phase === 'failed') return undefined
-        const { cdpEndpoint: _cdpEndpoint, modelApiUrl: _modelApiUrl, ...withoutEndpoint } = latest
+        const {
+          cdpEndpoint: _cdpEndpoint,
+          modelApiUrl: _modelApiUrl,
+          managerPublicOrigin: _managerPublicOrigin,
+          webStatus: _webStatus,
+          ...withoutEndpoint
+        } = latest
         return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
       })
     },

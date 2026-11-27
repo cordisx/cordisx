@@ -9,6 +9,7 @@ import {
 } from '../permission-persistence.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import { stagedPluginModulePath } from '../launcher/plugin-package.js'
+import { pluginAffectedClosure } from '../launcher/plugin-activation.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
@@ -198,10 +199,12 @@ export class ServiceRendererIdentityProjection {
     const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
       !attachmentEqual(before.get(id), after.get(id))
     )
+    const affected = pluginAffectedClosure(captured.previous.plugins, next.plugins)
     if (
-      after.size !== next.plugins.length || changed.length !== captured.affectedPluginIds.length
-      || new Set(captured.affectedPluginIds).size !== changed.length || !changed.includes(captured.targetId)
-      || changed.some(id => !captured.affectedPluginIds.includes(id))
+      after.size !== next.plugins.length || !changed.includes(captured.targetId)
+      || affected.length !== captured.affectedPluginIds.length
+      || new Set(captured.affectedPluginIds).size !== affected.length
+      || affected.some(id => !captured.affectedPluginIds.includes(id))
     ) throw new Error('renderer-identity-unavailable')
     const unavailable = new Set(
       [...this.plugins].flatMap(([id, alias]) => this.aliases.get(alias)?.unavailable ? [id] : []),
