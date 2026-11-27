@@ -13,6 +13,10 @@ export class ChannelNativeProviderRecovery {
         params: Readonly<Record<string, unknown>>,
       ) => Promise<unknown>
       readonly confirmedResumeTarget?: (threadId: string) => Promise<{ providerId: string; model: string } | undefined>
+      readonly configuration?: Pick<
+        import('./codex-chat-configuration.js').CodexChatConfiguration,
+        'captureObservation'
+      >
     },
   ) {}
 
@@ -44,6 +48,7 @@ export class ChannelNativeProviderRecovery {
   }
 
   async restore(threadId: string, providerId: string, fence: ChannelNativeSourceFence) {
+    const observe = this.input.configuration?.captureObservation(threadId)
     const result = object(
       await this.input.nativeRequest(
         'thread/resume',
@@ -59,6 +64,7 @@ export class ChannelNativeProviderRecovery {
     ) {
       return undefined
     }
+    await observe?.(result)
     return { providerId, model: result.model }
   }
 }
