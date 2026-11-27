@@ -183,7 +183,7 @@ export class ChatExecutionPreferences {
   async recordModelSelection(
     threadId: string,
     selection?: { providerId: string; model: string } | null,
-    expected?: { value: ChatExecutionRecord['modelSelection'] },
+    expected?: { value: ChatExecutionRecord['modelSelection']; record?: ChatExecutionRecord },
   ) {
     if (
       !identity(threadId) || selection && (
@@ -203,7 +203,10 @@ export class ChatExecutionPreferences {
         revision: 0,
         application: 'unknown' as const,
       }
-      if (expected && !isDeepStrictEqual(record.modelSelection, expected.value)) {
+      if (
+        expected && (!isDeepStrictEqual(record.modelSelection, expected.value)
+          || expected.record !== undefined && !isDeepStrictEqual(record, expected.record))
+      ) {
         throw new Error('MODEL_SELECTION_CHANGED')
       }
       if (selection === null) delete record.modelSelection

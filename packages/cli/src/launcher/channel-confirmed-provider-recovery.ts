@@ -87,20 +87,49 @@ export async function recoverConfirmedChannelProvider(input: {
     })
     if (!preserved) return true
     const savedSetting = structuredClone(store.snapshot().taskSettings[source]!)
-    const original = await native.providerRecovery.restore(source, probe.sourceProvider, fence)
-    if (!original || !await native.idle(source, true)) {
-      await unknown()
-      return true
-    }
     const execution = native.executionPreferences()
     if (!execution) {
       await unknown()
       return true
     }
     await execution.settled()
-    const previous = execution.read('local', source)?.modelSelection
+    const beforeRestore = execution.read('local', source)
+    if (!execution.observationConfirmed(source)) {
+      await unknown()
+      return true
+    }
+    if (beforeRestore?.modelSelection === undefined) {
+      // Older records have no modelSelection marker. Promote only the exact
+      // applied target before native resume can replace effective with source.
+      if (
+        !beforeRestore || beforeRestore.application !== 'applied'
+        || beforeRestore.appliedRevision !== undefined && beforeRestore.appliedRevision !== beforeRestore.revision
+        || beforeRestore.effective?.modelProvider !== target.providerId
+        || beforeRestore.effective?.model !== target.model
+      ) {
+        await unknown()
+        return true
+      }
+      await execution.recordModelSelection(source, target, { value: undefined, record: beforeRestore })
+    } else if (
+      beforeRestore.modelSelection.status !== 'confirmed'
+      || beforeRestore.modelSelection.providerId !== target.providerId
+      || beforeRestore.modelSelection.model !== target.model
+    ) {
+      await unknown()
+      return true
+    }
+    const original = await native.providerRecovery.restore(source, probe.sourceProvider, fence)
+    if (!original || !await native.idle(source, true)) {
+      await unknown()
+      return true
+    }
+    await execution.settled()
+    const afterRestore = execution.read('local', source)
+    const previous = afterRestore?.modelSelection
     if (
-      !previous || previous.status !== 'confirmed'
+      !beforeRestore || afterRestore?.revision !== beforeRestore.revision
+      || !execution.observationConfirmed(source) || !previous || previous.status !== 'confirmed'
       || !isDeepStrictEqual({ providerId: previous.providerId, model: previous.model }, target)
         && !isDeepStrictEqual({ providerId: previous.providerId, model: previous.model }, original)
     ) {
@@ -150,6 +179,9 @@ export async function recoverConfirmedChannelProvider(input: {
       state.jobs[job.id]?.state === 'queued' && state.jobs[job.id]?.sessionId === source
       && state.jobs[job.id]?.bindingId === job.bindingId
       && isDeepStrictEqual(state.taskSettings[source], savedSetting)
+      && execution.observationConfirmed(source)
+      && execution.read('local', source)?.revision === beforeRestore.revision
+      && isDeepStrictEqual(execution.read('local', source)?.modelSelection, { status: 'confirmed', ...original })
       && state.policyRevision === before.policyRevision && state.taskConfigRevision === before.taskConfigRevision
       && (event.kind === 'group'
         ? isDeepStrictEqual(confirmedGroupRecoveryScope(state, event, profileId, source, job, target, selection), admin)
