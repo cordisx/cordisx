@@ -33,6 +33,7 @@ type Session = {
 export type OwnerAdapterSessionOperation =
   | { readonly action: 'open'; readonly pid: number; readonly processStartedAt: string }
   | { readonly action: 'admit' | 'close'; readonly sessionId: string; readonly grant: string }
+  | { readonly action: 'model-services-read'; readonly sessionId: string; readonly grant: string }
   | { readonly action: 'poll'; readonly sessionId: string; readonly grant: string; readonly timeoutMs: number }
   | { readonly action: 'acknowledge'; readonly sessionId: string; readonly grant: string; readonly receipt: unknown }
   | { readonly action: 'lifecycle'; readonly sessionId: string; readonly grant: string; readonly payload: unknown }
@@ -80,6 +81,7 @@ export class OwnerAdapterSessions {
       readonly lifecycle?: (payload: unknown) => Promise<unknown>
       readonly management?: (payload: unknown) => Promise<unknown>
       readonly document?: (payload: unknown, context: OwnerAdapterDocumentContext) => Promise<unknown>
+      readonly modelServicesRead?: () => Promise<unknown>
       readonly artifact?: (payload: unknown, signal: AbortSignal) => Promise<unknown>
       readonly ownerCurrent: () => boolean
       readonly now?: () => number
@@ -285,6 +287,21 @@ export class OwnerAdapterSessions {
       : undefined
     const read = operation === 'load'
     return await this.invoke(sessionId, grant, payload, this.input.document, read, true)
+  }
+
+  /** Read only the owner's redacted shared model-service snapshot. */
+  async requestModelServicesRead(sessionId: string, grant: string): Promise<
+    { readonly available: true; readonly value: unknown } | { readonly available: false }
+  > {
+    if (!this.input.modelServicesRead) return { available: false }
+    return await this.invoke(
+      sessionId,
+      grant,
+      undefined,
+      async () => await this.input.modelServicesRead!(),
+      false,
+      true,
+    )
   }
 
   /** Artifact downloads belong to the service and cancellation is scoped to the initiating adapter. */

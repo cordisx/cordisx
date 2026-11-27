@@ -305,6 +305,13 @@ export async function prepareNativeSubmissionBootstrap(
           } catch { /* Diagnostics must not change native submission startup. */ }
         }
         reportStage('native-submission-completion-start')
+        const clientScope = completeOptions.nativeClientScope ?? completeOptions.managedCatalog
+        if (
+          completeOptions.nativeClientScope && completeOptions.managedCatalog
+          && (path.resolve(completeOptions.nativeClientScope.homeDir)
+              !== path.resolve(completeOptions.managedCatalog.homeDir)
+            || completeOptions.nativeClientScope.profileId !== completeOptions.managedCatalog.profileId)
+        ) throw new Error('native client profile scope is ambiguous')
         let channelSession: import('./channel-native-sessions.js').ChannelNativeSessions | undefined
         if (completeOptions.contextObserver) {
           contextObserver = completeOptions.contextObserver
@@ -586,6 +593,9 @@ export async function prepareNativeSubmissionBootstrap(
           completeOptions.defaultProviderId && completeOptions.defaultModelId
           && activation.startup?.providerReference(completeOptions.defaultProviderId) === undefined
         ) {
+          // Do not reject a valid service-owned selection just because its
+          // first asynchronous catalog read has not returned yet.
+          await providerSources.refreshForSelection()
           const launchProvider = (await catalog()).find(provider =>
             provider.providerId === completeOptions.defaultProviderId
           )
@@ -627,19 +637,25 @@ export async function prepareNativeSubmissionBootstrap(
         const homeConfigPath = completeOptions.managedCatalog === undefined
           ? undefined
           : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
+        if (completeOptions.ownerModelServicesRead && homeConfigPath) {
+          throw new Error('model-service authority is ambiguous')
+        }
+        const modelServices = completeOptions.ownerModelServicesRead
+          ? { read: completeOptions.ownerModelServicesRead }
+          : homeConfigPath === undefined
+          ? undefined
+          : {
+            read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
+            save: async (request: import('../model-service-contracts.js').ModelServicesSaveRequest) => {
+              const parsed = parseModelServicesSaveRequest(request)
+              return parsed === undefined
+                ? { status: 'rejected' as const, code: 'invalid' as const }
+                : await saveModelServices(homeConfigPath, parsed)
+            },
+          }
         const cdp = createNativeSubmissionCdpAuthority({
           ...(discovered.accountCapability ? { accountCapability: discovered.accountCapability } : {}),
-          ...(homeConfigPath === undefined ? {} : {
-            modelServices: {
-              read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
-              save: async request => {
-                const parsed = parseModelServicesSaveRequest(request)
-                return parsed === undefined
-                  ? { status: 'rejected', code: 'invalid' }
-                  : await saveModelServices(homeConfigPath, parsed)
-              },
-            },
-          }),
+          ...(modelServices === undefined ? {} : { modelServices }),
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           ...(taskExecutionUrl === undefined ? {} : { taskExecutionUrl }),
           submissionAvailable: discovered.transforms.length > 0,
@@ -674,7 +690,7 @@ export async function prepareNativeSubmissionBootstrap(
         const { composition: logicalComposition, migration: logicalMigration } = createDesktopLogicalServices({
           control,
           owner: completeOptions.logicalOwner,
-          profileId: completeOptions.managedCatalog?.profileId,
+          profileId: clientScope?.profileId,
           identity: scope => cdp.desktopIdentity(scope),
           ownerIdentity: scope => cdp.desktopOwnerIdentity(scope),
           dispatchIdentity: scope =>
@@ -739,11 +755,11 @@ export async function prepareNativeSubmissionBootstrap(
           creationDefaults: async () => (await chatExecution?.creationDefaults())?.settings ?? {},
           ...(startup === undefined ? {} : { startup }),
           directory: path.join(
-            completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
+            clientScope?.homeDir ?? path.dirname(codexHome),
             'apps',
             'codex',
             'profiles',
-            completeOptions.managedCatalog?.profileId ?? 'default',
+            clientScope?.profileId ?? 'default',
             'agent-task-intents',
           ),
           catalog: () => chatConfiguration?.catalog() ?? catalog(),
@@ -893,7 +909,7 @@ export async function prepareNativeSubmissionBootstrap(
           integrationStatus: async input =>
             agentBridge === undefined
               ? await createIntegrationStatus({
-                cordisxHomeDir: completeOptions.managedCatalog!.homeDir,
+                cordisxHomeDir: clientScope?.homeDir ?? path.dirname(codexHome),
                 caller: 'codex',
               })(input)
               : await agentBridge.status(input),

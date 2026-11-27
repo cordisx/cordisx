@@ -132,18 +132,33 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
 )
 
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
-  'continues to reject an unsupported enabled configured plugin',
+  'isolates an unsupported enabled configured plugin without exposing its configuration',
   async () => {
     const f = await fixture({ protectProfileInputs: true })
+    const entry = path.join(f.root, 'unsupported.mjs')
+    const privateValue = `fixture-private-${secret()}`
     try {
       await writeFile(
         f.configPath,
         JSON.stringify({
           ...createDefaultHomeConfig(),
-          plugins: [{ id: 'unsupported', entry: path.join(f.root, 'unsupported.mjs'), enabled: true }],
+          plugins: [{ id: 'unsupported', entry, enabled: true, config: { token: privateValue } }],
         }),
       )
-      expect(await f.call({ action: 'prepare' })).toEqual({ status: 'unavailable' })
+      const prepared = await f.call({ action: 'prepare' }) as any
+      expect(prepared).toMatchObject({ status: 'ok', value: { status: 'ok', privateGraphs: [] } })
+      const completed = await f.call({ action: 'complete', managerOrigin: origin, graphs: [] }) as any
+      expect(completed).toMatchObject({ status: 'ok', value: { status: 'ok' } })
+      const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+      try {
+        const bundle = bytes.toString('utf8')
+        expect(bundle).toContain('unsupported')
+        expect(bundle).toMatch(/standaloneUnavailable\s*:\s*(?:true|!0)/u)
+        expect(bundle).not.toContain(entry)
+        expect(bundle).not.toContain(privateValue)
+      } finally {
+        bytes.fill(0)
+      }
     } finally {
       await f.close()
     }

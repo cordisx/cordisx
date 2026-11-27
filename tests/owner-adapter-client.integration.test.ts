@@ -55,6 +55,7 @@ it('connects two native sessions to one authenticated service and reports owner 
       }
       return { status: 'loaded', snapshot: { revision: documentWrites.mock.calls.length } }
     },
+    modelServicesRead: async () => ({ status: 'ok', revision: 'owner-revision', services: [] }),
     artifact: async (value, signal) => {
       const request = value as { requestId: string }
       if (request.requestId === 'preview-one') return { readme: 'fixture' }
@@ -103,8 +104,10 @@ it('connects two native sessions to one authenticated service and reports owner 
     expect(second.snapshot).toEqual(snapshot)
     expect(first.rendererId).not.toBe(second.rendererId)
     const handle = async (command: { payload: unknown }) => ({ ok: true as const, value: command.payload })
+    expect(await first.modelServicesRead()).toEqual({ status: 'rejected', code: 'unavailable' })
     expect(await first.admit(handle)).toBe(true)
     expect(await second.admit(handle)).toBe(true)
+    expect(await first.modelServicesRead()).toEqual({ status: 'ok', revision: 'owner-revision', services: [] })
     await expect(first.documentBinding({ operation: 'replace' })).resolves.toEqual({
       status: 'unavailable',
       code: 'host-unavailable',

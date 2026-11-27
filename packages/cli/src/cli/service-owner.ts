@@ -52,6 +52,7 @@ import {
   previewMarketplaceArtifactPackage,
 } from '../launcher/marketplace-artifact.js'
 import { createOwnerAdapterDocuments } from './owner-adapter-documents.js'
+import { readModelServices } from '../launcher/model-service-store.js'
 import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
@@ -310,6 +311,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             snapshot: () => rendererLifecycle!.snapshot(),
             attach: async peer => await rendererLifecycle!.attach(peer),
             document: documents,
+            modelServicesRead: async () => await readModelServices(configPath, environment),
             artifact: async (value, signal) => {
               const request = parseMarketplaceArtifactBindingRequest(value)
               if (request.kind === 'cancel') throw new Error('adapter-artifact-request-invalid')

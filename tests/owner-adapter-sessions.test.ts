@@ -21,6 +21,36 @@ const snapshot = { active, registryEpoch: 3 }
 const processIdentity = { pid: 123, processStartedAt: 'start-1' }
 
 describe('owner adapter sessions', () => {
+  it('allows model-service reads only for admitted clients outside a lifecycle reservation', async () => {
+    const read = vi.fn(async () => ({ status: 'ok', revision: 'owner-revision', services: [] }))
+    const sessions = new OwnerAdapterSessions({
+      scope,
+      adapter: { appId: 'codex', adapterId: 'codex-desktop' },
+      snapshot: () => snapshot,
+      attach: async () => {},
+      ownerCurrent: () => true,
+      identify: async () => 'alive',
+      modelServicesRead: read,
+    })
+    try {
+      const opened = (await sessions.open(processIdentity))!
+      expect(await sessions.requestModelServicesRead(opened.sessionId, opened.grant)).toEqual({ available: false })
+      expect(await sessions.admit(opened.sessionId, opened.grant)).toBe(true)
+      expect(await sessions.requestModelServicesRead(opened.sessionId, opened.grant)).toEqual({
+        available: true,
+        value: { status: 'ok', revision: 'owner-revision', services: [] },
+      })
+      const reservation = sessions.reserve()
+      expect(await sessions.requestModelServicesRead(opened.sessionId, opened.grant)).toEqual({ available: false })
+      expect(reservation.release()).toBe(true)
+      expect(read).toHaveBeenCalledOnce()
+      await sessions.end(opened.sessionId, opened.grant)
+      expect(await sessions.requestModelServicesRead(opened.sessionId, opened.grant)).toEqual({ available: false })
+    } finally {
+      sessions.close()
+    }
+  })
+
   it('admits only a live process after it confirms the owner snapshot', async () => {
     const attach = vi.fn(async peer => {
       expect(await peer.request('synchronize', snapshot)).toEqual(snapshot)

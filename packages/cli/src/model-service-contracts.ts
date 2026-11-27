@@ -82,6 +82,8 @@ export interface ModelServicesSaveRequest {
 
 export interface ModelServicesClient {
   readonly modelServicesAvailable: boolean
+  /** False when this client can inspect the owner but cannot safely write its configuration. */
+  readonly modelServicesWritable?: boolean
   modelServicesRead(): Promise<ModelServicesReadResult>
   modelServicesSave(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult>
 }

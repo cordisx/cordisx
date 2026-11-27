@@ -21,6 +21,7 @@ import type { OwnerAdapterRpcOperation } from './owner-adapter-rpc.js'
 import { parseMarketplaceArtifactBindingRequest } from '../launcher/marketplace-artifact.js'
 import { ownerDocumentBridgeError } from '../launcher/owner-document-rpc.js'
 import { ownerDocumentWriteResultUnknown } from '../durable-document-contracts.js'
+import type { ModelServicesReadResult } from '../model-service-contracts.js'
 
 type Snapshot = Readonly<{
   active: ReturnType<typeof normalizePluginActivation>
@@ -255,6 +256,21 @@ export class OwnerAdapterClient {
           && (payload as Record<string, unknown>).operation === 'replace'
         ? ownerDocumentWriteResultUnknown()
         : ownerDocumentBridgeError()
+    }
+  }
+
+  async modelServicesRead(): Promise<ModelServicesReadResult> {
+    const unavailable = { status: 'rejected' as const, code: 'unavailable' as const }
+    if (this.closed || !this.admitted) return unavailable
+    try {
+      const value = valueOf(await this.request(this.operation('model-services-read'), this.controller.signal))
+      const item = record(value)
+      if (this.closed || !this.admitted) return unavailable
+      return item.status === 'ok' && typeof item.revision === 'string' && Array.isArray(item.services)
+        ? value as ModelServicesReadResult
+        : unavailable
+    } catch {
+      return unavailable
     }
   }
 

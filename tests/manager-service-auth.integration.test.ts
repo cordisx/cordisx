@@ -109,6 +109,7 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
     await requestPluginManagementRpc(paths, endpoint, operation) as Record<string, any>
   return {
     source,
+    projection,
     registration,
     lifecycle,
     request,
@@ -198,6 +199,7 @@ describe('local manager service authentication', () => {
         bindingId: view.bindingId,
       }
       const stale = await f.request(op('prepare-login', target))
+      f.projection.health = 'ready'
       await f.source.snapshot()
       expect(await f.request(op('login', { leaseId: stale.leaseId }))).toEqual({
         status: 'denied',

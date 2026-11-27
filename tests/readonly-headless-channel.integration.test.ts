@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,7 +9,7 @@ import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/sr
 import { openReadonlyHeadlessChannel } from '../packages/cli/src/cli/readonly-headless-channel.js'
 import { channelConfigurationApi } from '../packages/cli/src/cli/renderer-channel-composition.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
-import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
+import { bundledChannelArchive } from '../packages/cli/src/launcher/bundled-plugin.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { CordisXChannelManagerPresentationService } from '../packages/cli/src/renderer/channel-manager-presentation.js'
@@ -25,7 +25,8 @@ import {
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-readonly-channel-'))
-  const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? bundledPluginEntry('channel')
+  const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? path.join(root, 'channel.tgz')
+  if (process.env.CORDISX_CHANNEL_ENTRY_FIXTURE === undefined) await copyFile(bundledChannelArchive(), entry)
   const configPath = path.join(root, 'config.json')
   const configuration = {
     contract: 'cordisx.channel-service-config/v3',

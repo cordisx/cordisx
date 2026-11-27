@@ -163,6 +163,29 @@ describe('remote native provider consumer over private management RPC', () => {
     expect(f.calls.every(call => call.kind === 'list')).toBe(true)
   })
 
+  it('waits for the owner catalog before validating an explicit launch selection', async () => {
+    const f = await fixture()
+    const pending = deferred<void>()
+    f.setGate(pending.promise)
+    const remote = new RemoteTerminalProviderClient(f.source)
+    cleanups.push(() => remote.close())
+    const source = nativeRemoteProviderSource({
+      remote,
+      localSource: () => undefined,
+      localCatalog: async () => [],
+      validateLocal: async () => false,
+    })
+    expect(await source.catalog()).toEqual([])
+    const ready = vi.fn()
+    const refresh = source.refreshForSelection().then(ready)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(ready).not.toHaveBeenCalled()
+    pending.resolve()
+    await refresh
+    expect(await source.catalog()).toMatchObject([{ providerId: 'provider-b', models: [{ id: 'model-b' }] }])
+    expect(f.calls.every(call => call.kind === 'list')).toBe(true)
+  })
+
   it('shares the exact RPC transport with terminal but owns independent leases and closes only its leases', async () => {
     const f = await fixture()
     const terminal = await connectExistingTerminalProvider(f.source)

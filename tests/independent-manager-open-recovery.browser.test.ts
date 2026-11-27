@@ -394,7 +394,9 @@ it.skipIf(chrome === undefined).each(
       await cleanup(async () => {
         if (profile) await rm(profile, { recursive: true, force: true })
       })
-      if (failures.length) throw new AggregateError(failures, 'browser recovery test cleanup failed')
+      if (failures.length) {
+        throw new AggregateError(failures, `browser recovery test cleanup failed: ${failures.map(String).join('; ')}`)
+      }
     }
   },
   60_000,

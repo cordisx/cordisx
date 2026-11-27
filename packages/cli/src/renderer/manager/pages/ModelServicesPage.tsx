@@ -263,8 +263,9 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
               <SharedModelServices
                 client={registry?.standaloneModelServices ?? client}
                 locale={locale}
-                showWhenEmpty={registry?.standaloneModelServices !== undefined}
-                reconcile={registry?.standaloneModelServices !== undefined}
+                showWhenEmpty={registry?.standaloneModelServices !== undefined
+                  || client?.modelServicesWritable === false}
+                reconcile={registry?.standaloneModelServices !== undefined || client?.modelServicesWritable === false}
                 onAvailabilityChange={setSharedAvailable}
               />
             )}

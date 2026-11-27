@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -159,11 +160,11 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
     })
     expect(exchange.status).toBe(200)
     const { token } = await exchange.json() as { token: string }
-    const post = async (route: string) =>
+    const post = async (route: string, input: unknown = {}) =>
       await (await fetch(`${url.origin}${route}`, {
         method: 'POST',
         headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({}),
+        body: JSON.stringify(input),
       })).json()
     expect(await post('/api/renderer/open')).toMatchObject({ status: 'ok' })
     const supportsProfileFence = process.platform === 'darwin' || process.platform === 'linux'
@@ -176,7 +177,9 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
     })
     const configPath = path.join(cordisxHome, 'config.json')
     if (supportsProfileFence) {
-      expect(await post('/api/renderer/bootstrap')).toMatchObject({ status: 'ok' })
+      const jwk = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' })
+      const permissionPublicKey = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }
+      expect(await post('/api/renderer/bootstrap', { permissionPublicKey })).toMatchObject({ status: 'ok' })
       // The owner runs in another process; its renderer fence must stop the
       // normal Home writer rather than merely compare a cached snapshot.
       await expect(persistPermissionPolicies({ configPath }, [policy])).rejects.toThrow(
@@ -261,7 +264,6 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
       result: { outcome: 'applied', operation: 'install', revision: 2 },
     })
   } finally {
-    await manager('stop').catch(() => undefined)
     await command('stop').catch(() => undefined)
     const allowRemoval = async (directory: string) => {
       await chmod(directory, 0o700)

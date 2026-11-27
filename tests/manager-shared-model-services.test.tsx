@@ -55,6 +55,27 @@ function client(available = true) {
 }
 
 describe('Manager shared model services', () => {
+  it('shows a service-owned snapshot without enabling native writes', async () => {
+    const fixture = reactManagerFixture()
+    const { value, modelServicesSave } = client()
+    Object.defineProperty(value, 'modelServicesWritable', { value: false })
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="zh-CN" />)
+      await vi.waitFor(() => expect(value.modelServicesRead).toHaveBeenCalled())
+      expect(fixture.element('[data-shared-model-service="sub2tok"]')).not.toBeNull()
+      expect(fixture.element('.cxms-shared-notice').textContent).toContain('CordisX Web')
+      expect([...fixture.element('.cxms-shared').querySelectorAll('button')].every(button => button.disabled)).toBe(
+        true,
+      )
+      expect(modelServicesSave).not.toHaveBeenCalled()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
   it('omits the empty supplemental section', async () => {
     const fixture = reactManagerFixture()
     const { value } = client()

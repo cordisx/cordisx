@@ -736,7 +736,11 @@ it.skipIf(chrome === undefined)(
         }
       }
       await verifyUnavailable(third)
+      const previousDocument = await third.evaluate<number>('performance.timeOrigin')
       await third.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await third!.evaluate<number>('performance.timeOrigin')).not.toBe(previousDocument)
+      }, { timeout: 15_000 })
       await ready(third)
       await verifyUnavailable(third)
       const peerTarget = await third.send('Target.createTarget', { url: await open() }) as { targetId: string }

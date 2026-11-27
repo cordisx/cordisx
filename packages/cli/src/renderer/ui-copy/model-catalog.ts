@@ -278,5 +278,9 @@ export const MODEL_CATALOG_COPY = {
     en: 'Services could not be refreshed. Check the connection before making more changes.',
     'zh-CN': '服务暂时无法刷新，请检查连接后再修改。',
   },
+  'catalog.sharedServicesReadOnly': {
+    en: 'View only here. To edit, open CordisX Web.',
+    'zh-CN': '此处只读。请在 CordisX Web 中修改。',
+  },
   'catalog.sharedServiceRetryRead': { en: 'Retry', 'zh-CN': '重试' },
 } as const satisfies ProductCopyCatalog<'catalog'>

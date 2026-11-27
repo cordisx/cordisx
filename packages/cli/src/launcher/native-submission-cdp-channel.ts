@@ -109,7 +109,7 @@ export function createNativeSubmissionCdpAuthority(options: {
   /** Top-level `model-service` declarations in the CordisX home config. */
   readonly modelServices?: {
     read(): Promise<ModelServicesReadResult>
-    save(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult>
+    save?(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult>
   }
 }): NativeSubmissionCdpAuthority {
   const states = new Map<string, State>()
@@ -505,14 +505,15 @@ export function createNativeSubmissionCdpAuthority(options: {
           }
           if (envelope.operation === 'modelServicesRead' || envelope.operation === 'modelServicesSave') {
             if (
-              !options.modelServices || input?.generation !== generation || owner.disposed
+              !options.modelServices || envelope.operation === 'modelServicesSave' && !options.modelServices.save
+              || input?.generation !== generation || owner.disposed
               || documents.get(target.id) !== owner || session.isClosed()
             ) throw new Error('Model services unavailable')
             active.add(requestId)
             admitted = true
             const result = envelope.operation === 'modelServicesRead'
               ? await options.modelServices.read()
-              : await options.modelServices.save(input.request as ModelServicesSaveRequest)
+              : await options.modelServices.save!(input.request as ModelServicesSaveRequest)
             if (owner.disposed || documents.get(target.id) !== owner || session.isClosed()) {
               throw new Error('Model services retired')
             }
@@ -926,7 +927,11 @@ export function createNativeSubmissionCdpAuthority(options: {
           : ''
       }${
         options.modelServices
-          ? "modelServicesRead:()=>call('modelServicesRead',{generation}),modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
+          ? `modelServicesRead:()=>call('modelServicesRead',{generation}),${
+            options.modelServices.save
+              ? "modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
+              : ''
+          }`
           : ''
       }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),logicalPrevious:input=>call('logicalPrevious',input),logicalNext:input=>call('logicalNext',input),logicalSourceNavigation:input=>call('logicalSourceNavigation',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionConfirmLogical:input=>call('submissionConfirmLogical',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};

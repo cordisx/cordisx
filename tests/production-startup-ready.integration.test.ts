@@ -17,12 +17,17 @@ it('production onReady publishes with slow v15 apply pending while caller waits 
     expect(adopted).not.toHaveBeenCalled()
     const request = startupTerminalRequests(session.authority, () => undefined)
     expect(await request({ kind: 'wait', waiterId: 'ordinary' })).toEqual({ kind: 'ready' })
-    expect(await request({ kind: 'wait', providerId: 'fast-gateway', model: 'model', waiterId: 'fast' }))
+    expect(await request({ kind: 'wait', providerId: 'fast-gateway', model: 'gateway-model', waiterId: 'fast' }))
       .toEqual({ kind: 'ready' })
+    expect(await request({ kind: 'wait', providerId: 'fast-gateway', model: 'model' })).toMatchObject({
+      kind: 'unavailable',
+      startup: { reason: 'model-unavailable' },
+    })
     const connection = f.lifecycle.nativeActivation().prepareNativeConnection('fast-gateway')
     connection.dispose()
     const slowDone = vi.fn()
-    const slow = request({ kind: 'wait', providerId: 'slow-gateway', model: 'model', waiterId: 'slow' }).then(slowDone)
+    const slow = request({ kind: 'wait', providerId: 'slow-gateway', model: 'gateway-model', waiterId: 'slow' })
+      .then(slowDone)
     await new Promise(resolve => setImmediate(resolve))
     expect(slowDone).not.toHaveBeenCalled()
     expect(adopted).not.toHaveBeenCalled()

@@ -4,6 +4,7 @@ import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import type { CodexChatSettingsGuard } from './codex-chat-settings.js'
 import type { ExistingTerminalProviderSource } from './existing-terminal-provider-rpc.js'
 import type { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
+import type { ModelServicesReadResult } from '../model-service-contracts.js'
 
 export interface NativeSubmissionCatalogOptions {
   readonly chatSettingsGuard?: CodexChatSettingsGuard
@@ -23,6 +24,10 @@ export interface NativeSubmissionCatalogOptions {
   readonly nativeModelDiscovery?: boolean
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
+  /** Profile location for adapter-specific state, without claiming service ownership. */
+  readonly nativeClientScope?: Readonly<{ homeDir: string; profileId: string }>
+  /** The attached service supplies a redacted read-only snapshot. */
+  readonly ownerModelServicesRead?: () => Promise<ModelServicesReadResult>
   readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
   /** `model-service` declarations, merged into the catalog read from `config.toml`. */

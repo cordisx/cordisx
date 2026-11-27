@@ -236,6 +236,8 @@ export async function runServiceAttachedClient(
         codexHome({ ...environment, ...plan.environment }),
         {
           ...catalog,
+          nativeClientScope: { homeDir, profileId: selection.profileId },
+          ownerModelServicesRead: async () => await owner.modelServicesRead(),
           remoteTerminalProvider,
           contextObserver: context.observer,
         },

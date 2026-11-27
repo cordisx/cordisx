@@ -21,6 +21,7 @@ function register(artifactIntegrityValue?: `sha256:${string}`, development = fal
     }),
     configuration: () => ({ register: vi.fn() }),
     configBridge: () => undefined,
+    metadata: () => ({}),
   } as unknown as RuntimeClosureScope
   const manifest = {
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,

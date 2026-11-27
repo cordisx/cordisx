@@ -16,7 +16,7 @@ import { readServiceConfigState } from '../packages/cli/src/config/service-confi
 import type { HostServiceConfigNarrowApi } from '../packages/cli/src/launcher/service-config.js'
 import type { ChannelCredentialBridgeHandler } from '../packages/cli/src/launcher/channel-credential-rpc.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
-import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
+import { bundledChannelArchive, bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { normalizePluginManifest } from '../packages/cli/src/renderer/platform/platform-manifest.js'
 import { MemoryPermissionPolicyStore, PermissionBroker } from '../packages/cli/src/renderer/platform.js'
@@ -261,7 +261,8 @@ describe('actual direct Channel service ownership assembly', () => {
     async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'channel-service-owner-composition-'))
       const configPath = path.join(root, 'config.json')
-      const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? bundledPluginEntry('channel')
+      const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? path.join(root, 'channel.tgz')
+      if (process.env.CORDISX_CHANNEL_ENTRY_FIXTURE === undefined) await copyFile(bundledChannelArchive(), entry)
       let channel: Awaited<ReturnType<typeof createRendererChannelComposition>> | undefined
       let broker: PermissionBroker | undefined, fiber: ReturnType<Context['plugin']> | undefined
       let configApi: HostServiceConfigNarrowApi | undefined, credentials: ChannelCredentialBridgeHandler | undefined

@@ -80,7 +80,6 @@ it.skipIf(chrome === undefined).each([false, true])(
     let browser: ChildProcess | undefined
     const clients: CdpClient[] = []
     let ownerAttempted = false
-    let managerAttempted = false
     try {
       await mkdir(home)
       await writeFile(path.join(home, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
@@ -94,7 +93,6 @@ it.skipIf(chrome === undefined).each([false, true])(
       const started = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
       expect(started).toMatchObject({ status: 'ready', mode: 'service' })
       const link = async () => {
-        managerAttempted = true
         const output = (await run('manager', 'open', '--print-url')).stdout.trim().split(/\s+/u).at(-1)!
         const url = new URL(output)
         url.search = '?host=1'
@@ -279,9 +277,6 @@ it.skipIf(chrome === undefined).each([false, true])(
         if (browser) await stopChrome(browser)
       })
       await cleanup(async () => {
-        if (managerAttempted) expect(JSON.parse((await run('manager', 'stop')).stdout).status).toBe('stopped')
-      })
-      await cleanup(async () => {
         if (ownerAttempted) {
           expect(JSON.parse((await run('stop', '--mode', 'service', 'codex', 'default', '--json')).stdout).status)
             .toBe('stopped')
@@ -293,7 +288,12 @@ it.skipIf(chrome === undefined).each([false, true])(
           await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
         })
       }
-      if (failures.length) throw new AggregateError(failures, 'fixture process cleanup was not confirmed')
+      if (failures.length) {
+        throw new AggregateError(
+          failures,
+          `fixture process cleanup was not confirmed: ${failures.map(String).join('; ')}`,
+        )
+      }
     }
   },
   150_000,

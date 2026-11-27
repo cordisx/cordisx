@@ -15,7 +15,7 @@ export function parseOwnerAdapterRpcOperation(value: unknown): OwnerAdapterRpcOp
     ? ['kind', 'action', 'sessionId', 'grant', 'receipt']
     : action === 'lifecycle' || action === 'management' || action === 'document' || action === 'artifact'
     ? ['kind', 'action', 'sessionId', 'grant', 'payload']
-    : action === 'admit' || action === 'close'
+    : action === 'admit' || action === 'close' || action === 'model-services-read'
     ? ['kind', 'action', 'sessionId', 'grant']
     : []
   if (
@@ -59,6 +59,10 @@ export async function dispatchOwnerAdapterRpcOperation(
   }
   if (operation.action === 'document') {
     const result = await sessions.requestDocument(operation.sessionId, operation.grant, operation.payload)
+    return result.available ? { status: 'ok', value: result.value } : { status: 'unavailable' }
+  }
+  if (operation.action === 'model-services-read') {
+    const result = await sessions.requestModelServicesRead(operation.sessionId, operation.grant)
     return result.available ? { status: 'ok', value: result.value } : { status: 'unavailable' }
   }
   if (operation.action === 'artifact') {

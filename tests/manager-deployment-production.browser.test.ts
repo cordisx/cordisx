@@ -80,7 +80,6 @@ it.skipIf(chrome === undefined)(
     const pages: CdpClient[] = []
     const reachedAddresses = new Set<string>()
     const bundleTransfers: Array<{ encoding: string | undefined; wire: number; decoded: number }> = []
-    let managerAttempted = false
     let ownerAttempted = false
     let cleanupConfirmed = true
     try {
@@ -173,10 +172,10 @@ it.skipIf(chrome === undefined)(
         }),
         { mode: 0o600 },
       )
+      env.CORDISX_WEB_DEPLOYMENT = deployment
       ownerAttempted = true
       const started = JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout)
       expect(started).toMatchObject({ status: 'ready', mode: 'service' })
-      managerAttempted = true
       expect(JSON.parse((await run('manager', 'start', '--deployment', deployment)).stdout).status).toBe('running')
       const link = async () => {
         const url = new URL((await run('manager', 'open', '--print-url')).stdout.trim().split(/\s+/u).at(-1)!)
@@ -383,9 +382,6 @@ it.skipIf(chrome === undefined)(
         await new Promise<void>((resolve, reject) => proxy!.close(error => error ? reject(error) : resolve()))
       })
       await cleanup(async () => {
-        if (managerAttempted) expect(JSON.parse((await run('manager', 'stop')).stdout).status).toBe('stopped')
-      })
-      await cleanup(async () => {
         if (ownerAttempted) {
           expect(JSON.parse((await run('stop', '--mode', 'service', 'codex', 'default', '--json')).stdout).status)
             .toBe('stopped')
@@ -397,7 +393,12 @@ it.skipIf(chrome === undefined)(
           await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
         })
       }
-      if (failures.length) throw new AggregateError(failures, 'fixture process cleanup was not confirmed')
+      if (failures.length) {
+        throw new AggregateError(
+          failures,
+          `fixture process cleanup was not confirmed: ${failures.map(String).join('; ')}`,
+        )
+      }
     }
   },
   200_000,

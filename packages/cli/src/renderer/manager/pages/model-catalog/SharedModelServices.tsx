@@ -307,7 +307,7 @@ export function SharedModelServices({
   useEffect(() => () => onAvailabilityChange?.(false), [onAvailabilityChange])
   if (state === undefined || state.status !== 'ok' || !available && editing === undefined) return null
   const services = state.services
-  const canMutate = available && !readUnavailable
+  const canMutate = available && !readUnavailable && client?.modelServicesWritable !== false
   const changeEditing = (next: ServiceEditing | undefined) => {
     editingRef.current = next
     setEditing(next)
@@ -383,6 +383,9 @@ export function SharedModelServices({
               : null}
           </div>
         )
+        : null}
+      {available && !readUnavailable && client?.modelServicesWritable === false
+        ? <p role="status" className="cxms-shared-notice">{t('catalog.sharedServicesReadOnly')}</p>
         : null}
       {notice === undefined ? null : <p role="status" className="cxms-shared-notice">{notice}</p>}
       {editing === undefined
