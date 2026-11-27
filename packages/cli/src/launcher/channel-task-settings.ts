@@ -54,6 +54,7 @@ export class ChannelTaskSettings {
       access(): ChannelConversationAccess | undefined
       agent: ChannelAgentAccess
       notify?(event: ChannelEventRef, text: string, operationId: string): Promise<unknown>
+      report?(code: string): void
       logical?: { appId: string; profileId: string; fence: ChannelNativeSourceFence; claims: Set<string> }
     },
   ) {
@@ -98,6 +99,7 @@ export class ChannelTaskSettings {
           ...logical,
           event,
           job,
+          ...(this.input.report === undefined ? {} : { report: this.input.report }),
         })
       } catch {
         await this.input.store.mutate(state => {

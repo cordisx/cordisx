@@ -137,6 +137,7 @@ export class ChannelConversationConsumer {
       access: this.input.access,
       agent: this.agentAccess,
       notify: (event, text, id) => this.commandReply(id, event, text),
+      ...(this.input.report === undefined ? {} : { report: this.input.report }),
       ...(input.appId && input.logicalRuntime
         ? {
           logical: {

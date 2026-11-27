@@ -45,6 +45,7 @@ async function setup() {
     },
   }
   const fence = new ChannelNativeSourceFence(() => false)
+  const report = vi.fn()
   const run = () =>
     recoverConfirmedChannelProvider({
       store,
@@ -56,8 +57,9 @@ async function setup() {
       access: () => f.access,
       event: input.source.event,
       job: store.snapshot().jobs.j!,
+      report,
     })
-  return { store, native, fence, run }
+  return { store, native, fence, run, report }
 }
 
 it('continues dispatch immediately when the confirmed provider resumes unchanged', async () => {
@@ -81,6 +83,8 @@ it('marks a recovery check failure as uncertain instead of silently retrying', a
     code: 'CONFIRMED_PROVIDER_RECOVERY_UNCERTAIN',
     failureNotice: 'pending',
   })
+  expect(f.report).toHaveBeenCalledWith('CHANNEL_PROVIDER_RECOVERY_TARGET_CHECK_ERROR')
+  expect(JSON.stringify(f.report.mock.calls)).not.toContain('temporary read failure')
   expect(f.fence.isMigrating(a)).toBe(false)
 })
 
