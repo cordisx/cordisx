@@ -231,6 +231,7 @@ export async function recoverConfirmedChannelProvider(input: {
         selection,
         admitted: current,
         diagnostic,
+        confirmedRecovery: true,
         destinationConfiguration: configuration => {
           const effort = savedSetting.settings.effort === undefined
             ? undefined

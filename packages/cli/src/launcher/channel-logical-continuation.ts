@@ -12,7 +12,12 @@ import { channelLogicalTransactionStore } from './channel-logical-continuation-s
 import { type ChannelConversationState, ChannelConversationStore } from './channel-conversation-store.js'
 import { LogicalContinuationControl, type LogicalContinuationRequest } from './logical-continuation-control.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
-import { channelTaskChangeAllowed, channelTaskFields, type ChannelTaskPatch } from './channel-task-config.js'
+import {
+  channelTaskChangeAllowed,
+  channelTaskChangeDenied,
+  channelTaskFields,
+  type ChannelTaskPatch,
+} from './channel-task-config.js'
 import { channelCommandDenied } from './channel-conversation-policy.js'
 import { channelLogicalActor } from './channel-logical-actor.js'
 import type { ChannelNativeSourceFence } from './channel-native-source-fence.js'
@@ -41,6 +46,8 @@ export async function startChannelLogicalContinuation(input: {
     admitted(state: ChannelConversationState): boolean
     consume(state: ChannelConversationState): boolean
     diagnostic?(code: string): void
+    /** Only for the exact previously applied selection verified by the recovery owner. */
+    confirmedRecovery?: true
     taskClaim?: ChannelTaskContinuationClaim
     destinationConfiguration?(source: ContinuationConfiguration): ContinuationConfiguration
     confirmDestination?(sessionId: string): Promise<boolean>
@@ -99,7 +106,16 @@ export async function startChannelLogicalContinuation(input: {
     && (!input.automatic || input.automatic.admitted(state))
     && (!!input.automatic?.group
       || !channelTaskFields(target).some(command => channelCommandDenied(state.policy, event, command))
-        && channelTaskChangeAllowed(state.taskConfig, state.policy, event, target, { ...observedSelection, ...target }))
+        && (input.automatic?.confirmedRecovery
+          ? !channelCommandDenied(state.policy, event, 'continue-provider')
+            && !channelTaskChangeDenied(state.taskConfig, state.policy, event, target, {
+              ...observedSelection,
+              ...target,
+            })
+          : channelTaskChangeAllowed(state.taskConfig, state.policy, event, target, {
+            ...observedSelection,
+            ...target,
+          })))
   const diagnose = (code: string) => {
     try {
       input.automatic?.diagnostic?.(code)
@@ -166,6 +182,7 @@ export async function startChannelLogicalContinuation(input: {
         if (
           !input.automatic?.group
           && !channelTaskFields(target).some(command => channelCommandDenied(current.policy, event, command))
+          && !channelTaskChangeDenied(current.taskConfig, current.policy, event, target, { ...selection, ...target })
           && !channelTaskChangeAllowed(current.taskConfig, current.policy, event, target, { ...selection, ...target })
         ) return unavailable('PREFLIGHT_TASK_CHANGE_NOT_ALLOWED')
         return unavailable('PREFLIGHT_AUTHORITY')
