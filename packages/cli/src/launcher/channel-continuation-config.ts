@@ -4,6 +4,10 @@ import { isDeepStrictEqual } from 'node:util'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+// Native Codex may materialize an explicitly inherited normal tier as "default".
+const matchesServiceTier = (actual: unknown, expected: unknown): boolean =>
+  actual === 'priority' ? expected === 'priority' : (actual === null || actual === 'default')
+    && (expected === null || expected === 'default')
 
 export interface ContinuationConfiguration {
   readonly providerId: string
@@ -86,7 +90,7 @@ export function continuationStartMatches(value: unknown, expected: unknown): boo
   return typeof requested.providerId === 'string' && started.modelProvider === requested.providerId
     && typeof requested.model === 'string' && started.model === requested.model
     && typeof requested.cwd === 'string' && started.cwd === requested.cwd
-    && Object.hasOwn(requested, 'serviceTier') && started.serviceTier === requested.serviceTier
+    && Object.hasOwn(requested, 'serviceTier') && matchesServiceTier(started.serviceTier, requested.serviceTier)
     && started.approvalsReviewer === requested.approvalsReviewer && started.approvalPolicy === execution.approval
     && (execution.effort === 'inherit'
       ? started.reasoningEffort === null

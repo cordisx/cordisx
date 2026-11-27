@@ -6,6 +6,10 @@ const valid = value => typeof value === 'string' && /^[^\0\r\n]{1,512}$/u.test(v
 const token = value => valid(value) && value.length >= 16 && value.length <= 256
 const efforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 const failure = message => ({ handled: true, error: { code: -32000, message } })
+// Native Codex may materialize an explicitly inherited normal tier as "default".
+const matchesServiceTier = (actual, expected) =>
+  actual === 'priority' ? expected === 'priority' : (actual === null || actual === 'default')
+    && (expected === null || expected === 'default')
 
 /** Use only a live, exact source; unknown sources retain the native fork path. */
 export async function inheritNativeFork(message, { nativeCall, controlCall, nativeOpenAiRecovery = false }) {
@@ -78,7 +82,7 @@ export async function inheritNativeFork(message, { nativeCall, controlCall, nati
     const child = result?.thread?.id
     if (
       !valid(child) || child === params.threadId || result.modelProvider !== providerId || result.model !== model
-      || result.reasoningEffort !== effort || result.serviceTier !== tier
+      || result.reasoningEffort !== effort || !matchesServiceTier(result.serviceTier, tier)
     ) throw new Error('Fork result is uncertain')
     if (lease) {
       const committed = await controlCall('fork-complete', {
