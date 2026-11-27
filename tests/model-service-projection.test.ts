@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'smol-toml'
 import { parseHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { codexConfigModelProviders } from '../packages/cli/src/launcher/codex-config-model-providers.js'
 import {
   mergeDeclaredIntoCodexProjection,
   modelServicesOf,
@@ -172,6 +173,68 @@ describe('model-service provider declarations', () => {
     }
     const merged = mergeDeclaredIntoCodexProjection(native, [])
     expect(merged).toBe(native)
+  })
+
+  it('keeps reasoning capabilities for exact matches in the declared provider catalog', async () => {
+    const root = await codexHome()
+    const config = configWith([{
+      id: 'gateway',
+      kind: 'model-service',
+      displayName: 'Gateway',
+      baseUrl: 'https://gateway.example/v1',
+      apiKeyEnv: 'GATEWAY_API_KEY',
+      protocols: ['openai-responses'],
+      models: { codex: ['vendor/reasoning-model', 'vendor/plain-model'] },
+    }])
+    await writeFile(
+      path.join(root, 'config.toml'),
+      '[model_providers.gateway]\nmodel_catalog_url = "https://gateway.example/v1/codex/models"\n\n'
+        + '[model_providers.other]\nname = "Other"\n',
+    )
+    await writeFile(
+      path.join(root, 'gateway.json'),
+      JSON.stringify({
+        models: [
+          {
+            slug: 'vendor/reasoning-model',
+            display_name: 'Native model name',
+            supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }],
+            default_reasoning_level: 'high',
+          },
+          { slug: 'vendor/catalog-only' },
+        ],
+      }),
+    )
+    await writeFile(
+      path.join(root, 'other.json'),
+      JSON.stringify({
+        models: [{ slug: 'vendor/plain-model', supported_reasoning_levels: [{ effort: 'max' }] }],
+      }),
+    )
+    await projectModelServicesToCodex(config.providers, root)
+
+    const native = await codexConfigModelProviders(root, { gateway: 'gateway.json', other: 'other.json' })
+    expect(native.diagnostics).toEqual([])
+    const merged = mergeDeclaredIntoCodexProjection(native, config.providers)
+    expect(merged.providers.find(provider => provider.providerId === 'gateway')).toEqual({
+      providerId: 'gateway',
+      pluginId: 'cordisx.model-service',
+      title: 'Gateway',
+      defaultModelId: 'vendor/reasoning-model',
+      models: [
+        {
+          id: 'vendor/reasoning-model',
+          label: 'vendor/reasoning-model',
+          aliases: [],
+          reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'high' },
+        },
+        { id: 'vendor/plain-model', label: 'vendor/plain-model', aliases: [] },
+      ],
+    })
+    const written = parse(await readFile(path.join(root, 'config.toml'), 'utf8'))
+    expect(written).toMatchObject({
+      model_providers: { gateway: { model_catalog_url: 'https://gateway.example/v1/codex/models' } },
+    })
   })
 
   it('reports what a launch did with --provider before the host starts', async () => {

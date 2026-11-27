@@ -44,13 +44,23 @@ const DECLARED_PLUGIN_ID = 'cordisx.model-service'
 export function declarationCatalogEntry(
   provider: HomeConfigModelServiceProvider,
   appId: string,
+  nativeModels: NativeModelProviderCatalogEntry['models'] = [],
 ): NativeModelProviderCatalogEntry {
   const models = modelsForApp(provider, appId)
+  const nativeReasoning = new Map(nativeModels.map(model => [model.id, model.reasoningCapabilities]))
   return Object.freeze({
     providerId: provider.id,
     pluginId: DECLARED_PLUGIN_ID,
     title: provider.displayName,
-    models: Object.freeze(models.map(id => Object.freeze({ id, label: id, aliases: Object.freeze([]) }))),
+    models: Object.freeze(models.map(id => {
+      const reasoningCapabilities = nativeReasoning.get(id)
+      return Object.freeze({
+        id,
+        label: id,
+        aliases: Object.freeze([]),
+        ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
+      })
+    })),
     ...(models.length === 0 ? {} : { defaultModelId: models[0] }),
   })
 }
@@ -58,9 +68,8 @@ export function declarationCatalogEntry(
 /**
  * Adds every enabled declaration to a Codex projection read from `config.toml`.
  *
- * A declaration wins over a native table of the same id: it is the entry the
- * user manages in CordisX, and the native table is the copy a previous launch
- * projected from it.
+ * The declaration owns model membership and order. A native catalog can supply
+ * reasoning metadata for the same provider and exact model ID.
  */
 export function mergeDeclaredIntoCodexProjection(
   projection: CodexConfigModelProviderProjection,
@@ -69,6 +78,7 @@ export function mergeDeclaredIntoCodexProjection(
   const declared = servicesForApp(providers, 'codex')
   if (declared.length === 0) return projection
   const declaredIds = new Set(declared.map(provider => provider.id))
+  const nativeModels = new Map(projection.providers.map(provider => [provider.providerId, provider.models]))
   const wireApis = new Map(projection.providerWireApis)
   for (const provider of declared) wireApis.set(provider.id, CODEX_WIRE_API)
   const ids = new Set([...projection.providerIds].filter(id => !declaredIds.has(id)))
@@ -77,7 +87,7 @@ export function mergeDeclaredIntoCodexProjection(
     ...projection,
     providers: Object.freeze([
       ...projection.providers.filter(provider => !declaredIds.has(provider.providerId)),
-      ...declared.map(provider => declarationCatalogEntry(provider, 'codex')),
+      ...declared.map(provider => declarationCatalogEntry(provider, 'codex', nativeModels.get(provider.id))),
     ]),
     providerIds: ids,
     providerWireApis: wireApis,

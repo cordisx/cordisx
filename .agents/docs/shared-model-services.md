@@ -80,7 +80,16 @@ left alone.
 
 The Codex model selector and the agent tools (`list_model_providers`,
 `create_thread_with_provider`) read the native tables merged with the
-declarations; a declaration wins over a table of the same id.
+declarations. The merge uses the declaration's model list and default model.
+When the same provider and exact model ID are present in the native catalog,
+the selector also uses the native catalog's reasoning levels and default effort.
+An explicit provider catalog can supply these settings for each model.
+[Native provider catalogs](native-model-providers.md#explicit-config-provider-catalogs)
+
+If the gateway publishes a Codex-format online catalog, set `model_catalog_url`
+under that provider's native `[model_providers.<id>]` table. CordisX preserves
+that field when projecting a shared model service. Codex uses the URL to read
+runtime metadata such as the context window and automatic compaction threshold.
 
 ### Codex request options
 
