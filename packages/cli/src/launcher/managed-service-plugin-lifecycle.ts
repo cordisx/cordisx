@@ -591,7 +591,9 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       try {
         if (recovered !== undefined) {
           verified = this.runtime.adoptRecoveredActivation !== undefined && registryEpoch === recovered.registryEpoch
-            && active.profileId === recovered.profileId && active.runtimeGeneration === recovered.runtimeGeneration
+            && active.profileId === recovered.profileId
+            && (active.runtimeGeneration === recovered.runtimeGeneration
+              || !this.initialized && active.runtimeGeneration === this.options.runtimeGeneration)
             && JSON.stringify(active.plugins) === recovered.plugins
         }
       } catch { /* Unverifiable adoption cannot reopen the fence. */ }

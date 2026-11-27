@@ -28,7 +28,7 @@ import { decision, FormalRuntime, localPackage, request } from './suites/plugin-
 const secret = () => randomBytes(32).toString('hex')
 
 async function fixture(options: {
-  rollbackPending?: boolean
+  rollbackPending?: boolean | 'before-commit'
   failLeaseAt?: number
   blockProjection?: () => Promise<void>
 } = {}) {
@@ -42,23 +42,50 @@ async function fixture(options: {
     generation,
   }
   if (options.rollbackPending) {
+    const interruptedGeneration = 'runtime-before-restart'
     const interrupted = new FormalRuntime()
-    interrupted.failComplete = true
-    interrupted.failRollback = true
     const first = new PluginLifecycleCoordinator({
       homeDir: home,
       profileId: 'work',
-      runtimeGeneration: generation,
+      runtimeGeneration: interruptedGeneration,
       permissionPolicies: [],
       runtime: interrupted,
     })
+    let revision = 0
+    if (options.rollbackPending === 'before-commit') {
+      const baselineDirectory = await localPackage({ root, id: 'recovery-baseline' })
+      const baseline = await first.handle(
+        request({ kind: 'inspect-local', sourceDirectory: baselineDirectory }, 0, interruptedGeneration),
+      )
+      expect(
+        await first.handle(request(
+          {
+            kind: 'install',
+            candidateId: baseline.candidateId!,
+            authorizationDecision: decision(baseline.authorizationPlan!),
+          },
+          0,
+          interruptedGeneration,
+        )),
+      ).toMatchObject({ outcome: 'applied', revision: 1 })
+      revision = 1
+    }
+    interrupted.failStage = options.rollbackPending === 'before-commit'
+    interrupted.failComplete = options.rollbackPending !== 'before-commit'
+    interrupted.failRollback = true
     const sourceDirectory = await localPackage({ root, id: 'before-recovery' })
-    const plan = await first.handle(request({ kind: 'inspect-local', sourceDirectory }))
-    const failure = await first.handle(request({
-      kind: 'install',
-      candidateId: plan.candidateId!,
-      authorizationDecision: decision(plan.authorizationPlan!),
-    }))
+    const plan = await first.handle(
+      request({ kind: 'inspect-local', sourceDirectory }, revision, interruptedGeneration),
+    )
+    const failure = await first.handle(request(
+      {
+        kind: 'install',
+        candidateId: plan.candidateId!,
+        authorizationDecision: decision(plan.authorizationPlan!),
+      },
+      revision,
+      interruptedGeneration,
+    ))
     expect(failure).toMatchObject({ outcome: 'rollback-failed' })
   }
   let projectionAllowed = true
@@ -268,6 +295,7 @@ async function fixture(options: {
 
   return {
     lifecycle,
+    managed,
     coordinator,
     store,
     scope,
@@ -925,9 +953,25 @@ it('finishes an interrupted package rollback before service renderer initializat
   const f = await fixture({ rollbackPending: true })
   try {
     expect(await f.store.loadActive()).toMatchObject({ revision: 2, plugins: [] })
+    await vi.waitFor(() => expect(f.managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
     expect(f.lifecycle.prepare('after-startup-recovery').expectedRegistryEpoch).toBe(2)
     await f.lifecycle.abort('after-startup-recovery')
     expect(await f.install('after-recovery', 2)).toMatchObject({ outcome: 'applied', revision: 3 })
+  } finally {
+    await f.close()
+  }
+}, 30000)
+
+it('recovers an interrupted pre-commit rollback across service generations', async () => {
+  const f = await fixture({ rollbackPending: 'before-commit' })
+  try {
+    expect(await f.store.loadActive()).toMatchObject({
+      revision: 1,
+      runtimeGeneration: 'runtime-1',
+      plugins: [{ id: 'recovery-baseline' }],
+    })
+    await vi.waitFor(() => expect(f.managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
+    expect(await f.install('after-precommit-recovery', 1)).toMatchObject({ outcome: 'applied', revision: 2 })
   } finally {
     await f.close()
   }

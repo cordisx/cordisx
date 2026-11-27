@@ -3,7 +3,7 @@ import { createServicePluginRuntime } from '../packages/cli/src/launcher/service
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 
 it('refuses a Channel activation change while the service owns its ingress', async () => {
-  const runtime = createServicePluginRuntime('test')
+  const runtime = createServicePluginRuntime()
   const fence = runtime.prepare!('tx')
   const previous = { plugins: [{ id: 'channel', enabled: true }] }
   const candidate = { plugins: [{ id: 'channel', enabled: false }] }

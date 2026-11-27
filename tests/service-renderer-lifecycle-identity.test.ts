@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ServiceRendererLifecycleProjection } from '../packages/cli/src/cli/service-renderer-lifecycle-projection.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 } from '../packages/cli/src/usage-permissions.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
@@ -432,6 +433,37 @@ describe('owner-scoped lifecycle identity observations', () => {
       .toThrow('renderer-identity-lifecycle-unavailable')
     expect(() => f.projection.project('stage', changed([{ name: 'models.read', required: false, scope: {} }])))
       .toThrow('renderer-identity-lifecycle-unavailable')
+    const session = setup()
+    session.offer()
+    session.prepare()
+    const sessionRuntime = {
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+      schemaVersion: 5,
+      id: extra.id,
+      services: [],
+      capabilities: [{ name: 'sessions.get', required: false, scope: {} }],
+    }
+    const sessionStage = {
+      ...payload,
+      package: {
+        ...payload.package,
+        manifest: { ...payload.package.manifest, runtimeManifest: sessionRuntime },
+      },
+    }
+    expect(() =>
+      session.projection.project('stage', {
+        ...sessionStage,
+        package: {
+          ...sessionStage.package,
+          manifest: {
+            ...sessionStage.package.manifest,
+            runtimeManifest: { ...sessionRuntime, capabilities: [{ name: 'sessions.get', required: true, scope: {} }] },
+          },
+        },
+      })
+    ).toThrow('renderer-identity-lifecycle-unavailable')
+    const acceptedSession = session.projection.project('stage', sessionStage)
+    expect(acceptedSession.receipt!(session.stagedReceipt)).toMatchObject({ observation: candidate })
     const stage = f.projection.project('stage', payload)
     expect(stage.receipt!(f.stagedReceipt)).toMatchObject({ observation: candidate })
   })

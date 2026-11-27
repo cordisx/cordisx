@@ -14,6 +14,7 @@ import { type ManagerRendererGraph, parseManagerRendererGraph } from '../indepen
 import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap-state.js'
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
+import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
 
 // The standalone Manager has no Platform provider bridge. Optional Platform
 // declarations may be present, but no corresponding owner policy is projected.
@@ -180,6 +181,8 @@ async function inspectRendererPackage(
   // identity projection and the normal permission bridge.
   const visual = isServiceRendererVisualManifest(manifest, item.id) && staged.serviceModules.length === 0
     && staged.managedServiceResources.length === 0
+  const optionalSessions = isServiceRendererOptionalSessionManifest(manifest, item.id)
+    && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 && manifest.schemaVersion === 16
@@ -192,7 +195,7 @@ async function inspectRendererPackage(
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
     )
-  const supported = (legacy || managed || visual)
+  const supported = (legacy || managed || visual || optionalSessions)
     && !(legacy
       ? manifest.capabilities.length !== 0
       : managed && manifest.capabilities.some(capability =>
@@ -304,7 +307,10 @@ export function createServiceRendererProjector(input: {
       targetId: mutation.targetId,
       affectedPluginIds: [...mutation.affectedPluginIds],
       ...packageProjection,
+      // Retirement never authorizes a candidate in the renderer. The owner
+      // retains its transaction decision without projecting it as a grant.
       ...(mutation.authorizationDecision === undefined
+          || mutation.operation === 'disable' || mutation.operation === 'uninstall'
         ? {}
         : { authorizationDecision: mutation.authorizationDecision }),
       privateGraphs: leases.map(serviceRendererPrivateGraph),

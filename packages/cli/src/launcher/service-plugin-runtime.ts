@@ -18,13 +18,12 @@ export function assertServiceMutationAllowed(mutation: Pick<PluginRuntimeMutatio
 
 /** Observes package publication for a Node-only owner. Backend adoption and
  * cleanup are performed by the surrounding ManagedServicePluginLifecycleRuntime. */
-export function createServicePluginRuntime(runtimeGeneration: string): ServicePluginRuntime {
+export function createServicePluginRuntime(): ServicePluginRuntime {
   const record = (tuple: PackageActivationTuple) => ({
     ...tuple,
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1 as const,
     recordKind: 'active' as const,
-    runtimeGeneration,
   })
   let registryEpoch = 0
   let transaction: { id: string; epoch: string; staged?: PluginRuntimeMutation } | undefined

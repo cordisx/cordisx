@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 } from '../packages/cli/src/usage-permissions.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
   inspectServiceRendererInitialPackage,
@@ -104,6 +105,46 @@ it('admits only the supported service-free visual capability slice', async () =>
         ...visual.manifest,
         runtimeManifest: { ...visual.manifest.runtimeManifest, capabilities: [capability] },
       },
+    } as never)
+    await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+  }
+})
+
+it('admits optional read-only Session declarations without admitting required or mutating capabilities', async () => {
+  const value = staged()
+  const scope = { sessionIds: { kind: 'host-route-param', routeId: 'session.timeline', param: 'sessionId' } }
+  const runtime = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+    schemaVersion: 5,
+    id: item.id,
+    name: 'Session fixture',
+    services: [],
+    capabilities: ['sessions.get', 'sessions.read', 'sessions.subscribe'].map(name => ({
+      name,
+      required: false,
+      scope,
+    })),
+  }
+  const optional = {
+    ...value,
+    manifest: { ...value.manifest, runtimeManifest: runtime },
+    serviceModules: [],
+    managedServiceResources: [],
+  }
+  vi.mocked(loadStagedPluginPackage).mockResolvedValue(optional as never)
+  expect(await loadServiceRendererPackage('/fixture', item)).toBe(optional)
+  expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(optional)
+  for (
+    const capabilities of [
+      [{ name: 'sessions.get', required: true, scope }],
+      [{ name: 'agents.create', required: false, scope: {} }],
+      [{ name: 'sessions.subscribe', required: false, scope: { sessionIds: '*' } }],
+      [],
+    ]
+  ) {
+    vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce({
+      ...optional,
+      manifest: { ...optional.manifest, runtimeManifest: { ...runtime, capabilities } },
     } as never)
     await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
   }

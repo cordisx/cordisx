@@ -10,6 +10,7 @@ import {
 } from './renderer-lifecycle-peer.js'
 import { RendererLifecycleFederation } from './renderer-lifecycle-federation.js'
 import { assertServiceMutationAllowed, createServicePluginRuntime } from './service-plugin-runtime.js'
+import type { PackageActivationTuple } from './packages/types.js'
 import {
   type PluginGenerationArtifactServer,
   type PluginGenerationGraphLease,
@@ -51,7 +52,11 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
   private joining = 0
   private reservation: { id: string; mode: Mode; invalid: boolean; ready: boolean } | undefined
   private transaction: ActiveTransaction | undefined
-  private pendingAdoption: { mode: Mode; epoch: number } | undefined
+  private pendingAdoption: {
+    mode: Mode
+    epoch: number
+    recovery?: { target: PackageActivationTuple; candidateRevision: number }
+  } | undefined
   private externalFence: symbol | undefined
   private activeExternalMutation: symbol | undefined
   private readonly externalMutationContext = new AsyncLocalStorage<symbol>()
@@ -66,7 +71,7 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     readonly createArtifactServer?: () => Promise<PluginGenerationArtifactServer>
   }) {
     this.scope = Object.freeze({ ...parseAttachmentScope(input.scope) })
-    this.headless = createServicePluginRuntime(this.scope.generation)
+    this.headless = createServicePluginRuntime()
     this.projectMutation = input.projectMutation
     this.createArtifactServer = input.createArtifactServer ?? startPluginGenerationArtifactServer
   }
@@ -461,7 +466,11 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     }
     const result = await this.headless.recoverRollback!(plan)
     this.registryEpoch = result.registryEpoch
-    this.pendingAdoption = { mode: 'headless', epoch: result.registryEpoch }
+    this.pendingAdoption = {
+      mode: 'headless',
+      epoch: result.registryEpoch,
+      recovery: { target: structuredClone(plan.rollbackTarget), candidateRevision: plan.expectedPublished.revision },
+    }
     return result
   }
 
@@ -471,7 +480,24 @@ export class ServiceRendererLifecycle implements PluginLifecycleRuntime {
     if (!pending || pending.epoch !== registryEpoch || this.closed) {
       throw new Error('service renderer recovery adoption is unavailable')
     }
-    const confirmed = this.validateActive(active)
+    let confirmed: CordisXPluginActivationRecordV1
+    if (!this.initialized && pending.mode === 'headless' && pending.recovery) {
+      const value = normalizePluginActivation(active)
+      const target = pending.recovery.target
+      if (
+        value.recordKind !== 'active' || value.profileId !== target.profileId
+        || value.profileId !== this.scope.profileId
+        || ![target.runtimeGeneration, this.scope.generation].includes(value.runtimeGeneration)
+        || !attachmentEqual(value.plugins, target.plugins)
+        || !(value.revision === target.revision && value.lastGoodRevision === target.lastGoodRevision
+          || value.revision === pending.recovery.candidateRevision + 1 && value.lastGoodRevision === target.revision)
+      ) throw new Error('service renderer recovery adoption is unavailable')
+      // The receipt observes the previous generation. The durable store is
+      // rebound after recovery, before any renderer or service is admitted.
+      confirmed = this.validateActive({ ...value, runtimeGeneration: this.scope.generation })
+    } else {
+      confirmed = this.validateActive(active)
+    }
     if (pending.mode === 'renderers') await this.federation!.adoptRecoveredActivation(confirmed, registryEpoch)
     this.active = confirmed
     this.pendingAdoption = undefined
