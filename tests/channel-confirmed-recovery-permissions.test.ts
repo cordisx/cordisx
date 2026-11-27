@@ -10,7 +10,7 @@ import { recoverConfirmedChannelProvider } from '../packages/cli/src/launcher/ch
 
 async function scenario(
   options: {
-    deny?: 'value' | 'command' | 'continue'
+    deny?: 'value' | 'command' | 'continue' | 'other-model' | 'other-user'
     differentActor?: boolean
     uncertain?: boolean
     revoke?: boolean
@@ -39,6 +39,16 @@ async function scenario(
     state.taskConfig = parseChannelTaskConfig({
       permissions: options.deny === 'value'
         ? [{ id: 'deny-model', effect: 'deny', userIds: ['alice'], fields: ['model'], models: [target] }]
+        : options.deny === 'other-model'
+        ? [{
+          id: 'other-model',
+          effect: 'allow',
+          userIds: ['alice'],
+          fields: ['model'],
+          models: [{ providerId: 'other', model: 'model' }],
+        }]
+        : options.deny === 'other-user'
+        ? [{ id: 'other-user', effect: 'allow', userIds: ['other'], fields: ['model'] }]
         : [],
     })
     state.bindings.b = {
@@ -160,16 +170,19 @@ it('restores the exact previously applied private-chat model without requiring a
   }
 })
 
-it.each(['value', 'command', 'continue'] as const)('keeps an explicit %s deny in force', async deny => {
-  const f = await scenario({ deny })
-  try {
-    await f.run()
-    expect(f.create).not.toHaveBeenCalled()
-    expect(f.store.snapshot().bindings.b?.sessionId).toBe(a)
-  } finally {
-    await f.execution.close()
-  }
-})
+it.each(['value', 'command', 'continue', 'other-model', 'other-user'] as const)(
+  'keeps the %s restriction in force',
+  async deny => {
+    const f = await scenario({ deny })
+    try {
+      await f.run()
+      expect(f.create).not.toHaveBeenCalled()
+      expect(f.store.snapshot().bindings.b?.sessionId).toBe(a)
+    } finally {
+      await f.execution.close()
+    }
+  },
+)
 
 it('does not move the binding or retry when policy changes during destination creation', async () => {
   const f = await scenario({ revoke: true })

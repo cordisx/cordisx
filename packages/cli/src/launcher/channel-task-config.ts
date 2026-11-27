@@ -243,6 +243,26 @@ export function channelTaskChangeDenied(
   )
 }
 
+/** Restore an applied selection without requiring a new grant, while honoring configured constraints. */
+export function channelTaskConfirmedRecoveryAllowed(
+  config: ChannelTaskConfig,
+  policy: ChannelConversationPolicy,
+  event: ChannelEventRef,
+  patch: ChannelTaskPatch,
+  selection: ChannelTaskPatch,
+): boolean {
+  if (!event.actor?.userId) return false
+  return Object.keys(patch).every(field => {
+    const single = { [field]: patch[field as keyof ChannelTaskPatch] } as ChannelTaskPatch
+    if (channelTaskChangeDenied(config, policy, event, single, selection)) return false
+    const hasAllow = config.permissions.some(rule =>
+      rule.effect === 'allow' && (!rule.fields || rule.fields.includes(field as keyof ChannelTaskPatch))
+      && accountScope(rule, event) && (!rule.kinds || rule.kinds.includes(event.kind as 'direct' | 'group'))
+    )
+    return !hasAllow || channelTaskChangeAllowed(config, policy, event, single, selection)
+  })
+}
+
 /** Model authority may still use a legacy command deny, but never a coarse allow as a field grant. */
 export function channelTaskFields(patch: ChannelTaskPatch): readonly string[] {
   return Object.keys(patch).map(field =>

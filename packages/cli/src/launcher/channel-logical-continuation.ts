@@ -15,6 +15,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import {
   channelTaskChangeAllowed,
   channelTaskChangeDenied,
+  channelTaskConfirmedRecoveryAllowed,
   channelTaskFields,
   type ChannelTaskPatch,
 } from './channel-task-config.js'
@@ -108,7 +109,7 @@ export async function startChannelLogicalContinuation(input: {
       || !channelTaskFields(target).some(command => channelCommandDenied(state.policy, event, command))
         && (input.automatic?.confirmedRecovery
           ? !channelCommandDenied(state.policy, event, 'continue-provider')
-            && !channelTaskChangeDenied(state.taskConfig, state.policy, event, target, {
+            && channelTaskConfirmedRecoveryAllowed(state.taskConfig, state.policy, event, target, {
               ...observedSelection,
               ...target,
             })
