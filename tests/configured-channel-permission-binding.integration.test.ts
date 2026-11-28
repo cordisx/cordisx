@@ -256,6 +256,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       }))
       expect(onUnknown).not.toHaveBeenCalled()
       const once = createServiceRendererPermissionOnce({
+        homeDir: f.homeDir,
         profileId: f.profileId,
         bootstrap: f.bootstrap,
         proof,

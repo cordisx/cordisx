@@ -53,7 +53,13 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       const artifact = plugin.distributionArtifact!
       const identity = { id: 'channel', source: alias }
       const journal = new PermissionDecisionJournal({ homeDir: f.homeDir, profileId: f.profileId })
-      channel = createServiceRendererPermissionOnce({ profileId: f.profileId, bootstrap: f.bootstrap, proof, journal })
+      channel = createServiceRendererPermissionOnce({
+        homeDir: f.homeDir,
+        profileId: f.profileId,
+        bootstrap: f.bootstrap,
+        proof,
+        journal,
+      })
       let sent = ''
       globalThis.__cordisxPermissionOnceRequestV1 = payload => {
         sent = payload
