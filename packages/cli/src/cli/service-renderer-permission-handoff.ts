@@ -167,32 +167,59 @@ async function reserve(
     const configuredPlugin = entry.configuredPlugins?.find(plugin => plugin.pluginId === targetIdentity.pluginId)
     const binding = entry.identityContext ?? configured?.permissionContext() ?? configuredPlugin?.permissionContext()
     if (!binding || binding.rendererId !== id) throw new Error('renderer-permission-handoff-unavailable')
+    if (adapterTarget?.kind === 'installed' && entry.unavailableInstalledPlugins?.has(targetIdentity.pluginId)) {
+      const unavailable = entry.unavailableInstalledPlugins
+      const projection = entry.identity
+      const alias = entry.identityAliases?.get(targetIdentity.pluginId)
+      const active = snapshot.active.plugins.find(plugin => plugin.id === targetIdentity.pluginId)
+      const omittedCurrent = () => {
+        try {
+          if (
+            !projection || !alias || !active || !active.enabled || active.digest !== adapterTarget.digest
+            || active.moduleGeneration !== adapterTarget.moduleGeneration
+            || entry.unavailableInstalledPlugins !== unavailable || !unavailable.has(targetIdentity.pluginId)
+            || entry.identity !== projection || entry.identityAliases?.get(targetIdentity.pluginId) !== alias
+            || entry.leases.some(lease => lease.pluginId === targetIdentity.pluginId)
+          ) return false
+          const resolved = projection.resolveLifecycle(binding, alias, targetIdentity.pluginId, active)
+          return resolved.source === targetIdentity.source && resolved.digest === adapterTarget.digest
+        } catch {
+          return false
+        }
+      }
+      if (!omittedCurrent()) throw new Error('renderer-permission-handoff-unavailable')
+      // This renderer has an owner-verified placeholder and no graph lease, so
+      // it cannot retain a grant. Its owner snapshot still advances below.
+      return { id, entry, configured, peer, target: undefined, omittedCurrent }
+    }
     const target = input.target({ ...binding, admitted: true }, targetIdentity.pluginId)
     if (
       !target.isCurrent() || target.ownerIdentity.id !== targetIdentity.pluginId
       || target.ownerIdentity.source !== targetIdentity.source
     ) throw new Error('renderer-permission-handoff-unavailable')
-    return { id, entry, configured, peer, target }
+    return { id, entry, configured, peer, target, omittedCurrent: undefined }
   })
   const writer = cohort.find(item => item.id === origin.rendererId)
   if (
     changes.length === 0 || changes.length > 2
-    || adapterTarget === undefined && (!writer || cohort.length === 0)
+    || adapterTarget === undefined && (!writer?.target || cohort.length === 0)
     || adapterTarget !== undefined && (writer !== undefined || !adapterTarget.isCurrent()
         || !origin.additionalPeers?.some(peer => peer.identity.rendererId === origin.rendererId))
   ) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
-  const writerTarget = adapterTarget ?? writer!.target
+  const writerTarget = adapterTarget ?? writer!.target!
   if (
     writerTarget.ownerIdentity.id !== targetIdentity.pluginId
     || writerTarget.ownerIdentity.source !== targetIdentity.source
   ) throw new Error('renderer-permission-handoff-unavailable')
   if (
     cohort.some(item =>
-      item.target.kind !== writerTarget.kind || item.target.digest !== writerTarget.digest
-      || !attachmentEqual(item.target.artifact, writerTarget.artifact)
-      || item.target.kind === 'installed' && item.target.moduleGeneration !== writerTarget.moduleGeneration
+      item.target !== undefined && (
+        item.target.kind !== writerTarget.kind || item.target.digest !== writerTarget.digest
+        || !attachmentEqual(item.target.artifact, writerTarget.artifact)
+        || item.target.kind === 'installed' && item.target.moduleGeneration !== writerTarget.moduleGeneration
+      )
     )
   ) {
     throw new Error('renderer-permission-handoff-unavailable')
@@ -212,8 +239,9 @@ async function reserve(
     try {
       return !ended && ownerLive() && (reservation?.isCurrent() ?? true)
         && attachmentEqual(input.lifecycle.snapshot(), snapshot)
-        && cohort.every(({ id, entry, configured, target }) =>
-          entry.lifecycleTransition === transition && input.current(id, entry) && target.isCurrent()
+        && cohort.every(({ id, entry, configured, target, omittedCurrent }) =>
+          entry.lifecycleTransition === transition && input.current(id, entry)
+          && (target?.isCurrent() ?? omittedCurrent?.() === true)
           && (configured === undefined || configured.isCurrent())
         )
     } catch {
@@ -331,11 +359,14 @@ async function reserve(
           const confirm = async (items: typeof cohort) =>
             await synchronizeServiceRendererPolicies({
               scope,
-              peers: items.map(item => ({
-                peer: item.peer,
-                origin: item === writer,
-                project: records => item.target.project(records),
-              })),
+              peers: items.flatMap(item => {
+                const target = item.target
+                return target === undefined ? [] : [{
+                  peer: item.peer,
+                  origin: item === writer,
+                  project: (records: readonly CordisXPersistedPermissionPolicyRecord[]) => target.project(records),
+                }]
+              }),
               requestId,
               expected: previous,
               updates: changes,

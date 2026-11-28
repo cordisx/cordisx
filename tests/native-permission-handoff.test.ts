@@ -4,6 +4,10 @@ import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service
 import { reserveServiceRendererPermissionHandoff } from '../packages/cli/src/cli/service-renderer-permission-handoff.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
+vi.mock('../packages/cli/src/cli/service-renderer-permission-inputs.js', () => ({
+  serviceRendererPermissionInputsCurrent: async () => true,
+}))
+
 it.each([false, true])('checks native-only policy inputs through the write (changed: %s)', async changed => {
   const profileId = 'default'
   const generation = 'owner-1'
@@ -167,3 +171,140 @@ it.each([false, true])('checks the configured native writer graph (mismatch: %s)
   origin.fence()
   consumers.close()
 })
+
+it.each([false, true])(
+  'only skips an unavailable Web placeholder without a graph lease (lease: %s)',
+  async hasLease => {
+    const profileId = 'default', generation = 'owner-1', rendererId = 'a'.repeat(64), webId = 'd'.repeat(64)
+    const identity = { id: 'demo', source: 'file:///demo.js' }
+    const digest = `sha256:${'c'.repeat(64)}` as const
+    const item = { id: identity.id, digest, enabled: true, moduleGeneration: 'module-1' }
+    const snapshot = { active: { plugins: [item] }, registryEpoch: 1 }
+    const [raw] = exactDomPermissionPolicies(profileId, [{
+      id: identity.id,
+      entry: '/demo.js',
+      pointIds: ['manager.content'],
+    }])
+    const update = { ...raw!, key: { ...raw!.key, identity: { pluginId: identity.id, source: identity.source } } }
+    const alias = `https://renderer.cordisx.invalid/plugin/${'e'.repeat(64)}`
+    const webPeer = {
+      identity: { rendererId: webId },
+      closed: false,
+      onDisconnect: () => () => {},
+      close: vi.fn(),
+      request: vi.fn(),
+    }
+    const nativePeer = {
+      identity: { rendererId },
+      scope: { homeDigest: 'b'.repeat(64), ownerAppId: 'codex', profileId, generation },
+      closed: false,
+      onDisconnect: () => () => {},
+    }
+    const binding = { rendererId: webId }
+    const entry = {
+      peer: webPeer,
+      bootstrapConfirmed: true,
+      policies: [] as unknown[],
+      snapshot,
+      checks: [],
+      leases: hasLease ? [{ pluginId: identity.id }] : [],
+      identityContext: binding,
+      identityAliases: new Map([[identity.id, alias]]),
+      identity: { resolveLifecycle: () => ({ source: identity.source, digest }) },
+      unavailableInstalledPlugins: new Set([identity.id]),
+    }
+    const writes = { isCurrent: () => true, release: () => true, fence: vi.fn() }
+    const lifecycle = {
+      snapshot: () => snapshot,
+      reserveExternalMutation: () => ({ isCurrent: () => true, release: () => true, fence: () => {} }),
+      terminal: vi.fn(),
+    }
+    const participants = {
+      isBoundTo: () => true,
+      ownerPeers: () => [webPeer],
+      peer: (id: string) => id === webId ? webPeer : undefined,
+      isLive: () => true,
+      disconnectAll: vi.fn(),
+    }
+    const origin = await fenceAdapterOrigin({
+      sessions: { suspendMutations: async () => writes, hasAdmittedPeer: () => true } as never,
+      participants: participants as never,
+      lifecycle: lifecycle as never,
+      originRendererId: rendererId,
+      reserveAdditionalPeers: async () => ({ peers: [nativePeer], originRendererId: rendererId, ...writes }) as never,
+    })
+    const target = {
+      kind: 'installed' as const,
+      identity,
+      ownerIdentity: identity,
+      moduleGeneration: item.moduleGeneration,
+      digest,
+      artifact: { version: '1.0.0', integrity: digest },
+      isCurrent: () => true,
+      project: (records: readonly typeof update[]) => ({
+        identity,
+        moduleGeneration: item.moduleGeneration,
+        policies: records,
+      }),
+      resolve: (records: readonly typeof update[]) => records,
+    }
+    let policies: readonly typeof update[] = []
+    const consumers = {
+      isCurrent: () => true,
+      adopt: async (value: { requestId: string; candidate: readonly typeof update[] }) => ({
+        profileId,
+        ownerGeneration: generation,
+        requestId: value.requestId,
+        adopted: true,
+        candidate: value.candidate,
+      }),
+      release: () => true,
+      fence: vi.fn(),
+    }
+    const reserve = () =>
+      reserveServiceRendererPermissionHandoff(
+        {
+          profileId,
+          generation,
+          channel: undefined,
+          permissionFence: {
+            runPolicyMutation: async (_input: unknown, action: () => Promise<unknown>) => await action(),
+          },
+          entries: new Map([[webId, entry]]),
+          participants,
+          lifecycle,
+          readLifetimes: { drainCurrent: async () => true },
+          policies: async () => policies,
+          current: () => true,
+          target: () => {
+            throw new Error('placeholder must not receive policy')
+          },
+        } as never,
+        origin,
+        {
+          profileId,
+          ownerGeneration: generation,
+          rendererId,
+          signal: new AbortController().signal,
+          admitted: true,
+        },
+        'native-request',
+        [],
+        [update],
+        consumers as never,
+        target as never,
+      )
+    if (hasLease) {
+      await expect(reserve()).rejects.toThrow('renderer-permission-handoff-unavailable')
+      expect(consumers.fence).toHaveBeenCalled()
+      return
+    }
+    const barrier = await reserve()
+    await barrier.run(async () => {
+      policies = [update]
+    })
+    expect(await barrier.complete(policies)).toBe(true)
+    expect(entry.policies).toEqual([update])
+    expect(webPeer.request).not.toHaveBeenCalled()
+  },
+)
