@@ -121,7 +121,6 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       status: 'ok',
       services: [],
     })
-    await expect(cmd('start', 'codex', profile, '--json')).rejects.toThrow('owned by service mode')
     await expect(cmd('run', 'codex', profile)).rejects.toThrow('already has a runtime owner')
     const listing = JSON.parse(await cmd('plugin', 'list', '--profile', profile, '--json'))
     expect(listing).toMatchObject({

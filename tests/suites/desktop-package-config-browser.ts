@@ -7,6 +7,19 @@ import { decision, FakeRuntime, localPackage, request } from './plugin-lifecycle
 const pluginId = 'desktop-config-fixture'
 const form = `[data-plugin-config-form=${pluginId}]`
 
+/** Wait for a replacement document before consulting its runtime readiness. */
+export async function reloadDesktopConfigPage(
+  page: CdpClient,
+  ready: (page: CdpClient) => Promise<void>,
+): Promise<void> {
+  await page.evaluate('globalThis.__desktopConfigBeforeReload = true')
+  await page.send('Page.reload')
+  await vi.waitFor(async () => {
+    expect(await page.evaluate('globalThis.__desktopConfigBeforeReload === undefined')).toBe(true)
+  }, { timeout: 15_000 })
+  await ready(page)
+}
+
 export async function verifyReadOnlyDesktopConfig(
   pages: readonly CdpClient[],
   label: string,
@@ -42,12 +55,7 @@ export async function verifyDesktopConfigRecovery(
   expect(unavailable.plugins.find((item: any) => item.id === pluginId)?.status).toBe('failed')
   expect(JSON.stringify(unavailable)).not.toContain(secret)
   expect(unavailable.pluginConfig).toBeUndefined()
-  await page.evaluate('globalThis.__unavailableConfigBeforeReload = true')
-  await page.send('Page.reload')
-  await vi.waitFor(async () => {
-    expect(await page.evaluate('globalThis.__unavailableConfigBeforeReload === undefined')).toBe(true)
-  }, { timeout: 15_000 })
-  await ready(page)
+  await reloadDesktopConfigPage(page, ready)
   expect(await page.evaluate('globalThis.__desktopConfigValue')).toEqual({ label })
 }
 
