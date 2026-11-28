@@ -4,7 +4,7 @@ import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service
 import { reserveServiceRendererPermissionHandoff } from '../packages/cli/src/cli/service-renderer-permission-handoff.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
-it('commits an authenticated native-origin policy with no Web client running', async () => {
+it.each([false, true])('checks native-only policy inputs through the write (changed: %s)', async changed => {
   const profileId = 'default'
   const generation = 'owner-1'
   const rendererId = 'a'.repeat(64)
@@ -16,6 +16,7 @@ it('commits an authenticated native-origin policy with no Web client running', a
   }])
   const update = { ...record!, key: { ...record!.key, identity: { pluginId: identity.id, source: identity.source } } }
   let policies: typeof update[] = []
+  let configuredCurrent = true
   const peer = {
     identity: { rendererId },
     scope: { homeDigest: 'b'.repeat(64), ownerAppId: 'codex', profileId, generation },
@@ -45,13 +46,14 @@ it('commits an authenticated native-origin policy with no Web client running', a
     reserveAdditionalPeers: async () => adapters as never,
   })
   const target = {
-    kind: 'installed' as const,
+    kind: 'configured-plugin' as const,
     identity,
     ownerIdentity: identity,
     moduleGeneration: 'module-1',
     digest: `sha256:${'c'.repeat(64)}` as const,
     artifact: { version: '1.0.0', integrity: `sha256:${'c'.repeat(64)}` as const },
     isCurrent: () => true,
+    verifyCurrent: async () => configuredCurrent,
     project: (records: readonly typeof update[]) => ({ identity, moduleGeneration: 'module-1', policies: records }),
     resolve: (records: readonly typeof update[]) => records,
   }
@@ -89,9 +91,16 @@ it('commits an authenticated native-origin policy with no Web client running', a
     consumers as never,
     target as never,
   )
-  await barrier.run(async () => {
+  const writing = barrier.run(async () => {
     policies = [update]
+    if (changed) configuredCurrent = false
   })
+  if (changed) {
+    await expect(writing).rejects.toThrow('renderer-permission-handoff-unavailable')
+    expect(consumers.fence).toHaveBeenCalledOnce()
+    return
+  }
+  await writing
   expect(await barrier.complete(policies)).toBe(true)
   expect(writes.release).toHaveBeenCalled()
   expect(consumers.release).toHaveBeenCalledOnce()

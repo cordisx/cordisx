@@ -222,15 +222,18 @@ async function reserve(
   }
   const inputsCurrent = async () => {
     if (!current()) return false
-    const checks = await Promise.all(cohort.map(async ({ entry }) =>
-      await serviceRendererPermissionInputsCurrent({
-        entry,
-        profileId: input.profileId,
-        pluginId: targetIdentity.pluginId,
-        signal: context.signal,
-        isCurrent: current,
-      })
-    ))
+    const checks = await Promise.all([
+      ...cohort.map(async ({ entry }) =>
+        await serviceRendererPermissionInputsCurrent({
+          entry,
+          profileId: input.profileId,
+          pluginId: targetIdentity.pluginId,
+          signal: context.signal,
+          isCurrent: current,
+        })
+      ),
+      ...(adapterTarget?.verifyCurrent === undefined ? [] : [adapterTarget.verifyCurrent()]),
+    ])
     return current() && checks.every(Boolean)
   }
   const fence = () => {
