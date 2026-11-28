@@ -1,7 +1,8 @@
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import { isPermissionPolicyRecordV2, normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
-import type { PermissionDecisionJournal } from './permission-decision-journal.js'
+import { type PermissionDecisionJournal, permissionDecisionKey } from './permission-decision-journal.js'
 import {
   projectPermissionDecisionHistory,
   projectRuntimeDecisionHistory,
@@ -97,10 +98,42 @@ export function createServiceRendererPermissionHistory(input: {
             record.key.identity.pluginId === evidence.ownerIdentity.id
             && record.key.identity.source === evidence.ownerIdentity.source
           )
+          const staged = await loadStagedPluginPackage(input.homeDir, evidence.digest)
+          if (
+            !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
+            || staged.digest !== evidence.digest || staged.manifest.id !== evidence.ownerIdentity.id
+            || staged.identitySource !== evidence.ownerIdentity.source
+            || staged.manifest.version !== evidence.artifact.version
+            || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
+          ) throw new Error('permission-history-unavailable')
+          // This is a read-only history projection, not a policy grant. Only
+          // exact declarations in the owner-verified manifest may be shown;
+          // request-specific paths, sessions and accounts stay in the owner.
+          const declared = withDeclaredRuntimeAskPolicies(
+            [],
+            input.profileId,
+            evidence.ownerIdentity,
+            staged.manifest.runtimeManifest,
+          )
+          const declaredKeys = new Set(declared.map(permissionDecisionKey))
           const result = await projectPermissionDecisionHistory({
             journal: input.journal,
-            records: withManagerDomAskPolicies(records, input.profileId, evidence.ownerIdentity),
-            project: record => input.bootstrap.permissionAccess.project([record], context, pluginId)[0],
+            records: withDeclaredRuntimeAskPolicies(
+              withManagerDomAskPolicies(records, input.profileId, evidence.ownerIdentity),
+              input.profileId,
+              evidence.ownerIdentity,
+              staged.manifest.runtimeManifest,
+            ),
+            project: record => {
+              if (!isPermissionPolicyRecordV2(record)) {
+                return input.bootstrap.permissionAccess.project([record], context, pluginId)[0]
+              }
+              if (!declaredKeys.has(permissionDecisionKey(record))) return undefined
+              return normalizePersistedPermissionPolicyRecord({
+                ...record,
+                key: { ...record.key, identity: { ...record.key.identity, source: evidence.identity.source } },
+              })
+            },
           })
           if (
             context.signal.aborted || !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)

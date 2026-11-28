@@ -324,6 +324,13 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         runtimeIndex: true,
       })
       await runtimeReceipt.commit()
+      const declaredReceipt = await journal.begin({
+        client: 'codex',
+        requestId: 'native-declared-runtime',
+        records: [runtimeRecord],
+        onceDecision: 'allow-once',
+      })
+      await declaredReceipt.commit()
       const history = createServiceRendererPermissionHistory({
         homeDir: f.homeDir,
         profileId: f.profileId,
@@ -336,8 +343,13 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         requestContext!,
       ).dispatch() as { requestId: string; ok: boolean; value: Array<{ client: string; record: unknown }> }
       expect(historyResult).toMatchObject({ requestId: 'read-history', ok: true })
-      expect(historyResult.value).toHaveLength(3)
-      expect(historyResult.value.every(item => item.client === 'web')).toBe(true)
+      expect(historyResult.value).toHaveLength(4)
+      expect(historyResult.value.filter(item => item.client === 'web')).toHaveLength(3)
+      expect(historyResult.value).toContainEqual(expect.objectContaining({
+        client: 'codex',
+        decision: 'allow-once',
+        record: { ...runtimeRecord, key: { ...runtimeRecord.key, identity: { pluginId: 'channel', source: alias } } },
+      }))
       expect(JSON.stringify(historyResult)).toContain(alias)
       expect(JSON.stringify(historyResult)).not.toContain(f.configuredChannel!.plugin.source)
       const ownerPolicy = (await loadHomeConfig(f.configPath)).permissions.find(item =>
