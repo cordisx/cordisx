@@ -33,10 +33,13 @@ export function nativePermissionPrompt(
       runtimeDecision = decision
       return true
     },
-    request: async (plan, identity) => {
+    request: async (plan, identity, context) => {
       if (plan.identity.pluginId !== identity.id || plan.identity.source !== identity.source) return undefined
       const decision = await ordinary.request(plan, identity)
       if (!decision || plan.operation !== 'runtime') return decision
+      // Exact-request and unverified local graphs keep their existing session
+      // behavior until the service can verify their distinct authorities.
+      if (context?.ownerReviewEligible === false) return decision
       if (!runtimeDecision || !await runtimeDecision(plan, decision)) return undefined
       return decision
     },

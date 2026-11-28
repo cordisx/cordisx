@@ -652,7 +652,11 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         decision = await Promise.race([
-          this.promptV2?.request(plan, identity) ?? Promise.resolve(undefined),
+          this.promptV2?.request(plan, identity, {
+            ownerReviewEligible: registration.artifact !== undefined
+              && !registration.runtimeExactCapabilities.has(capability as CordisXPlatformCapability)
+              && ![...registration.channelExactCapabilities].some(item => item === capability),
+          }) ?? Promise.resolve(undefined),
           new Promise<undefined>(resolve => {
             timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)
           }),

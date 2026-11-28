@@ -8,6 +8,7 @@ import {
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
 import { normalizePermissionScopeV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
 import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
+import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
@@ -107,12 +108,12 @@ export function createOwnerAdapterPermissionPolicy(input: {
     let updates: readonly CordisXPersistedPermissionPolicyRecord[]
     if (genericOnce) {
       const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, target.digest)
-      const manifest = staged.manifest.runtimeManifest
+      const manifest = normalizePluginManifest(staged.manifest.runtimeManifest, target.identity.id)
       if (
         !await targetCurrent() || staged.identitySource !== target.identity.source
-        || ![4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16].includes(manifest.schemaVersion)
+        || manifest.schemaVersion === 1
       ) throw new Error('adapter-permission-unavailable')
-      const declarations = manifestDeclarationsV2(manifest as Parameters<typeof manifestDeclarationsV2>[0])
+      const declarations = manifestDeclarationsV2(manifest)
       const declaration = declarations.find(item => item.name === first.key.capability)
       if (
         !declaration || !attachmentEqual(normalizePermissionScopeV2(declaration.scope), first.key.scope)

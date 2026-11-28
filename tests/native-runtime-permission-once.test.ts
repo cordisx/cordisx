@@ -10,11 +10,14 @@ import {
 import { createOwnerAdapterPermissionPolicy } from '../packages/cli/src/cli/owner-adapter-permission-policy.js'
 import { OwnerAdapterPermissionProof } from '../packages/cli/src/cli/owner-adapter-permission-proof.js'
 import { createOwnerAdapterPermissionHistory } from '../packages/cli/src/cli/owner-adapter-permission-history.js'
+import { withDeclaredRuntimeAskPolicies } from '../packages/cli/src/cli/permission-decision-history.js'
 import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
 import { createStandalonePermissionSigner } from '../packages/cli/src/independent-manager/standalone-permission-signer.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { loadHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { nativePermissionPrompt } from '../packages/cli/src/renderer/native-permission-prompt.js'
 import { manifestDeclarationsV2 } from '../packages/cli/src/renderer/platform/platform-permission-types.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
@@ -45,6 +48,14 @@ it('requires the service to authorize an exact native runtime decision before us
       availability: 'supported',
     }),
   }, catalog)
+  const declared14 = withDeclaredRuntimeAskPolicies([], profileId, identity, {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+    schemaVersion: 14,
+    id: identity.id,
+    services: [],
+    capabilities: [declaration],
+  })
+  expect(declared14[0]?.key).toMatchObject({ capability: 'models.read', scope: declaration.scope })
   const view = new PermissionAuthorizationViewModel(plan)
   view.select('models.read', 'allow-once')
   const selected = view.confirm()
@@ -81,7 +92,13 @@ it('requires the service to authorize an exact native runtime decision before us
           id: identity.id,
           version: '1.0.0',
           dependencies: [],
-          runtimeManifest: { schemaVersion: 4, capabilities: [declaration] },
+          runtimeManifest: {
+            $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+            schemaVersion: 4,
+            id: identity.id,
+            services: [],
+            capabilities: [declaration],
+          },
         },
       }) as never,
     runtime: () => ({ bootstrap: {} as never, consumers: {} as never, fence: async () => ({} as never) }),
@@ -112,7 +129,13 @@ it('requires the service to authorize an exact native runtime decision before us
       loadPolicies: async () => [],
       reviewIdentity: async () => ({
         identity,
-        manifest: { schemaVersion: 4, capabilities: [declaration] },
+        manifest: {
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+          schemaVersion: 4,
+          id: identity.id,
+          services: [],
+          capabilities: [declaration],
+        },
         isCurrent: () => true,
       }),
     })
@@ -135,6 +158,7 @@ it('requires the service to authorize an exact native runtime decision before us
     expect(await prompt.request(plan, { ...identity, id: 'other' })).toBeUndefined()
     expect(ordinary.request).not.toHaveBeenCalled()
     expect(await prompt.request(plan, identity)).toBeUndefined()
+    expect(await prompt.request(plan, identity, { ownerReviewEligible: false })).toEqual(selected.decision)
     expect(prompt.bindRuntimeDecision(async (currentPlan, decision) => {
       const second = await signer.signRuntimeOnce('request-2', currentPlan, decision)
       return await handler({

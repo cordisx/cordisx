@@ -6,6 +6,7 @@ import { CORDISX_PERMISSION_POLICY_SCHEMA_V2, CORDISX_PERMISSION_POLICY_SCHEMA_V
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
 import { normalizePermissionPolicyRecordV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
 import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
+import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
 
 /** Reconstruct ask keys from the owner-verified package without storing private scopes in the journal. */
 export function withDeclaredRuntimeAskPolicies(
@@ -15,10 +16,10 @@ export function withDeclaredRuntimeAskPolicies(
   manifest: unknown,
 ): readonly CordisXPersistedPermissionPolicyRecord[] {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return records
-  const version = (manifest as { schemaVersion?: unknown }).schemaVersion
-  if (typeof version !== 'number' || ![4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16].includes(version)) return records
+  const normalized = normalizePluginManifest(manifest, identity.id)
+  if (normalized.schemaVersion === 1) return records
   const selected = new Map(records.map(record => [permissionDecisionKey(record), record]))
-  for (const declaration of manifestDeclarationsV2(manifest as Parameters<typeof manifestDeclarationsV2>[0])) {
+  for (const declaration of manifestDeclarationsV2(normalized)) {
     const candidate = normalizePermissionPolicyRecordV2({
       $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
       schemaVersion: 2,
