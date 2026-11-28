@@ -48,6 +48,12 @@ it('confirms only one exact Web runtime target against the owner manifest and cu
   let policies: any[] = []
   const access = {
     evidence: () => evidence,
+    initialModel: () => ({
+      evidence,
+      snapshot: structuredClone(policies),
+      isCurrent: () => true,
+      verifyCurrent: async () => true,
+    }),
     isCurrentEvidence: () => !controller.signal.aborted,
     snapshot: () => structuredClone(policies),
     resolve: vi.fn(() => {
@@ -111,6 +117,8 @@ it('confirms only one exact Web runtime target against the owner manifest and cu
     const broad = await signed('broad', ['codex', 'other'])
     await expect(channel.prepare(payload('broad', broad), admitted).dispatch()).rejects.toThrow()
     const valid = await signed('valid', ['codex'])
+    // Startup exceptions cover only the installed model catalog, not other capabilities.
+    expect(() => channel.prepare(payload('valid', valid), context)).toThrow('permission-once-unavailable')
     policies = [{
       ...valid.record,
       key: { ...valid.record.key, identity: { pluginId: 'demo', source: evidence.ownerIdentity.source } },

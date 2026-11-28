@@ -283,12 +283,15 @@ export class ManagerPermissionProofAuthority {
     readonly moduleGeneration: string
     readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
     readonly proof: unknown
+    /** Only the owner-verified initial model path may verify a pre-admission decision. */
+    readonly initial?: true
   }): boolean {
     try {
       const { context } = input
       const entry = this.entries.get(context.rendererId)
       if (
-        this.input.target === 'native' || !entry || entry.signal !== context.signal || context.admitted !== true
+        this.input.target === 'native' || !entry || entry.signal !== context.signal
+        || context.admitted !== true && input.initial !== true
         || !this.current(context) || input.expected.length > 4096 || entry.used.size >= 4096
         || !input.proof || typeof input.proof !== 'object' || Array.isArray(input.proof)
       ) return false

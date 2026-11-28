@@ -96,7 +96,7 @@ it.each(['allow-persistent', 'deny-persistent', 'ask'] as const)(
         value: { ok: true, value: { ok: policy === 'allow-persistent' } },
       })
       expect(catalogReads).toBe(policy === 'allow-persistent' ? 1 : 0)
-      if (policy === 'allow-persistent') {
+      if (policy !== 'deny-persistent') {
         const binding = {
           source: field('source')!,
           pluginId: field('pluginId')!,
@@ -117,30 +117,66 @@ it.each(['allow-persistent', 'deny-persistent', 'ask'] as const)(
           key: { ...declared.key, identity: { pluginId: identity.id, source: identity.source } },
           policy: 'allow-persistent' as const,
         }
-        globalThis.__cordisxPlatformModelsRequestV1 = payload => {
+        const modelChannel = channel
+        const journal = new PermissionDecisionJournal({ homeDir: f.homeDir, profileId: f.profileId })
+        const onceChannel = createServiceRendererPermissionOnce({
+          homeDir: f.homeDir,
+          profileId: f.profileId,
+          bootstrap: f.bootstrap,
+          proof,
+          journal,
+        })
+        const forward = (target: ManagerRendererChannel, receive: (payload: string) => void) => (payload: string) => {
+          channel = target
           const requestId = (JSON.parse(payload) as { requestId: string }).requestId
-          void f.sessions.call(f.invocation, 'fixture-write', payload).then(reply =>
-            globalThis.__cordisxPlatformModelsReceiveV1?.(JSON.stringify(
+          void f.sessions.call(f.invocation, 'fixture-write', payload).then(reply => {
+            receive(JSON.stringify(
               reply.status === 'ok' ? reply.value : { requestId, ok: false },
             ))
-          )
+          })
         }
+        globalThis.__cordisxPlatformModelsRequestV1 = forward(
+          modelChannel,
+          value => globalThis.__cordisxPlatformModelsReceiveV1?.(value),
+        )
+        globalThis.__cordisxPermissionOnceRequestV1 = forward(
+          onceChannel,
+          value => globalThis.__cordisxPermissionOnceReceiveV1?.(value),
+        )
+        const once = BrowserPermissionOnceBinding.connect(STANDALONE_PERMISSION_BINDING_MARKER)!
         const bridge = BrowserPlatformModelsBridge.connect()!
         const documents = new CordisXOwnerDocumentBroker(undefined, [binding], bridge)
+        const prompt = standalonePermissionPrompt({
+          request: async plan => {
+            const view = new PermissionAuthorizationViewModel(plan)
+            view.select('models.read', 'allow-once')
+            const choice = view.confirm()
+            return choice.status === 'confirmed' && choice.decision.schemaVersion === 2 ? choice.decision : undefined
+          },
+        }, { isReviewing: () => false, dispose() {}, cancelV3() {}, isDomLeaseVisible: () => true } as never)
+        prompt.bindRuntimeDecision(async (plan, decision, artifact) =>
+          await once.authorizeWebRuntime(signer, artifact, plan, decision)
+        )
         const broker = new PermissionBroker(
-          new MemoryPermissionPolicyStore([], [projected]),
+          new MemoryPermissionPolicyStore([], policy === 'allow-persistent' ? [projected] : []),
           { request: async () => 'deny' },
           () => new Date(),
           30_000,
           f.profileId,
           f.generation,
+          undefined,
+          undefined,
+          prompt,
         )
         const root = new Context()
+        let authorizationRequestId = ''
         const fiber = root.plugin(CordisXPlatformService, {
           adapter: new UnavailablePlatformAdapter(),
           broker,
-          listOwnerModels: async (owner, generation, requestId, input) =>
-            await documents.listModels(owner, generation, requestId, input),
+          listOwnerModels: async (owner, generation, requestId, input) => {
+            authorizationRequestId = requestId
+            return await documents.listModels(owner, generation, requestId, input)
+          },
         })
         try {
           broker.register(
@@ -152,16 +188,28 @@ it.each(['allow-persistent', 'deny-persistent', 'ask'] as const)(
           )
           await fiber
           const ctx = root.extend({ [CORDISX_PLUGIN_ID]: identity.id, [CORDISX_PLUGIN_SOURCE]: identity.source })
-          expect(await ctx.platform.models.list({ providerIds: ['codex'] })).toMatchObject({
+          const call = await ctx.platform.models.list({ providerIds: ['codex'] })
+          expect(call).toMatchObject({
             ok: true,
             value: { models: [{ ref: { providerId: 'codex', modelId: 'model-a' } }] },
           })
+          if (policy === 'ask') {
+            expect(await documents.listModels(identity, binding.moduleGeneration, authorizationRequestId, {}))
+              .toMatchObject({ ok: false })
+            expect(await journal.recent([declared])).toMatchObject([{
+              entry: { client: 'web' },
+              committedAt: expect.any(String),
+            }])
+          }
         } finally {
           await fiber.dispose()
           broker.dispose()
           documents.dispose()
+          once.dispose()
           delete globalThis.__cordisxPlatformModelsRequestV1
           delete globalThis.__cordisxPlatformModelsReceiveV1
+          delete globalThis.__cordisxPermissionOnceRequestV1
+          delete globalThis.__cordisxPermissionOnceReceiveV1
         }
       }
       // A denied read does not fence the session or prevent normal admission.

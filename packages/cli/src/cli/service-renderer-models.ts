@@ -113,13 +113,13 @@ export function createServiceRendererModels(input: {
               throw new Error('renderer-models-unavailable')
             }
             if (
-              initial && policy?.policy !== 'allow-persistent'
-              || policy?.policy !== 'allow-persistent' && !(policy === undefined || policy.policy === 'ask')
+              policy?.policy !== 'allow-persistent' && !(policy === undefined || policy.policy === 'ask')
               || (policy === undefined || policy.policy === 'ask')
                 && !input.bootstrap.permissionAccess.runtimeOnceGrants.consume(context, {
                   requestId: authorizationRequestId,
                   record,
                   moduleGeneration: principal.moduleGeneration,
+                  ...(initial ? { initial: true as const } : {}),
                 })
             ) throw new Error('renderer-models-unavailable')
             const providers = await input.catalog()

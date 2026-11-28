@@ -241,7 +241,6 @@ export function installIndependentHostBindings(input: {
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
           || channel === 'native-catalog'
           || channel === 'permission-policy'
-          || channel === 'permission-once'
           || channel === 'permission-history'
           || channel === 'owner-document' && !request.readOnly
           || channel === 'managed-service-ui' && operation === 'readAccounts'

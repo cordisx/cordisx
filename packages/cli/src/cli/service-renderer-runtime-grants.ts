@@ -18,8 +18,9 @@ export class ServiceRendererRuntimeGrants {
     readonly record: CordisXPermissionPolicyRecordV2
     readonly moduleGeneration: string
     readonly current: () => boolean
+    readonly initial?: true
   }): void {
-    if (context.admitted !== true || context.signal.aborted || !input.current()) {
+    if (context.admitted !== true && input.initial !== true || context.signal.aborted || !input.current()) {
       throw new Error('renderer-runtime-grant-unavailable')
     }
     let grants = this.sessions.get(context.signal)
@@ -43,13 +44,15 @@ export class ServiceRendererRuntimeGrants {
     readonly requestId: string
     readonly record: CordisXPermissionPolicyRecordV2
     readonly moduleGeneration: string
+    readonly initial?: true
   }): boolean {
     const grants = this.sessions.get(context.signal)
     const grant = grants?.get(input.requestId)
     if (!grant) return false
     grants!.delete(input.requestId)
     try {
-      return context.admitted === true && !context.signal.aborted && grant.expires >= Date.now()
+      return (context.admitted === true || input.initial === true) && !context.signal.aborted
+        && grant.expires >= Date.now()
         && grant.moduleGeneration === input.moduleGeneration
         && grant.key === persistedPermissionRecordKey(input.record) && grant.current()
     } catch {
