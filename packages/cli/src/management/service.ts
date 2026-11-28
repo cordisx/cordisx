@@ -652,7 +652,9 @@ export async function openPluginManagementService(
             status: 'permission-review-required',
             request: planned.request,
             snapshot,
-            candidateId: lifecycle.candidateId,
+            candidateId: permission.schemaVersion === 1
+              ? lifecycle.candidateId
+              : permission.binding.requestId ?? lifecycle.candidateId,
             ...(lifecycle.package === undefined ? {} : { package: lifecycle.package }),
             permissionPlan: permission,
           }

@@ -137,7 +137,8 @@ it.skipIf(chrome === undefined)(
     } finally {
       await page?.close().catch(() => {})
       if (browser) await stopChrome(browser)
-      if (profile) await rm(profile, { recursive: true, force: true })
+      // Chromium children may finish a profile write just after the parent exits.
+      if (profile) await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
       await web?.close()
       lifetime.abort()
       await Promise.all(gateways.map(async gateway => await gateway.close()))
