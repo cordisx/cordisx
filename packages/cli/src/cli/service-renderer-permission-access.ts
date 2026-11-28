@@ -157,13 +157,18 @@ export class ServiceRendererPermissionAccess {
   /** History is read-only and remains visible when an installed plugin is disabled. */
   historyIdentity(context: ManagerRendererChannelContext, pluginId: string): {
     readonly ownerIdentity: { readonly id: string; readonly source: string }
+    readonly artifact: { readonly digest: `sha256:${string}`; readonly version: string }
     isCurrent(): boolean
   } {
     const entry = this.entry(context)
     const alias = entry.identityAliases?.get(pluginId)
     if (!alias) {
       const evidence = this.evidence(context, pluginId)
-      return { ownerIdentity: evidence.ownerIdentity, isCurrent: () => this.isCurrentEvidence(evidence) }
+      return {
+        ownerIdentity: evidence.ownerIdentity,
+        artifact: { digest: evidence.digest, version: evidence.artifact.version },
+        isCurrent: () => this.isCurrentEvidence(evidence),
+      }
     }
     const identity = entry.identity
     const snapshot = entry.snapshot
@@ -183,7 +188,11 @@ export class ServiceRendererPermissionAccess {
       }
     }
     if (!current()) throw new Error('renderer-permission-history-unavailable')
-    return Object.freeze({ ownerIdentity, isCurrent: current })
+    return Object.freeze({
+      ownerIdentity,
+      artifact: { digest: item.digest, version: item.version },
+      isCurrent: current,
+    })
   }
 
   private target(context: ManagerRendererChannelContext, pluginId: string): ManagerPolicyTarget {

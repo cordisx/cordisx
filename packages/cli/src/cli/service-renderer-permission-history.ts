@@ -46,34 +46,25 @@ export function createServiceRendererPermissionHistory(input: {
             const snapshot = input.bootstrap.permissionAccess.snapshot(context)
             const lifecycle = await input.journal.recentLifecycle(identity.ownerIdentity)
             const exactRuntime = await input.journal.recentRuntime(identity.ownerIdentity)
-            let evidence: ReturnType<typeof input.bootstrap.permissionAccess.evidence> | undefined
-            try {
-              evidence = input.bootstrap.permissionAccess.evidence(context, pluginId)
-            } catch { /* Disabled or unavailable packages still expose their lifecycle history. */ }
-            let runtime: Awaited<ReturnType<typeof projectRuntimeDecisionHistory>> = []
-            if (evidence) {
-              const staged = await loadStagedPluginPackage(input.homeDir, evidence.digest)
-              if (
-                !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
-                || !attachmentEqual(evidence.ownerIdentity, identity.ownerIdentity)
-                || staged.digest !== evidence.digest || staged.manifest.id !== evidence.ownerIdentity.id
-                || staged.identitySource !== evidence.ownerIdentity.source
-                || staged.manifest.version !== evidence.artifact.version
-                || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
-              ) throw new Error('permission-history-unavailable')
-              runtime = await projectRuntimeDecisionHistory(
-                input.journal,
-                withDeclaredRuntimeAskPolicies(
-                  [],
-                  input.profileId,
-                  evidence.ownerIdentity,
-                  staged.manifest.runtimeManifest,
-                ),
-              )
-            }
+            // History can use the exact installed artifact even if this page has no plugin graph.
+            const staged = await loadStagedPluginPackage(input.homeDir, identity.artifact.digest)
+            if (
+              !identity.isCurrent() || staged.digest !== identity.artifact.digest
+              || staged.manifest.id !== identity.ownerIdentity.id
+              || staged.identitySource !== identity.ownerIdentity.source
+              || staged.manifest.version !== identity.artifact.version
+            ) throw new Error('permission-history-unavailable')
+            const runtime = await projectRuntimeDecisionHistory(
+              input.journal,
+              withDeclaredRuntimeAskPolicies(
+                [],
+                input.profileId,
+                identity.ownerIdentity,
+                staged.manifest.runtimeManifest,
+              ),
+            )
             if (
               context.signal.aborted || !identity.isCurrent()
-              || evidence && !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
               || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
             ) throw new Error('permission-history-unavailable')
             const result = [...lifecycle, ...runtime, ...exactRuntime].sort((a, b) =>

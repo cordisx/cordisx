@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { DesktopManagerConfigProjection } from '../packages/cli/src/cli/desktop-manager-config-projection.js'
@@ -10,9 +11,118 @@ import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-compo
 import { PackagePluginConfigStore } from '../packages/cli/src/launcher/package-plugin-config.js'
 import type { ServiceRendererPrivateGraph } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
+import { localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
+import { createServiceRendererPermissionHistory } from '../packages/cli/src/cli/service-renderer-permission-history.js'
+import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
+import { withDeclaredRuntimeAskPolicies } from '../packages/cli/src/cli/permission-decision-history.js'
+import type { ManagerRendererChannel } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 
 const origin = 'http://127.0.0.1:43123'
 const secret = () => randomBytes(32).toString('hex')
+
+it('shows declared runtime authorization origin for an unavailable installed graph', async () => {
+  let history!: ManagerRendererChannel
+  const f = await fixture({
+    protectProfileInputs: true,
+    browserManagement: true,
+    extraChannels: () => [['fixture-history', { prepare: (payload, context) => history.prepare(payload, context) }]],
+  })
+  try {
+    const staged = await f.coordinator.stagePackageSource({
+      kind: 'local-directory',
+      location: pathToFileURL(await localPackageV5(f.root)).href,
+    })
+    const inspected = await f.coordinator.inspectStagedPackage(staged, 'history-inspect')
+    const plan = (await f.coordinator.permissionReviewPlanV7({
+      requestId: 'history-review',
+      profileId: f.profileId,
+      runtimeGeneration: f.generation,
+      expectedRevision: 0,
+      target: { kind: 'candidate', candidateId: inspected.candidateId! },
+    }))!
+    const required = plan.declarations.find(item => item.decisionRequired)!
+    const decision = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json' as const,
+      schemaVersion: 7 as const,
+      origin: 'explicit-user' as const,
+      planId: plan.planId,
+      operation: plan.operation,
+      profileId: plan.profileId,
+      identity: plan.identity,
+      binding: plan.binding,
+      decisions: [{
+        capability: required.capability,
+        scope: required.scope,
+        securityFingerprint: required.securityFingerprint,
+        decision: 'allow-once' as const,
+      }],
+    }
+    expect(
+      await f.coordinator.applyPermissionReviewV7({
+        requestId: 'history-install',
+        profileId: f.profileId,
+        runtimeGeneration: f.generation,
+        expectedRevision: 0,
+        decision,
+      }),
+    ).toMatchObject({ outcome: 'applied' })
+    const journal = new PermissionDecisionJournal({ homeDir: f.homeDir, profileId: f.profileId })
+    const owner = { id: staged.manifest.id, source: staged.identitySource }
+    const records = withDeclaredRuntimeAskPolicies([], f.profileId, owner, staged.manifest.runtimeManifest)
+    const model = records.find(record => record.key.capability === 'models.read')!
+    await (await journal.begin({
+      client: 'codex',
+      requestId: 'native-model',
+      records: [model],
+      onceDecision: 'allow-once',
+    })).commit()
+    history = createServiceRendererPermissionHistory({
+      homeDir: f.homeDir,
+      profileId: f.profileId,
+      generation: f.generation,
+      bootstrap: f.bootstrap,
+      journal,
+    })
+    const prepared = await f.call({ action: 'prepare' }) as any
+    expect(prepared.value.privateGraphs).toEqual([])
+    expect(await f.call({ action: 'complete', managerOrigin: origin, graphs: [] })).toMatchObject({ status: 'ok' })
+    const poll = f.sessions.poll(f.invocation, 3000)
+    const admitting = f.sessions.admit(f.invocation)
+    const command = (await poll as any).value.command
+    await f.sessions.acknowledge(f.invocation, {
+      id: command.id,
+      sequence: command.sequence,
+      ok: true,
+      value: { active: command.payload.active, registryEpoch: command.payload.registryEpoch },
+    })
+    expect(await admitting).toMatchObject({ status: 'ok', value: { admitted: true } })
+    const response = await f.sessions.call(
+      f.invocation,
+      'fixture-history',
+      JSON.stringify({
+        requestId: 'read-history',
+        pluginId: staged.manifest.id,
+        kind: 'lifecycle',
+      }),
+    ) as any
+    expect(response).toMatchObject({
+      status: 'ok',
+      value: {
+        ok: true,
+        value: [{
+          operation: 'runtime',
+          client: 'codex',
+          decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+        }],
+      },
+    })
+    expect(JSON.stringify(response)).not.toContain(staged.identitySource)
+    expect(JSON.stringify(response)).not.toContain(f.homeDir)
+  } finally {
+    await f.close()
+  }
+}, 30_000)
 
 function project(graph: ServiceRendererPrivateGraph) {
   const baseUrl = `${origin}/api/renderer/graphs/${secret()}/`
