@@ -126,6 +126,31 @@ it('finds a one-time decision even before a policy is saved', async () => {
   }])
 })
 
+it('does not attribute another source with the same plugin ID to the current installed package', async () => {
+  const { journal } = await fixture()
+  const other = {
+    ...record,
+    key: { ...record.key, identity: { ...record.key.identity, source: 'file:///private/old-plugin.js' } },
+  }
+  await (await journal.begin({ client: 'web', requestId: 'old-source', records: [other] })).commit()
+  await (await journal.begin({ client: 'codex', requestId: 'current-source', records: [record] })).commit()
+  const handler = createOwnerAdapterPermissionHistory({
+    profileId: 'work',
+    journal,
+    loadPolicies: async () => [record, other],
+    reviewIdentity: async () => ({
+      identity: { id: 'demo', source: record.key.identity.source },
+      isCurrent: () => true,
+    }),
+  })
+  const result = await handler({ kind: 'permission-history', pluginId: 'demo' }, {
+    secret: 'not-exposed',
+    current: () => true,
+  })
+  expect(result).toHaveLength(1)
+  expect(result).toMatchObject([{ client: 'codex', record }])
+})
+
 it('projects lifecycle reviews only for the exact plugin source and keeps unconfirmed outcomes distinct', async () => {
   const { journal } = await fixture()
   const ask = { ...record, policy: 'ask' as const }

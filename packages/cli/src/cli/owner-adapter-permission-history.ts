@@ -13,7 +13,11 @@ export function createOwnerAdapterPermissionHistory(input: {
     pluginId: string,
     context: OwnerAdapterDocumentContext,
   ) => Promise<
-    { readonly identity: { readonly id: string; readonly source: string }; isCurrent(): boolean } | undefined
+    {
+      readonly identity: { readonly id: string; readonly source: string }
+      isCurrent(): boolean
+      verifyCurrent?(): Promise<boolean>
+    } | undefined
   >
 }) {
   return async (value: unknown, context: OwnerAdapterDocumentContext) => {
@@ -30,22 +34,28 @@ export function createOwnerAdapterPermissionHistory(input: {
     }
     let records = before.filter(record => record.key.identity.pluginId === operation.pluginId)
     const target = await input.reviewIdentity?.(operation.pluginId, context)
+    if (input.reviewIdentity && !target) throw new Error('permission-history-unavailable')
+    const targetCurrent = async () =>
+      !target || target.isCurrent() && (target.verifyCurrent === undefined || await target.verifyCurrent())
     if (operation.kind === 'plugin-authorization-history') {
-      if (!target || !target.isCurrent()) throw new Error('permission-history-unavailable')
+      if (!target || !await targetCurrent()) throw new Error('permission-history-unavailable')
       const result = await input.journal.recentLifecycle(target.identity)
       if (
-        !context.current(false) || !target.isCurrent() || !attachmentEqual(before, await input.loadPolicies())
+        !context.current(false) || !attachmentEqual(before, await input.loadPolicies()) || !await targetCurrent()
       ) throw new Error('permission-history-unavailable')
       return result
     }
-    if (target) records = [...withManagerDomAskPolicies(records, input.profileId, target.identity)]
+    if (target) {
+      records = records.filter(record => record.key.identity.source === target.identity.source)
+      records = [...withManagerDomAskPolicies(records, input.profileId, target.identity)]
+    }
     const result = await projectPermissionDecisionHistory({
       journal: input.journal,
       records,
       project: record => record,
     })
     if (
-      !context.current(false) || target && !target.isCurrent() || !attachmentEqual(before, await input.loadPolicies())
+      !context.current(false) || !attachmentEqual(before, await input.loadPolicies()) || !await targetCurrent()
     ) {
       throw new Error('permission-history-unavailable')
     }

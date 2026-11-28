@@ -146,7 +146,9 @@ function StandaloneDomPermissionReview({ model, permission, locale, onReviewed }
               {artifact.persistentAvailable
                 ? chinese ? '审核页面权限' : 'Review page access'
                 : chinese
-                ? '审核此标签页权限'
+                ? review.native ? '审核此客户端权限' : '审核此标签页权限'
+                : review.native
+                ? 'Review access for this client'
                 : 'Review access for this tab'}
             </Button>
             {declined ? <p role="status">{chinese ? '本次未允许。' : 'Access was not allowed.'}</p> : null}

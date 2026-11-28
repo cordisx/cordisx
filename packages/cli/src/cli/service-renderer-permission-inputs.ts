@@ -8,7 +8,7 @@ import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap
 
 /** Recheck the effective owner config and the selected configured archive without staging it again. */
 export async function serviceRendererPermissionInputsCurrent(input: {
-  readonly entry: ServiceRendererBootstrapEntry
+  readonly entry: Pick<ServiceRendererBootstrapEntry, 'config'>
   readonly profileId: string
   readonly pluginId: string
   readonly signal: AbortSignal

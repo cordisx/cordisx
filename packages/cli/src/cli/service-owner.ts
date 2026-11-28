@@ -61,6 +61,7 @@ import { OwnerAdapterPermissionProof } from './owner-adapter-permission-proof.js
 import { createOwnerAdapterPermissionPolicy } from './owner-adapter-permission-policy.js'
 import { createOwnerAdapterLifecycleReview } from './owner-adapter-lifecycle-review.js'
 import { ownerAdapterInstalledHistoryIdentity } from './owner-adapter-permission-target.js'
+import { ownerAdapterConfiguredHistoryIdentity } from './owner-adapter-configured-history.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -108,6 +109,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererPermissionProof: ManagerPermissionProofAuthority | undefined
       let rendererPermissionConsumers: ServiceOwnerPermissionConsumers | undefined
       let nativePermissionProof: OwnerAdapterPermissionProof | undefined
+      let ownerConfigured: Awaited<ReturnType<typeof loadConfig>> | undefined
       let ownerOpen = true
       let serviceReady = false
       let webUnavailable = false
@@ -160,7 +162,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               context,
               lifecycle: rendererLifecycle,
             }).catch(() => undefined)
-            return target
+            if (target || !ownerConfigured) return target
+            return await ownerAdapterConfiguredHistoryIdentity({
+              homeDir,
+              profileId,
+              generation,
+              pluginId,
+              context,
+              lifecycle: rendererLifecycle,
+              config: ownerConfigured,
+              signal: lifetime.signal,
+            }).catch(() => undefined)
           },
         })
         const config = await loadHomeConfig(configPath)
@@ -345,6 +357,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             },
           })
           const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
+          ownerConfigured = configured
           const documents = createOwnerAdapterDocuments({
             homeDir,
             profileId,
