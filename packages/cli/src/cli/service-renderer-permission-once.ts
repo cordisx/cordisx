@@ -5,6 +5,7 @@ import type { ManagerPermissionProofAuthority } from './manager-permission-proof
 import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
 import type { PermissionDecisionJournal } from './permission-decision-journal.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
 
 /** Confirm a renderer-local one-time decision in the owner before it can create a lease. */
 export function createServiceRendererPermissionOnce(input: {
@@ -50,9 +51,12 @@ export function createServiceRendererPermissionOnce(input: {
           const evidence = input.bootstrap.permissionAccess.evidence(context, pluginId)
           const snapshot = input.bootstrap.permissionAccess.snapshot(context)
           const expected = input.bootstrap.permissionAccess.project(snapshot, context, pluginId)
+          const verify = isPermissionPolicyRecordV2(rendererRecord)
+            ? input.proof.authorizeWebRuntimeOnce.bind(input.proof)
+            : input.proof.authorizeOnce.bind(input.proof)
           if (
             context.signal.aborted || !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
-            || !input.proof.authorizeOnce({
+            || !verify({
               context,
               requestId: request.requestId,
               record: rendererRecord,

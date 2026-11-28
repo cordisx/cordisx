@@ -3,6 +3,7 @@ import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 import { standaloneDomReview } from './standalone-dom-review.js'
 import { BrowserPermissionOnceBinding } from './permission-once-binding.js'
 import { nativeRuntimePrompt } from './native-permission-prompt.js'
+import { standaloneRuntimePrompt } from './standalone-runtime-prompt.js'
 import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
 import { bindStandaloneRuntimePolicyReviewer } from './standalone-runtime-policy-review.js'
 
@@ -58,6 +59,12 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
             once ? await once.authorizeRuntime(standalonePermissionSigner, plan, decision) : false
           )
         ) throw new Error('Native runtime permission review is unavailable')
+        if (
+          metadata.hostKind === 'standalone'
+          && !standaloneRuntimePrompt(broker)?.bindRuntimeDecision(async (plan, decision, artifact) =>
+            once ? await once.authorizeWebRuntime(standalonePermissionSigner, artifact, plan, decision) : false
+          )
+        ) throw new Error('Standalone runtime permission review is unavailable')
       }
       standalonePolicyAdopter?.(async input => {
         if (signal?.aborted) return false

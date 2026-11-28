@@ -299,7 +299,10 @@ export interface PermissionAuthorizationPromptV2 {
   request(
     plan: CordisXPermissionAuthorizationPlanV2,
     identity: CordisXPluginIdentity,
-    context?: { readonly ownerReviewEligible: boolean },
+    context?: {
+      readonly ownerReviewEligible: boolean
+      readonly ownerReviewArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
+    },
   ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined>
   requestV3?(
     plan: CordisXPermissionAuthorizationPlanV3,

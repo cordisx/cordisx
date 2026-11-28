@@ -2,6 +2,7 @@ import { BrowserPermissionAuthorizationPromptV2, BrowserPermissionPrompt, Permis
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 import { bindStandaloneDomReview, createStandaloneDomReview } from './standalone-dom-review.js'
 import { bindNativeRuntimePrompt, nativePermissionPrompt } from './native-permission-prompt.js'
+import { bindStandaloneRuntimePrompt, standalonePermissionPrompt } from './standalone-runtime-prompt.js'
 
 /** Compose the Host broker with the scoped standalone review, when available. */
 export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
@@ -10,14 +11,19 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
   const review = (standalone || native) && runtimeScope.metadata()!.standaloneReviewSession !== undefined
     ? createStandaloneDomReview(document, native)
     : undefined
-  const ordinary = standalone ? undefined : new BrowserPermissionAuthorizationPromptV2(
-    document,
-    undefined,
-    runtimeScope.metadata()!.ownerPermissionSnapshot === true
-      ? { sessionOnly: true, requireTrustedEvents: true }
-      : {},
-  )
-  const nativePrompt = review && ordinary ? nativePermissionPrompt(ordinary, review) : undefined
+  const ordinary = !standalone || review
+    ? new BrowserPermissionAuthorizationPromptV2(
+      document,
+      undefined,
+      standalone
+        ? { sessionOnly: true, requireTrustedEvents: true, externalStyles: true, hideManage: true }
+        : runtimeScope.metadata()!.ownerPermissionSnapshot === true
+        ? { sessionOnly: true, requireTrustedEvents: true }
+        : {},
+    )
+    : undefined
+  const nativePrompt = !standalone && review && ordinary ? nativePermissionPrompt(ordinary, review) : undefined
+  const webPrompt = standalone && review && ordinary ? standalonePermissionPrompt(ordinary, review) : undefined
   const broker = new PermissionBroker(
     runtimeScope.permissionStore()!,
     standalone ? { request: async () => 'deny' as const } : new BrowserPermissionPrompt(
@@ -33,10 +39,11 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
     runtimeScope.generation()!,
     runtimeScope.generationVisibility()!,
     runtimeScope.pluginConsole()!,
-    standalone ? review : nativePrompt ?? ordinary,
+    standalone ? webPrompt ?? review : nativePrompt ?? ordinary,
     runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
   )
   if (review !== undefined) bindStandaloneDomReview(broker, review)
   if (nativePrompt !== undefined) bindNativeRuntimePrompt(broker, nativePrompt)
+  if (webPrompt !== undefined) bindStandaloneRuntimePrompt(broker, webPrompt)
   return broker
 }

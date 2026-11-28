@@ -20,6 +20,7 @@ import { assertPermissionAuthorizationDecisionV2, normalizePermissionPolicyRecor
 import { nativeRuntimeOnceProofBytes } from '../native-runtime-once-proof.js'
 import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
 import { runtimePolicyProofBytes } from '../runtime-policy-proof.js'
+import { webRuntimeOnceProofBytes } from '../web-runtime-once-proof.js'
 
 type Review = {
   readonly identity: { readonly id: string; readonly source: string }
@@ -145,6 +146,42 @@ export async function createStandalonePermissionSigner(
     })
     return { record, selected: selected.decision }
   }
+  const runtimeDecision = (
+    plan: CordisXPermissionAuthorizationPlanV2,
+    decision: CordisXPermissionAuthorizationDecisionV2,
+  ) => {
+    if (
+      closed || plan.$schema !== CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2
+      || plan.schemaVersion !== 2 || plan.operation !== 'runtime' || plan.profileId !== scope.profileId
+      || plan.binding.runtimeGeneration !== scope.generation || !plan.binding.moduleGeneration
+      || plan.catalogVersion !== CORDISX_CAPABILITY_CATALOG_VERSION || plan.declarations.length !== 1
+    ) throw new Error('native-runtime-once-decision-unavailable')
+    assertPermissionAuthorizationDecisionV2(plan, decision)
+    const declaration = plan.declarations[0]!
+    const selected = decision.decisions[0]!
+    if (
+      (declaration.policy !== 'ask' && declaration.policy !== 'allow-persistent')
+      || selected.decision !== 'allow-once' && selected.decision !== 'deny-once'
+    ) throw new Error('native-runtime-once-decision-unavailable')
+    const record = normalizePermissionPolicyRecordV2({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+      schemaVersion: 2,
+      key: {
+        profileId: plan.profileId,
+        identity: plan.identity,
+        capability: declaration.capability,
+        scope: declaration.scope,
+        securityFingerprint: declaration.securityFingerprint,
+      },
+      policy: 'ask',
+    })
+    return {
+      record,
+      selected: selected.decision,
+      observed: declaration.policy,
+      moduleGeneration: plan.binding.moduleGeneration!,
+    }
+  }
   return {
     publicKey,
     /** Called only after the native Host dialog accepted a trusted runtime decision. */
@@ -157,31 +194,8 @@ export async function createStandalonePermissionSigner(
       readonly decision: 'allow-once' | 'deny-once'
       readonly proof: unknown
     }> {
-      if (
-        closed || target !== 'native' || plan.$schema !== CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2
-        || plan.schemaVersion !== 2 || plan.operation !== 'runtime' || plan.profileId !== scope.profileId
-        || plan.binding.runtimeGeneration !== scope.generation || !plan.binding.moduleGeneration
-        || plan.catalogVersion !== CORDISX_CAPABILITY_CATALOG_VERSION || plan.declarations.length !== 1
-      ) throw new Error('native-runtime-once-decision-unavailable')
-      assertPermissionAuthorizationDecisionV2(plan, decision)
-      const declaration = plan.declarations[0]!
-      const selected = decision.decisions[0]!
-      if (
-        (declaration.policy !== 'ask' && declaration.policy !== 'allow-persistent')
-        || selected.decision !== 'allow-once' && selected.decision !== 'deny-once'
-      ) throw new Error('native-runtime-once-decision-unavailable')
-      const record = normalizePermissionPolicyRecordV2({
-        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
-        schemaVersion: 2,
-        key: {
-          profileId: plan.profileId,
-          identity: plan.identity,
-          capability: declaration.capability,
-          scope: declaration.scope,
-          securityFingerprint: declaration.securityFingerprint,
-        },
-        policy: 'ask',
-      })
+      if (target !== 'native') throw new Error('native-runtime-once-decision-unavailable')
+      const { record, selected, observed, moduleGeneration } = runtimeDecision(plan, decision)
       const random = provider.getRandomValues(new Uint8Array(32))
       const payload = {
         version: 1 as const,
@@ -189,14 +203,14 @@ export async function createStandalonePermissionSigner(
         rendererId: scope.rendererId,
         profileId: scope.profileId,
         ownerGeneration: scope.generation,
-        moduleGeneration: plan.binding.moduleGeneration,
+        moduleGeneration,
         requestId,
         decisionId: [...random].map(byte => byte.toString(16).padStart(2, '0')).join(''),
         planId: plan.planId,
         issuedAt: now(),
-        observed: declaration.policy,
+        observed,
         record,
-        decision: selected.decision,
+        decision: selected,
       }
       const signature = await provider.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' },
@@ -206,9 +220,47 @@ export async function createStandalonePermissionSigner(
       if (closed) throw new Error('native-runtime-once-decision-unavailable')
       return {
         record,
-        decision: selected.decision,
+        decision: selected,
         proof: { payload, signature: base64url(new Uint8Array(signature)) },
       }
+    },
+    /** Called only after a trusted Web runtime prompt for this verified artifact. */
+    async signWebRuntimeOnce(
+      requestId: string,
+      artifact: { readonly version: string; readonly integrity: `sha256:${string}` },
+      plan: CordisXPermissionAuthorizationPlanV2,
+      decision: CordisXPermissionAuthorizationDecisionV2,
+    ): Promise<{
+      readonly record: CordisXPermissionPolicyRecordV2
+      readonly decision: 'allow-once' | 'deny-once'
+      readonly proof: unknown
+    }> {
+      if (target !== 'standalone') throw new Error('web-runtime-once-decision-unavailable')
+      const { record, selected, observed, moduleGeneration } = runtimeDecision(plan, decision)
+      const random = provider.getRandomValues(new Uint8Array(32))
+      const payload = {
+        version: 1 as const,
+        kind: 'web-runtime-v2' as const,
+        rendererId: scope.rendererId,
+        profileId: scope.profileId,
+        ownerGeneration: scope.generation,
+        moduleGeneration,
+        requestId,
+        decisionId: [...random].map(byte => byte.toString(16).padStart(2, '0')).join(''),
+        planId: plan.planId,
+        issuedAt: now(),
+        observed,
+        record,
+        decision: selected,
+        artifact: { ...artifact },
+      }
+      const signature = await provider.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        pair.privateKey,
+        webRuntimeOnceProofBytes(payload),
+      )
+      if (closed) throw new Error('web-runtime-once-decision-unavailable')
+      return { record, decision: selected, proof: { payload, signature: base64url(new Uint8Array(signature)) } }
     },
     /** Call only after the Host dialog has accepted a trusted user event. */
     noteConfirmed(

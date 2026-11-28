@@ -48,6 +48,18 @@ export class BrowserPermissionOnceBinding {
     return await this.submit(requestId, signed)
   }
 
+  async authorizeWebRuntime(
+    signer: StandalonePermissionSigner,
+    artifact: Parameters<StandalonePermissionSigner['signWebRuntimeOnce']>[1],
+    plan: Parameters<StandalonePermissionSigner['signWebRuntimeOnce']>[2],
+    decision: Parameters<StandalonePermissionSigner['signWebRuntimeOnce']>[3],
+  ): Promise<boolean> {
+    if (this.closed) return false
+    const requestId = globalThis.crypto.randomUUID()
+    const signed = await signer.signWebRuntimeOnce(requestId, artifact, plan, decision)
+    return await this.submit(requestId, signed)
+  }
+
   private async submit(requestId: string, signed: {
     readonly record: unknown
     readonly decision: 'allow-once' | 'deny-once'

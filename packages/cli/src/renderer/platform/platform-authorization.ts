@@ -654,6 +654,12 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
         decision = await Promise.race([
           this.promptV2?.request(plan, identity, {
             ownerReviewEligible: registration.artifact !== undefined,
+            ...(registration.artifact === undefined ? {} : {
+              ownerReviewArtifact: {
+                version: registration.artifact.version,
+                integrity: registration.artifact.integrity,
+              },
+            }),
           }) ?? Promise.resolve(undefined),
           new Promise<undefined>(resolve => {
             timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)
