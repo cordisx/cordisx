@@ -8,6 +8,7 @@ import { createServiceRendererPermissionChannel } from '../packages/cli/src/cli/
 import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service-owner-permission-consumers.js'
 import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
 import { createServiceRendererPermissionHistory } from '../packages/cli/src/cli/service-renderer-permission-history.js'
+import { withDeclaredRuntimeAskPolicies } from '../packages/cli/src/cli/permission-decision-history.js'
 import { createServiceRendererPermissionOnce } from '../packages/cli/src/cli/service-renderer-permission-once.js'
 import type {
   ManagerRendererChannel,
@@ -305,7 +306,21 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         'allow-persistent',
         'ask',
       ])
+      const runtimeRecord = withDeclaredRuntimeAskPolicies(
+        [],
+        f.profileId,
+        { id: 'channel', source: channelSource },
+        f.configuredChannel!.plugin.manifest,
+      )[0]!
+      const runtimeReceipt = await journal.begin({
+        client: 'codex',
+        requestId: 'native-runtime',
+        records: [runtimeRecord],
+        onceDecision: 'allow-once',
+      })
+      await runtimeReceipt.commit()
       const history = createServiceRendererPermissionHistory({
+        homeDir: f.homeDir,
         profileId: f.profileId,
         generation: f.generation,
         bootstrap: f.bootstrap,
@@ -334,13 +349,22 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         JSON.stringify({ requestId: 'read-lifecycle', pluginId: 'channel', kind: 'lifecycle' }),
         requestContext!,
       ).dispatch() as { value: unknown }
-      expect(lifecycleHistory.value).toMatchObject([{
-        client: 'codex',
-        operation: 'install',
-        decisions: [{ decision: 'allow-once' }],
-        committedAt: expect.any(String),
-      }])
+      expect(lifecycleHistory.value).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          client: 'codex',
+          operation: 'install',
+          decisions: [expect.objectContaining({ decision: 'allow-once' })],
+          committedAt: expect.any(String),
+        }),
+        expect.objectContaining({
+          client: 'codex',
+          operation: 'runtime',
+          decisions: [{ capability: runtimeRecord.key.capability, decision: 'allow-once' }],
+          committedAt: expect.any(String),
+        }),
+      ]))
       expect(JSON.stringify(lifecycleHistory)).not.toContain(f.configuredChannel!.plugin.source)
+      expect(JSON.stringify(lifecycleHistory)).not.toContain('channelTenants')
       expect(await f.sessions.call(f.invocation, 'fixture-write', oncePayload)).toMatchObject({ status: 'unknown' })
     } finally {
       consumers?.close()

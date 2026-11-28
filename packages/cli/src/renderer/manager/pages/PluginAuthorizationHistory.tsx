@@ -46,7 +46,7 @@ export function PluginAuthorizationHistory({ pluginId, locale, model }: {
   const zh = productLocale(locale) === 'zh-CN'
   return (
     <section className="cxr-section" data-plugin-authorization-history>
-      <h3>{zh ? '安装与启用授权记录' : 'Installation and enablement authorization'}</h3>
+      <h3>{zh ? '授权记录' : 'Authorization history'}</h3>
       <Button tag="button" type="button" theme="default" variant="outline" onClick={() => setRefresh(n => n + 1)}>
         {zh ? '刷新' : 'Refresh'}
       </Button>
@@ -60,7 +60,9 @@ export function PluginAuthorizationHistory({ pluginId, locale, model }: {
         : null}
       {state.status === 'ready'
         ? state.items.map((item, index) => {
-          const action = item.operation === 'install'
+          const action = item.operation === 'runtime'
+            ? zh ? '运行时权限' : 'Runtime permission'
+            : item.operation === 'install'
             ? zh ? '安装' : 'Install'
             : item.operation === 'update'
             ? zh ? '更新' : 'Update'

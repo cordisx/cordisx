@@ -1,6 +1,7 @@
 import { createPublicKey, type JsonWebKey, type KeyObject, verify } from 'node:crypto'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionRecordKey,
@@ -12,6 +13,7 @@ import {
   standalonePermissionProofBytes,
 } from '../standalone-permission-proof.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import { nativeRuntimeOnceProofBytes, normalizeNativeRuntimeOnceProof } from '../native-runtime-once-proof.js'
 
 type Entry = {
   readonly signal: AbortSignal
@@ -178,6 +180,62 @@ export class ManagerPermissionProofAuthority {
           key: entry.key,
           dsaEncoding: 'ieee-p1363',
         }, signature)
+      ) return false
+      if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
+      entry.used.add(payload.decisionId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  authorizeRuntimeOnce(input: {
+    readonly context: ManagerRendererChannelContext
+    readonly requestId: string
+    readonly record: CordisXPersistedPermissionPolicyRecord
+    readonly decision: 'allow-once' | 'deny-once'
+    readonly expected: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly moduleGeneration: string
+    readonly proof: unknown
+  }): boolean {
+    try {
+      const { context } = input
+      const entry = this.entries.get(context.rendererId)
+      if (
+        this.input.target !== 'native' || !entry || entry.signal !== context.signal || context.admitted !== true
+        || !this.current(context) || input.expected.length > 4096 || entry.used.size >= 4096
+        || !input.proof || typeof input.proof !== 'object' || Array.isArray(input.proof)
+      ) return false
+      const proof = input.proof as Record<string, unknown>
+      if (
+        Object.keys(proof).length !== 2 || Object.keys(proof).some(key => !['payload', 'signature'].includes(key))
+        || typeof proof.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/u.test(proof.signature)
+      ) return false
+      const signature = Buffer.from(proof.signature, 'base64url')
+      if (signature.length !== 64 || signature.toString('base64url') !== proof.signature) return false
+      const payload = normalizeNativeRuntimeOnceProof(proof.payload)
+      const record = normalizePersistedPermissionPolicyRecord(input.record)
+      const now = (this.input.now ?? Date.now)()
+      if (
+        payload.rendererId !== context.rendererId || payload.profileId !== context.profileId
+        || payload.ownerGeneration !== context.ownerGeneration || payload.moduleGeneration !== input.moduleGeneration
+        || payload.requestId !== input.requestId || payload.decision !== input.decision
+        || entry.used.has(payload.decisionId) || !Number.isSafeInteger(now)
+        || payload.issuedAt > now + 5_000 || now - payload.issuedAt > 60_000
+        || JSON.stringify(record) !== JSON.stringify(payload.record)
+      ) return false
+      const key = persistedPermissionRecordKey(payload.record)
+      const prior = input.expected.filter(item =>
+        isPermissionPolicyRecordV2(item) && persistedPermissionRecordKey(item) === key
+      )
+      if (prior.length > 1 || (prior[0]?.policy ?? 'ask') !== payload.observed) return false
+      if (
+        !verify(
+          'sha256',
+          nativeRuntimeOnceProofBytes(payload),
+          { key: entry.key, dsaEncoding: 'ieee-p1363' },
+          signature,
+        )
       ) return false
       if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
       entry.used.add(payload.decisionId)

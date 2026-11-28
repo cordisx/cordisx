@@ -2,8 +2,12 @@ import { parsePermissionBindingRequest, persistPermissionPoliciesIfUnchanged } f
 import { attachmentEqual, attachmentRecord } from '../launcher/renderer-lifecycle-peer.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   normalizePersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
+import { normalizePermissionScopeV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
+import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
@@ -14,7 +18,7 @@ import { ownerAdapterInstalledPermissionTarget } from './owner-adapter-permissio
 import { ownerAdapterConfiguredPermissionTarget } from './owner-adapter-configured-permission.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
-import type { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import type { CordisXConfig } from '../launcher/config.js'
 
 /** Owner-only native permission writes use the same profile and renderer barrier as Web. */
@@ -99,9 +103,28 @@ export function createOwnerAdapterPermissionPolicy(input: {
       profileId: input.profileId,
       identities: [target.identity],
     })
-    const updates = target.resolve(request.records)
-    if (!attachmentEqual(target.project(updates).policies, request.records)) {
-      throw new Error('adapter-permission-unavailable')
+    const genericOnce = once && isPermissionPolicyRecordV2(first)
+    let updates: readonly CordisXPersistedPermissionPolicyRecord[]
+    if (genericOnce) {
+      const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, target.digest)
+      const manifest = staged.manifest.runtimeManifest
+      if (
+        !await targetCurrent() || staged.identitySource !== target.identity.source
+        || ![4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16].includes(manifest.schemaVersion)
+      ) throw new Error('adapter-permission-unavailable')
+      const declarations = manifestDeclarationsV2(manifest as Parameters<typeof manifestDeclarationsV2>[0])
+      const declaration = declarations.find(item => item.name === first.key.capability)
+      if (
+        !declaration || !attachmentEqual(normalizePermissionScopeV2(declaration.scope), first.key.scope)
+        || permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration)
+          !== first.key.securityFingerprint
+      ) throw new Error('adapter-permission-unavailable')
+      updates = request.records
+    } else {
+      updates = target.resolve(request.records)
+      if (!attachmentEqual(target.project(updates).policies, request.records)) {
+        throw new Error('adapter-permission-unavailable')
+      }
     }
     const expected = await input.loadPolicies()
     const runtime = input.runtime()
@@ -114,7 +137,13 @@ export function createOwnerAdapterPermissionPolicy(input: {
       artifact: target.artifact,
       proof: operation.proof,
     }
-    const authorized = once
+    const authorized = genericOnce
+      ? input.proof.authorizeRuntimeOnce({
+        ...common,
+        record: updates[0]!,
+        decision: operation.decision as 'allow-once' | 'deny-once',
+      })
+      : once
       ? input.proof.authorizeOnce({
         ...common,
         record: updates[0]!,
@@ -122,23 +151,65 @@ export function createOwnerAdapterPermissionPolicy(input: {
       })
       : input.proof.authorize({ ...common, records: updates })
     if (!authorized) throw new Error('adapter-permission-unavailable')
-    const trace = await input.journal.begin({
-      client: 'codex',
-      requestId: request.requestId,
-      records: updates,
-      ...(once ? { onceDecision: operation.decision as 'allow-once' | 'deny-once' } : {}),
-    })
+    const beginTrace = async () =>
+      await input.journal.begin({
+        client: 'codex',
+        requestId: request.requestId,
+        records: updates,
+        ...(once ? { onceDecision: operation.decision as 'allow-once' | 'deny-once' } : {}),
+      })
     if (!context.live() || !await targetCurrent()) throw new Error('adapter-permission-unavailable')
     if (once) {
-      if (!attachmentEqual(expected, await input.loadPolicies()) || !context.current(false)) {
-        throw new Error('adapter-permission-unavailable')
+      // A configured native graph has a renderer-local generation. Verify that
+      // the requesting peer actually loaded the same owner-selected archive.
+      const origin = genericOnce && target.kind !== 'installed' ? await runtime.fence(context.rendererId) : undefined
+      let released = false
+      try {
+        if (origin) {
+          const peers = origin.additionalPeers?.filter(peer => peer.identity.rendererId === context.rendererId) ?? []
+          if (!origin.isCurrent() || peers.length !== 1) throw new Error('adapter-permission-unavailable')
+          const snapshot = input.lifecycle.snapshot()
+          const peer = peers[0]!
+          const value = attachmentRecord(
+            await peer.request('permission-provenance', { pluginId: first.key.identity.pluginId }),
+          )
+          if (
+            !origin.isCurrent() || peer.closed || Object.keys(value).length !== 7 || value.available !== true
+            || value.rendererId !== context.rendererId || value.ownerGeneration !== input.generation
+            || !attachmentEqual(value.snapshot, snapshot) || !attachmentEqual(input.lifecycle.snapshot(), snapshot)
+            || !attachmentEqual(value.identity, target.ownerIdentity)
+            || !attachmentEqual(value.artifact, target.artifact)
+            || value.moduleGeneration !== target.moduleGeneration
+          ) throw new Error('adapter-permission-unavailable')
+        }
+        if (!attachmentEqual(expected, await input.loadPolicies()) || !context.current(false)) {
+          throw new Error('adapter-permission-unavailable')
+        }
+        const trace = await beginTrace()
+        if (!context.current(false) || !await targetCurrent() || origin && !origin.isCurrent()) {
+          throw new Error('adapter-permission-unavailable')
+        }
+        await trace.commit()
+        if (
+          !context.current(false) || !await targetCurrent() || !attachmentEqual(expected, await input.loadPolicies())
+          || origin && !origin.isCurrent()
+        ) throw new Error('adapter-permission-unavailable')
+        if (origin) {
+          released = origin.release()
+          if (!released) throw new Error('adapter-permission-unavailable')
+        }
+        return true
+      } finally {
+        if (origin && !released) {
+          try {
+            if (!origin.release()) origin.fence()
+          } catch {
+            origin.fence()
+          }
+        }
       }
-      await trace.commit()
-      if (!context.current(false) || !await targetCurrent() || !attachmentEqual(expected, await input.loadPolicies())) {
-        throw new Error('adapter-permission-unavailable')
-      }
-      return true
     }
+    const trace = await beginTrace()
     const origin = await runtime.fence(context.rendererId)
     let consumers: ReturnType<ServiceOwnerPermissionConsumers['reserve']> | undefined
     try {

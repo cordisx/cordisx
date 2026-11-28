@@ -10,6 +10,12 @@ it('shows the service-reported client and leaves unconfirmed outcomes visible', 
     client: 'codex',
     requestedAt: '2026-11-28T08:00:00.000Z',
     decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+  }, {
+    operation: 'runtime',
+    client: 'codex',
+    requestedAt: '2026-11-28T08:01:00.000Z',
+    committedAt: '2026-11-28T08:01:01.000Z',
+    decisions: [{ capability: 'models.read', decision: 'allow-once' }],
   }])
   const model = managerModel(undefined, { pluginAuthorizationHistory: read })
   try {
@@ -18,6 +24,7 @@ it('shows the service-reported client and leaves unconfirmed outcomes visible', 
     expect(text).toContain('Codex')
     expect(text).toContain('单次允许')
     expect(text).toContain('结果未确认')
+    expect(text).toContain('运行时权限')
     expect(read).toHaveBeenCalledWith('demo')
     await fixture.click('[data-plugin-authorization-history] button')
     expect(read).toHaveBeenCalledTimes(2)

@@ -1,13 +1,45 @@
 import type { PermissionAuthorizationPromptV2 } from './platform.js'
 import type { StandaloneDomReview } from './standalone-dom-review.js'
+import type {
+  CordisXPermissionAuthorizationDecisionV2,
+  CordisXPermissionAuthorizationPlanV2,
+} from '../permission-contracts.js'
+
+type RuntimeDecision = (
+  plan: CordisXPermissionAuthorizationPlanV2,
+  decision: CordisXPermissionAuthorizationDecisionV2,
+) => Promise<boolean>
+type NativePrompt = PermissionAuthorizationPromptV2 & { bindRuntimeDecision(decision: RuntimeDecision): boolean }
+const prompts = new WeakMap<object, NativePrompt>()
+
+export function bindNativeRuntimePrompt(broker: object, prompt: NativePrompt): void {
+  if (prompts.has(broker)) throw new Error('native-runtime-prompt-already-bound')
+  prompts.set(broker, prompt)
+}
+
+export function nativeRuntimePrompt(broker: object): NativePrompt | undefined {
+  return prompts.get(broker)
+}
 
 /** Keep ordinary native prompts available while routing Manager review through the owner proof. */
 export function nativePermissionPrompt(
   ordinary: PermissionAuthorizationPromptV2,
   review: StandaloneDomReview,
-): PermissionAuthorizationPromptV2 {
+): NativePrompt {
+  let runtimeDecision: RuntimeDecision | undefined
   return {
-    request: (plan, identity) => ordinary.request(plan, identity),
+    bindRuntimeDecision: decision => {
+      if (runtimeDecision) return false
+      runtimeDecision = decision
+      return true
+    },
+    request: async (plan, identity) => {
+      if (plan.identity.pluginId !== identity.id || plan.identity.source !== identity.source) return undefined
+      const decision = await ordinary.request(plan, identity)
+      if (!decision || plan.operation !== 'runtime') return decision
+      if (!runtimeDecision || !await runtimeDecision(plan, decision)) return undefined
+      return decision
+    },
     requestV3: (plan, identity) =>
       review.isReviewing()
         ? review.requestV3(plan, identity)
@@ -24,6 +56,7 @@ export function nativePermissionPrompt(
     cancelUsageV6: (planId, binding) => ordinary.cancelUsageV6?.(planId, binding),
     isDomLeaseVisible: (identity, pointId, generation) => review.isDomLeaseVisible(identity, pointId, generation),
     dispose: () => {
+      runtimeDecision = undefined
       review.dispose()
       ordinary.dispose?.()
     },

@@ -72,6 +72,11 @@ it('reads lifecycle authorization choices through the same bounded Web channel',
           requestedAt: '2026-11-28T08:00:00.000Z',
           committedAt: '2026-11-28T08:00:01.000Z',
           decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+        }, {
+          operation: 'runtime',
+          client: 'codex',
+          requestedAt: '2026-11-28T08:01:00.000Z',
+          decisions: [{ capability: 'models.read', decision: 'allow-once' }],
         }],
       }))
     )
@@ -82,7 +87,7 @@ it('reads lifecycle authorization choices through the same bounded Web channel',
       client: 'codex',
       operation: 'install',
       decisions: [{ capability: 'models.read', decision: 'allow-once' }],
-    }])
+    }, { operation: 'runtime', client: 'codex' }])
   } finally {
     binding.dispose()
   }

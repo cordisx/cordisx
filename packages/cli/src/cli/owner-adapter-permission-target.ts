@@ -62,7 +62,11 @@ export async function ownerAdapterInstalledHistoryIdentity(input: {
   readonly context: OwnerAdapterDocumentContext
   readonly lifecycle: OwnerRendererLifecycle
   readonly loadPackage?: typeof loadStagedPluginPackage
-}): Promise<{ readonly identity: { readonly id: string; readonly source: string }; isCurrent(): boolean }> {
+}): Promise<{
+  readonly identity: { readonly id: string; readonly source: string }
+  readonly manifest: unknown
+  isCurrent(): boolean
+}> {
   const invalid = (): never => {
     throw new Error('adapter-permission-history-unavailable')
   }
@@ -87,5 +91,9 @@ export async function ownerAdapterInstalledHistoryIdentity(input: {
     || staged.manifest.version !== item.version || staged.manifest.canonicalSource !== item.canonicalSource
     || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
   ) return invalid()
-  return Object.freeze({ identity: Object.freeze({ id: item.id, source: staged.identitySource }), isCurrent: current })
+  return Object.freeze({
+    identity: Object.freeze({ id: item.id, source: staged.identitySource }),
+    manifest: staged.manifest.runtimeManifest,
+    isCurrent: current,
+  })
 }

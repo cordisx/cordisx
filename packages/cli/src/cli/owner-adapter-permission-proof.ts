@@ -126,6 +126,43 @@ export class OwnerAdapterPermissionProof {
     })
   }
 
+  authorizeRuntimeOnce(input: {
+    readonly context: OwnerAdapterManagementContext
+    readonly requestId: string
+    readonly record: CordisXPersistedPermissionPolicyRecord
+    readonly decision: 'allow-once' | 'deny-once'
+    readonly expected: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly moduleGeneration: string
+    readonly proof: unknown
+  }): boolean {
+    if (
+      this.closed || !input.context.live() || !input.proof || typeof input.proof !== 'object'
+      || Array.isArray(input.proof)
+    ) return false
+    const wrapper = input.proof as Record<string, unknown>
+    if (
+      Object.keys(wrapper).length !== 2 || typeof wrapper.keyId !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(wrapper.keyId) || !Object.hasOwn(wrapper, 'proof')
+    ) return false
+    const entry = this.entries.get(`${input.context.rendererId}:${wrapper.keyId}`)
+    if (!entry || entry.context.signal !== input.context.signal) return false
+    return entry.authority.authorizeRuntimeOnce({
+      context: {
+        profileId: this.scope.profileId,
+        ownerGeneration: this.scope.generation,
+        rendererId: input.context.rendererId,
+        signal: input.context.signal,
+        admitted: true,
+      },
+      requestId: input.requestId,
+      record: input.record,
+      decision: input.decision,
+      expected: input.expected,
+      moduleGeneration: input.moduleGeneration,
+      proof: wrapper.proof,
+    })
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true

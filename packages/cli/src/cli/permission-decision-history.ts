@@ -1,9 +1,67 @@
-import type { PermissionDecisionHistoryItem } from '../permission-decision-history.js'
+import type { PermissionDecisionHistoryItem, PluginAuthorizationHistoryItem } from '../permission-decision-history.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { type PermissionDecisionJournal, permissionDecisionKey } from './permission-decision-journal.js'
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
-import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../permission-contracts.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2, CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../permission-contracts.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
+import { normalizePermissionPolicyRecordV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
+import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
+
+/** Reconstruct ask keys from the owner-verified package without storing private scopes in the journal. */
+export function withDeclaredRuntimeAskPolicies(
+  records: readonly CordisXPersistedPermissionPolicyRecord[],
+  profileId: string,
+  identity: { readonly id: string; readonly source: string },
+  manifest: unknown,
+): readonly CordisXPersistedPermissionPolicyRecord[] {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return records
+  const version = (manifest as { schemaVersion?: unknown }).schemaVersion
+  if (typeof version !== 'number' || ![4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16].includes(version)) return records
+  const selected = new Map(records.map(record => [permissionDecisionKey(record), record]))
+  for (const declaration of manifestDeclarationsV2(manifest as Parameters<typeof manifestDeclarationsV2>[0])) {
+    const candidate = normalizePermissionPolicyRecordV2({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+      schemaVersion: 2,
+      key: {
+        profileId,
+        identity: { pluginId: identity.id, source: identity.source },
+        capability: declaration.name,
+        scope: declaration.scope,
+        securityFingerprint: permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration),
+      },
+      policy: 'ask',
+    })
+    const key = permissionDecisionKey(candidate)
+    if (!selected.has(key)) selected.set(key, candidate)
+  }
+  return [...selected.values()]
+}
+
+/** Show runtime origins without sending source paths or permission scopes to another client. */
+export async function projectRuntimeDecisionHistory(
+  journal: PermissionDecisionJournal,
+  records: readonly CordisXPersistedPermissionPolicyRecord[],
+): Promise<readonly PluginAuthorizationHistoryItem[]> {
+  const selected = new Map(records.map(record => [permissionDecisionKey(record), record]))
+  const events = await journal.recent(records)
+  return events.filter(event => event.entry.lifecycle === undefined).flatMap(event => {
+    const decisions = event.entry.changes.flatMap(change => {
+      const record = selected.get(change.key)
+      if (!record || change.pluginId !== record.key.identity.pluginId || change.capability !== record.key.capability) {
+        return []
+      }
+      return [{ capability: change.capability, decision: change.policy }]
+    })
+    if (decisions.length === 0) return []
+    return [{
+      operation: 'runtime' as const,
+      client: event.entry.client,
+      requestedAt: event.entry.requestedAt,
+      ...(event.committedAt === undefined ? {} : { committedAt: event.committedAt }),
+      decisions,
+    }]
+  })
+}
 
 /** Include unsaved ask policies so one-time decisions can be found before any persistent write. */
 export function withManagerDomAskPolicies(

@@ -70,6 +70,10 @@ export async function prepareNativePermissionBootstrap(
           const result = await signer.signOnce(id, review, plan, decision)
           return { ...result, proof: { keyId, proof: result.proof } }
         },
+        signRuntimeOnce: async (id, plan, decision) => {
+          const result = await signer.signRuntimeOnce(id, plan, decision)
+          return { ...result, proof: { keyId, proof: result.proof } }
+        },
       },
     }
   } catch (error) {

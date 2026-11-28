@@ -288,6 +288,7 @@ export async function openProductionPluginManagementComposition(input: {
   const rendererPermissionHistory = input.rendererPermissionPolicy === undefined || decisionJournal === undefined
     ? undefined
     : createServiceRendererPermissionHistory({
+      homeDir: input.homeDir,
       profileId: input.profileId,
       generation: input.runtimeGeneration,
       bootstrap: input.rendererPermissionPolicy.bootstrap,

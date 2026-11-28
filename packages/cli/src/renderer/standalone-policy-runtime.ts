@@ -2,6 +2,7 @@ import type { StandaloneDomPolicyAdoption } from '../standalone-permission-contr
 import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 import { standaloneDomReview } from './standalone-dom-review.js'
 import { BrowserPermissionOnceBinding } from './permission-once-binding.js'
+import { nativeRuntimePrompt } from './native-permission-prompt.js'
 
 type PolicyBroker = {
   adoptStandaloneDomPolicies(
@@ -42,6 +43,12 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
             once ? await once.authorize(standalonePermissionSigner, context, plan, decision) : false
           )
         ) throw new Error('Standalone permission review is unavailable')
+        if (
+          metadata.nativeOwnerPermissionReview === true
+          && !nativeRuntimePrompt(broker)?.bindRuntimeDecision(async (plan, decision) =>
+            once ? await once.authorizeRuntime(standalonePermissionSigner, plan, decision) : false
+          )
+        ) throw new Error('Native runtime permission review is unavailable')
       }
       standalonePolicyAdopter?.(async input => {
         if (signal?.aborted) return false

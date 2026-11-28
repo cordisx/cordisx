@@ -47,7 +47,7 @@ export function parsePluginAuthorizationHistory(value: unknown): readonly Plugin
     const item = raw as Record<string, unknown>
     if (
       Object.keys(item).some(key => !['operation', 'client', 'requestedAt', 'committedAt', 'decisions'].includes(key))
-      || !['install', 'update', 'enable'].includes(String(item.operation))
+      || !['install', 'update', 'enable', 'runtime'].includes(String(item.operation))
       || item.client !== 'web' && item.client !== 'codex' || typeof item.requestedAt !== 'string'
       || !Number.isFinite(Date.parse(item.requestedAt))
       || item.committedAt !== undefined && (typeof item.committedAt !== 'string'

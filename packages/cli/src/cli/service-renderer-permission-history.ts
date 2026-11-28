@@ -1,11 +1,18 @@
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
 import type { PermissionDecisionJournal } from './permission-decision-journal.js'
-import { projectPermissionDecisionHistory, withManagerDomAskPolicies } from './permission-decision-history.js'
+import {
+  projectPermissionDecisionHistory,
+  projectRuntimeDecisionHistory,
+  withDeclaredRuntimeAskPolicies,
+  withManagerDomAskPolicies,
+} from './permission-decision-history.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 
 /** Read the service ledger through the current Manager's owner-issued alias. */
 export function createServiceRendererPermissionHistory(input: {
+  readonly homeDir: string
   readonly profileId: string
   readonly generation: string
   readonly bootstrap: ServiceRendererBootstrap
@@ -36,11 +43,41 @@ export function createServiceRendererPermissionHistory(input: {
           dispatch: async () => {
             if (context.signal.aborted || !identity.isCurrent()) throw new Error('permission-history-unavailable')
             const snapshot = input.bootstrap.permissionAccess.snapshot(context)
-            const result = await input.journal.recentLifecycle(identity.ownerIdentity)
+            const lifecycle = await input.journal.recentLifecycle(identity.ownerIdentity)
+            let evidence: ReturnType<typeof input.bootstrap.permissionAccess.evidence> | undefined
+            try {
+              evidence = input.bootstrap.permissionAccess.evidence(context, pluginId)
+            } catch { /* Disabled or unavailable packages still expose their lifecycle history. */ }
+            let runtime: Awaited<ReturnType<typeof projectRuntimeDecisionHistory>> = []
+            if (evidence) {
+              const staged = await loadStagedPluginPackage(input.homeDir, evidence.digest)
+              if (
+                !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
+                || !attachmentEqual(evidence.ownerIdentity, identity.ownerIdentity)
+                || staged.digest !== evidence.digest || staged.manifest.id !== evidence.ownerIdentity.id
+                || staged.identitySource !== evidence.ownerIdentity.source
+                || staged.manifest.version !== evidence.artifact.version
+                || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
+              ) throw new Error('permission-history-unavailable')
+              runtime = await projectRuntimeDecisionHistory(
+                input.journal,
+                withDeclaredRuntimeAskPolicies(
+                  [],
+                  input.profileId,
+                  evidence.ownerIdentity,
+                  staged.manifest.runtimeManifest,
+                ),
+              )
+            }
             if (
               context.signal.aborted || !identity.isCurrent()
+              || evidence && !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
               || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
             ) throw new Error('permission-history-unavailable')
+            const result = [...lifecycle, ...runtime].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).slice(
+              0,
+              100,
+            )
             return { requestId, ok: true, value: result }
           },
         }

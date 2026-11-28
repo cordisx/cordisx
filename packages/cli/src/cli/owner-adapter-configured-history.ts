@@ -51,5 +51,5 @@ export async function ownerAdapterConfiguredHistoryIdentity(input: {
       isCurrent: current,
     })
   if (!current() || !await verifyCurrent()) return invalid()
-  return Object.freeze({ identity, isCurrent: current, verifyCurrent })
+  return Object.freeze({ identity, manifest: staged.manifest.runtimeManifest, isCurrent: current, verifyCurrent })
 }

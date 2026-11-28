@@ -34,6 +34,25 @@ export class BrowserPermissionOnceBinding {
     if (this.closed) return false
     const requestId = globalThis.crypto.randomUUID()
     const signed = await signer.signOnce(requestId, review, plan, decision)
+    return await this.submit(requestId, signed)
+  }
+
+  async authorizeRuntime(
+    signer: StandalonePermissionSigner,
+    plan: Parameters<StandalonePermissionSigner['signRuntimeOnce']>[1],
+    decision: Parameters<StandalonePermissionSigner['signRuntimeOnce']>[2],
+  ): Promise<boolean> {
+    if (this.closed) return false
+    const requestId = globalThis.crypto.randomUUID()
+    const signed = await signer.signRuntimeOnce(requestId, plan, decision)
+    return await this.submit(requestId, signed)
+  }
+
+  private async submit(requestId: string, signed: {
+    readonly record: unknown
+    readonly decision: 'allow-once' | 'deny-once'
+    readonly proof: unknown
+  }): Promise<boolean> {
     if (this.closed) return false
     return await new Promise<boolean>(resolve => {
       const timer = setTimeout(() => {
