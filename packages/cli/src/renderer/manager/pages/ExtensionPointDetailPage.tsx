@@ -134,7 +134,14 @@ export function ExtensionPointDetailPage(
       {tab === 'usage' && (
         <div className="cxr-list">
           {model.permissionPolicyWritable === false
-            ? <p role="status">{managerCopy(snapshot.localization.locale, 'permission.read-only')}</p>
+            ? (
+              <p role="status">
+                {managerCopy(
+                  snapshot.localization.locale,
+                  model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
+                )}
+              </p>
+            )
             : null}
           {point.plugins.map(plugin => (
             <section className="cxr-card" key={`${plugin.identity.source}\0${plugin.identity.id}`}>

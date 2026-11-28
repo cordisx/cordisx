@@ -187,7 +187,14 @@ export function PermissionDetailPage(
                 )}
             />
             {model.permissionPolicyWritable === false
-              ? <p role="status">{managerCopy(snapshot.localization.locale, 'permission.read-only')}</p>
+              ? (
+                <p role="status">
+                  {managerCopy(
+                    snapshot.localization.locale,
+                    model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
+                  )}
+                </p>
+              )
               : null}
           </>
         )}

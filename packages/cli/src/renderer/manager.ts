@@ -226,6 +226,8 @@ export interface ManagerModel {
   readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
   /** False when the active owner only supplies a permission snapshot. */
   readonly permissionPolicyWritable?: boolean
+  /** A service-attached native client can use Web for eligible UI reviews. */
+  readonly permissionReviewInWeb?: boolean
   /** Host-private review of an owner-selected configured Channel page. */
   readonly standaloneDomReview?: {
     describe(identity: CordisXPluginIdentity, pointId: string):

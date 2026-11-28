@@ -958,6 +958,7 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   modelProviders: runtimeScope.modelProviders()!,
   permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone'
     && runtimeScope.metadata()!.ownerPermissionSnapshot !== true,
+  permissionReviewInWeb: runtimeScope.metadata()!.ownerPermissionSnapshot === true,
   ...(() => {
     const review = createStandaloneDomReviewModel(runtimeScope)
     return review === undefined ? {} : { standaloneDomReview: review }
