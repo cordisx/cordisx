@@ -13,13 +13,18 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
   const ordinary = standalone ? undefined : new BrowserPermissionAuthorizationPromptV2(
     document,
     undefined,
-    runtimeScope.metadata()!.ownerPermissionSnapshot === true ? { sessionOnly: true } : {},
+    runtimeScope.metadata()!.ownerPermissionSnapshot === true
+      ? { sessionOnly: true, requireTrustedEvents: true }
+      : {},
   )
   const broker = new PermissionBroker(
     runtimeScope.permissionStore()!,
     standalone ? { request: async () => 'deny' as const } : new BrowserPermissionPrompt(
       document,
-      { sessionOnly: runtimeScope.metadata()!.ownerPermissionSnapshot === true },
+      {
+        sessionOnly: runtimeScope.metadata()!.ownerPermissionSnapshot === true,
+        requireTrustedEvents: runtimeScope.metadata()!.ownerPermissionSnapshot === true,
+      },
     ),
     () => new Date(),
     30000,

@@ -64,4 +64,20 @@ describe('host-owned permission prompt', () => {
     once.click()
     await expect(pending).resolves.toBe('allow-once')
   })
+
+  it('does not let synthetic clicks grant a service-owned permission', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true })
+    const controller = new AbortController()
+    const prompt = new BrowserPermissionPrompt(dom.window.document, {
+      sessionOnly: true,
+      requireTrustedEvents: true,
+    })
+    const pending = prompt.request({ ...request, signal: controller.signal })
+    await Promise.resolve()
+    const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')!
+    dialog.querySelector<HTMLButtonElement>('[data-permission-decision="allow-once"]')!.click()
+    expect(dom.window.document.querySelector('[data-permission-prompt]')).toBe(dialog)
+    controller.abort()
+    await expect(pending).resolves.toBe('deny')
+  })
 })

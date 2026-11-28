@@ -316,7 +316,7 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
 
   constructor(
     private readonly document: Document | undefined = globalThis.document,
-    private readonly options: { readonly sessionOnly?: boolean } = {},
+    private readonly options: { readonly sessionOnly?: boolean; readonly requireTrustedEvents?: boolean } = {},
   ) {
     this.theme = new HostThemeProjection(document ?? globalThis.document)
   }
@@ -386,13 +386,19 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
       once.type = 'button'
       once.dataset.permissionDecision = 'allow-once'
       once.textContent = '仅此次允许'
-      once.addEventListener('click', () => finish('allow-once'), { once: true })
+      once.addEventListener('click', event => {
+        if (this.options.requireTrustedEvents && !event.isTrusted) return
+        finish('allow-once')
+      })
       const allow = document.createElement('button')
       allow.type = 'button'
       allow.dataset.permissionDecision = 'allow'
       allow.dataset.primary = 'true'
       allow.textContent = '始终允许'
-      allow.addEventListener('click', () => finish('allow'), { once: true })
+      allow.addEventListener('click', event => {
+        if (this.options.requireTrustedEvents && !event.isTrusted) return
+        finish('allow')
+      })
       overlay.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return
         event.preventDefault()
