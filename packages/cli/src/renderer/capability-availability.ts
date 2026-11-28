@@ -129,6 +129,31 @@ export function platformAdapterCapabilityProvider(
   })
 }
 
+/** Web's model catalog is provided by the shared CordisX service. */
+export function serviceModelCapabilityProvider(status: CordisXPlatformAdapterStatus): CordisXCapabilityProviderReport {
+  const available = status.mode !== 'unavailable' && status.supportedCapabilities.includes('models.read')
+  const reason = available
+    ? message('provider.service-models.supported', 'The CordisX service provides the model catalog.')
+    : message('provider.service-models.unavailable', 'The CordisX service model catalog is unavailable.')
+  return report({
+    providerId: 'cordisx-service-models',
+    providerName: message('provider.service-models.name', 'CordisX service'),
+    kind: 'host-local',
+    family: 'platform',
+    status: available ? 'supported' : 'unavailable',
+    reason,
+    routes: PLATFORM_CAPABILITIES.map(capability =>
+      route(
+        capability,
+        available && capability === 'models.read' ? 'supported' : 'unavailable',
+        capability === 'models.read'
+          ? reason
+          : message('route.service-models.unavailable', 'This service capability is unavailable.'),
+      )
+    ),
+  })
+}
+
 /** Public Channel Manager reads and credential workflows are served by the single Host provider. */
 export function channelManagerCapabilityProvider(): CordisXCapabilityProviderReport {
   const reason = message(

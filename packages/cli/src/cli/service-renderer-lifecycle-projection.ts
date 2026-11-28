@@ -5,6 +5,7 @@ import { pluginAffectedClosure } from '../launcher/plugin-activation.js'
 import type { ManagerRendererCommandMethod, OwnerCommandProjection } from './manager-renderer-peer.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
+import { isServiceRendererOptionalModelManifest } from './service-renderer-optional-model-manifest.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
 type Candidate = {
@@ -258,7 +259,8 @@ export class ServiceRendererLifecycleProjection {
         || !(runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
             && runtime.id === target.id && Array.isArray(runtime.capabilities) && runtime.capabilities.length === 0
           || isServiceRendererVisualManifest(runtime, target.id)
-          || isServiceRendererOptionalSessionManifest(runtime, target.id))
+          || isServiceRendererOptionalSessionManifest(runtime, target.id)
+          || isServiceRendererOptionalModelManifest(runtime, target.id))
         || (target.canonicalSource === undefined
           ? manifest.canonicalSource !== undefined
           : manifest.canonicalSource !== pkg.identitySource)

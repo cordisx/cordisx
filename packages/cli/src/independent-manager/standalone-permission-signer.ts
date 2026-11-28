@@ -235,7 +235,9 @@ export async function createStandalonePermissionSigner(
       readonly decision: 'allow-once' | 'deny-once'
       readonly proof: unknown
     }> {
-      if (target !== 'standalone') throw new Error('web-runtime-once-decision-unavailable')
+      if (target !== 'standalone' || plan.binding.requestId !== requestId) {
+        throw new Error('web-runtime-once-decision-unavailable')
+      }
       const { record, selected, observed, moduleGeneration } = runtimeDecision(plan, decision)
       const random = provider.getRandomValues(new Uint8Array(32))
       const payload = {

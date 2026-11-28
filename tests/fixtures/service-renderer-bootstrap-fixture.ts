@@ -43,7 +43,9 @@ import {
 import { removeStagedPluginPackage } from '../../packages/cli/src/launcher/plugin-package.js'
 import { attachmentHomeDigest } from '../../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererLifecycle } from '../../packages/cli/src/launcher/service-renderer-lifecycle.js'
-import { decision, localPackage, request } from '../suites/plugin-lifecycle.fixtures.js'
+import { decision, localPackage, localPackageV4, request } from '../suites/plugin-lifecycle.fixtures.js'
+import { allowedDecisionV2 } from '../../packages/cli/src/launcher/plugin-lifecycle-model.js'
+import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 import { stageServiceModePlugin } from './service-mode-plugin.js'
 import { exactDomPermissionPolicies } from '../helpers/dom-permission.js'
 
@@ -85,6 +87,8 @@ export async function fixture(
     permissionProof?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['permissionProof']
     channelPermissionPolicy?: boolean
     configuredPluginPermissionPolicy?: boolean
+    optionalModelsPlugin?: boolean
+    installedPermissionPolicy?: boolean
     browserManagement?: boolean
     coordinateLifecycle?: boolean
     projectPluginConfig?: Pick<DesktopManagerConfigProjection, 'project' | 'clear'>
@@ -98,6 +102,38 @@ export async function fixture(
   await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
   const profileId = 'default'
   const generation = 'fixture-owner'
+  if (options.optionalModelsPlugin) {
+    const offlineGeneration = 'fixture-setup'
+    const setup = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId,
+      runtimeGeneration: offlineGeneration,
+      permissionPolicies: [],
+      runtime: { async stage() {}, async commit() {}, async abort() {}, async reload() {} },
+    })
+    const active = await setup.store.bindRuntimeGeneration()
+    const scope = { profileId, runtimeGeneration: offlineGeneration, expectedRevision: active.revision }
+    const planned = await setup.handle({
+      $schema: CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1,
+      schemaVersion: 1,
+      requestId: crypto.randomUUID(),
+      ...scope,
+      operation: { kind: 'inspect-local', sourceDirectory: await localPackageV4(root, true) },
+    })
+    if (!planned.candidateId) throw new Error('fixture model plugin planning failed')
+    const plan = await setup.permissionReviewPlanV2({
+      ...scope,
+      requestId: crypto.randomUUID(),
+      target: { kind: 'candidate', candidateId: planned.candidateId },
+    })
+    if (!plan) throw new Error('fixture model plugin review failed')
+    const applied = await setup.applyPermissionReviewV2({
+      ...scope,
+      requestId: crypto.randomUUID(),
+      decision: allowedDecisionV2(plan),
+    })
+    if (applied.outcome !== 'applied') throw new Error('fixture model plugin activation failed')
+  }
   let configuredChannel: {
     plugin: Awaited<ReturnType<typeof loadConfig>>['plugins'][number]
     service: ReturnType<typeof createLocalChannelService>
@@ -367,6 +403,7 @@ export async function fixture(
     experimentalChannelCredentials: options.channelCredentials === true,
     experimentalConfiguredPermissionPolicy: options.channelPermissionPolicy === true,
     experimentalConfiguredPluginPermissionPolicy: options.configuredPluginPermissionPolicy === true,
+    experimentalInstalledPermissionPolicy: options.installedPermissionPolicy === true,
     ...(options.permissionProof === undefined ? {} : { permissionProof: options.permissionProof }),
     ...(configuredChannel === undefined ? {} : {
       experimentalConfiguredChannel: {

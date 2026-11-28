@@ -40,7 +40,7 @@ import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXPageService, CordisXRouteService } from './navigation.js'
 import { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
-import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
+import { createRuntimeRouting } from './runtime-routing.js'
 import { type AgentRuntimeConnection, type AgentRuntimeRouteScope } from './platform.js'
 import { CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
@@ -52,9 +52,9 @@ import {
 } from './extension-points.js'
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
+import { createStandaloneModelBridge, standaloneModelFallback } from './platform-models-binding.js'
 import { CordisXAgentLoopBroker } from './agent-loop.js'
 import { PlaygroundMockAgentLoopHost, PlaygroundMockAgentLoopV4Transport } from './playground-mock-agent-loop.js'
-import { PlaygroundRoomSimulationBridgeRegistry } from './playground-room-simulation-bridge.js'
 import {
   BrowserConfigBridge,
   type ConfigCandidate,
@@ -135,25 +135,21 @@ export async function start(
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
   const blockedPlugins = metadata.hostKind === 'standalone' ? new Set<string>() : readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
+  const standaloneModels = createStandaloneModelBridge(metadata.hostKind, metadata.ownerDocumentBindings !== undefined)
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
   if (metadata.providers.length > 0 && metadata.providerBridgeToken !== undefined) {
     bindingPlatformAdapter = await BindingPlatformAdapter.connect(metadata.providerBridgeToken).catch(() => undefined)
   }
-  const platformAdapter = bindingPlatformAdapter ?? agentAdapter
+  const platformAdapter = bindingPlatformAdapter ?? standaloneModelFallback(standaloneModels, agentAdapter)
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
-  const browserHostedPlayground = metadata.hostKind === 'playground' || window.location.protocol !== 'app:'
-  const routeHistory = browserHostedPlayground
-    ? new BrowserRouteHistoryAdapter(window, true)
-    : new CodexRouterHistoryAdapter(window)
+  const { browserHostedPlayground, routeHistory, playgroundRoomSimulationBridgeRegistry } = createRuntimeRouting(
+    metadata.hostKind,
+    window,
+  )
   let disposeAgentDetailHistoryReturn: () => void = () => {}
-  const playgroundRoomSimulationBridgeRegistry = metadata.hostKind === 'playground'
-      && window.location.protocol === 'http:'
-      && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
-    ? new PlaygroundRoomSimulationBridgeRegistry()
-    : undefined
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
   const iconThemePreferenceBridge =
     metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
@@ -174,7 +170,11 @@ export async function start(
   const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined
     ? undefined
     : new BrowserOwnerDocumentBridge(metadata.hostKind === 'standalone' ? 1_000 : undefined)
-  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
+  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(
+    ownerDocumentBridge,
+    metadata.ownerDocumentBindings,
+    standaloneModels,
+  )
   const { bindings: entityPrincipalBindings, register: registerEntityBindings } = createEntityPrincipalBindings(
     metadata.ownerDocumentBindings,
   )
@@ -980,6 +980,7 @@ export async function start(
     await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
+    standaloneModels?.dispose()
     policyRuntime.dispose()
     standaloneDesktopPackageConfigBridge?.dispose()
     agentContextBridge?.dispose()

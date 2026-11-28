@@ -55,7 +55,8 @@ export class BrowserPermissionOnceBinding {
     decision: Parameters<StandalonePermissionSigner['signWebRuntimeOnce']>[3],
   ): Promise<boolean> {
     if (this.closed) return false
-    const requestId = globalThis.crypto.randomUUID()
+    const requestId = plan.binding.requestId
+    if (!requestId || this.pending.has(requestId)) return false
     const signed = await signer.signWebRuntimeOnce(requestId, artifact, plan, decision)
     return await this.submit(requestId, signed)
   }
@@ -65,7 +66,7 @@ export class BrowserPermissionOnceBinding {
     readonly decision: 'allow-once' | 'deny-once'
     readonly proof: unknown
   }): Promise<boolean> {
-    if (this.closed) return false
+    if (this.closed || this.pending.has(requestId)) return false
     return await new Promise<boolean>(resolve => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)

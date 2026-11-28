@@ -18,7 +18,12 @@ it('requires a current Web artifact, graph, policy and one-use proof before gran
     operation: 'runtime',
     profileId: scope.profileId,
     identity: { pluginId: identity.id, source: identity.source },
-    binding: { operationId: 'runtime-1', runtimeGeneration: scope.generation, moduleGeneration: 'graph-1' },
+    binding: {
+      operationId: 'runtime-1',
+      requestId: 'request-1',
+      runtimeGeneration: scope.generation,
+      moduleGeneration: 'graph-1',
+    },
     declarations: [{ name: 'models.read', required: false, scope: { providers: ['codex'] } }],
     policies: [],
     contextFor: () => ({

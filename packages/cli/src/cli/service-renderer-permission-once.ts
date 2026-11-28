@@ -122,6 +122,17 @@ export function createServiceRendererPermissionOnce(input: {
           if (!current()) throw new Error('permission-once-unavailable')
           await trace.commit()
           if (!current()) throw new Error('permission-once-unavailable')
+          if (
+            choice === 'allow-once' && isPermissionPolicyRecordV2(ownerRecords[0]!)
+            && ownerRecords[0]!.key.capability === 'models.read'
+          ) {
+            input.bootstrap.permissionAccess.runtimeOnceGrants.issue(context, {
+              requestId: request.requestId,
+              record: ownerRecords[0]!,
+              moduleGeneration: evidence.moduleGeneration,
+              current,
+            })
+          }
           return { requestId: request.requestId, ok: true, value: true }
         },
       }

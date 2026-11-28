@@ -602,8 +602,16 @@ describe('owner-scoped lifecycle identity observations', () => {
       f.projection.project('stage', changed([{ name: 'usage.read', required: true, scope: { profile: 'current' } }]))
     )
       .toThrow('renderer-identity-lifecycle-unavailable')
-    expect(() => f.projection.project('stage', changed([{ name: 'models.read', required: false, scope: {} }])))
+    expect(() => f.projection.project('stage', changed([{ name: 'models.read', required: true, scope: {} }])))
       .toThrow('renderer-identity-lifecycle-unavailable')
+    const models = setup()
+    models.offer()
+    models.prepare()
+    const modelStage = models.projection.project(
+      'stage',
+      changed([{ name: 'models.read', required: false, scope: {} }]),
+    )
+    expect(modelStage.receipt!(models.stagedReceipt)).toMatchObject({ observation: candidate })
     const session = setup()
     session.offer()
     session.prepare()

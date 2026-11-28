@@ -101,6 +101,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererBootstrap?: ManagerRendererChannel
   /** Owner-issued per-renderer durable document bridge. */
   readonly rendererDocuments?: ManagerRendererChannel
+  readonly rendererModels?: ManagerRendererChannel
   readonly rendererManagementAuthority?: Pick<ServiceRendererBootstrap, 'managementRequest' | 'allowsManagementWrite'>
   /** Owner resource retirement must finish before a renderer revocation is acknowledged. */
   readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
@@ -157,6 +158,10 @@ export async function openProductionPluginManagementComposition(input: {
   ) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
+  if (
+    input.rendererModels && (input.mode !== 'service' || !input.rendererDocuments || !input.rendererParticipants
+      || !input.rendererBootstrap || !input.rendererPermissionPolicy)
+  ) throw new Error('manager-consumer-fence-scope-invalid')
   if (input.rendererLifecycle && !input.rendererParticipants?.isBoundTo(input.rendererLifecycle)) {
     throw new Error('manager-consumer-fence-scope-invalid')
   }
@@ -330,6 +335,7 @@ export async function openProductionPluginManagementComposition(input: {
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),
       ...(input.rendererDocuments === undefined ? [] : [['owner-document', input.rendererDocuments] as const]),
+      ...(input.rendererModels === undefined ? [] : [['platform-models', input.rendererModels] as const]),
       ...(rendererManagedServiceUI === undefined
         ? []
         : [['managed-service-ui', rendererManagedServiceUI] as const]),

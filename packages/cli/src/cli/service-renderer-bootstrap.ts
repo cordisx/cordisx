@@ -980,6 +980,10 @@ export class ServiceRendererBootstrap {
     return this.documents?.channel()
   }
 
+  documentAuthority(): ServiceRendererDocuments | undefined {
+    return this.documents
+  }
+
   close(): Promise<boolean> {
     if (this.closing) return this.closing
     this.closed = true

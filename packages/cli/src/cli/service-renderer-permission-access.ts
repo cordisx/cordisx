@@ -17,6 +17,7 @@ import type { ServiceRendererParticipants } from './service-renderer-participant
 import { installedManagerPermissionTarget, type ManagerPolicyTarget } from './service-renderer-installed-permission.js'
 import { configuredManagerPermissionTarget } from './service-renderer-configured-permission.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import { ServiceRendererRuntimeGrants } from './service-renderer-runtime-grants.js'
 
 export interface ServiceRendererPermissionEvidence {
   readonly kind: ManagerPolicyTarget['kind']
@@ -31,6 +32,7 @@ export interface ServiceRendererPermissionEvidence {
 
 /** Owner-private access to exact renderer-projected policy targets. */
 export class ServiceRendererPermissionAccess {
+  readonly runtimeOnceGrants = new ServiceRendererRuntimeGrants()
   private readonly issuedEvidence = new WeakSet<ServiceRendererPermissionEvidence>()
   constructor(
     private readonly input: {

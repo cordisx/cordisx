@@ -122,6 +122,18 @@ export class ServiceRendererDocuments {
     }
   }
 
+  /** Resolve only a live, generation-bound Host principal for another owner capability. */
+  principal(context: ManagerRendererChannelContext, token: string) {
+    const grant = this.grants.get(context.signal)?.get(token)
+    if (!grant || !this.allowed(context, grant, true)) throw new Error('renderer-principal-unavailable')
+    return {
+      identity: { id: grant.pluginId, source: grant.alias },
+      ownerIdentity: { id: grant.pluginId, source: grant.source },
+      moduleGeneration: grant.moduleGeneration,
+      isCurrent: () => this.allowed(context, grant, true),
+    }
+  }
+
   channel(): ManagerRendererChannel {
     return {
       prepare: (payload, context) => {

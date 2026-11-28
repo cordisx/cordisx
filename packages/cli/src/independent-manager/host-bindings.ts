@@ -18,6 +18,7 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'desktop-package-config': ['__cordisxDesktopPackageConfigRequestV1', '__cordisxDesktopPackageConfigReceiveV1'],
   marketplace: ['__cordisxMarketplaceRequestV1', '__cordisxMarketplaceReceiveV1'],
   'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
+  'platform-models': ['__cordisxPlatformModelsRequestV1', '__cordisxPlatformModelsReceiveV1'],
   provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
 } as const
 
@@ -242,6 +243,7 @@ export function installIndependentHostBindings(input: {
           || channel === 'permission-policy'
           || channel === 'permission-once'
           || channel === 'permission-history'
+          || channel === 'platform-models'
           || channel === 'owner-document' && !request.readOnly
           || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')

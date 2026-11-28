@@ -29,6 +29,7 @@ import { createManagerRendererModelServicesChannel } from './manager-renderer-mo
 import { createManagerRendererNativeCatalogChannel } from './manager-renderer-native-catalog.js'
 import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
+import { createServiceRendererModels } from './service-renderer-models.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
 import { reserveManagedServiceClients } from '../launcher/managed-service-client-reservation.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
@@ -574,6 +575,16 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               && rendererParticipants?.peer(context.rendererId)?.closed === false,
           })
           : undefined
+        const documentAuthority = rendererBootstrap.documentAuthority()
+        const rendererModels = documentAuthority && rendererPermissionProof
+          ? createServiceRendererModels({
+            homeDir,
+            profileId,
+            documents: documentAuthority,
+            bootstrap: rendererBootstrap,
+            catalog: api.catalog,
+          })
+          : undefined
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -591,6 +602,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           ...(rendererBootstrap.documentChannel() === undefined
             ? {}
             : { rendererDocuments: rendererBootstrap.documentChannel()! }),
+          ...(rendererModels === undefined ? {} : { rendererModels }),
           rendererManagementAuthority: rendererBootstrap,
           rendererRetirement: rendererId => rendererBootstrap!.waitForRetirement(rendererId),
           rendererWriteLifetimes: rendererBootstrap.writeLifetimes,

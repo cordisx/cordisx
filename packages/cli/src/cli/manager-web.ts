@@ -85,6 +85,7 @@ const rendererChannelAllowlist = new Set([
   'permission-once',
   'permission-history',
   'owner-document',
+  'platform-models',
 ])
 
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
@@ -639,6 +640,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
           || input.channel === 'permission-policy' || input.channel === 'permission-once'
+          || input.channel === 'platform-models'
         if (input.channel === 'owner-document') {
           const write = managerDocumentWrite(input.payload)
           if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })

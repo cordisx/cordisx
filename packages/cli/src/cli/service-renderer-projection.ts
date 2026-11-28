@@ -15,9 +15,10 @@ import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
+import { isServiceRendererOptionalModelManifest } from './service-renderer-optional-model-manifest.js'
 
-// The standalone Manager has no Platform provider bridge. Optional Platform
-// declarations may be present, but no corresponding owner policy is projected.
+// Managed graphs may declare these capabilities as optional. The service
+// currently bridges only a scoped model catalog; the others remain unavailable.
 const unavailablePlatformCapabilities = new Set([
   'models.read',
   'tasks.catalog.read',
@@ -183,6 +184,8 @@ async function inspectRendererPackage(
     && staged.managedServiceResources.length === 0
   const optionalSessions = isServiceRendererOptionalSessionManifest(manifest, item.id)
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
+  const optionalModels = isServiceRendererOptionalModelManifest(manifest, item.id)
+    && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 && manifest.schemaVersion === 16
@@ -195,7 +198,7 @@ async function inspectRendererPackage(
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
     )
-  const supported = (legacy || managed || visual || optionalSessions)
+  const supported = (legacy || managed || visual || optionalSessions || optionalModels)
     && !(legacy
       ? manifest.capabilities.length !== 0
       : managed && manifest.capabilities.some(capability =>

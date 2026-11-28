@@ -132,7 +132,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     if (!registration || !declaration || registration.manifest.schemaVersion === 1) return false
     // Shared v2 logic uses the legacy-shaped return only for existing platform callers.
     const result = await this.authorizeDeclarationV2(registration, declaration, requested)
-    return result.ok && this.isAuthorizationCurrent(registration, result.value)
+    return result.ok && this.isAuthorizationCurrent(registration, result.value.revision)
   }
   policy(
     identity: CordisXPluginIdentity,
@@ -606,8 +606,17 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     }
     const result = await this.authorizeDeclarationV2(registration, declaration, requested)
     if (!result.ok) return result
-    return this.isAuthorizationCurrent(registration, result.value)
-      ? { ok: true, value: { declaration: legacyDeclaration } }
+    return this.isAuthorizationCurrent(registration, result.value.revision)
+      ? {
+        ok: true,
+        value: {
+          declaration: legacyDeclaration,
+          ownerRequestId: result.value.requestId,
+          ...(registration.generation.moduleGeneration === undefined
+            ? {}
+            : { moduleGeneration: registration.generation.moduleGeneration }),
+        },
+      }
       : failure('permission-denied', `${capability} authorization was invalidated`)
   }
 
@@ -616,7 +625,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     registration: Registration,
     declaration: CordisXCapabilityDeclarationV2,
     requested: RequestedScope,
-  ): Promise<CordisXPlatformResult<bigint>> {
+  ): Promise<CordisXPlatformResult<{ readonly revision: bigint; readonly requestId: string }>> {
     const identity = registration.identity, identityKey = platformIdentityKey(identity), capability = declaration.name
     if (!scopeAllows(declaration.scope, requested)) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
@@ -733,7 +742,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} authorization was invalidated`)
     }
-    return { ok: true, value: revision }
+    return { ok: true, value: { revision, requestId } }
   }
 
   requiredDenied(

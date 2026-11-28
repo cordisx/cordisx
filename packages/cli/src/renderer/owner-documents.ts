@@ -404,14 +404,37 @@ export class CordisXOwnerDocumentBroker {
   #clients = new Set<BoundOwnerDocuments>()
   #bridge: BrowserOwnerDocumentBridge | undefined
   #bindings = new Map<string, string>()
+  #models: import('./platform-models-binding.js').BrowserPlatformModelsBridge | undefined
 
-  constructor(bridge?: BrowserOwnerDocumentBridge, bindings: readonly OwnerDocumentPrincipalBinding[] = []) {
+  constructor(
+    bridge?: BrowserOwnerDocumentBridge,
+    bindings: readonly OwnerDocumentPrincipalBinding[] = [],
+    models?: import('./platform-models-binding.js').BrowserPlatformModelsBridge,
+  ) {
     this.#bridge = bridge
+    this.#models = models
     this.registerBindings(bindings)
+  }
+
+  async listModels(
+    identity: { readonly id: string; readonly source: string },
+    moduleGeneration: string,
+    requestId: string,
+    input: import('../contracts.js').CordisXModelsListInput,
+  ): Promise<import('../contracts.js').CordisXPlatformResult<import('../contracts.js').CordisXModelPage>> {
+    const token = this.#bindings.get(identityKey(identity, moduleGeneration))
+    if (!token || !this.#models) {
+      return { ok: false, error: { code: 'adapter-unavailable', message: 'Service model catalog unavailable' } }
+    }
+    return await this.#models.list(token, requestId, input)
   }
 
   registerBindings(bindings: readonly OwnerDocumentPrincipalBinding[]): void {
     for (const binding of bindings) this.#bindings.set(identityKey(binding, binding.moduleGeneration), binding.token)
+  }
+
+  modelsAvailable(): boolean {
+    return this.#models !== undefined
   }
 
   bind(input: BoundOwnerDocumentInput): CordisXOwnerDocumentsV1 & { dispose(): void } {
@@ -430,6 +453,8 @@ export class CordisXOwnerDocumentBroker {
     for (const client of [...this.#clients]) client.dispose()
     this.#clients.clear()
     this.#bridge?.dispose()
+    this.#models?.dispose()
+    this.#models = undefined
     this.#bridge = undefined
   }
 }

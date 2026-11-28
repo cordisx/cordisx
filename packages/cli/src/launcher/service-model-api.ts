@@ -51,33 +51,34 @@ export async function startServiceModelApi(input: {
       throw error
     }
   }
+  const catalog = async () => {
+    const plugins = await pluginCatalog()
+    const managed = input.managed?.catalog() ?? []
+    const ids = new Set([...managed, ...plugins].map(provider => provider.providerId))
+    const shared = (await declarations().catch(() => undefined))?.providers.filter(provider => !ids.has(provider.id))
+      ?? []
+    return [
+      ...managed,
+      ...plugins.filter(provider => !input.managed?.owns(provider.providerId)),
+      ...shared.map(provider => ({
+        providerId: provider.id,
+        pluginId: 'cordisx.model-service',
+        title: provider.displayName,
+        models: [
+          ...new Set(
+            Object.entries(provider.models ?? {}).flatMap(([app, models]) =>
+              provider.appliesTo === undefined || provider.appliesTo.includes(app) ? models : []
+            ),
+          ),
+        ].map(id => ({ id, label: id, aliases: [] })),
+      })),
+    ]
+  }
   const server = await startModelApiServer({
     homeDir: input.homeDir,
     profileId: input.profileId,
     port: Number(input.environment.CORDISX_MODEL_API_PORT ?? 8398),
-    async catalog() {
-      const plugins = await pluginCatalog()
-      const managed = input.managed?.catalog() ?? []
-      const ids = new Set([...managed, ...plugins].map(provider => provider.providerId))
-      const shared = (await declarations().catch(() => undefined))?.providers.filter(provider => !ids.has(provider.id))
-        ?? []
-      return [
-        ...managed,
-        ...plugins.filter(provider => !input.managed?.owns(provider.providerId)),
-        ...shared.map(provider => ({
-          providerId: provider.id,
-          pluginId: 'cordisx.model-service',
-          title: provider.displayName,
-          models: [
-            ...new Set(
-              Object.entries(provider.models ?? {}).flatMap(([app, models]) =>
-                provider.appliesTo === undefined || provider.appliesTo.includes(app) ? models : []
-              ),
-            ),
-          ].map(id => ({ id, label: id, aliases: [] })),
-        })),
-      ]
-    },
+    catalog,
     async connect(providerId, modelId, signal) {
       return await clients.open(signal, async () => {
         signal.throwIfAborted()
@@ -123,6 +124,7 @@ export async function startServiceModelApi(input: {
   })
   return {
     ...server,
+    catalog,
     reserveForLifecycle: (pluginIds: readonly string[]) => clients.reserveForLifecycle(pluginIds),
     async close() {
       let failure: unknown

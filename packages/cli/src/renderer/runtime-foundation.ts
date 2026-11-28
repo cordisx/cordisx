@@ -190,6 +190,7 @@ import {
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
   platformAdapterCapabilityProvider,
+  serviceModelCapabilityProvider,
 } from './capability-availability.js'
 import { CORDISX_PLUGIN_PRINCIPAL, PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
@@ -654,10 +655,12 @@ export const createRuntimeExternalProviderStatuses = (runtimeScope: RuntimeClosu
 
 export const createRuntimeCapabilityAvailability = (runtimeScope: RuntimeClosureScope) =>
   new CapabilityAvailabilityRegistry([
-    platformAdapterCapabilityProvider(runtimeScope.agentAdapter()!.status(), {
-      providerId: 'desktop-current-connection',
-      kind: 'current-connection',
-    }),
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? serviceModelCapabilityProvider(runtimeScope.platformAdapter()!.status())
+      : platformAdapterCapabilityProvider(runtimeScope.agentAdapter()!.status(), {
+        providerId: 'desktop-current-connection',
+        kind: 'current-connection',
+      }),
     ...externalProviderCapabilityProviders(runtimeScope.externalProviderStatuses()!),
     channelManagerCapabilityProvider(),
     ...hostLocalCapabilityProviders({

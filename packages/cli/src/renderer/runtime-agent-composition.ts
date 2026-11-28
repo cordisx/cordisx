@@ -578,6 +578,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       broker: runtimeScope.broker()!,
       console: runtimeScope.pluginConsole()!,
       executionPlatform: runtimeScope.metadata()!.executionPlatform,
+      ...(runtimeScope.metadata()!.hostKind === 'standalone' && runtimeScope.ownerDocumentBroker()!.modelsAvailable()
+        ? {
+          listOwnerModels: (identity, moduleGeneration, requestId, input) =>
+            runtimeScope.ownerDocumentBroker()!.listModels(identity, moduleGeneration, requestId, input),
+        }
+        : {}),
     })
     await runtimeScope.platformFiber
     await runtimeScope.ctx.plugin(CordisXAgentContextService, {

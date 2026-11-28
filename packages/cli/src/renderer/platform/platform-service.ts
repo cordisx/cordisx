@@ -217,6 +217,12 @@ export interface CordisXPlatformServiceOptions {
   readonly broker: PermissionBroker
   readonly console?: PluginConsoleAspect
   readonly executionPlatform?: PlatformExecutionPlatform
+  readonly listOwnerModels?: (
+    identity: CordisXPluginIdentity,
+    moduleGeneration: string,
+    requestId: string,
+    input: CordisXModelsListInput,
+  ) => Promise<CordisXPlatformResult<CordisXModelPage>>
 }
 
 const platformServiceOptions = new WeakMap<object, CordisXPlatformServiceOptions>()
@@ -421,7 +427,13 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
-    const result = await this.guarded(async () => await optionsFor(this).adapter.listModels(input))
+    const options = optionsFor(this)
+    const identity = token === undefined ? pluginIdentity(this.ctx) : options.console?.owner(token)
+    const result = await this.guarded(async () =>
+      options.listOwnerModels && identity && grant.value.moduleGeneration && grant.value.ownerRequestId
+        ? await options.listOwnerModels(identity, grant.value.moduleGeneration, grant.value.ownerRequestId, input)
+        : await options.adapter.listModels(input)
+    )
     if (!result.ok) return result
     return {
       ok: true,
