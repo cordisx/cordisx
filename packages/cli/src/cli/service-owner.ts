@@ -620,12 +620,22 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               ...(nativeAdapters === undefined ? {} : {
                 reserveAdditionalPeers: async () => await nativeAdapters!.reserveForLifecycle(),
               }),
-              reserveOtherConsumers: async (origin, evidence) =>
-                rendererPermissionConsumers!.reserve(origin, {
+              reserveOtherConsumers: async (origin, evidence) => {
+                const consumers = rendererPermissionConsumers!.reserve(origin, {
                   identity: evidence.ownerIdentity,
                   moduleGeneration: evidence.moduleGeneration,
+                  kind: evidence.kind,
+                  artifact: evidence.artifact,
                   isCurrent: () => rendererBootstrap!.permissionAccess.isCurrentEvidence(evidence),
-                }),
+                })
+                try {
+                  await consumers.prepare()
+                  return consumers
+                } catch (error) {
+                  consumers.fence()
+                  throw error
+                }
+              },
             },
           }),
           mode: 'service',

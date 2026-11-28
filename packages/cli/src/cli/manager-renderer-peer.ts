@@ -15,6 +15,7 @@ export type ManagerRendererCommandMethod =
   | 'managed-service-accounts'
   | 'desktop-package-configuration'
   | 'permission-policy'
+  | 'permission-provenance'
 
 export interface ManagerRendererPeerScope {
   readonly homeDigest: string
@@ -58,6 +59,7 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'managed-service-accounts',
   'desktop-package-configuration',
   'permission-policy',
+  'permission-provenance',
 ])
 const MAX_COMMAND_BYTES = 256 * 1024
 // Channel views omit images but can still describe many configured accounts.

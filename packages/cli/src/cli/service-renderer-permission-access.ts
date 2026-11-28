@@ -19,6 +19,7 @@ import { configuredManagerPermissionTarget } from './service-renderer-configured
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 
 export interface ServiceRendererPermissionEvidence {
+  readonly kind: ManagerPolicyTarget['kind']
   readonly identity: { readonly id: string; readonly source: string }
   readonly ownerIdentity: { readonly id: string; readonly source: string }
   readonly moduleGeneration: string
@@ -91,6 +92,7 @@ export class ServiceRendererPermissionAccess {
     const target = this.target(context, pluginId)
     const evidence: ServiceRendererPermissionEvidence = {
       ...target.project([]),
+      kind: target.kind,
       artifact: target.artifact,
       ownerIdentity: target.ownerIdentity,
       digest: target.digest,

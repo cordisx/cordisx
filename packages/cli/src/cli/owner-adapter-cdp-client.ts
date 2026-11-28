@@ -55,6 +55,37 @@ export class OwnerAdapterCdpClient {
 
   private async execute(command: ManagerRendererCommand): Promise<unknown> {
     const frame = attachmentRecord(command.payload)
+    if (command.method === 'permission-provenance') {
+      if (
+        !this.input.policyScope || this.transaction || Object.keys(frame).length !== 1
+        || typeof frame.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(frame.pluginId)
+      ) throw new Error('adapter-policy-provenance-unavailable')
+      const admission = this.input.cdp.beginSharedAdmission(`adapter-provenance-${randomUUID()}`)
+      try {
+        const before = await admission.readSnapshot()
+        const proof = await admission.configurationProof(frame.pluginId)
+        const configured = proof?.plugin.configured
+        if (
+          !proof || !configured || proof.plugin.id !== frame.pluginId
+          || proof.plugin.package !== undefined || typeof proof.plugin.source !== 'string'
+          || !attachmentEqual(proof.snapshot, before) || !attachmentEqual(await admission.readSnapshot(), before)
+        ) return { available: false }
+        return {
+          available: true,
+          rendererId: this.input.policyScope.rendererId,
+          ownerGeneration: this.input.policyScope.generation,
+          snapshot: before,
+          identity: { id: proof.plugin.id, source: proof.plugin.source },
+          artifact: { version: configured.version, integrity: configured.integrity },
+          moduleGeneration: configured.moduleGeneration,
+        }
+      } catch {
+        // A read-only proof can be unavailable without retiring a healthy client.
+        return { available: false }
+      } finally {
+        admission.release()
+      }
+    }
     if (command.method === 'permission-policy') {
       if (!this.input.policyScope || this.transaction) throw new Error('adapter-policy-handoff-unavailable')
       const packet = parseOwnerPolicyPacket(frame)

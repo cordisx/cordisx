@@ -47,6 +47,42 @@ const frame = (method: ManagerRendererCommand['method'], payload: unknown): Mana
   payload,
 })
 
+it('returns only the exact configured archive and native generation for owner policy coordination', async () => {
+  const policyScope = { profileId: 'default', generation: 'owner-1', rendererId: 'c'.repeat(64) }
+  const configured = { version: '1.2.3', integrity: `sha256:${'d'.repeat(64)}`, moduleGeneration: 'native-graph' }
+  const admission = {
+    readSnapshot: vi.fn(async () => snapshot),
+    configurationProof: vi.fn(async () => ({
+      snapshot,
+      plugin: {
+        id: 'one',
+        source: 'https://example.test/plugin',
+        configured,
+        configuration: { private: 'must not leave the client' },
+      },
+    })),
+    release: vi.fn(),
+  } as unknown as CdpSharedAdmission
+  const client = new OwnerAdapterCdpClient({
+    cdp: { beginSharedAdmission: () => admission, terminal: () => {}, refreshBrowserGraphBootstrap: async () => {} },
+    policyScope,
+    loadMutation: async () => mutation,
+  })
+  expect(await client.handle(frame('permission-provenance', { pluginId: 'one' }))).toEqual({
+    ok: true,
+    value: {
+      available: true,
+      rendererId: policyScope.rendererId,
+      ownerGeneration: policyScope.generation,
+      snapshot,
+      identity: { id: 'one', source: 'https://example.test/plugin' },
+      artifact: { version: configured.version, integrity: configured.integrity },
+      moduleGeneration: configured.moduleGeneration,
+    },
+  })
+  expect(admission.release).toHaveBeenCalledOnce()
+})
+
 it('seeds a newly launched native fleet with the existing service epoch exactly once', () => {
   const runtime = new CdpPluginLifecycleRuntime()
   runtime.initializeOwnerRegistryEpoch(7)

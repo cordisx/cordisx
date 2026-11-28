@@ -44,9 +44,11 @@ export class ServiceOwnerPermissionConsumers {
     target?: {
       readonly identity: { readonly id: string; readonly source: string }
       readonly moduleGeneration?: string
+      readonly kind?: 'installed' | 'configured-channel' | 'configured-plugin'
+      readonly artifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
       readonly isCurrent: () => boolean
     },
-  ): ServiceRendererPermissionConsumerFence {
+  ): ServiceRendererPermissionConsumerFence & { prepare(): Promise<void> } {
     const identity = target?.identity ?? { id: 'channel', source: this.input.channelSource ?? '' }
     const selected = Object.freeze({ id: identity.id, source: identity.source })
     const targetCurrent = () => {
@@ -69,12 +71,18 @@ export class ServiceOwnerPermissionConsumers {
       || !targetCurrent()
       || !isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
       || (origin.additionalPeers?.length ?? 0) > 0 && (!this.input.nativeAdapters || !target?.moduleGeneration)
+      || target?.kind?.startsWith('configured-') && !target.artifact
     ) throw new Error('service-permission-consumers-unavailable')
     const reservation = Symbol('service-permission-consumers')
     this.reservation = reservation
     let ended = false
     let started = false
     let adopted = false
+    let preparing = false
+    const nativePeers = origin.additionalPeers ?? []
+    const needsProvenance = nativePeers.length > 0 && target?.kind?.startsWith('configured-') === true
+    let prepared = !needsProvenance
+    const generations = new Map<string, string>()
     const current = () =>
       !ended && ownerCurrent() && targetCurrent() && this.reservation === reservation
       && isCurrentManagerOriginFence(origin, this.input.participants, this.input.lifecycle)
@@ -88,8 +96,48 @@ export class ServiceOwnerPermissionConsumers {
     }
     return {
       isCurrent: current,
+      /** Resolve each native graph before any policy write is dispatched. */
+      prepare: async () => {
+        if (!current()) throw new Error('service-permission-consumers-unavailable')
+        if (prepared) return
+        if (preparing || started || !target?.artifact) {
+          throw new Error('service-permission-consumers-unavailable')
+        }
+        preparing = true
+        try {
+          const snapshot = this.input.lifecycle.snapshot()
+          await Promise.all(nativePeers.map(async peer => {
+            const value = await peer.request('permission-provenance', { pluginId: selected.id })
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+              throw new Error('service-permission-consumers-unavailable')
+            }
+            const proof = value as Record<string, unknown>
+            if (
+              !current() || peer.closed || Object.keys(proof).length !== 7 || proof.available !== true
+              || proof.rendererId !== peer.identity.rendererId || proof.ownerGeneration !== this.input.generation
+              || !attachmentEqual(proof.snapshot, snapshot)
+              || !attachmentEqual(this.input.lifecycle.snapshot(), snapshot)
+              || !attachmentEqual(proof.identity, selected) || !attachmentEqual(proof.artifact, target.artifact)
+              || typeof proof.moduleGeneration !== 'string'
+              || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(proof.moduleGeneration)
+            ) throw new Error('service-permission-consumers-unavailable')
+            generations.set(peer.identity.rendererId, proof.moduleGeneration)
+          }))
+          if (!current() || generations.size !== nativePeers.length) {
+            throw new Error('service-permission-consumers-unavailable')
+          }
+          prepared = true
+        } catch (error) {
+          fence()
+          throw error
+        } finally {
+          preparing = false
+        }
+      },
       adopt: async (request, signal) => {
-        if (started || !current() || signal.aborted) throw new Error('service-permission-consumers-unavailable')
+        if (started || !prepared || !current() || signal.aborted) {
+          throw new Error('service-permission-consumers-unavailable')
+        }
         started = true
         const expected = request.expected.map(record => normalizePersistedPermissionPolicyRecord(record))
         const updates = request.updates.map(record => normalizePersistedPermissionPolicyRecord(record))
@@ -110,7 +158,6 @@ export class ServiceOwnerPermissionConsumers {
         if (signal.aborted || !current() || !attachmentEqual(readback, candidate)) {
           throw new Error('service-permission-consumers-unavailable')
         }
-        const nativePeers = origin.additionalPeers ?? []
         if (nativePeers.length > 0) {
           const relevant = (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
             records.filter(record =>
@@ -131,7 +178,9 @@ export class ServiceOwnerPermissionConsumers {
               requestId: request.requestId,
               origin: peer.identity.rendererId === origin.rendererId,
               identity: selected,
-              moduleGeneration: target!.moduleGeneration!,
+              moduleGeneration: needsProvenance
+                ? generations.get(peer.identity.rendererId)!
+                : target!.moduleGeneration!,
               expected: relevant(expected),
               updates: relevant(updates),
               candidate: relevant(candidate),

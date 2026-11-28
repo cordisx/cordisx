@@ -77,6 +77,114 @@ it('reads back the exact owner policy before releasing the service-only reservat
   f.consumers.close()
 })
 
+it.each([false, true])('checks configured native provenance before policy adoption (mismatch: %s)', async mismatch => {
+  const artifact = { version: '1.2.3', integrity: `sha256:${'a'.repeat(64)}` as const }
+  const identity = { id: 'channel', source: 'https://example.test/channel' }
+  const snapshot = { active: { revision: 1 }, registryEpoch: 3 }
+  const handoffs: any[] = []
+  const observedArtifact = mismatch ? { ...artifact, version: 'other' } : artifact
+  const native = {
+    identity: { rendererId: 'native' },
+    closed: false,
+    onDisconnect: () => () => {},
+    request: async (method: string, value: any) => {
+      if (method === 'permission-provenance') {
+        expect(value).toEqual({ pluginId: identity.id })
+        return {
+          available: true,
+          rendererId: 'native',
+          ownerGeneration: 'owner-generation',
+          snapshot,
+          identity,
+          artifact: observedArtifact,
+          moduleGeneration: 'native-graph',
+        }
+      }
+      handoffs.push(value)
+      return {
+        rendererId: value.rendererId,
+        ownerGeneration: value.ownerGeneration,
+        handoffId: value.handoffId,
+        requestId: value.requestId,
+        moduleGeneration: value.moduleGeneration,
+        adopted: true,
+      }
+    },
+  }
+  const web = { identity: { rendererId: 'web' }, onDisconnect: () => () => {} }
+  const writes = { rendererId: 'web', isCurrent: () => true, release: () => true, fence: () => {} }
+  const lifecycle = {
+    snapshot: () => snapshot,
+    reserveExternalMutation: () => ({ isCurrent: () => true, release: () => true, fence: () => {} }),
+    terminal: () => {},
+  }
+  const participants = {
+    isBoundTo: () => true,
+    ownerPeers: () => [web],
+    peer: () => web,
+    isLive: () => true,
+  }
+  const origin = await fenceManagerOrigin({
+    sessions: { suspendMutationsForCurrentWrite: async () => writes, hasAdmittedPeer: () => true } as never,
+    participants: participants as never,
+    lifecycle: lifecycle as never,
+    allowAdditionalManagers: true,
+    reserveAdditionalPeers: async () => ({
+      peers: [native] as never,
+      isCurrent: () => true,
+      release: () => true,
+      fence: () => {},
+    }),
+  })
+  let persisted: any[] = []
+  const consumers = new ServiceOwnerPermissionConsumers({
+    profileId: 'default',
+    generation: 'owner-generation',
+    participants: participants as never,
+    lifecycle: lifecycle as never,
+    ownerCurrent: () => true,
+    loadPolicies: async () => persisted,
+    nativeAdapters: { signPolicy: (_peer: unknown, value: unknown) => value } as never,
+  })
+  const [base] = exactDomPermissionPolicies('default', [{
+    id: identity.id,
+    entry: '/fixture.js',
+    pointIds: ['manager.content'],
+  }])
+  const update = { ...base!, key: { ...base!.key, identity: { pluginId: identity.id, source: identity.source } } }
+  const reservation = consumers.reserve(origin, {
+    identity,
+    moduleGeneration: 'web-graph',
+    kind: 'configured-channel',
+    artifact,
+    isCurrent: () => true,
+  })
+  if (mismatch) {
+    await expect(reservation.prepare()).rejects.toThrow('service-permission-consumers-unavailable')
+    expect(handoffs).toEqual([])
+    expect(reservation.isCurrent()).toBe(false)
+    origin.fence()
+    consumers.close()
+    return
+  }
+  await reservation.prepare()
+  persisted = [update]
+  expect(
+    await reservation.adopt({
+      profileId: 'default',
+      ownerGeneration: 'owner-generation',
+      requestId: 'fixture-request',
+      expected: [],
+      updates: [update],
+      candidate: [update],
+    }, new AbortController().signal),
+  ).toMatchObject({ adopted: true })
+  expect(handoffs).toMatchObject([{ moduleGeneration: 'native-graph', identity }])
+  expect(origin.release()).toBe(true)
+  expect(reservation.release()).toBe(true)
+  consumers.close()
+})
+
 it('rejects stale owner readback and a policy for another source', async () => {
   const stale = await fixture(async () => [])
   const staleReservation = stale.consumers.reserve(stale.origin)
