@@ -1,5 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { PluginManagementRequest } from '../management/contracts.js'
+import type { DeferredPermissionPlan } from '../permission-deferral.js'
+import { PluginActivationStore } from '../launcher/plugin-activation.js'
+import { loadServiceRendererPackage } from './service-renderer-projection.js'
 
 type RestrictedInstalledIntent = Extract<
   PluginManagementRequest,
@@ -27,6 +30,12 @@ interface StoredPlan extends RestrictedLifecyclePlan {
   readonly ownerToken: string
 }
 
+export interface RestrictedPermissionReview extends RestrictedLifecyclePlan {
+  readonly ownerPlan: DeferredPermissionPlan
+  readonly rendererPlan: DeferredPermissionPlan
+  readonly expires: number
+}
+
 const ownerTokenPattern = /^management-execution-[a-f0-9-]{36}$/u
 const sessionTokenPattern = /^renderer-management-execution-[a-f0-9-]{36}$/u
 const limit = 16
@@ -34,10 +43,16 @@ const limit = 16
 /** Owner-only plans belong to one renderer session and are consumed at most once. */
 export class ServiceRendererManagementPlans {
   private readonly plans = new Map<string, StoredPlan>()
+  private readonly reviews = new Map<string, RestrictedPermissionReview>()
   private closed = false
   private cleanupFailed = false
 
-  constructor(private readonly discardOwnerPlan: (token: string) => void) {}
+  constructor(
+    private readonly discardOwnerPlan: (token: string) => void,
+    private readonly reviewEnabled = false,
+    private readonly verifyReviewCandidate: (plan: DeferredPermissionPlan, revision: number) => Promise<boolean> =
+      async () => false,
+  ) {}
 
   get available(): boolean {
     return !this.closed && !this.cleanupFailed
@@ -65,6 +80,56 @@ export class ServiceRendererManagementPlans {
     return plan
   }
 
+  /** Keep candidate identity and authority inside this one admitted session. */
+  async issueReview(input: RestrictedLifecyclePlan & { readonly ownerPlan: DeferredPermissionPlan }): Promise<
+    {
+      readonly token: string
+      readonly plan: DeferredPermissionPlan
+    } | undefined
+  > {
+    if (!this.available || !this.reviewEnabled || input.ownerPlan.schemaVersion !== 7) {
+      return undefined
+    }
+    if (!await this.verifyReviewCandidate(input.ownerPlan, input.activationRevision) || !this.available) {
+      return undefined
+    }
+    const now = Date.now()
+    for (const [token, review] of this.reviews) if (review.expires < now) this.reviews.delete(token)
+    if (this.reviews.size >= 4) this.reviews.delete(this.reviews.keys().next().value!)
+    const token = `renderer-review-${randomUUID()}`
+    const alias = `https://renderer.cordisx.invalid/plugin/${randomBytes(32).toString('hex')}`
+    const rendererPlan: DeferredPermissionPlan = {
+      ...structuredClone(input.ownerPlan),
+      identity: { ...input.ownerPlan.identity, source: alias },
+      binding: { ...input.ownerPlan.binding, requestId: token },
+      declarations: input.ownerPlan.declarations.map(({ certification: _certification, ...item }) => item),
+    }
+    this.reviews.set(token, {
+      intent: structuredClone(input.intent),
+      managementRevision: input.managementRevision,
+      activationRevision: input.activationRevision,
+      ownerPlan: structuredClone(input.ownerPlan),
+      rendererPlan,
+      expires: now + 15 * 60_000,
+    })
+    return { token, plan: structuredClone(rendererPlan) }
+  }
+
+  peekReview(token: string): RestrictedPermissionReview | undefined {
+    const review = this.available ? this.reviews.get(token) : undefined
+    if (!review || review.expires < Date.now()) {
+      this.reviews.delete(token)
+      return undefined
+    }
+    return review
+  }
+
+  takeReview(token: string): RestrictedPermissionReview | undefined {
+    const review = this.peekReview(token)
+    if (review) this.reviews.delete(token)
+    return review
+  }
+
   discard(token: string): void {
     const plan = this.plans.get(token)
     this.plans.delete(token)
@@ -86,6 +151,7 @@ export class ServiceRendererManagementPlans {
     this.closed = true
     const plans = [...this.plans.values()]
     this.plans.clear()
+    this.reviews.clear()
     for (const plan of plans) {
       try {
         this.discardOwner(plan.ownerToken)
@@ -93,6 +159,46 @@ export class ServiceRendererManagementPlans {
     }
     if (this.cleanupFailed) throw new Error('renderer-management-plan-cleanup-unavailable')
   }
+}
+
+/** Issue restricted plans only when the owner has enabled the profile fence. */
+export function createServiceRendererManagementPlans(input: {
+  readonly homeDir: string
+  readonly profileId: string
+  readonly generation: string
+  readonly protectProfileInputs?: boolean
+  readonly restrictedManagement?: { readonly discardPlan: (token: string) => void }
+  readonly permissionProof?: { readonly authorizeLifecycle?: unknown }
+}): { readonly managementPlans?: ServiceRendererManagementPlans } {
+  return input.protectProfileInputs && input.restrictedManagement
+    ? {
+      managementPlans: new ServiceRendererManagementPlans(
+        input.restrictedManagement.discardPlan,
+        typeof input.permissionProof?.authorizeLifecycle === 'function',
+        async (plan, revision) => {
+          try {
+            if (
+              !plan.binding.requestId || plan.profileId !== input.profileId
+              || plan.binding.runtimeGeneration !== input.generation
+            ) return false
+            const candidate = await new PluginActivationStore(input.homeDir, input.profileId, input.generation)
+              .loadCandidate(plan.binding.requestId)
+            const item = candidate.plugins.find(plugin => plugin.id === plan.identity.pluginId)
+            if (
+              candidate.recordKind !== 'candidate' || candidate.transactionId !== plan.binding.requestId
+              || candidate.profileId !== input.profileId || candidate.runtimeGeneration !== input.generation
+              || candidate.lastGoodRevision !== revision || candidate.revision !== revision + 1
+              || !item?.enabled || item.moduleGeneration !== plan.binding.moduleGeneration
+            ) return false
+            const staged = await loadServiceRendererPackage(input.homeDir, item)
+            return staged.identitySource === plan.identity.source
+          } catch {
+            return false
+          }
+        },
+      ),
+    }
+    : {}
 }
 
 /** A Marketplace selection contains catalog identity, never an arbitrary artifact or candidate. */

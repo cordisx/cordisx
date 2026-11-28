@@ -4,6 +4,9 @@ import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { createOwnerAdapterLifecycleReview } from '../packages/cli/src/cli/owner-adapter-lifecycle-review.js'
 import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
+import { ServiceRendererRuntimeGrants } from '../packages/cli/src/cli/service-renderer-runtime-grants.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../packages/cli/src/permission-contracts.js'
+import { normalizePermissionPolicyRecordV2 } from '../packages/cli/src/permission-model-v2.js'
 import type { OwnerAdapterManagementContext } from '../packages/cli/src/cli/owner-adapter-sessions.js'
 import { handlePluginLifecycleBindingRequest } from '../packages/cli/src/launcher/plugin-lifecycle-rpc.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
@@ -24,20 +27,46 @@ it('attributes an exact native install review to its service-owned journal witho
   })
   const staged = await coordinator.stagePackageSource({
     kind: 'local-directory',
-    location: pathToFileURL(await localPackageV5(root)).href,
+    location: pathToFileURL(await localPackageV5(root, false, false)).href,
   })
   const planned = await coordinator.inspectStagedPackage(staged, 'inspect-1')
   const handler = { token: 'private', profileId: 'work', generation: 'runtime-1', coordinator }
   const journal = new PermissionDecisionJournal({ homeDir: home, profileId: 'work' })
   let pendingObserved = false
+  let webGrantObserved = false
+  const grants = new ServiceRendererRuntimeGrants()
   const review = createOwnerAdapterLifecycleReview({
     homeDir: home,
     coordinator,
     journal,
+    runtimeGrants: () => grants,
     dispatch: async request => {
       if (request.kind === 'permission-review-apply-v7') {
         const pending = await journal.recentLifecycle({ id: staged.manifest.id, source: staged.identitySource })
         pendingObserved = pending.length === 1 && pending[0]?.committedAt === undefined
+        const decision = request.request.decision
+        const item = (await coordinator.store.loadCandidate(decision.binding.requestId!)).plugins
+          .find(plugin => plugin.id === decision.identity.pluginId)!
+        const choice = decision.decisions.find(value => value.capability === 'models.read')!
+        const record = normalizePermissionPolicyRecordV2({
+          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+          schemaVersion: 2,
+          key: {
+            profileId: decision.profileId,
+            identity: decision.identity,
+            capability: choice.capability,
+            scope: choice.scope,
+            securityFingerprint: choice.securityFingerprint,
+          },
+          policy: 'ask',
+        })
+        webGrantObserved = grants.consumeActivation({
+          transactionId: decision.binding.requestId,
+          moduleGeneration: item.moduleGeneration,
+          digest: item.digest,
+          record,
+          rendererId: 'b'.repeat(64),
+        })
       }
       return await handlePluginLifecycleBindingRequest(handler, request)
     },
@@ -96,6 +125,7 @@ it('attributes an exact native install review to its service-owned journal witho
   }, context)
   expect(await review(apply, context)).toMatchObject({ outcome: 'applied' })
   expect(pendingObserved).toBe(true)
+  expect(webGrantObserved).toBe(true)
   expect(await journal.recentLifecycle({ id: staged.manifest.id, source: staged.identitySource })).toMatchObject([{
     operation: 'install',
     client: 'codex',

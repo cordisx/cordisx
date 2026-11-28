@@ -77,6 +77,12 @@ export type PluginManagementRpcOperation =
   }
   | { readonly kind: 'permission-history'; readonly pluginId: string }
   | { readonly kind: 'plugin-authorization-history'; readonly pluginId: string }
+  | {
+    readonly kind: 'plugin-review-apply'
+    readonly reviewToken: string
+    readonly decision: unknown
+    readonly proof: unknown
+  }
   | { readonly kind: 'plan'; readonly request: PluginManagementRequest }
   | { readonly kind: 'execute'; readonly request: PluginManagementRequest; readonly expectedRevision?: number }
   | { readonly kind: 'migrate-legacy-sources'; readonly input: PluginManagementLegacySourceMigration }
@@ -138,7 +144,10 @@ function managementRpcDeadline(operation: PluginManagementRpcOperation): number 
   ) {
     try {
       const value = JSON.parse(operation.payload) as { operation?: { kind?: unknown; request?: { kind?: unknown } } }
-      if (value.operation?.kind === 'execute' && value.operation.request?.kind === 'plugin-execute-plan') {
+      if (
+        value.operation?.kind === 'plugin-review-apply'
+        || value.operation?.kind === 'execute' && value.operation.request?.kind === 'plugin-execute-plan'
+      ) {
         return 210_000
       }
     } catch { /* Malformed requests retain the ordinary deadline. */ }
@@ -216,6 +225,7 @@ export function parsePluginManagementRpcRequest(
       'plugin-info',
       'permission-history',
       'plugin-authorization-history',
+      'plugin-review-apply',
       'plan',
       'execute',
       'migrate-legacy-sources',
@@ -270,6 +280,7 @@ export async function handlePluginManagementRpcRequest(
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
   if (operation.kind === 'permission-review-apply') throw new Error('Permission review requires the lifecycle owner')
+  if (operation.kind === 'plugin-review-apply') throw new Error('Plugin review requires the admitted renderer owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')

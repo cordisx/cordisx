@@ -1,19 +1,13 @@
-import { CORDISX_PERMISSION_POLICY_SCHEMA_V2, CORDISX_PERMISSION_POLICY_SCHEMA_V4 } from '../permission-contracts.js'
-import type { CordisXCapabilityScope, CordisXPlatformCapability } from '../platform-contracts.js'
 import { assertDeferredPermissionDecision, type DeferredPermissionPlan } from '../permission-deferral.js'
-import { assertPermissionAuthorizationDecisionV2, normalizePermissionPolicyRecordV2 } from '../permission-model-v2.js'
-import {
-  assertPermissionAuthorizationDecisionV4,
-  isHostDomPermissionCapability,
-  normalizePermissionPolicyRecordV4,
-} from '../permission-model-v4.js'
-import { createPermissionPolicyRecord } from '../permissions.js'
-import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import { assertPermissionAuthorizationDecisionV2 } from '../permission-model-v2.js'
+import { assertPermissionAuthorizationDecisionV4 } from '../permission-model-v4.js'
 import type { PluginLifecycleBindingRequest } from '../launcher/plugin-lifecycle-rpc.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
-import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
-import type { PermissionDecisionChoice, PermissionDecisionJournal } from './permission-decision-journal.js'
+import type { PermissionDecisionJournal } from './permission-decision-journal.js'
+import { beginLifecycleDecisionJournal } from './lifecycle-decision-journal.js'
+import { issueReviewedModelGrant } from './service-renderer-reviewed-model-grant.js'
+import type { ServiceRendererRuntimeGrants } from './service-renderer-runtime-grants.js'
 import type {
   CordisXPermissionAuthorizationPlanV2,
   CordisXPermissionAuthorizationPlanV4,
@@ -29,6 +23,7 @@ export function createOwnerAdapterLifecycleReview(input: {
   readonly coordinator: PluginLifecycleCoordinator
   readonly journal: PermissionDecisionJournal
   readonly dispatch: (request: PluginLifecycleBindingRequest) => Promise<unknown>
+  readonly runtimeGrants?: () => ServiceRendererRuntimeGrants | undefined
   readonly now?: () => number
 }) {
   const reviews = new Map<string, { readonly signal: AbortSignal; readonly entries: Map<string, Review> }>()
@@ -83,77 +78,32 @@ export function createOwnerAdapterLifecycleReview(input: {
     } else {
       throw new Error('adapter-review-unavailable')
     }
-    // Host-derived no-decision activations are not attributed to a user action.
-    if (decision.schemaVersion === 7 && decision.origin !== 'explicit-user') return await input.dispatch(request)
-    const selected = decision.decisions.filter(choice =>
-      review.plan.declarations.some(item => item.capability === choice.capability && item.decisionRequired)
-    )
-    if (selected.length === 0) return await input.dispatch(request)
-    const candidateId = decision.binding.requestId
-    if (!candidateId || !['install', 'update', 'enable'].includes(decision.operation)) {
-      throw new Error('adapter-review-unavailable')
-    }
-    const candidate = await input.coordinator.store.loadCandidate(candidateId)
-    const item = candidate.plugins.find(plugin => plugin.id === decision.identity.pluginId)
-    if (!item || item.moduleGeneration !== decision.binding.moduleGeneration) {
-      throw new Error('adapter-review-unavailable')
-    }
-    const staged = await loadStagedPluginPackage(input.homeDir, item.digest)
-    if (staged.identitySource !== decision.identity.source || !context.live()) {
-      throw new Error('adapter-review-unavailable')
-    }
-    const records = selected.map(choice => {
-      const policy = choice.decision === 'allow-once' || choice.decision === 'deny-once' ? 'ask' : choice.decision
-      if (staged.manifest.runtimeManifest.schemaVersion === 1) {
-        return createPermissionPolicyRecord({
-          profileId: decision.profileId,
-          identity: { id: decision.identity.pluginId, source: decision.identity.source },
-          capability: choice.capability as CordisXPlatformCapability,
-          scope: choice.scope as CordisXCapabilityScope,
-          policy: policy === 'allow-persistent' ? 'allow' : policy === 'deny-persistent' ? 'deny' : 'ask',
-        })
-      }
-      const record = {
-        key: {
-          profileId: decision.profileId,
-          identity: decision.identity,
-          capability: choice.capability,
-          scope: choice.scope,
-          securityFingerprint: choice.securityFingerprint,
-        },
-        policy,
-      }
-      return isHostDomPermissionCapability(choice.capability)
-        ? normalizePermissionPolicyRecordV4({
-          ...record,
-          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
-          schemaVersion: 4,
-        })
-        : normalizePermissionPolicyRecordV2({
-          ...record,
-          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
-          schemaVersion: 2,
-        })
-    }) satisfies CordisXPersistedPermissionPolicyRecord[]
-    const receipts: Array<{ commit(): Promise<void> }> = []
-    for (let index = 0; index < records.length; index += 23) {
-      receipts.push(
-        await input.journal.begin({
-          client: 'codex',
-          requestId: apply.requestId,
-          records: records.slice(index, index + 23),
-          lifecycle: {
-            operation: decision.operation as 'install' | 'update' | 'enable',
-            decisions: selected.slice(index, index + 23).map(choice => choice.decision as PermissionDecisionChoice),
-          },
-        }),
-      )
-    }
+    const receipts = await beginLifecycleDecisionJournal({
+      ...input,
+      plan: review.plan,
+      decision,
+      client: 'codex',
+      requestId: apply.requestId,
+      current: context.live,
+    })
     if (!context.live()) throw new Error('adapter-review-unavailable')
-    const result = await input.dispatch(request)
-    if (result && typeof result === 'object' && 'outcome' in result && result.outcome === 'applied') {
-      for (const receipt of receipts) await receipt.commit()
+    const grants = input.runtimeGrants?.()
+    const activationGrant = await issueReviewedModelGrant({
+      homeDir: input.homeDir,
+      coordinator: input.coordinator,
+      ...(grants === undefined ? {} : { grants }),
+      decision,
+      current: context.live,
+    })
+    try {
+      const result = await input.dispatch(request)
+      const applied = !!result && typeof result === 'object' && 'outcome' in result && result.outcome === 'applied'
+      activationGrant?.finish(applied)
+      if (applied) { for (const receipt of receipts) await receipt.commit() }
+      return result
+    } catch (error) {
+      activationGrant?.finish(false)
+      throw error
     }
-    return result
   }
 }

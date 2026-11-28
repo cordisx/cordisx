@@ -1,7 +1,7 @@
 import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
 
-/** A service-free graph can use the owner model catalog when the capability is optional. */
-export function isServiceRendererOptionalModelManifest(value: unknown, pluginId: string): boolean {
+/** A service-free graph can use the owner model catalog under its declared model policy. */
+export function isServiceRendererModelManifest(value: unknown, pluginId: string): boolean {
   try {
     if (
       !value || typeof value !== 'object' || Array.isArray(value)
@@ -12,7 +12,7 @@ export function isServiceRendererOptionalModelManifest(value: unknown, pluginId:
     return manifest.capabilities.some(capability => capability.name === 'models.read')
       && manifest.capabilities.every(capability =>
         capability.name === 'models.read'
-          ? capability.required === false && Object.keys(capability.scope).every(key => key === 'providers')
+          ? Object.keys(capability.scope).every(key => key === 'providers')
           : capability.name === 'ui.extension-points.render'
       )
   } catch {

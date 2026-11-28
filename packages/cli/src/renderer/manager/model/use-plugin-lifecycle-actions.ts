@@ -7,6 +7,7 @@ import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../..
 import { notificationCenterForDocument } from '../../notifications/host.js'
 import { productLocale } from '../../ui-copy.js'
 import { StandalonePluginLifecycleContext } from './standalone-plugin-lifecycle.js'
+import { reviewStandaloneLifecycle } from '../../standalone-lifecycle-review.js'
 import {
   requestPluginAuthorizationV2,
   requestPluginAuthorizationV4,
@@ -107,7 +108,32 @@ export function usePluginLifecycleActions(
           })
           if (confirmation?.status !== 'completed') return
         }
-        const result = await standalone.binding.executeLifecycle!(plan.executionRequest, plan.snapshot.revision)
+        let result = await standalone.binding.executeLifecycle!(plan.executionRequest, plan.snapshot.revision)
+        if (result.status === 'permission-review-required' && operation.kind === 'enable') {
+          const review = result.permissionPlan
+          if (
+            !standalone.binding.applyLifecycleReview || review.schemaVersion !== 7
+            || result.request.kind !== 'plugin-enable' || result.request.pluginId !== plugin.id
+            || review.identity.pluginId !== plugin.id || review.profileId !== snapshot.pluginLifecycle?.profileId
+            || review.binding.runtimeGeneration !== snapshot.pluginLifecycle.runtimeGeneration
+            || review.binding.requestId !== result.candidateId
+            || result.snapshot.activationRevision !== snapshot.pluginLifecycle.revision
+          ) throw new Error('Plugin permission review is unavailable')
+          const choice = await reviewStandaloneLifecycle(
+            document,
+            { id: plugin.id, name: plugin.name, source: review.identity.source },
+            review,
+            snapshot.permissions.filter(item => item.identity.id === plugin.id),
+            result.candidateId,
+          )
+          if (!choice) return
+          result = await standalone.binding.applyLifecycleReview(
+            result.candidateId,
+            choice.decision,
+            choice.proof,
+            choice.requestId,
+          )
+        }
         if (result.status !== 'applied') {
           throw new Error('error' in result ? result.error.message : 'Plugin operation could not be completed')
         }

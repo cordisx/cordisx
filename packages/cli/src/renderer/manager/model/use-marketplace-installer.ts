@@ -6,6 +6,7 @@ import type { PluginManagementRequest, PluginManagementSnapshot } from '../../..
 import type { PluginManagementBinding } from '../../management-binding.js'
 import { productLocale } from '../../ui-copy.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
+import { reviewStandaloneLifecycle } from '../../standalone-lifecycle-review.js'
 import type { NotificationsV1 } from '@cordisx/protocol/notifications/v1'
 import {
   requestPluginAuthorizationV2,
@@ -166,7 +167,34 @@ export function useMarketplaceInstaller(
           }
           // Once dispatched, the owner may commit; cancellation cannot promise rollback.
           updateCancellable(false)
-          const result = await standalone.binding.executeLifecycle!(plan.executionRequest, plan.snapshot.revision)
+          let result = await standalone.binding.executeLifecycle!(plan.executionRequest, plan.snapshot.revision)
+          if (result.status === 'permission-review-required') {
+            const review = result.permissionPlan
+            if (
+              !standalone.binding.applyLifecycleReview || review.schemaVersion !== 7
+              || !sameSelection(result.request, selection) || review.identity.pluginId !== plugin.id
+              || review.profileId !== lifecycle.profileId
+              || review.binding.runtimeGeneration !== lifecycle.runtimeGeneration
+              || review.binding.requestId !== result.candidateId
+              || result.snapshot.activationRevision !== lifecycle.revision
+            ) throw new Error('Plugin permission review is unavailable')
+            const choice = await reviewStandaloneLifecycle(
+              ownerDocument,
+              { id: plugin.id, name, source: review.identity.source },
+              review,
+              snapshot.permissions.filter(item =>
+                item.identity.id === plugin.id && item.identity.source === review.identity.source
+              ),
+              result.candidateId,
+            )
+            if (!choice || request.signal.aborted) return
+            result = await standalone.binding.applyLifecycleReview(
+              result.candidateId,
+              choice.decision,
+              choice.proof,
+              choice.requestId,
+            )
+          }
           if (
             result.status !== 'applied' || result.pendingActivation
             || !sameSelection(result.request, selection)

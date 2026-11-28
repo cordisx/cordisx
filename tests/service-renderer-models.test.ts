@@ -11,14 +11,14 @@ import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager
 import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
 import { createServiceRendererModels } from '../packages/cli/src/cli/service-renderer-models.js'
 import { createServiceRendererPermissionOnce } from '../packages/cli/src/cli/service-renderer-permission-once.js'
-import { isServiceRendererOptionalModelManifest } from '../packages/cli/src/cli/service-renderer-optional-model-manifest.js'
+import { isServiceRendererModelManifest } from '../packages/cli/src/cli/service-renderer-model-manifest.js'
 import { ServiceRendererRuntimeGrants } from '../packages/cli/src/cli/service-renderer-runtime-grants.js'
 import { createStandalonePermissionSigner } from '../packages/cli/src/independent-manager/standalone-permission-signer.js'
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../packages/cli/src/standalone-permission-contract.js'
 
-it('admits only optional model access for the service-free model bridge', () => {
+it('admits declared model access but not other service-free capabilities', () => {
   const declaration = { name: 'models.read', required: false, scope: { providers: ['codex'] } }
   const manifest = {
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
@@ -27,12 +27,12 @@ it('admits only optional model access for the service-free model bridge', () => 
     services: [],
     capabilities: [declaration],
   }
-  expect(isServiceRendererOptionalModelManifest(manifest, 'demo')).toBe(true)
+  expect(isServiceRendererModelManifest(manifest, 'demo')).toBe(true)
   expect(
-    isServiceRendererOptionalModelManifest({ ...manifest, capabilities: [{ ...declaration, required: true }] }, 'demo'),
-  ).toBe(false)
+    isServiceRendererModelManifest({ ...manifest, capabilities: [{ ...declaration, required: true }] }, 'demo'),
+  ).toBe(true)
   expect(
-    isServiceRendererOptionalModelManifest({
+    isServiceRendererModelManifest({
       ...manifest,
       capabilities: [declaration, { name: 'tasks.create', required: false, scope: {} }],
     }, 'demo'),
@@ -72,6 +72,7 @@ it('consumes a plugin-scoped one-time model grant and filters the owner catalog'
   const admitted = { ...context, admitted: true }
   const evidence = { identity, ownerIdentity, moduleGeneration: 'graph-1', digest, artifact }
   let snapshot: any[] = []
+  let candidate: string | undefined
   const access = {
     evidence: () => evidence,
     isCurrentEvidence: () => !controller.signal.aborted,
@@ -108,7 +109,14 @@ it('consumes a plugin-scoped one-time model grant and filters the owner catalog'
     documents: {
       principal: (_context: unknown, value: string) => {
         if (value !== token) throw new Error('invalid token')
-        return { identity, ownerIdentity, moduleGeneration: 'graph-1', isCurrent: () => !controller.signal.aborted }
+        return {
+          kind: candidate === undefined ? 'active' : 'candidate',
+          identity,
+          ownerIdentity,
+          moduleGeneration: 'graph-1',
+          ...(candidate === undefined ? {} : { transactionId: candidate, digest, version: artifact.version }),
+          isCurrent: () => !controller.signal.aborted,
+        }
       },
     } as never,
     catalog: async () => [
@@ -184,6 +192,44 @@ it('consumes a plugin-scoped one-time model grant and filters the owner catalog'
       ok: true,
       value: { ok: false },
     })
+    snapshot = []
+    const ownerRecord = {
+      ...signed.record,
+      key: { ...signed.record.key, identity: { pluginId: 'demo', source: ownerIdentity.source } },
+    }
+    const activation = bootstrap.permissionAccess.runtimeOnceGrants.issueActivation({
+      transactionId: 'candidate-1',
+      record: ownerRecord,
+      moduleGeneration: 'graph-1',
+      digest,
+    })
+    candidate = 'other-candidate'
+    expect(await models.prepare(request('wrong-candidate', 'stage-id'), admitted).dispatch())
+      .toMatchObject({ ok: true, value: { ok: false } })
+    candidate = 'candidate-1'
+    const duringStage = models.prepare(request('candidate', 'stage-id'), admitted)
+    expect(duringStage.mode).toBe('read')
+    expect(await duringStage.dispatch()).toMatchObject({ ok: true, value: { ok: true } })
+    expect(await models.prepare(request('candidate-repeat', 'stage-id'), admitted).dispatch())
+      .toMatchObject({ ok: true, value: { ok: false } })
+    expect(
+      await models.prepare(request('candidate-peer', 'stage-id'), { ...admitted, rendererId: 'e'.repeat(64) })
+        .dispatch(),
+    ).toMatchObject({ ok: true, value: { ok: true } })
+    activation.finish(true)
+    candidate = undefined
+    expect(await models.prepare(request('candidate-replay', 'stage-id'), admitted).dispatch())
+      .toMatchObject({ ok: true, value: { ok: false } })
+    const cancelled = bootstrap.permissionAccess.runtimeOnceGrants.issueActivation({
+      transactionId: 'candidate-2',
+      record: ownerRecord,
+      moduleGeneration: 'graph-1',
+      digest,
+    })
+    cancelled.finish(false)
+    candidate = 'candidate-2'
+    expect(await models.prepare(request('cancelled-candidate', 'stage-id'), admitted).dispatch())
+      .toMatchObject({ ok: true, value: { ok: false } })
   } finally {
     controller.abort()
     proof.close()

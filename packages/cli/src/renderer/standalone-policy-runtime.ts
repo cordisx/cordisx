@@ -6,6 +6,7 @@ import { nativeRuntimePrompt } from './native-permission-prompt.js'
 import { standaloneRuntimePrompt } from './standalone-runtime-prompt.js'
 import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
 import { bindStandaloneRuntimePolicyReviewer } from './standalone-runtime-policy-review.js'
+import { bindStandaloneLifecycleReview } from './standalone-lifecycle-review.js'
 
 type PolicyBroker = {
   adoptStandaloneDomPolicies(
@@ -28,15 +29,25 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
   const once = standalonePermissionSigner
     ? BrowserPermissionOnceBinding.connect(metadata.permissionBridgeToken)
     : undefined
+  let unbindLifecycle: (() => void) | undefined
   return {
     metadata: safeMetadata,
     sign: standalonePermissionSigner?.sign,
     dispose: () => {
+      unbindLifecycle?.()
       once?.dispose()
       standalonePermissionSigner?.close()
     },
     register(broker: PolicyBroker, signal?: AbortSignal, onUnknown?: () => void): void {
       if (standalonePermissionSigner) {
+        if (metadata.hostKind === 'standalone' && metadata.standaloneReviewSession) {
+          unbindLifecycle = bindStandaloneLifecycleReview(
+            document,
+            standalonePermissionSigner,
+            metadata.standaloneReviewSession,
+            signal,
+          )
+        }
         bindStandaloneRuntimePolicyReviewer(
           broker,
           (context, record, observed) => standalonePermissionSigner.noteRuntimePolicy(context, record, observed),

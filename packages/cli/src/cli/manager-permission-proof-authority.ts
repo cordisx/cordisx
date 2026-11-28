@@ -16,6 +16,8 @@ import type { ManagerRendererChannelContext } from './manager-renderer-sessions.
 import { nativeRuntimeOnceProofBytes, normalizeNativeRuntimeOnceProof } from '../native-runtime-once-proof.js'
 import { normalizeRuntimePolicyProof, runtimePolicyProofBytes } from '../runtime-policy-proof.js'
 import { normalizeWebRuntimeOnceProof, webRuntimeOnceProofBytes } from '../web-runtime-once-proof.js'
+import { lifecycleReviewProofBytes, normalizeLifecycleReviewProofPayload } from '../lifecycle-review-proof.js'
+import type { DeferredPermissionDecision } from '../permission-deferral.js'
 
 type Entry = {
   readonly signal: AbortSignal
@@ -324,6 +326,48 @@ export class ManagerPermissionProofAuthority {
       ) {
         return false
       }
+      if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
+      entry.used.add(payload.decisionId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  authorizeLifecycle(input: {
+    readonly context: ManagerRendererChannelContext
+    readonly requestId: string
+    readonly reviewToken: string
+    readonly decision: DeferredPermissionDecision
+    readonly proof: unknown
+  }): boolean {
+    try {
+      const { context } = input
+      const entry = this.entries.get(context.rendererId)
+      if (
+        this.input.target === 'native' || !entry || entry.signal !== context.signal || context.admitted !== true
+        || !this.current(context) || entry.used.size >= 4096 || !input.proof || typeof input.proof !== 'object'
+        || Array.isArray(input.proof)
+      ) return false
+      const proof = input.proof as Record<string, unknown>
+      if (
+        Object.keys(proof).length !== 2 || Object.keys(proof).some(key => !['payload', 'signature'].includes(key))
+        || typeof proof.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/u.test(proof.signature)
+      ) return false
+      const signature = Buffer.from(proof.signature, 'base64url')
+      if (signature.length !== 64 || signature.toString('base64url') !== proof.signature) return false
+      const payload = normalizeLifecycleReviewProofPayload(proof.payload)
+      const now = (this.input.now ?? Date.now)()
+      if (
+        payload.rendererId !== context.rendererId || payload.profileId !== context.profileId
+        || payload.ownerGeneration !== context.ownerGeneration || payload.requestId !== input.requestId
+        || payload.reviewToken !== input.reviewToken || entry.used.has(payload.decisionId)
+        || !Number.isSafeInteger(now) || payload.issuedAt > now + 5_000 || now - payload.issuedAt > 60_000
+        || JSON.stringify(payload.decision) !== JSON.stringify(input.decision)
+      ) return false
+      if (
+        !verify('sha256', lifecycleReviewProofBytes(payload), { key: entry.key, dsaEncoding: 'ieee-p1363' }, signature)
+      ) return false
       if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
       entry.used.add(payload.decisionId)
       return true

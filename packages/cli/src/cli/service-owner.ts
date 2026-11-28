@@ -339,6 +339,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             homeDir,
             coordinator,
             journal: decisionJournal,
+            runtimeGrants: () => rendererBootstrap?.permissionAccess.runtimeOnceGrants,
             dispatch: async request => await handlePluginLifecycleBindingRequest(adapterLifecycleHandler, request),
           })
           nativePermissionProof = new OwnerAdapterPermissionProof({ profileId, generation })

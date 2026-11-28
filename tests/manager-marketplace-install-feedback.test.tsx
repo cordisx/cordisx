@@ -5,6 +5,7 @@ import { useMarketplaceInstaller } from '../packages/cli/src/renderer/manager/mo
 import { installNotificationHost } from '../packages/cli/src/renderer/notifications/host.js'
 import { managerModel, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
 import { buildDeferredPermissionPlan } from '../packages/cli/src/permission-deferral.js'
+import { bindStandaloneLifecycleReview } from '../packages/cli/src/renderer/standalone-lifecycle-review.js'
 
 it('installs the selected Marketplace artifact through the standalone owner and waits for its receipt', async () => {
   const fixture = reactManagerFixture()
@@ -233,6 +234,110 @@ it('limits a service-attached native install review to trusted session decisions
     })
     expect(apply).not.toHaveBeenCalled()
   } finally {
+    await fixture.dispose()
+  }
+})
+
+it('opens a trusted Web review for the service-issued candidate and cancels without applying', async () => {
+  const fixture = reactManagerFixture()
+  const token = 'renderer-review-aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
+  const source = 'https://example.test/plugin'
+  const plan = buildDeferredPermissionPlan({
+    planId: 'install-required',
+    operation: 'install',
+    profileId: 'test',
+    identity: { source: `https://renderer.cordisx.invalid/plugin/${'b'.repeat(64)}`, pluginId: 'example' },
+    binding: { operationId: 'install-required', runtimeGeneration: 'test', requestId: token },
+    declarations: [{ name: 'models.read', required: true, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const snapshot = managerSnapshot({
+    pluginLifecycle: { profileId: 'test', revision: 0, runtimeGeneration: 'test', operationsAvailable: false },
+  })
+  const management = {
+    profileId: 'test',
+    revision: 4,
+    activationRevision: 0,
+    rendererLifecycleAccess: 'session-scoped-v1',
+    runtime: { kind: 'active', runtimeGeneration: 'test', mode: 'service' },
+    plugins: [],
+  }
+  const plugin = {
+    id: 'example',
+    identity: 'example@1.0.0',
+    version: '1.0.0',
+    schemaVersion: 8,
+    source,
+    feedUrl: 'https://example.test/marketplace.json',
+    artifact: {
+      packageName: 'example',
+      downloadUrl: 'https://example.test/example.tgz',
+      integrity: `sha256:${'a'.repeat(64)}`,
+    },
+  } as MarketplaceCatalogPlugin
+  const request = {
+    kind: 'plugin-plan-marketplace',
+    pluginId: plugin.id,
+    sourceUrl: plugin.feedUrl,
+    version: plugin.version,
+    expectedCanonicalSource: source,
+    expectedArtifactIntegrity: plugin.artifact!.integrity,
+  }
+  const apply = vi.fn()
+  const signer = { signLifecycle: vi.fn() }
+  const unbind = bindStandaloneLifecycleReview(fixture.document, signer as never, async () => true)
+  const binding = {
+    planLifecycle: vi.fn().mockResolvedValue({
+      status: 'planned',
+      request,
+      snapshot: management,
+      executionRequest: { kind: 'plugin-execute-plan', executionToken: 'session-token' },
+    }),
+    executeLifecycle: vi.fn().mockResolvedValue({
+      status: 'permission-review-required',
+      request,
+      snapshot: management,
+      candidateId: token,
+      permissionPlan: plan,
+    }),
+    applyLifecycleReview: apply,
+  }
+  let installer!: ReturnType<typeof useMarketplaceInstaller>
+  function Installer() {
+    installer = useMarketplaceInstaller(
+      managerModel(snapshot),
+      snapshot,
+      { failed: 'Failed', succeeded: 'Installed' },
+      {
+        document: fixture.document,
+        standalone: { binding, snapshot: management } as never,
+      },
+    )
+    return null
+  }
+  try {
+    await fixture.render(<Installer />)
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = installer.run(plugin, 'Example')
+      await Promise.resolve()
+    })
+    const overlay = fixture.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+    expect(overlay).not.toBeNull()
+    expect(overlay.querySelector('[data-permission-decision="allow-once"]')).not.toBeNull()
+    expect(overlay.querySelector('[data-permission-decision="allow-persistent"]')).toBeNull()
+    await act(async () => {
+      overlay.querySelector<HTMLElement>('[data-permission-action="confirm"]')!.click()
+      overlay.dispatchEvent(
+        new fixture.document.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await pending
+    })
+    expect(signer.signLifecycle).not.toHaveBeenCalled()
+    expect(apply).not.toHaveBeenCalled()
+  } finally {
+    unbind()
     await fixture.dispose()
   }
 })

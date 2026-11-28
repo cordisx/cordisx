@@ -38,6 +38,7 @@ import { coordinateManagerManagedServiceMutations } from './manager-managed-serv
 import type { ManagerManagedServiceUIGate } from './manager-managed-service-ui-gate.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import { createServiceRendererPermissionChannel } from './service-renderer-permission-channel.js'
+import { createServiceRendererLifecycleReview } from './service-renderer-lifecycle-review.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
@@ -308,6 +309,19 @@ export async function openProductionPluginManagementComposition(input: {
       proof: input.rendererPermissionPolicy.proof,
       journal: decisionJournal,
     })
+  const rendererLifecycleReview = input.mode !== 'service' || input.rendererPermissionPolicy === undefined
+      || decisionJournal === undefined
+    ? undefined
+    : createServiceRendererLifecycleReview({
+      homeDir: input.homeDir,
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      coordinator: input.coordinator,
+      journal: decisionJournal,
+      proof: input.rendererPermissionPolicy.proof,
+      bootstrap: input.rendererPermissionPolicy.bootstrap,
+      service,
+    })
   rendererSessions = new ManagerRendererSessions({
     profileId: input.profileId,
     ownerGeneration: input.runtimeGeneration,
@@ -330,7 +344,14 @@ export async function openProductionPluginManagementComposition(input: {
     ...(input.rendererWriteLifetimes === undefined ? {} : { writeLifetimes: input.rendererWriteLifetimes }),
     ...(input.rendererReadLifetimes === undefined ? {} : { readLifetimes: input.rendererReadLifetimes }),
     channels: new Map([
-      ['plugin-management', createManagerRendererManagementChannel(service, input.rendererManagementAuthority)],
+      [
+        'plugin-management',
+        createManagerRendererManagementChannel(
+          service,
+          input.rendererManagementAuthority,
+          rendererLifecycleReview,
+        ),
+      ],
       ...(input.rendererBootstrap === undefined
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),

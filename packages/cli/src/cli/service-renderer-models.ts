@@ -50,33 +50,35 @@ export function createServiceRendererModels(input: {
       const initialModel = initial
         ? input.bootstrap.permissionAccess.initialModel(context, principal.identity.id)
         : undefined
-      const evidence = initialModel?.evidence
+      const evidence = principal.kind === 'candidate' ? undefined : initialModel?.evidence
         ?? input.bootstrap.permissionAccess.evidence(context, principal.identity.id)
       const snapshot = initialModel?.snapshot ?? input.bootstrap.permissionAccess.snapshot(context)
       const current = () =>
         principal.isCurrent() && (initialModel
           ? initialModel.isCurrent()
-          : input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
+          : (evidence === undefined || input.bootstrap.permissionAccess.isCurrentEvidence(evidence))
             && attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context)))
       if (
         !current() || context.profileId !== input.profileId
-        || !attachmentEqual(principal.identity, evidence.identity)
-        || !attachmentEqual(principal.ownerIdentity, evidence.ownerIdentity)
-        || principal.moduleGeneration !== evidence.moduleGeneration
+        || evidence && (!attachmentEqual(principal.identity, evidence.identity)
+            || !attachmentEqual(principal.ownerIdentity, evidence.ownerIdentity)
+            || principal.moduleGeneration !== evidence.moduleGeneration)
       ) throw new Error('renderer-models-unavailable')
+      const digest = principal.kind === 'candidate' ? principal.digest : evidence!.digest
+      const version = principal.kind === 'candidate' ? principal.version : evidence!.artifact.version
       return {
-        // A read consumes an owner-issued once grant and must not be retried automatically.
-        mode: 'write',
+        // Candidate reads run inside the lifecycle fence; the HTTP transport never retries either mode.
+        mode: principal.kind === 'candidate' ? 'read' : 'write',
         channelConfigurationIndependent: true,
         dispatch: async () => {
           try {
             if (initialModel && !await initialModel.verifyCurrent()) throw new Error('renderer-models-unavailable')
-            const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, evidence.digest)
+            const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, digest)
             if (
               !current() || staged.identitySource !== principal.ownerIdentity.source
-              || staged.digest !== evidence.digest || staged.manifest.id !== principal.identity.id
-              || staged.manifest.version !== evidence.artifact.version
-              || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
+              || staged.digest !== digest || staged.manifest.id !== principal.identity.id
+              || staged.manifest.version !== version
+              || evidence && (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
             ) throw new Error('renderer-models-unavailable')
             const records = withDeclaredRuntimeAskPolicies(
               [],
@@ -112,16 +114,27 @@ export function createServiceRendererModels(input: {
             ) {
               throw new Error('renderer-models-unavailable')
             }
-            if (
-              policy?.policy !== 'allow-persistent' && !(policy === undefined || policy.policy === 'ask')
-              || (policy === undefined || policy.policy === 'ask')
-                && !input.bootstrap.permissionAccess.runtimeOnceGrants.consume(context, {
+            if (policy?.policy !== 'allow-persistent') {
+              if (policy !== undefined && policy.policy !== 'ask') {
+                throw new Error('renderer-models-unavailable')
+              }
+              const runtimeGrant = principal.kind !== 'candidate'
+                && input.bootstrap.permissionAccess.runtimeOnceGrants.consume(context, {
                   requestId: authorizationRequestId,
                   record,
                   moduleGeneration: principal.moduleGeneration,
                   ...(initial ? { initial: true as const } : {}),
                 })
-            ) throw new Error('renderer-models-unavailable')
+              const activationGrant = runtimeGrant
+                || input.bootstrap.permissionAccess.runtimeOnceGrants.consumeActivation({
+                  ...(principal.kind === 'candidate' ? { transactionId: principal.transactionId } : {}),
+                  record,
+                  moduleGeneration: principal.moduleGeneration,
+                  digest,
+                  rendererId: context.rendererId,
+                })
+              if (!activationGrant) throw new Error('renderer-models-unavailable')
+            }
             const providers = await input.catalog()
             if (!current() || initialModel && !await initialModel.verifyCurrent()) {
               throw new Error('renderer-models-unavailable')

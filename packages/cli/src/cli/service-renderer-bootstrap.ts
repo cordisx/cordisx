@@ -50,7 +50,7 @@ import { ServiceRendererPermissionAccess } from './service-renderer-permission-a
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
 import { restrictedLifecycleIds } from './service-renderer-management-eligibility.js'
-import { ServiceRendererManagementPlans } from './service-renderer-management-plans.js'
+import { createServiceRendererManagementPlans } from './service-renderer-management-plans.js'
 import { serviceRendererBootstrapStatus } from './service-renderer-bootstrap-status.js'
 import { closeBootstrapFences } from './service-renderer-bootstrap-cleanup.js'
 import { createServiceRendererBootstrapChannel } from './service-renderer-bootstrap-channel.js'
@@ -132,7 +132,9 @@ export class ServiceRendererBootstrap {
       /** The owner also supplied the private, coordinated credential bridge. */
       readonly experimentalChannelCredentials?: boolean
       /** Owner-created verifier, enabled only with an independently coordinated policy channel. */
-      readonly permissionProof?: Pick<ManagerPermissionProofAuthority, 'register'>
+      readonly permissionProof?:
+        & Pick<ManagerPermissionProofAuthority, 'register'>
+        & Partial<Pick<ManagerPermissionProofAuthority, 'authorizeLifecycle'>>
       /** Service owner has a coordinated policy channel for configured Channel UI. */
       readonly experimentalConfiguredPermissionPolicy?: boolean
       /** Service owner has the same policy handoff for eligible configured plugin graphs. */
@@ -491,9 +493,7 @@ export class ServiceRendererBootstrap {
       startupAbort: new AbortController(),
       stale: false,
       bootstrapConfirmed: false,
-      ...(this.input.protectProfileInputs && this.input.restrictedManagement
-        ? { managementPlans: new ServiceRendererManagementPlans(this.input.restrictedManagement.discardPlan) }
-        : {}),
+      ...createServiceRendererManagementPlans(this.input),
     }
     this.entries.set(rendererId, entry)
     if (peer.closed) {
@@ -905,7 +905,7 @@ export class ServiceRendererBootstrap {
     return await entry.completing
   }
 
-  private managementEntry(context: ManagerRendererChannelContext) {
+  managementEntry(context: ManagerRendererChannelContext) {
     return serviceRendererManagementEntry(this.entries.get(context.rendererId), {
       ...(this.input.restrictedManagement === undefined
         ? {}

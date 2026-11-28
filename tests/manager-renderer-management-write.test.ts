@@ -86,3 +86,23 @@ it('permits mutations only for an admitted renderer and fences a lost write', as
     authority.dispose()
   }
 })
+
+it('routes a lifecycle review as a write only for an admitted renderer', async () => {
+  const review = vi.fn(async (_operation, requestId) => ({ requestId, ok: true, value: { status: 'applied' } }))
+  const channel = createManagerRendererManagementChannel({} as PluginManagementService, undefined, review)
+  const context = {
+    profileId: 'fixture',
+    rendererId: secret(),
+    ownerGeneration: 'generation',
+    signal: new AbortController().signal,
+    admitted: true,
+  }
+  const token = 'renderer-review-aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
+  const operation = { kind: 'plugin-review-apply', reviewToken: token, decision: {}, proof: {} }
+  const prepared = channel.prepare(payload(operation), context)
+  expect(prepared.mode).toBe('write')
+  expect(await prepared.dispatch()).toMatchObject({ ok: true, value: { status: 'applied' } })
+  expect(review).toHaveBeenCalledOnce()
+  expect(() => channel.prepare(payload(operation), { ...context, admitted: false })).toThrow()
+  expect(() => channel.prepare(payload({ ...operation, extra: true }), context)).toThrow()
+})

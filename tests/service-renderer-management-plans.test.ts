@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
+import { buildDeferredPermissionPlan } from '../packages/cli/src/permission-deferral.js'
 import {
   hasSessionExecutionToken,
   restrictedExecutionToken,
@@ -48,6 +49,133 @@ it('continues cleaning owner plans if one cleanup fails', () => {
   plans.issue(second, input)
   expect(() => plans.close()).toThrow('renderer-management-plan-cleanup-unavailable')
   expect(attempts).toEqual([first, second])
+})
+
+it('issues an exact private candidate review to only one enabled renderer session', async () => {
+  const plans = new ServiceRendererManagementPlans(vi.fn(), true, async () => true)
+  const other = new ServiceRendererManagementPlans(vi.fn(), true, async () => true)
+  const source = 'https://example.test/example'
+  const ownerPlan = buildDeferredPermissionPlan({
+    planId: 'owner-review',
+    operation: 'install',
+    profileId: 'default',
+    identity: { pluginId: 'example', source },
+    binding: {
+      operationId: 'owner-review',
+      runtimeGeneration: 'owner',
+      moduleGeneration: 'module-1',
+      requestId: 'private-candidate',
+    },
+    declarations: [{ name: 'models.read', required: true, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const intent = {
+    kind: 'plugin-plan-marketplace' as const,
+    pluginId: 'example',
+    sourceUrl: 'https://example.test/marketplace.json',
+    version: '1.0.0',
+    expectedCanonicalSource: source,
+    expectedArtifactIntegrity: `sha256:${'a'.repeat(64)}`,
+  }
+  const issued = (await plans.issueReview({ intent, managementRevision: 4, activationRevision: 2, ownerPlan }))!
+  expect(issued.plan.binding.requestId).toBe(issued.token)
+  expect(issued.plan.identity.source).toMatch(/^https:\/\/renderer\.cordisx\.invalid\/plugin\//u)
+  expect(JSON.stringify(issued)).not.toContain('private-candidate')
+  expect(JSON.stringify(issued)).not.toContain(source)
+  expect(other.peekReview(issued.token)).toBeUndefined()
+  expect(plans.takeReview(issued.token)?.ownerPlan).toEqual(ownerPlan)
+  expect(plans.takeReview(issued.token)).toBeUndefined()
+  plans.close()
+  other.close()
+})
+
+it('returns a session-scoped review only for the exact verified Marketplace selection', async () => {
+  const plans = new ServiceRendererManagementPlans(vi.fn(), true, async () => true)
+  const active = { profileId: 'default', revision: 0, plugins: [] }
+  const ownerSnapshot = () => ({ active, registryEpoch: 1 }) as any
+  const snapshot = {
+    profileId: 'default',
+    revision: 4,
+    activationRevision: 0,
+    plugins: [],
+    sources: [],
+    hiddenCatalogEntries: [],
+    migrations: { legacyBrowserSourcesV2: false },
+    runtime: { kind: 'active', runtimeGeneration: 'owner', mode: 'service' },
+  } as any
+  const entry = (): ManagementProjectionEntry => ({
+    confirmed: true,
+    current: () => true,
+    unchanged: async () => true,
+    identity: undefined,
+    aliases: undefined,
+    snapshot: ownerSnapshot(),
+    scopedLifecycle: true,
+    restricted: { writableIds: new Set(), plans },
+  })
+  const context = {
+    profileId: 'default',
+    rendererId: 'a'.repeat(64),
+    ownerGeneration: 'owner',
+    signal: new AbortController().signal,
+    admitted: true,
+  }
+  const intent = {
+    kind: 'plugin-plan-marketplace' as const,
+    pluginId: 'example',
+    sourceUrl: 'https://example.test/marketplace.json',
+    version: '1.0.0',
+    expectedCanonicalSource: 'https://example.test/example',
+    expectedArtifactIntegrity: `sha256:${'a'.repeat(64)}`,
+  }
+  const ownerPlan = buildDeferredPermissionPlan({
+    planId: 'owner-review',
+    operation: 'install',
+    profileId: 'default',
+    identity: { pluginId: 'example', source: intent.expectedCanonicalSource },
+    binding: {
+      operationId: 'owner-review',
+      runtimeGeneration: 'owner',
+      moduleGeneration: 'module-1',
+      requestId: 'private-candidate',
+    },
+    declarations: [{ name: 'models.read', required: true, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const planned = await projectManagementRequest({
+    context,
+    operation: { kind: 'plan', request: intent },
+    entry,
+    ownerSnapshot,
+    dispatch: async () => ({
+      status: 'planned',
+      request: intent,
+      snapshot,
+      executionRequest: { kind: 'plugin-execute-plan', executionToken: ownerToken() },
+    }),
+  }) as any
+  const result = await projectManagementRequest({
+    context,
+    operation: { kind: 'execute', request: planned.executionRequest, expectedRevision: 4 },
+    entry,
+    ownerSnapshot,
+    dispatch: async () => ({
+      status: 'permission-review-required',
+      request: intent,
+      snapshot,
+      candidateId: 'private-candidate',
+      package: { id: 'example', version: '1.0.0', canonicalSource: intent.expectedCanonicalSource },
+      permissionPlan: ownerPlan,
+    }),
+  }) as any
+  expect(result.status).toBe('permission-review-required')
+  expect(result.permissionPlan.binding.requestId).toBe(result.candidateId)
+  expect(JSON.stringify(result.permissionPlan)).not.toContain('private-candidate')
+  expect(JSON.stringify(result.permissionPlan)).not.toContain(intent.expectedCanonicalSource)
+  expect(plans.peekReview(result.candidateId)?.ownerPlan).toEqual(ownerPlan)
+  plans.close()
 })
 
 it('binds an exact Marketplace selection to one renderer and reports an unavailable review without applying it', async () => {

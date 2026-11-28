@@ -19,7 +19,11 @@ import { BrowserPermissionAuthorizationPromptV2 } from '../platform/platform-per
 import type { ManagerPermissionSnapshot, ManagerPluginSnapshot } from '../manager.js'
 
 type ReviewPlan = CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
-type ReviewOptions = { readonly sessionOnly?: boolean; readonly requireTrustedEvents?: boolean }
+type ReviewOptions = {
+  readonly sessionOnly?: boolean
+  readonly requireTrustedEvents?: boolean
+  readonly externalStyles?: boolean
+}
 
 function permissionAvailability(
   plan: ReviewPlan,

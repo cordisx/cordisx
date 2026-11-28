@@ -15,7 +15,7 @@ import type { ServiceRendererBootstrapEntry } from './service-renderer-bootstrap
 import { readSettledPackageInputs } from './service-renderer-profile-inputs.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
-import { isServiceRendererOptionalModelManifest } from './service-renderer-optional-model-manifest.js'
+import { isServiceRendererModelManifest } from './service-renderer-model-manifest.js'
 
 // Managed graphs may declare these capabilities as optional. The service
 // currently bridges only a scoped model catalog; the others remain unavailable.
@@ -184,7 +184,7 @@ async function inspectRendererPackage(
     && staged.managedServiceResources.length === 0
   const optionalSessions = isServiceRendererOptionalSessionManifest(manifest, item.id)
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
-  const optionalModels = isServiceRendererOptionalModelManifest(manifest, item.id)
+  const models = isServiceRendererModelManifest(manifest, item.id)
     && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
   const managedVersion = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
     || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 && manifest.schemaVersion === 15
@@ -198,7 +198,7 @@ async function inspectRendererPackage(
     && manifest.services.every(service =>
       staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
     )
-  const supported = (legacy || managed || visual || optionalSessions || optionalModels)
+  const supported = (legacy || managed || visual || optionalSessions || models)
     && !(legacy
       ? manifest.capabilities.length !== 0
       : managed && manifest.capabilities.some(capability =>

@@ -9,6 +9,7 @@ import type {
   PluginManagementSnapshot,
 } from '../management/contracts.js'
 import { parsePermissionHistory, parsePluginAuthorizationHistory } from './permission-history-binding.js'
+import type { DeferredPermissionDecision } from '../permission-deferral.js'
 
 const BINDING = '__cordisxPluginManagementRequestV1'
 const RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -31,6 +32,12 @@ export interface PluginManagementBinding {
   mutate(request: PluginManagementConfigRequest, expectedRevision: number): Promise<PluginManagementResult>
   planLifecycle?(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult>
   executeLifecycle?(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult>
+  applyLifecycleReview?(
+    reviewToken: string,
+    decision: DeferredPermissionDecision,
+    proof: unknown,
+    requestId: string,
+  ): Promise<PluginManagementResult>
   pluginInfo?(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined>
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult>
 }
@@ -74,6 +81,22 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     return result
   }
 
+  async applyLifecycleReview(
+    reviewToken: string,
+    decision: DeferredPermissionDecision,
+    proof: unknown,
+    requestId: string,
+  ): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({
+      kind: 'plugin-review-apply',
+      reviewToken,
+      decision,
+      proof,
+    }, requestId)
+    if ('snapshot' in result) this.publish(result.snapshot)
+    return result
+  }
+
   pluginInfo(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined> {
     return this.send({ kind: 'plugin-info', query })
   }
@@ -106,15 +129,21 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     for (const listener of this.listeners) listener(snapshot)
   }
 
-  private send<Value>(operation: object): Promise<Value> {
+  private send<Value>(operation: object, suppliedRequestId?: string): Promise<Value> {
     if (this.disposed) return Promise.reject(new Error('plugin management bridge is disposed'))
     const binding = window[BINDING]
     if (typeof binding !== 'function') return Promise.reject(new Error('plugin management is unavailable'))
-    const requestId = typeof crypto.randomUUID === 'function'
+    const requestId = suppliedRequestId ?? (typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
-      : `management-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      : `management-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(requestId) || this.pending.has(requestId)) {
+      return Promise.reject(new Error('plugin management request is invalid'))
+    }
     const value = operation as { readonly kind?: string; readonly request?: { readonly kind?: string } }
-    const timeout = value.kind === 'execute' && value.request?.kind === 'plugin-execute-plan' ? 230_000 : 60_000
+    const timeout = value.kind === 'plugin-review-apply'
+        || value.kind === 'execute' && value.request?.kind === 'plugin-execute-plan'
+      ? 230_000
+      : 60_000
     return new Promise<Value>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)

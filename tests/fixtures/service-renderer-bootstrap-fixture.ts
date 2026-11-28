@@ -17,6 +17,7 @@ import { ReadonlyChannelRendererBridge } from '../../packages/cli/src/cli/readon
 import { ServiceRendererParticipants } from '../../packages/cli/src/cli/service-renderer-participant.js'
 import { createServiceRendererProjector } from '../../packages/cli/src/cli/service-renderer-projection.js'
 import {
+  type ManagerRendererChannel,
   type ManagerRendererChannelContext,
   ManagerRendererSessions,
 } from '../../packages/cli/src/cli/manager-renderer-sessions.js'
@@ -71,6 +72,7 @@ export async function fixture(
     protectProfileInputs?: boolean
     writeDispatch?: (context: ManagerRendererChannelContext, payload: unknown) => Promise<unknown>
     readDispatch?: (context: ManagerRendererChannelContext) => Promise<unknown>
+    extraChannels?: () => readonly (readonly [string, ManagerRendererChannel])[]
     channelArchive?: string
     channelUiGrant?: boolean
     channelGrantOtherSource?: boolean
@@ -576,6 +578,7 @@ export async function fixture(
         : [['plugin-management', createManagerRendererManagementChannel(management, bootstrap)] as const]),
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
+      ...(options.extraChannels?.() ?? []),
       ...(channelActions === undefined ? [] : [['channel-actions', channelActions] as const]),
       ...(serviceConfigChannel === undefined ? [] : [['service-config', serviceConfigChannel] as const]),
       ...(credentialsChannel === undefined ? [] : [['channel-credentials', credentialsChannel.channel] as const]),
@@ -652,6 +655,7 @@ export async function fixture(
     generation,
     lifecycle,
     coordinator,
+    management,
     bootstrap,
     channelBridge,
     managed,

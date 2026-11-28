@@ -156,6 +156,32 @@ function sameMembers(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && new Set(left).size === left.length && left.every(id => right.includes(id))
 }
 
+function reviewTarget(
+  entry: ManagementProjectionEntry,
+  context: ManagerRendererChannelContext,
+  intent: RestrictedLifecycleIntent,
+  pkg: Extract<PluginManagementResult, { readonly status: 'permission-review-required' }>['package'],
+): { readonly source: string; readonly operations: readonly string[] } | undefined {
+  if (!pkg || pkg.id !== intent.pluginId) return undefined
+  if (intent.kind === 'plugin-plan-marketplace') {
+    return pkg.version === intent.version && pkg.canonicalSource === intent.expectedCanonicalSource
+      ? { source: intent.expectedCanonicalSource, operations: ['install', 'update'] }
+      : undefined
+  }
+  if (intent.kind !== 'plugin-enable' || !entry.identity || !entry.snapshot) return undefined
+  const item = entry.snapshot.active.plugins.find(plugin => plugin.id === intent.pluginId)
+  const alias = entry.aliases?.get(intent.pluginId)
+  if (
+    !item || item.enabled || !alias || pkg.digest !== item.digest || pkg.version !== item.version
+    || pkg.canonicalSource !== item.canonicalSource
+  ) return undefined
+  try {
+    return { source: entry.identity.resolveHistory(context, alias, item).source, operations: ['enable'] }
+  } catch {
+    return undefined
+  }
+}
+
 async function projectRestrictedLifecycle(input: {
   readonly context: ManagerRendererChannelContext
   readonly operation: Extract<Operation, { readonly kind: 'plan' | 'execute' }>
@@ -238,7 +264,44 @@ async function projectRestrictedLifecycle(input: {
     if (result.status === 'rejected' || result.status === 'conflict') {
       return { status: result.status, request: plan.intent, snapshot, error: resultError(result) }
     }
-    if (result.status === 'permission-review-required' && plan.intent.kind === 'plugin-plan-marketplace') {
+    if (result.status === 'permission-review-required') {
+      const review = result.permissionPlan
+      const selected = plan.intent
+      const target = reviewTarget(entry, context, selected, result.package)
+      if (
+        target && attachmentEqual(result.request, selected)
+        && review.schemaVersion === 7 && review.profileId === context.profileId
+        && review.identity.pluginId === selected.pluginId && review.identity.source === target.source
+        && review.binding.runtimeGeneration === context.ownerGeneration
+        && review.binding.requestId === result.candidateId
+        && typeof review.binding.moduleGeneration === 'string' && target.operations.includes(review.operation)
+        && review.declarations.some(item => item.decisionRequired)
+        && review.declarations.every(item => !item.decisionRequired || item.allowedDecisions.includes('allow-once'))
+      ) {
+        const issued = await plans.issueReview({
+          intent: selected,
+          managementRevision: snapshot.revision,
+          activationRevision: snapshot.activationRevision,
+          ownerPlan: review,
+        })
+        if (issued) {
+          const latest = input.currentEntry()
+          if (
+            !latest || latest.identity !== entry.identity || latest.restricted?.plans !== plans || !latest.current()
+            || !attachmentEqual(latest.snapshot, entry.snapshot) || !await latest.unchanged()
+          ) {
+            plans.takeReview(issued.token)
+            throw new Error('renderer-management-projection-unavailable')
+          }
+          return {
+            status: 'permission-review-required',
+            request: selected,
+            snapshot,
+            candidateId: issued.token,
+            permissionPlan: issued.plan,
+          }
+        }
+      }
       return {
         status: 'rejected',
         request: plan.intent,

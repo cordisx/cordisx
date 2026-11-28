@@ -125,6 +125,38 @@ export class ServiceRendererDocuments {
   /** Resolve only a live, generation-bound Host principal for another owner capability. */
   principal(context: ManagerRendererChannelContext, token: string, options: { readonly initialRead?: true } = {}) {
     const grant = this.grants.get(context.signal)?.get(token)
+    if (!grant) throw new Error('renderer-principal-unavailable')
+    const entry = this.entry(context)
+    const pending = entry?.pendingIdentity
+    const item = pending?.candidate.plugins.find(plugin => plugin.id === grant.pluginId)
+    const candidateCurrent = () => {
+      try {
+        const next = this.entry(context)
+        if (
+          !context.admitted || !entry || next !== entry || grant.entry !== entry || !pending || !item?.enabled
+          || entry.pendingIdentity !== pending || !entry.lifecycleTransition?.isCurrent() || !entry.snapshot
+          || !entry.identity || entry.channelTransition || !attachmentEqual(entry.snapshot.active, pending.previous)
+          || item.moduleGeneration !== grant.moduleGeneration
+          || entry.identity.candidateAlias(context, pending.transactionId, grant.pluginId) !== grant.alias
+        ) return false
+        const resolved = entry.identity.resolveLifecycle(context, grant.alias, grant.pluginId)
+        return resolved.source === grant.source && resolved.digest === item.digest
+      } catch {
+        return false
+      }
+    }
+    if (candidateCurrent()) {
+      return {
+        kind: 'candidate' as const,
+        identity: { id: grant.pluginId, source: grant.alias },
+        ownerIdentity: { id: grant.pluginId, source: grant.source },
+        moduleGeneration: grant.moduleGeneration,
+        transactionId: pending!.transactionId,
+        digest: item!.digest,
+        version: item!.version,
+        isCurrent: candidateCurrent,
+      }
+    }
     const initialRead = options.initialRead === true && context.admitted !== true
     const current = () => {
       const entry = this.entry(context)
@@ -133,6 +165,7 @@ export class ServiceRendererDocuments {
     }
     if (!grant || !current()) throw new Error('renderer-principal-unavailable')
     return {
+      kind: 'active' as const,
       identity: { id: grant.pluginId, source: grant.alias },
       ownerIdentity: { id: grant.pluginId, source: grant.source },
       moduleGeneration: grant.moduleGeneration,

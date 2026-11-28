@@ -4,7 +4,8 @@ import {
   parsePluginManagementRpcRequest,
 } from '../launcher/management-rpc.js'
 import type { PluginManagementService } from '../management/service.js'
-import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
+import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import { isRendererManagementRead } from '../management/renderer-operation-mode.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 
@@ -15,6 +16,11 @@ import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 export function createManagerRendererManagementChannel(
   service: PluginManagementService,
   authority?: Pick<ServiceRendererBootstrap, 'managementRequest' | 'allowsManagementWrite'>,
+  review?: (
+    operation: Extract<PluginManagementRpcOperation, { readonly kind: 'plugin-review-apply' }>,
+    requestId: string,
+    context: ManagerRendererChannelContext,
+  ) => Promise<unknown>,
 ): ManagerRendererChannel {
   return {
     prepare(payload, context) {
@@ -41,6 +47,16 @@ export function createManagerRendererManagementChannel(
         profileId: context.profileId,
       })
       const kind = request.operation.kind
+      if (request.operation.kind === 'plugin-review-apply') {
+        const operation = request.operation
+        if (
+          !review || context.admitted !== true || Object.keys(operation).length !== 4
+          || !Object.hasOwn(operation, 'decision') || !Object.hasOwn(operation, 'proof')
+          || typeof operation.reviewToken !== 'string'
+          || !/^renderer-review-[a-f0-9-]{36}$/u.test(operation.reviewToken)
+        ) throw new Error('MANAGER_RENDERER_UNAVAILABLE')
+        return { mode: 'write', dispatch: async () => await review(operation, request.requestId, context) }
+      }
       const writes = ['refresh-catalog', 'plan', 'execute', 'migrate-legacy-sources']
       const keys: Readonly<Record<string, readonly string[]>> = {
         query: ['kind'],

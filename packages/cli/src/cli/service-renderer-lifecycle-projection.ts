@@ -5,7 +5,11 @@ import { pluginAffectedClosure } from '../launcher/plugin-activation.js'
 import type { ManagerRendererCommandMethod, OwnerCommandProjection } from './manager-renderer-peer.js'
 import { isServiceRendererVisualManifest } from './service-renderer-visual-manifest.js'
 import { isServiceRendererOptionalSessionManifest } from './service-renderer-optional-session-manifest.js'
-import { isServiceRendererOptionalModelManifest } from './service-renderer-optional-model-manifest.js'
+import { isServiceRendererModelManifest } from './service-renderer-model-manifest.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../permission-contracts.js'
+import { normalizePermissionPolicyRecordV2 } from '../permission-model-v2.js'
+import { ownerDeclaredRuntimePolicy } from './owner-adapter-runtime-declaration.js'
+import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
 
 type Snapshot = Readonly<{ active: CordisXPluginActivationRecordV1; registryEpoch: number }>
 type Candidate = {
@@ -42,6 +46,47 @@ function record(value: unknown): Record<string, unknown> {
     throw new Error('renderer-identity-lifecycle-unavailable')
   }
   return value as Record<string, unknown>
+}
+
+/** Forward only a one-time choice for the exact required model declaration in the owner package. */
+function safeModelActivationDecision(
+  decision: Record<string, unknown>,
+  value: unknown,
+  profileId: string,
+  pluginId: string,
+): boolean {
+  try {
+    const runtime = record(record(record(value).manifest).runtimeManifest)
+    if (
+      !isServiceRendererModelManifest(runtime, pluginId) || decision.origin !== 'explicit-user'
+      || !Array.isArray(decision.decisions) || decision.decisions.length !== 1
+    ) return false
+    const manifest = normalizePluginManifest(runtime, pluginId)
+    if (
+      manifest.schemaVersion === 1 || !manifest.capabilities.some(item => item.name === 'models.read' && item.required)
+    ) return false
+    const choice = record(decision.decisions[0])
+    if (
+      Object.keys(choice).length !== 4
+      || Object.keys(choice).some(key => !['capability', 'scope', 'securityFingerprint', 'decision'].includes(key))
+      || choice.capability !== 'models.read' || !['allow-once', 'deny-once'].includes(String(choice.decision))
+    ) return false
+    const policy = normalizePermissionPolicyRecordV2({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+      schemaVersion: 2,
+      key: {
+        profileId,
+        identity: decision.identity,
+        capability: choice.capability,
+        scope: choice.scope,
+        securityFingerprint: choice.securityFingerprint,
+      },
+      policy: 'ask',
+    })
+    return ownerDeclaredRuntimePolicy({ manifest: runtime, pluginId, record: policy })
+  } catch {
+    return false
+  }
 }
 
 /** Preflight and execution may enumerate the same owner-validated impact differently. */
@@ -260,7 +305,7 @@ export class ServiceRendererLifecycleProjection {
             && runtime.id === target.id && Array.isArray(runtime.capabilities) && runtime.capabilities.length === 0
           || isServiceRendererVisualManifest(runtime, target.id)
           || isServiceRendererOptionalSessionManifest(runtime, target.id)
-          || isServiceRendererOptionalModelManifest(runtime, target.id))
+          || isServiceRendererModelManifest(runtime, target.id))
         || (target.canonicalSource === undefined
           ? manifest.canonicalSource !== undefined
           : manifest.canonicalSource !== pkg.identitySource)
@@ -273,7 +318,8 @@ export class ServiceRendererLifecycleProjection {
       const binding = v7 ? record(decision.binding) : undefined
       if (
         (decision.schemaVersion !== 1 && !v7)
-        || !Array.isArray(decision.decisions) || decision.decisions.length !== 0
+        || !Array.isArray(decision.decisions)
+        || (!v7 && decision.decisions.length !== 0)
         || identity.pluginId !== candidate.targetId || !aliasMatches(identity.source)
         || (v7 && (
           payload.package === undefined
@@ -294,7 +340,9 @@ export class ServiceRendererLifecycleProjection {
               .includes(key)
           )
           || Object.keys(identity).some(key => !['source', 'pluginId'].includes(key))
-          || decision.origin !== 'host-no-decision' || decision.operation !== payload.operation
+          || !(decision.origin === 'host-no-decision' && decision.decisions.length === 0
+            || safeModelActivationDecision(decision, payload.package, candidate.owner.profileId, candidate.targetId))
+          || decision.operation !== payload.operation
           || !['install', 'update', 'enable'].includes(String(decision.operation))
           || decision.profileId !== candidate.owner.profileId
           || decision.planId !== `${candidate.owner.runtimeGeneration}:${candidate.targetId}`

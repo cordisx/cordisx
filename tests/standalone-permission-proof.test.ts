@@ -7,6 +7,10 @@ import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission
 import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../packages/cli/src/permission-contracts.js'
 import { normalizePermissionPolicyRecordV3 } from '../packages/cli/src/permission-model-v3.js'
 import { normalizeStandalonePermissionProofPayload } from '../packages/cli/src/standalone-permission-proof.js'
+import {
+  buildDeferredPermissionPlan,
+  type DeferredPermissionDecision,
+} from '../packages/cli/src/permission-deferral.js'
 
 const scope = { rendererId: 'a'.repeat(64), profileId: 'default', generation: 'owner-1' }
 const identity = { id: 'channel', source: `https://renderer.cordisx.invalid/plugin/${'b'.repeat(64)}` }
@@ -152,6 +156,75 @@ it('confirms a one-time decision against the current owner snapshot and rejects 
     expect(authority.authorizeOnce({ ...input, expected: [record] })).toBe(false)
     expect(authority.authorizeOnce(input)).toBe(true)
     expect(authority.authorizeOnce(input)).toBe(false)
+  } finally {
+    signer.close()
+    authority.close()
+  }
+})
+
+it('binds a Web install review to its document, exact decision and single-use owner token', async () => {
+  const token = 'renderer-review-aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
+  const install = buildDeferredPermissionPlan({
+    planId: 'install-example',
+    operation: 'install',
+    profileId: scope.profileId,
+    identity: { pluginId: 'example', source: `https://renderer.cordisx.invalid/plugin/${'d'.repeat(64)}` },
+    binding: { operationId: 'install-example', runtimeGeneration: scope.generation, requestId: token },
+    declarations: [{ name: 'models.read', required: true, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const item = install.declarations[0]!
+  const choice: DeferredPermissionDecision = {
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+    schemaVersion: 7,
+    origin: 'explicit-user',
+    planId: install.planId,
+    operation: install.operation,
+    profileId: install.profileId,
+    identity: install.identity,
+    binding: install.binding,
+    decisions: [{
+      capability: item.capability,
+      scope: item.scope,
+      securityFingerprint: item.securityFingerprint,
+      decision: 'allow-once',
+    }],
+  }
+  const signer = await createStandalonePermissionSigner(scope, { crypto: webcrypto as unknown as Crypto })
+  const controller = new AbortController()
+  const context = {
+    profileId: scope.profileId,
+    rendererId: scope.rendererId,
+    ownerGeneration: scope.generation,
+    signal: controller.signal,
+  }
+  const authority = new ManagerPermissionProofAuthority({
+    profileId: scope.profileId,
+    generation: scope.generation,
+    isCurrent: () => true,
+  })
+  try {
+    authority.register(context, signer.publicKey)
+    const proof = await signer.signLifecycle('install-1', token, install, choice)
+    const request = {
+      context: { ...context, admitted: true },
+      requestId: 'install-1',
+      reviewToken: token,
+      decision: choice,
+      proof,
+    }
+    expect(
+      authority.authorizeLifecycle({ ...request, reviewToken: 'renderer-review-bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb' }),
+    ).toBe(false)
+    expect(authority.authorizeLifecycle({ ...request, decision: { ...choice, planId: 'other' } })).toBe(false)
+    expect(authority.authorizeLifecycle(request)).toBe(true)
+    expect(authority.authorizeLifecycle(request)).toBe(false)
+    await expect(signer.signLifecycle('install-2', token, install, {
+      ...choice,
+      decisions: [{ ...choice.decisions[0]!, decision: 'allow-persistent' }],
+    })).rejects.toThrow('lifecycle-review-decision-unavailable')
   } finally {
     signer.close()
     authority.close()

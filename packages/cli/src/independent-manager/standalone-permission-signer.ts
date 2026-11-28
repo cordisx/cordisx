@@ -21,6 +21,12 @@ import { nativeRuntimeOnceProofBytes } from '../native-runtime-once-proof.js'
 import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
 import { runtimePolicyProofBytes } from '../runtime-policy-proof.js'
 import { webRuntimeOnceProofBytes } from '../web-runtime-once-proof.js'
+import {
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  type DeferredPermissionPlan,
+} from '../permission-deferral.js'
+import { lifecycleReviewProofBytes } from '../lifecycle-review-proof.js'
 
 type Review = {
   readonly identity: { readonly id: string; readonly source: string }
@@ -184,6 +190,42 @@ export async function createStandalonePermissionSigner(
   }
   return {
     publicKey,
+    /** Called only after the Host lifecycle dialog accepts a trusted user event. */
+    async signLifecycle(
+      requestId: string,
+      reviewToken: string,
+      plan: DeferredPermissionPlan,
+      decision: DeferredPermissionDecision,
+    ): Promise<unknown> {
+      if (
+        closed || target !== 'standalone' || !/^[A-Za-z0-9-]{1,96}$/u.test(requestId)
+        || !/^renderer-review-[a-f0-9-]{36}$/u.test(reviewToken) || plan.binding.requestId !== reviewToken
+        || plan.profileId !== scope.profileId || plan.binding.runtimeGeneration !== scope.generation
+        || !['install', 'update', 'enable'].includes(plan.operation) || decision.origin !== 'explicit-user'
+        || decision.decisions.some(item => item.decision !== 'allow-once' && item.decision !== 'deny-once')
+      ) throw new Error('lifecycle-review-decision-unavailable')
+      assertDeferredPermissionDecision(plan, decision)
+      const random = provider.getRandomValues(new Uint8Array(32))
+      const payload = {
+        version: 1 as const,
+        rendererId: scope.rendererId,
+        profileId: scope.profileId,
+        ownerGeneration: scope.generation,
+        requestId,
+        reviewToken,
+        decisionId: [...random].map(byte => byte.toString(16).padStart(2, '0')).join(''),
+        issuedAt: now(),
+        decision: structuredClone(decision),
+      }
+      if (!Number.isSafeInteger(payload.issuedAt)) throw new Error('lifecycle-review-decision-unavailable')
+      const signature = await provider.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        pair.privateKey,
+        lifecycleReviewProofBytes(payload),
+      )
+      if (closed) throw new Error('lifecycle-review-decision-unavailable')
+      return { payload, signature: base64url(new Uint8Array(signature)) }
+    },
     /** Called only after the native Host dialog accepted a trusted runtime decision. */
     async signRuntimeOnce(
       requestId: string,

@@ -122,7 +122,7 @@ it('keeps document grants scoped to the admitted renderer and the owner identity
 it('does not dispatch candidate document writes until the new generation is committed', async () => {
   const test = await fixture()
   const [old] = test.documents.initial(test.context, test.entry)
-  const next = { id: 'example', enabled: true, moduleGeneration: 'module-2' }
+  const next = { id: 'example', enabled: true, moduleGeneration: 'module-2', digest: 'digest', version: '2.0.0' }
   const candidate = { ...test.entry.snapshot!.active, recordKind: 'candidate', plugins: [next] }
   const mutation = {
     transactionId: 'change',
@@ -131,16 +131,31 @@ it('does not dispatch candidate document writes until the new generation is comm
   } as unknown as PluginRuntimeMutation
   test.entry.pendingIdentity = {
     transactionId: 'change',
+    previous: test.entry.snapshot!.active,
     candidate,
   } as ServiceRendererBootstrapEntry['pendingIdentity']
   test.entry.lifecycleTransition = { isCurrent: () => true }
   const [binding] = test.documents.candidate(test.context, test.entry, mutation)
+  const principal = test.documents.principal(test.context, binding!.token)
+  expect(principal).toMatchObject({
+    kind: 'candidate',
+    transactionId: 'change',
+    digest: 'digest',
+    version: '2.0.0',
+    ownerIdentity: { id: 'example', source: test.source },
+  })
+  expect(principal.isCurrent()).toBe(true)
+  expect(() => test.documents.principal({ ...test.context, admitted: false }, binding!.token)).toThrow()
+  expect(() => test.documents.principal({ ...test.context, signal: new AbortController().signal }, binding!.token))
+    .toThrow()
   const staged = await test.call(binding!.token, 'replace')
   expect(staged.mode).toBe('read')
   expect(staged.result.value.status).toBe('unavailable')
   const active = { active: { ...candidate, recordKind: 'active' }, registryEpoch: 2 } as ServiceRendererSnapshot
   test.promote(active)
   delete test.entry.lifecycleTransition
+  expect(principal.isCurrent()).toBe(false)
+  expect(test.documents.principal(test.context, binding!.token).kind).toBe('active')
   expect((await test.call(old!.token, 'replace')).result.value.status).toBe('unavailable')
   expect((await test.call(binding!.token, 'replace')).result.value.status).toBe('accepted')
 })

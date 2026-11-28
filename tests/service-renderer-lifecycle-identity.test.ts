@@ -3,6 +3,8 @@ import { ServiceRendererLifecycleProjection } from '../packages/cli/src/cli/serv
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 } from '../packages/cli/src/usage-permissions.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
+import { permissionSecurityFingerprint } from '../packages/cli/src/permission-model-v2.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capability-risk-catalog.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
@@ -602,8 +604,14 @@ describe('owner-scoped lifecycle identity observations', () => {
       f.projection.project('stage', changed([{ name: 'usage.read', required: true, scope: { profile: 'current' } }]))
     )
       .toThrow('renderer-identity-lifecycle-unavailable')
-    expect(() => f.projection.project('stage', changed([{ name: 'models.read', required: true, scope: {} }])))
-      .toThrow('renderer-identity-lifecycle-unavailable')
+    const requiredModel = setup()
+    requiredModel.offer()
+    requiredModel.prepare()
+    const requiredModelStage = requiredModel.projection.project(
+      'stage',
+      changed([{ name: 'models.read', required: true, scope: {} }]),
+    )
+    expect(requiredModelStage.receipt!(requiredModel.stagedReceipt)).toMatchObject({ observation: candidate })
     const models = setup()
     models.offer()
     models.prepare()
@@ -645,5 +653,68 @@ describe('owner-scoped lifecycle identity observations', () => {
     expect(acceptedSession.receipt!(session.stagedReceipt)).toMatchObject({ observation: candidate })
     const stage = f.projection.project('stage', payload)
     expect(stage.receipt!(f.stagedReceipt)).toMatchObject({ observation: candidate })
+  })
+
+  it('projects only the exact one-time model choice for the current candidate', () => {
+    const declaration = { name: 'models.read' as const, required: true, scope: { providers: ['codex'] } }
+    const runtime = {
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+      schemaVersion: 5,
+      id: extra.id,
+      services: [],
+      capabilities: [declaration],
+    }
+    const choice = {
+      capability: declaration.name,
+      scope: declaration.scope,
+      securityFingerprint: permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration),
+      decision: 'allow-once',
+    }
+    const decision = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+      schemaVersion: 7,
+      origin: 'explicit-user',
+      planId: `${candidate.runtimeGeneration}:${extra.id}`,
+      operation: 'install',
+      profileId: candidate.profileId,
+      identity: { pluginId: extra.id, source: alias('2') },
+      binding: {
+        operationId: `review:${'c'.repeat(64)}`,
+        runtimeGeneration: candidate.runtimeGeneration,
+        moduleGeneration: extra.moduleGeneration,
+        requestId: candidate.transactionId,
+      },
+      decisions: [choice],
+    }
+    const pkg = {
+      digest: extra.digest,
+      identitySource: alias('2'),
+      manifest: {
+        id: extra.id,
+        version: extra.version,
+        canonicalSource: alias('2'),
+        runtimeManifest: runtime,
+      },
+    }
+    for (
+      const bad of [
+        { ...choice, scope: { providers: ['other'] } },
+        { ...choice, securityFingerprint: 'forged' },
+        { ...choice, decision: 'allow-persistent' },
+        { ...choice, capability: 'tasks.create' },
+        { ...choice, extra: true },
+      ]
+    ) {
+      const f = setup()
+      f.offer()
+      f.prepare()
+      expect(() => f.stage({ package: pkg, authorizationDecision: { ...decision, decisions: [bad] } })).toThrow()
+    }
+    const valid = setup()
+    valid.offer()
+    valid.prepare()
+    const result = valid.stage({ package: pkg, authorizationDecision: decision })
+    expect(result.receipt!(valid.stagedReceipt)).toMatchObject({ observation: candidate })
   })
 })
