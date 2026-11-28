@@ -4,11 +4,26 @@ import {
   compareProcessStartTimes,
   processIdentityEnvironment,
 } from '../packages/cli/src/launcher/process-start-identity.js'
-import { parseDarwinProcessIdentities } from '../packages/cli/src/launcher/darwin-process-identity.js'
-import { liveProcessStartedAt, recordedProcessStatus } from '../packages/cli/src/launcher/process-identity.js'
+import {
+  parseDarwinProcessIdentities,
+  parseDarwinProcessIdentity,
+} from '../packages/cli/src/launcher/darwin-process-identity.js'
+import {
+  liveProcessStartedAt,
+  processTable,
+  recordedProcessStatus,
+} from '../packages/cli/src/launcher/process-identity.js'
 import { processIdentityStatus, processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 
-const fixture = vi.hoisted(() => ({ present: true, failure: false, permissionDenied: false, nativeUnavailable: false }))
+const fixture = vi.hoisted(() => ({
+  present: true,
+  failure: false,
+  permissionDenied: false,
+  nativeUnavailable: false,
+  fullUnavailable: false,
+  targetUnavailable: false,
+  targetReturnsTable: false,
+}))
 const canonical = 'Tue Oct 27 20:38:49 2026'
 const localized = '二 10月/27 20:38:49 2026'
 const anotherStart = 'Tue Nov  3 20:38:49 2026'
@@ -31,12 +46,18 @@ vi.mock('node:child_process', async importOriginal => {
     ...actual,
     execFileSync: vi.fn((file: string, args: readonly string[], options?: Options) => {
       if (file.endsWith('/CordisXProcessIdentity')) {
-        return fixture.nativeUnavailable
+        const target = args[0] === '--pid'
+        return fixture.nativeUnavailable || (target ? fixture.targetUnavailable : fixture.fullUnavailable)
           ? JSON.stringify({ version: 1, status: 'unavailable', reason: 'identity-unavailable' })
           : JSON.stringify({
             version: 1,
             status: 'complete',
-            processes: [{ pid: process.pid, parentPid: 1, startedAt: canonical }],
+            processes: [
+              { pid: process.pid, parentPid: 1, startedAt: canonical },
+              ...(target && fixture.targetReturnsTable
+                ? [{ pid: process.pid + 1, parentPid: 1, startedAt: canonical }]
+                : []),
+            ],
           })
       }
       if (file !== 'ps' || !args.includes('pid=,ppid=,lstart=')) throw new Error('unexpected fixture command')
@@ -61,6 +82,9 @@ beforeEach(() => {
   fixture.failure = false
   fixture.permissionDenied = false
   fixture.nativeUnavailable = false
+  fixture.fullUnavailable = false
+  fixture.targetUnavailable = false
+  fixture.targetReturnsTable = false
   vi.clearAllMocks()
 })
 
@@ -245,6 +269,47 @@ describe('Darwin native process identity fallback', () => {
     expect(() => parseDarwinProcessIdentities('{"version":2,"status":"complete","processes":[]}', row.pid)).toThrow()
     expect(() => parseDarwinProcessIdentities(snapshot([row]), row.pid + 1)).toThrow(/omitted the launcher/)
   })
+
+  it('accepts only the exact single requested identity in a targeted response', () => {
+    expect(parseDarwinProcessIdentity(snapshot([row]), row.pid)).toEqual(row)
+    expect(() => parseDarwinProcessIdentity(snapshot([row, { ...row, pid: row.pid + 1 }]), row.pid)).toThrow()
+    expect(() => parseDarwinProcessIdentity(snapshot([row]), row.pid + 1)).toThrow()
+    expect(() => parseDarwinProcessIdentity(snapshot([row]), 0)).toThrow()
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'uses exact PID evidence when the complete sandboxed process table is unavailable',
+    async () => {
+      fixture.permissionDenied = true
+      fixture.fullUnavailable = true
+      expect(await processStartIdentity(process.pid)).toBe(canonical)
+      expect(liveProcessStartedAt(process.pid)).toBe(canonical)
+      expect(execFileSync).toHaveBeenCalledWith(
+        expect.stringMatching(/\/CordisXProcessIdentity$/u),
+        ['--pid', String(process.pid)],
+        expect.objectContaining({ env: expect.objectContaining({ LC_ALL: 'C' }) }),
+      )
+      expect(recordedProcessStatus(process.pid, canonical)).toBe('alive')
+      expect(() => processTable()).toThrow('identity-unavailable')
+      fixture.targetUnavailable = true
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
+      expect(recordedProcessStatus(process.pid, canonical)).toBe('unknown')
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    'falls back to a verified complete snapshot when an older helper ignores the target argument',
+    async () => {
+      fixture.permissionDenied = true
+      fixture.targetReturnsTable = true
+      expect(await processStartIdentity(process.pid)).toBe(canonical)
+      expect(execFileSync).toHaveBeenCalledWith(
+        expect.stringMatching(/\/CordisXProcessIdentity$/u),
+        [],
+        expect.any(Object),
+      )
+    },
+  )
 
   it.skipIf(process.platform !== 'darwin')(
     'shares the fallback for lease, supervisor and recorded status',

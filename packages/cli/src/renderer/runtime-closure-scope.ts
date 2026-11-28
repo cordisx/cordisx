@@ -180,6 +180,7 @@ import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
+import type { BrowserStandaloneDesktopPackageConfigBridge } from './standalone-desktop-package-config-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type { BrowserAgentContextBridge } from './agent-context-binding.js'
 import type {
@@ -334,6 +335,7 @@ export interface RuntimeClosureScope {
   readonly commitPluginMutation: () => (transactionId: string) => Promise<void>
   readonly completePluginMutation: () => (transactionId: string) => Promise<RendererGenerationCleanupObservation>
   readonly configBridge: () => BrowserConfigBridge | undefined
+  readonly standaloneDesktopPackageConfigBridge: () => BrowserStandaloneDesktopPackageConfigBridge | undefined
   configRendererFiber: Fiber | undefined
   readonly configRenderers: () => ConfigRendererRegistry
   readonly configuration: () => PluginConfigurationRegistry

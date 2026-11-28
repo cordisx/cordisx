@@ -1,0 +1,277 @@
+import { execFile } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
+import { chmod, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import path from 'node:path'
+import { promisify } from 'node:util'
+import { expect, it, vi } from 'vitest'
+import { updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
+import {
+  pluginManagementRpcPaths,
+  readPluginManagementRpcEndpoint,
+  requestPluginManagementRpc,
+} from '../packages/cli/src/launcher/management-rpc.js'
+import type { PluginManagementResult, PluginManagementSnapshot } from '../packages/cli/src/management/contracts.js'
+import { localPackageV4, localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
+
+const run = promisify(execFile)
+
+it('applies scoped deferred reviews for V5 and V4 manifests through the real service owner and socket', async () => {
+  const root = await mkdtemp('/tmp/cx-permission-review-owner-')
+  const cordisxHome = path.join(root, 'cordisx')
+  const cli = process.env.CORDISX_CLI_FIXTURE ?? path.resolve('packages/cli/dist/src/cli.js')
+  const profile = 'review-fixture'
+  const env: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('CORDISX_')),
+  )
+  env.CORDISX_HOME = cordisxHome
+  env.CORDISX_MODEL_API_PORT = '0'
+  env.HOME = root
+  env.CODEX_HOME = path.join(root, 'codex-home')
+  const command = async (action: string) =>
+    await run(process.execPath, [
+      cli,
+      action,
+      '--mode',
+      'service',
+      'codex',
+      profile,
+      '--json',
+    ], { env, cwd: root, timeout: 30000 })
+  const manager = async (...args: string[]) =>
+    await run(process.execPath, [cli, 'manager', ...args, '--profile', profile], { env, cwd: root, timeout: 30000 })
+  try {
+    await mkdir(cordisxHome)
+    const v4Package = await localPackageV5(root)
+    const v2Package = await localPackageV4(root)
+    expect(JSON.parse((await command('start')).stdout)).toMatchObject({ status: 'ready', mode: 'service' })
+    const paths = pluginManagementRpcPaths(cordisxHome, 'codex', profile)
+    const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+    const request = (operation: Parameters<typeof requestPluginManagementRpc>[2]) =>
+      requestPluginManagementRpc(paths, endpoint, operation)
+    const reviewPlan = async (sourceDirectory: string) => {
+      const planned = await request({
+        kind: 'plan',
+        request: { kind: 'plugin-plan-local', sourceDirectory },
+      }) as PluginManagementResult
+      if (planned.status !== 'planned' || !planned.executionRequest) throw new Error('planning failed')
+      const result = await request({ kind: 'execute', request: planned.executionRequest }) as PluginManagementResult
+      if (result.status !== 'permission-review-required') throw new Error(`review was not required: ${result.status}`)
+      return result
+    }
+    const before = await reviewPlan(v4Package)
+    const plan = before.permissionPlan
+    if (plan.schemaVersion !== 7) throw new Error('expected deferred permission plan')
+    expect(plan.identity.pluginId).toBe('permission-v5')
+    const declarations = plan.declarations.filter(item => item.decisionRequired)
+    expect(declarations.map(item => [item.capability, item.required])).toEqual([['models.read', true]])
+    expect(plan.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
+      required: false,
+      decisionRequired: false,
+      authorizationMode: 'deferred',
+    })
+    for (const declaration of declarations) {
+      expect(declaration.allowedDecisions).toContain('allow-once')
+      expect(declaration.allowedDecisions).toContain('deny-once')
+    }
+    const decision = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json' as const,
+      schemaVersion: 7 as const,
+      origin: 'explicit-user' as const,
+      planId: plan.planId,
+      operation: plan.operation,
+      profileId: plan.profileId,
+      identity: plan.identity,
+      binding: plan.binding,
+      decisions: declarations.map(item => ({
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+        decision: item.required ? 'allow-once' as const : 'deny-once' as const,
+      })),
+    }
+    const operation = {
+      kind: 'permission-review-apply' as const,
+      userConfirmed: true as const,
+      expectedRevision: before.snapshot.activationRevision,
+      decision,
+    }
+    // Cancelling the review sends no decision, and does not change activation.
+    expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
+    await expect(request({ ...operation, userConfirmed: false } as never)).rejects.toThrow('invalid permission review')
+    await expect(request({ ...operation, decision: { ...decision, profileId: 'other-profile' } })).rejects.toThrow(
+      'invalid permission review',
+    )
+    await expect(requestPluginManagementRpc(paths, { ...endpoint, token: '0'.repeat(64) }, operation))
+      .rejects.toThrow('scope is invalid')
+    expect(await request({ ...operation, expectedRevision: 50 })).toEqual({
+      status: 'rejected',
+      reason: 'stale-revision',
+    })
+    expect(
+      await request({
+        ...operation,
+        decision: { ...decision, binding: { ...decision.binding, runtimeGeneration: 'expired' } },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'stale-generation' })
+    expect(await request({ ...operation, decision: { ...decision, decisions: [] } })).toEqual({
+      status: 'rejected',
+      reason: 'permission-denied',
+    })
+    expect(
+      await request({
+        ...operation,
+        decision: { ...decision, decisions: decision.decisions.map(item => ({ ...item, scope: {} })) },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'permission-denied' })
+    expect(
+      await request({
+        ...operation,
+        decision: { ...decision, identity: { ...decision.identity, pluginId: 'other-plugin' } },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'permission-denied' })
+    expect(
+      await request({
+        ...operation,
+        decision: {
+          ...decision,
+          decisions: decision.decisions.map(item => ({ ...item, securityFingerprint: `sha256:${'0'.repeat(64)}` })),
+        },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'permission-denied' })
+    expect(
+      await request({
+        ...operation,
+        decision: { ...decision, decisions: decision.decisions.map(item => ({ ...item, decision: 'deny-once' })) },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'permission-denied' })
+    expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
+
+    // The real sidecar must not discard an open Manager session to apply a
+    // review arriving over the owner socket. Closing it permits the review.
+    const entry = (await manager('open', '--print-url')).stdout.trim().split(' ').at(-1)!
+    const url = new URL(entry)
+    const exchange = await fetch(`${url.origin}/api/session`, {
+      method: 'POST',
+      headers: { origin: url.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: url.hash.slice(1) }),
+    })
+    expect(exchange.status).toBe(200)
+    const { token } = await exchange.json() as { token: string }
+    const post = async (route: string, input: unknown = {}) =>
+      await (await fetch(`${url.origin}${route}`, {
+        method: 'POST',
+        headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify(input),
+      })).json()
+    expect(await post('/api/renderer/open')).toMatchObject({ status: 'ok' })
+    const supportsProfileFence = process.platform === 'darwin' || process.platform === 'linux'
+    const policy = createPermissionPolicyRecord({
+      profileId: profile,
+      identity: { source: 'https://example.test/unrelated', id: 'unrelated' },
+      capability: 'models.read',
+      scope: { providers: ['codex'] },
+      policy: 'deny',
+    })
+    const configPath = path.join(cordisxHome, 'config.json')
+    if (supportsProfileFence) {
+      const jwk = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' })
+      const permissionPublicKey = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }
+      expect(await post('/api/renderer/bootstrap', { permissionPublicKey })).toMatchObject({ status: 'ok' })
+      // The owner runs in another process; its renderer fence must stop the
+      // normal Home writer rather than merely compare a cached snapshot.
+      await expect(persistPermissionPolicies({ configPath }, [policy])).rejects.toThrow(
+        'permission policy is in use',
+      )
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), configPath)).rejects.toThrow('plugin configuration is in use')
+    }
+    expect(await request(operation)).toEqual({
+      status: 'unavailable',
+      reason: 'profile-coordination-unavailable',
+    })
+    expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
+    expect(await post('/api/renderer/close')).toEqual({ closed: true })
+    if (supportsProfileFence) {
+      await vi.waitFor(async () => await persistPermissionPolicies({ configPath }, [policy]))
+      await vi.waitFor(async () =>
+        await updateHomeConfigAtomic(current => ({
+          ...current,
+          plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+        }), configPath)
+      )
+      await updateHomeConfigAtomic(current => ({ ...current, permissions: [], plugins: [] }), configPath)
+    }
+
+    const applied = await Promise.all([request(operation), request(operation)])
+    expect(applied).toContainEqual(expect.objectContaining({
+      status: 'ok',
+      result: expect.objectContaining({ outcome: 'applied', operation: 'install', revision: 1 }),
+    }))
+    expect(applied).toContainEqual({
+      status: 'rejected',
+      reason: expect.stringMatching(/^(review-busy|stale-revision)$/),
+    })
+    expect(await request({ kind: 'query' })).toMatchObject({
+      activationRevision: 1,
+      plugins: [{ id: 'permission-v5', status: 'unavailable-in-service-mode' }],
+    })
+    // Replaying a confirmed choice after the activation changed is never applied twice.
+    expect(await request(operation)).toEqual({ status: 'rejected', reason: 'stale-revision' })
+
+    const next = await reviewPlan(v2Package)
+    const v2 = next.permissionPlan
+    if (v2.schemaVersion !== 7) throw new Error('expected deferred permission plan')
+    expect(v2.declarations.find(item => item.capability === 'tasks.control')).toMatchObject({
+      required: false,
+      decisionRequired: false,
+      authorizationMode: 'deferred',
+    })
+    const v2Operation = {
+      kind: 'permission-review-apply' as const,
+      userConfirmed: true as const,
+      expectedRevision: next.snapshot.activationRevision,
+      decision: {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json' as const,
+        schemaVersion: 7 as const,
+        origin: 'explicit-user' as const,
+        planId: v2.planId,
+        operation: v2.operation,
+        profileId: v2.profileId,
+        identity: v2.identity,
+        binding: v2.binding,
+        decisions: v2.declarations.filter(item => item.decisionRequired).map(item => ({
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+          decision: item.required ? 'allow-once' as const : 'deny-once' as const,
+        })),
+      },
+    }
+    expect(
+      await request({
+        ...v2Operation,
+        decision: { ...v2Operation.decision, decisions: [] },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'permission-denied' })
+    expect(await request(v2Operation)).toMatchObject({
+      status: 'ok',
+      result: { outcome: 'applied', operation: 'install', revision: 2 },
+    })
+  } finally {
+    await command('stop').catch(() => undefined)
+    const allowRemoval = async (directory: string) => {
+      await chmod(directory, 0o700)
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.isDirectory()) await allowRemoval(path.join(directory, entry.name))
+      }
+    }
+    await allowRemoval(root)
+    await rm(root, { recursive: true, force: true })
+  }
+}, 90000)

@@ -19,6 +19,7 @@ import {
 import { HostThemeProjection } from '../host-theme.js'
 import { readNativeSidebarMinimum } from '../adapter/native-sidebar-minimum.js'
 import { ManagerApp } from './ManagerApp.js'
+import { installStandaloneManager } from './install-standalone.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
 import {
@@ -43,7 +44,9 @@ export interface ReactManagerInstallOptions {
   readonly nativeRouteHistory?: NativeRouteSource
   readonly nativeAppVersion?: string
   /** Opt-in Host workspace presentation; Codex still owns its native tabs and routes. */
-  readonly presentationMode?: 'overlay' | 'workspace'
+  readonly presentationMode?: 'overlay' | 'workspace' | 'standalone'
+  /** Used by the standalone service when inline styles are restricted. */
+  readonly standaloneStyleHref?: '/manager-host.css'
   /** Explicit compatibility for legacy Host fixtures; 26.924 production uses native two-pane seats. */
   readonly legacyModal?: boolean
 }
@@ -54,6 +57,7 @@ export function installReactCordisXManager(
   model: ManagerModel,
   options: ReactManagerInstallOptions = {},
 ): () => void {
+  if (options.presentationMode === 'standalone') return installStandaloneManager(document, model, options)
   const presentationMode = options.legacyModal === true ? 'overlay' : options.presentationMode ?? 'overlay'
   const view = document.defaultView
   const installedAnimationFrameFallback = view !== null && typeof view.requestAnimationFrame !== 'function'

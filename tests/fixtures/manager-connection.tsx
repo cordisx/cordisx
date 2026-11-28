@@ -17,7 +17,7 @@ const host = catalogFixture([])
 const registry = new ModelProviderRegistry(async () => [])
 registry.management = host.client
 const navigation = new HostManagerNavigationController()
-const snapshot: ManagerSnapshot = {
+let snapshot: ManagerSnapshot = {
   version: 'connection-browser-fixture',
   plugins: [
     {
@@ -48,9 +48,13 @@ const snapshot: ManagerSnapshot = {
   },
 }
 const pluginUpdates: unknown[] = []
+const listeners = new Set<() => void>()
 const model = {
   snapshot: () => snapshot,
-  subscribe: () => () => {},
+  subscribe: (listener: () => void) => {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  },
   modelProviders: registry,
   updatePluginConfig: async (...args: unknown[]) => {
     pluginUpdates.push(args)
@@ -62,6 +66,25 @@ export async function showPluginForm() {
 }
 export function pluginWrites() {
   return pluginUpdates
+}
+export async function publishPluginRevision() {
+  snapshot = {
+    ...snapshot,
+    plugins: snapshot.plugins.map(plugin =>
+      plugin.id !== 'form-page-fixture' ? plugin : {
+        ...plugin,
+        configuration: {
+          ...plugin.configuration,
+          revision: plugin.configuration.revision + 1,
+          fields: plugin.configuration.fields.map(field =>
+            field.path.length === 1 && field.path[0] === 'name' ? { ...field, value: 'remote value' } : field
+          ),
+        },
+      }
+    ),
+  }
+  for (const listener of listeners) listener()
+  await settle()
 }
 export async function openFormItem() {
   const layer = document.querySelector('.cxf-form-page-layer:not([hidden])')

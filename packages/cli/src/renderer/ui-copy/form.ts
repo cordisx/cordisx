@@ -50,8 +50,13 @@ export const FORM_COPY = {
   },
   'form.conflict-retained': {
     en:
-      'Configuration changed in another window or process. Your draft is retained; refresh and review before saving again.',
-    'zh-CN': '配置已在其他窗口或进程中更新。你的草稿仍保留；刷新后请重新核对再保存。',
+      'Configuration changed in another window or process. Your draft is retained. Review the latest settings; saving will replace the fields you edited.',
+    'zh-CN': '配置已在其他窗口或进程中更新，草稿仍保留。请核对最新配置；保存时会覆盖你修改的字段。',
+  },
+  'form.review-latest': { en: 'Review latest and keep my edits', 'zh-CN': '核对最新配置并保留修改' },
+  'form.conflict-incompatible': {
+    en: 'Some edited fields are no longer available or have changed. Undo those changes to continue.',
+    'zh-CN': '部分已修改的字段已不可用或发生变化，请先撤销这些修改再继续。',
   },
   'form.add-item': { en: 'Add item', 'zh-CN': '添加条目' },
   'form.edit-item': { en: 'Edit item', 'zh-CN': '编辑条目' },

@@ -10,6 +10,8 @@ import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import type { StartupNavigationHandoff } from '../shortcuts/startup-cover.js'
+import type { RemotePluginLifecycleBinding } from './remote-plugin-lifecycle-cdp.js'
+import { NativeTargetNavigationGrace } from './native-target-navigation.js'
 import {
   type ProductionGraphBootstrap,
   type ProductionGraphOperations,
@@ -145,12 +147,16 @@ export interface WatchInjectionOptions {
   readonly onStatus?: (message: string) => void
   /** Called after the first workspace renderer accepts the CordisX bootstrap. */
   readonly onReady?: () => void | Promise<void>
+  /** Host-private notification after every installed renderer was removed successfully. */
+  readonly onCleanupConfirmed?: () => void
   readonly providerFleet?: support.ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost?: support.CodexAgentHistoryHost
   readonly agentHistoryBridgeToken?: string
   readonly configBridge?: support.ConfigBridgeHandler
   readonly ownerDocuments?: support.OwnerDocumentBridgeHandler
+  readonly remoteOwnerDocuments?: { readonly request: (payload: unknown) => Promise<unknown> }
+  readonly remoteMarketplaceArtifact?: import('./marketplace-artifact-cdp.js').RemoteMarketplaceArtifactBinding
   readonly serviceConfigBridge?: support.ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: support.ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: support.ChannelActionsBridgeHandler
@@ -163,6 +169,8 @@ export interface WatchInjectionOptions {
     readonly handler: support.PluginLifecycleBridgeHandler
     readonly runtime: CdpPluginLifecycleRuntime
   }
+  /** Lifecycle authority is in a separate service; this process owns only its native CDP fleet. */
+  readonly remotePluginLifecycle?: RemotePluginLifecycleBinding & { readonly runtime: CdpPluginLifecycleRuntime }
   readonly pluginManagement?: support.PluginManagementBridgeHandler
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
@@ -182,6 +190,8 @@ export interface WatchInjectionOptions {
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
   const diagnostic = bindDiagnostic()
+  if (options.pluginLifecycle && options.remotePluginLifecycle) throw new Error('plugin lifecycle owner is ambiguous')
+  const lifecycleRuntime = options.pluginLifecycle?.runtime ?? options.remotePluginLifecycle?.runtime
   if (options.nativeSubmission !== undefined && options.launcherOwnedNativeTarget !== true) {
     throw new Error('Native submission requires a launcher-owned target')
   }
@@ -201,6 +211,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     }
   }
   const installed = new Map<string, support.InstalledScript>()
+  const nativeNavigation = new NativeTargetNavigationGrace()
   let startupNavigation: StartupNavigationHandoff | undefined
   let startupNavigationPending = startupNavigation !== undefined
   const startupStages = new Set<string>()
@@ -258,10 +269,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   if (iconThemePreferenceBroadcast !== undefined && options.iconThemePreferencePersistence !== undefined) {
     iconThemePreferenceBroadcast.assertScope(options.iconThemePreferencePersistence)
   }
-  if (options.pluginLifecycle !== undefined) {
-    if (options.hasLoopbackGraph === true) options.pluginLifecycle.runtime.markBrowserGraphTransportReady()
-    options.pluginLifecycle.runtime.setBrowserGraphTerminalError(latchProductionGraphError)
-    options.pluginLifecycle.runtime.setBrowserGraphAdmission(
+  if (lifecycleRuntime !== undefined) {
+    if (options.hasLoopbackGraph === true) lifecycleRuntime.markBrowserGraphTransportReady()
+    lifecycleRuntime.setBrowserGraphTerminalError(latchProductionGraphError)
+    lifecycleRuntime.setBrowserGraphAdmission(
       options.launcherOwnedNativeTarget !== true
         || options.pluginArtifactOrigin === undefined
         || options.productionGraphBootstrap === undefined
@@ -303,7 +314,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             }
           }),
     )
-    options.pluginLifecycle.runtime.setBrowserGraphBootstrapRefresh(
+    lifecycleRuntime.setBrowserGraphBootstrapRefresh(
       options.launcherOwnedNativeTarget !== true
         || options.pluginArtifactOrigin === undefined
         || options.productionGraphBootstrap === undefined
@@ -406,7 +417,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           }
           watcherStage = 'target-list'
           const browserGraphTransport = options.hasLoopbackGraph === true
-            || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
+            || lifecycleRuntime?.requiresBrowserGraphTransport() === true
           const waitingForFirstWorkspace = browserGraphTransport && options.launcherOwnedNativeTarget === true
             && !ownedWorkspaceInstalled && !awaitingStartupReplacement
           if (waitingForFirstWorkspace) {
@@ -429,6 +440,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const listedTargets = await listTargets(options.port)
           startupStage('target-list-ready')
           if (options.signal.aborted) return
+          const navigatingNative = nativeNavigation.retain(listedTargets, installed)
           const candidates = injectableTargets(listedTargets).filter(target => !retiredStartupTargets.has(target.id))
           const pendingStartupNavigation = startupNavigationPending ? startupNavigation : undefined
           let startupSeed: CdpTarget | undefined
@@ -471,12 +483,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             startupInstallationDeadline ??= Date.now() + support.CDP_INJECTION_TIMEOUT_MS
             startupStage('initial-native-workspace-wait')
           } else if (
-            browserGraphTransport && candidates.length > 0 && targets.length === 0 && !awaitingStartupReplacement
+            browserGraphTransport && candidates.length > 0 && targets.length === 0 && navigatingNative.size === 0
+            && !awaitingStartupReplacement
           ) {
             attemptedReloadTarget = 'production'
             throw new Error('production loopback graph requires a native app:// renderer target')
           }
-          const live = new Set(targets.map(target => target.id))
+          const live = new Set([...targets.map(target => target.id), ...navigatingNative])
           for (const [id, record] of installed) {
             await record.session.isResponsive()
             if (live.has(id)) continue
@@ -579,6 +592,9 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
                 ? session => observeCdpTargetRetirement(options.port, target, session)
                 : undefined,
               target.url === 'app://-/index.html' ? options.agentContext : undefined,
+              options.remotePluginLifecycle,
+              options.remoteOwnerDocuments,
+              options.remoteMarketplaceArtifact,
             ).finally(() => installationDeadline?.release())
             installed.set(target.id, record)
             if (nativeWorkspaceTarget(target)) {
@@ -680,6 +696,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
         watcherFailure === undefined ? undefined : { cause: watcherFailure },
       )
     }
+    options.onCleanupConfirmed?.()
   }
   if (watcherFailure !== undefined) throw watcherFailure
 }

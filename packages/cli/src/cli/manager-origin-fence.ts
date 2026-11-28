@@ -1,0 +1,267 @@
+import type { DesktopConfigurationReservation } from '../launcher/desktop-configuration-reservation.js'
+import type { AttachedRendererPeer } from '../launcher/renderer-lifecycle-peer.js'
+import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
+import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
+import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
+
+export interface ManagerOriginAdditionalFence {
+  readonly peers: readonly ManagerRendererCommandPeer[]
+  /** Set only by an adapter reservation entered from its authenticated current call. */
+  readonly originRendererId?: string
+  isCurrent(): boolean
+  release(): boolean
+  fence(): void
+}
+
+export interface ManagerOriginFence {
+  readonly rendererId: string
+  readonly desktopConfiguration?: DesktopConfigurationReservation['desktopConfiguration']
+  readonly additionalPeers?: readonly ManagerRendererCommandPeer[]
+  isCurrent(): boolean
+  release(): boolean
+  fence(): void
+}
+
+type ExternalReservation = {
+  isCurrent(): boolean
+  release(): boolean
+  fence(): void
+  readonly desktopConfiguration?: DesktopConfigurationReservation['desktopConfiguration']
+}
+type ExternalLifecycle = OwnerRendererLifecycle & {
+  reserveExternalMutation(peers: readonly AttachedRendererPeer[]): ExternalReservation | Promise<ExternalReservation>
+  terminal(error: unknown): void
+}
+
+const issued = new WeakMap<ManagerOriginFence, {
+  readonly participants: ServiceRendererParticipants
+  readonly lifecycle: OwnerRendererLifecycle
+  readonly current: () => boolean
+  readonly consumeRelease: () => boolean
+}>()
+
+/** Read-only verification: callers cannot fabricate an origin reservation. */
+export function isCurrentManagerOriginFence(
+  fence: ManagerOriginFence,
+  participants: ServiceRendererParticipants,
+  lifecycle: OwnerRendererLifecycle,
+): boolean {
+  const record = issued.get(fence)
+  return record?.participants === participants && record.lifecycle === lifecycle && record.current()
+}
+
+/** Consume the same-turn proof that this exact origin released successfully. */
+export function consumeReleasedManagerOriginFence(
+  fence: ManagerOriginFence,
+  participants: ServiceRendererParticipants,
+  lifecycle: OwnerRendererLifecycle,
+): boolean {
+  const record = issued.get(fence)
+  return record?.participants === participants && record.lifecycle === lifecycle && record.consumeRelease()
+}
+
+/**
+ * Keep the originating Manager alive for its write receipt. Other admitted
+ * Managers are accepted only when the caller can hand off all of their views;
+ * unadmitted and non-Manager peers remain outside that authority. The caller
+ * must separately fence readers, profile writers and service state.
+ */
+export async function fenceManagerOrigin(input: {
+  readonly sessions: ManagerRendererSessions
+  readonly participants: ServiceRendererParticipants
+  readonly lifecycle: ExternalLifecycle
+  readonly allowAdditionalManagers?: boolean
+  readonly reserveAdditionalPeers?: () => Promise<ManagerOriginAdditionalFence>
+  readonly onFailure?: (phase: string, error: unknown) => void
+  readonly timeoutMs?: number
+}): Promise<ManagerOriginFence> {
+  if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-origin-fence-scope-invalid')
+  const writes = await input.sessions.suspendMutationsForCurrentWrite(input.timeoutMs)
+  return await issueOriginFence(input, writes, writes.rendererId, 'manager')
+}
+
+/** Keep the authenticated native writer alive while fencing every Manager and adapter. */
+export async function fenceAdapterOrigin(input: {
+  readonly sessions: ManagerRendererSessions
+  readonly participants: ServiceRendererParticipants
+  readonly lifecycle: ExternalLifecycle
+  readonly originRendererId: string
+  readonly reserveAdditionalPeers: () => Promise<ManagerOriginAdditionalFence>
+  readonly onFailure?: (phase: string, error: unknown) => void
+  readonly timeoutMs?: number
+}): Promise<ManagerOriginFence> {
+  if (
+    !input.participants.isBoundTo(input.lifecycle) || !/^[a-f0-9]{64}$/u.test(input.originRendererId)
+  ) throw new Error('manager-origin-fence-scope-invalid')
+  const writes = await input.sessions.suspendMutations(input.timeoutMs)
+  return await issueOriginFence({ ...input, allowAdditionalManagers: true }, writes, input.originRendererId, 'adapter')
+}
+
+async function issueOriginFence(
+  input: {
+    readonly sessions: ManagerRendererSessions
+    readonly participants: ServiceRendererParticipants
+    readonly lifecycle: ExternalLifecycle
+    readonly allowAdditionalManagers?: boolean
+    readonly reserveAdditionalPeers?: () => Promise<ManagerOriginAdditionalFence>
+    readonly onFailure?: (phase: string, error: unknown) => void
+  },
+  writes: { isCurrent(): boolean; release(): boolean; fence(): void },
+  rendererId: string,
+  originKind: 'manager' | 'adapter',
+): Promise<ManagerOriginFence> {
+  let lifecycle: ExternalReservation
+  let additional: ManagerOriginAdditionalFence | undefined
+  let phase = 'manager-cohort'
+  let peers: readonly NonNullable<ReturnType<ServiceRendererParticipants['peer']>>[]
+  try {
+    peers = input.participants.ownerPeers()
+    const origin = input.participants.peer(rendererId)
+    if (
+      originKind === 'manager' && (!origin || !peers.includes(origin))
+      || originKind === 'adapter' && origin !== undefined
+      || (!input.allowAdditionalManagers && peers.length !== 1)
+      || peers.some(peer => !input.participants.isLive(peer.identity) || !input.sessions.hasAdmittedPeer(peer))
+    ) {
+      throw new Error('manager-origin-fence-unavailable')
+    }
+    phase = 'additional-peers'
+    additional = await input.reserveAdditionalPeers?.()
+    if (
+      additional && (!additional.isCurrent() || additional.peers.some(peer => peer.closed || peers.includes(peer))
+          || new Set(additional.peers).size !== additional.peers.length)
+      || originKind === 'adapter' && (!additional || additional.originRendererId !== rendererId
+          || additional.peers.filter(peer => peer.identity.rendererId === rendererId).length !== 1)
+    ) throw new Error('manager-origin-fence-unavailable')
+    phase = 'lifecycle-fence'
+    lifecycle = await input.lifecycle.reserveExternalMutation([...peers, ...(additional?.peers ?? [])])
+  } catch (error) {
+    try {
+      input.onFailure?.(phase, error)
+    } catch { /* Diagnostics must not change the fence. */ }
+    if (additional) {
+      try {
+        if (!additional.release()) additional.fence()
+      } catch {
+        try {
+          additional.fence()
+        } catch { /* Continue releasing the Manager gate. */ }
+      }
+    }
+    if (!writes.release()) writes.fence()
+    throw new Error('manager-origin-fence-unavailable')
+  }
+  let ended = false
+  let releaseReceipt = false
+  const subscriptions: Array<() => void> = []
+  const unsubscribe = () => {
+    for (const dispose of subscriptions.splice(0)) dispose()
+  }
+  const fence = () => {
+    if (ended) return
+    ended = true
+    unsubscribe()
+    try {
+      lifecycle.fence()
+    } finally {
+      try {
+        additional?.fence()
+      } finally {
+        writes.fence()
+      }
+    }
+  }
+  for (const peer of [...peers, ...(additional?.peers ?? [])]) {
+    const dispose = peer.onDisconnect(fence)
+    if (ended) {
+      dispose()
+      unsubscribe()
+      throw new Error('manager-origin-fence-unavailable')
+    }
+    subscriptions.push(dispose)
+  }
+  const current = () => {
+    try {
+      const live = input.participants.ownerPeers()
+      return !ended && writes.isCurrent() && lifecycle.isCurrent() && (additional?.isCurrent() ?? true)
+        && live.length === peers.length
+        && peers.every(peer =>
+          live.includes(peer) && input.participants.peer(peer.identity.rendererId) === peer
+          && input.participants.isLive(peer.identity) && input.sessions.hasAdmittedPeer(peer)
+        )
+    } catch {
+      return false
+    }
+  }
+  const result: ManagerOriginFence = Object.freeze({
+    rendererId,
+    isCurrent: current,
+    ...(additional === undefined ? {} : { additionalPeers: Object.freeze([...additional.peers]) }),
+    ...(lifecycle.desktopConfiguration === undefined ? {} : {
+      desktopConfiguration: {
+        seat: lifecycle.desktopConfiguration.seat,
+        proof: async (pluginId: string) => {
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          const proof = await lifecycle.desktopConfiguration!.proof(pluginId)
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          return proof
+        },
+        update: async (operation: Parameters<DesktopConfigurationReservation['desktopConfiguration']['update']>[0]) => {
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          const value = await lifecycle.desktopConfiguration!.update(operation)
+          if (!current()) throw new Error('manager-origin-fence-unavailable')
+          return value
+        },
+        confirm: () => current() && lifecycle.desktopConfiguration!.confirm(),
+      },
+    }),
+    release() {
+      if (ended) return false
+      if (!current()) {
+        fence()
+        return false
+      }
+      ended = true
+      unsubscribe()
+      let lifecycleReleased = false
+      try {
+        lifecycleReleased = lifecycle.release()
+        if (lifecycleReleased && writes.release() && (additional?.release() ?? true)) {
+          releaseReceipt = true
+          queueMicrotask(() => releaseReceipt = false)
+          return true
+        }
+      } catch {
+        // A lifecycle exception must never leave the Manager gate open.
+      }
+      if (!lifecycleReleased) {
+        try {
+          lifecycle.fence()
+        } catch { /* Continue fencing the Manager write gate. */ }
+      }
+      try {
+        additional?.fence()
+      } catch { /* Continue fencing the Manager write gate. */ }
+      writes.fence()
+      if (lifecycleReleased) {
+        try {
+          input.lifecycle.terminal(new Error('manager-origin-fence-unavailable'))
+        } catch { /* remain fenced */ }
+      }
+      return false
+    },
+    fence,
+  })
+  issued.set(result, {
+    participants: input.participants,
+    lifecycle: input.lifecycle,
+    current,
+    consumeRelease: () => {
+      if (!releaseReceipt) return false
+      releaseReceipt = false
+      return true
+    },
+  })
+  return result
+}

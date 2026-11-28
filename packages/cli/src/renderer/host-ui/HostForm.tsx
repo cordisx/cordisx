@@ -24,6 +24,16 @@ import type { ConfigMutationOperation } from '../configuration.js'
 import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps } from './ArrayEditor.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
+import { HostFormActions, type HostFormState } from './HostFormActions.js'
+import { HostFormMessage } from './HostFormMessage.js'
+import {
+  canReviewHostFormDraft,
+  groupHostFormFields,
+  isSensitiveHostField,
+  projectHostFormDraft,
+  useHostFormRevision,
+  useStandaloneDraftWarning,
+} from './HostFormRevision.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { HostIcon } from './HostIcon.js'
 import {
@@ -111,8 +121,6 @@ export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + HOST_RADIO_CHOICE_
   }
 `
 
-const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
-
 function pathKey(field: CordisXConfigFieldSnapshot): string {
   return field.path.join('.')
 }
@@ -146,7 +154,7 @@ function descriptor(field: CordisXConfigFieldSnapshot): FormDescriptor {
 }
 
 function primitive(field: CordisXConfigFieldSnapshot): FormPrimitive | 'sensitive-unavailable' {
-  if (field.role !== undefined && SENSITIVE_ROLES.has(field.role)) return 'sensitive-unavailable'
+  if (isSensitiveHostField(field)) return 'sensitive-unavailable'
   return resolveFormPresenter(descriptor(field)).primitive
 }
 
@@ -749,48 +757,47 @@ export function HostFieldRow(props: HostFieldRowProps) {
 export function HostForm({ model, plugin }: { readonly model: ManagerModel; readonly plugin: ManagerPluginSnapshot }) {
   const shell = useRef<HTMLDivElement>(null)
   const [committedValues, setCommittedValues] = useState<ReadonlyMap<string, unknown>>(() => new Map())
-  const fields = useMemo(() =>
-    plugin.configuration.fields.map(field =>
-      committedValues.has(pathKey(field))
-        ? { ...field, value: committedValues.get(pathKey(field)) as CordisXJsonValue }
-        : field
-    ), [committedValues, plugin.configuration.fields])
   const [draftOperations, setDraftOperations] = useState<ReadonlyMap<string, ConfigMutationOperation>>(() => new Map())
   const [saving, setSaving] = useState(false)
+  const [subpageDepth, setSubpageDepth] = useState(0)
   const [message, setMessage] = useState<string>()
-  const [formState, setFormState] = useState<'pristine' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'>(
-    'pristine',
-  )
+  const [formState, setFormState] = useState<HostFormState>('pristine')
   const locale = model.snapshot().localization.locale
   const submission = useRef(0)
   const submitting = useRef(false)
-  useEffect(() => {
-    submission.current += 1
-    submitting.current = false
-    setSaving(false)
-    setCommittedValues(new Map())
-    setDraftOperations(new Map())
-    setFormState('pristine')
-    setMessage(undefined)
-    return () => {
+  const activeDraft = draftOperations.size > 0 || subpageDepth > 0 || saving
+  const revision = useHostFormRevision({
+    plugin,
+    active: activeDraft,
+    reviewBlocked: saving || subpageDepth > 0,
+    reset: () => {
       submission.current += 1
-    }
-  }, [plugin.id, plugin.configuration.revision])
-  const groups = useMemo(() => {
-    const result = new Map<string, { title?: string; description?: string; fields: CordisXConfigFieldSnapshot[] }>()
-    for (const field of fields) {
-      const id = field.group?.id ?? 'general'
-      const current = result.get(id)
-        ?? {
-          ...(field.group?.title === undefined ? {} : { title: field.group.title }),
-          ...(field.group?.description === undefined ? {} : { description: field.group.description }),
-          fields: [],
-        }
-      current.fields.push(field)
-      result.set(id, current)
-    }
-    return [...result.entries()]
-  }, [fields])
+      submitting.current = false
+      setSaving(false)
+      setSubpageDepth(0)
+      setCommittedValues(new Map())
+      setDraftOperations(new Map())
+      setFormState('pristine')
+      setMessage(undefined)
+    },
+  })
+  useStandaloneDraftWarning(shell, activeDraft)
+  useEffect(() => () => {
+    submission.current += 1
+  }, [])
+  const fields = useMemo(() =>
+    projectHostFormDraft({
+      baseline: revision.configuration.fields,
+      latest: plugin.configuration.fields,
+      committed: committedValues,
+      sameSource: revision.sameSource,
+    }), [
+    committedValues,
+    plugin.configuration.fields,
+    revision.configuration.fields,
+    revision.sameSource,
+  ])
+  const groups = useMemo(() => groupHostFormFields(fields), [fields])
   const formDraft = useMemo(() => {
     const next = new FormDraft(Object.fromEntries(fields.map(field => [pathKey(field), field.value])))
     for (const operation of draftOperations.values()) {
@@ -800,6 +807,10 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     return next
   }, [draftOperations, fields])
   const operations = [...draftOperations.values()]
+  const compatible = canReviewHostFormDraft(operations, revision.configuration.fields, plugin.configuration.fields)
+  const blockedDraft = revision.stale || !compatible
+  const visibleState = blockedDraft && !saving ? 'conflict' : formState
+  const visibleMessage = blockedDraft && !saving ? managerCopy(locale, 'form.conflict-retained') : message
   const change = (field: CordisXConfigFieldSnapshot, operation: ConfigMutationOperation) =>
     flushSync(() => {
       setFormState('dirty')
@@ -817,11 +828,12 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       return next
     })
   return (
-    <div ref={shell} className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
+    <div ref={shell} className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={visibleState}>
       <HostFormPageStack
-        key={`${plugin.id}:${plugin.configuration.revision}`}
-        resetKey={plugin.configuration.revision}
+        key={plugin.id}
+        resetKey={plugin.id}
         layout="fill"
+        onDepthChange={setSubpageDepth}
       >
         <Form
           className="cxf-react-form"
@@ -829,15 +841,19 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
             event.e?.preventDefault()
             if (
               model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
-              || submitting.current || formState === 'saved'
-            ) return
+              || submitting.current || formState === 'saved' || blockedDraft
+            ) {
+              return
+            }
             const invalid = fields.find(field =>
               !field.disabled && primitive(field) !== 'sensitive-unavailable'
               && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale)
                 !== undefined
             )
             if (invalid !== undefined) {
-              flushSync(() => setFormState('error'))
+              flushSync(() =>
+                setFormState('error')
+              )
               setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
               shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
               return
@@ -847,9 +863,11 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
             setSaving(true)
             setFormState('saving')
             setMessage(undefined)
-            void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
+            void model.updatePluginConfig(plugin.id, revision.expectedRevision, operations)
               .then(() => {
-                if (submission.current !== currentSubmission) return
+                if (submission.current !== currentSubmission) {
+                  return
+                }
                 setCommittedValues(
                   new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
                 )
@@ -858,14 +876,18 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                 setMessage(managerCopy(locale, 'form.configuration-saved'))
               })
               .catch(error => {
-                if (submission.current !== currentSubmission) return
+                if (submission.current !== currentSubmission) {
+                  return
+                }
                 const text = error instanceof Error ? error.message : String(error)
                 const conflict = /conflict|revision/iu.test(text)
                 setFormState(conflict ? 'conflict' : 'error')
                 setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
               })
               .finally(() => {
-                if (submission.current !== currentSubmission) return
+                if (submission.current !== currentSubmission) {
+                  return
+                }
                 submitting.current = false
                 setSaving(false)
               })
@@ -873,42 +895,20 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
         >
           <HostFormPage
             footer={
-              <div className="cxf-form-actions">
-                <div className="cxf-status" data-state={formState} role="status">
-                  {operations.length === 0 || formState === 'saved'
-                    ? ''
-                    : formState === 'saving'
-                    ? managerCopy(locale, 'form.saving')
-                    : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
-                </div>
-                <div className="cxf-form-action-buttons">
-                  <Button
-                    tag="button"
-                    type="reset"
-                    variant="outline"
-                    icon={<HostSurfaceIcon token="host:reset" />}
-                    disabled={saving || operations.length === 0 || formState === 'saved'}
-                    onClick={() => {
-                      setDraftOperations(new Map())
-                      setFormState('pristine')
-                      setMessage(undefined)
-                    }}
-                  >
-                    {managerCopy(locale, 'form.undo-changes')}
-                  </Button>
-                  <Button
-                    tag="button"
-                    type="submit"
-                    theme="primary"
-                    icon={<HostSurfaceIcon token="host:save" />}
-                    loading={saving}
-                    disabled={saving || !plugin.configuration.writable || operations.length === 0
-                      || formState === 'saved'}
-                  >
-                    {managerCopy(locale, 'form.save-configuration')}
-                  </Button>
-                </div>
-              </div>
+              <HostFormActions
+                locale={locale}
+                state={formState}
+                visibleState={visibleState}
+                dirty={operations.length > 0}
+                saving={saving}
+                writable={plugin.configuration.writable}
+                stale={blockedDraft}
+                undo={() => {
+                  setDraftOperations(new Map())
+                  setFormState('pristine')
+                  setMessage(undefined)
+                }}
+              />
             }
           >
             <div className="cxf-form-body">
@@ -943,7 +943,8 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                           onUseDefault={() => {
                             if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
                           }}
-                          onRollback={() => rollback(field)}
+                          onRollback={() =>
+                            rollback(field)}
                           onCopyPath={() => {
                             const clipboard = window.navigator.clipboard
                             if (typeof clipboard?.writeText !== 'function') {
@@ -952,7 +953,9 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                             }
                             void clipboard.writeText(field.path.join('.')).then(() =>
                               setMessage(managerCopy(locale, 'form.path-copied'))
-                            ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
+                            ).catch(() =>
+                              setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
+                            )
                           }}
                           onChange={next =>
                             change(
@@ -967,17 +970,21 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                   </div>
                 </section>
               ))}
-              {message === undefined
-                ? null
-                : (
-                  <div
-                    className="cxr-notice cxf-alert"
-                    data-tone={formState === 'saved' ? 'info' : 'error'}
-                    role="status"
-                  >
-                    {message}
-                  </div>
-                )}
+              <HostFormMessage
+                locale={locale}
+                message={visibleMessage}
+                saved={visibleState === 'saved'}
+                incompatible={!compatible}
+                review={!revision.stale || saving ? undefined : {
+                  enabled: revision.canReview && compatible,
+                  run: () => {
+                    if (!revision.review()) return
+                    setCommittedValues(new Map())
+                    setFormState('dirty')
+                    setMessage(undefined)
+                  },
+                }}
+              />
             </div>
           </HostFormPage>
         </Form>

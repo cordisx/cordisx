@@ -37,6 +37,12 @@ export interface PluginLifecycleBridgeHandler {
   readonly bundleCoordinator?: PluginBundleCoordinator
 }
 
+/** Parsing needs only the client-scoped binding identity, not the owning coordinator. */
+export type PluginLifecycleBindingScope = Pick<
+  PluginLifecycleBridgeHandler,
+  'token' | 'profileId' | 'generation' | 'bundleCoordinator'
+>
+
 function object(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   return value as Record<string, unknown>
@@ -94,7 +100,7 @@ export type PluginLifecycleBindingRequest =
 
 function parseBundleRequest(
   value: unknown,
-  handler: PluginLifecycleBridgeHandler,
+  handler: PluginLifecycleBindingScope,
 ): CordisXPluginBundleLifecycleRequestV1 {
   const request = object(value, 'plugin bundle lifecycle request')
   exactKeys(request, [
@@ -180,7 +186,7 @@ function parseBundleRequest(
 
 function requestScope(
   request: Record<string, unknown>,
-  handler: PluginLifecycleBridgeHandler,
+  handler: PluginLifecycleBindingScope,
 ): Pick<HostPermissionLifecycleReviewV2Request, 'requestId' | 'profileId' | 'runtimeGeneration' | 'expectedRevision'> {
   if (typeof request.requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(request.requestId)) {
     throw new Error('plugin lifecycle request id is invalid')
@@ -202,7 +208,7 @@ function requestScope(
 /** Validate the Host-only envelope before passing a protocol request to the coordinator. */
 export function parsePluginLifecycleBindingRequest(
   value: unknown,
-  handler: PluginLifecycleBridgeHandler,
+  handler: PluginLifecycleBindingScope,
 ): PluginLifecycleBindingRequest {
   const envelope = object(value, 'plugin lifecycle bridge request')
   exactKeys(envelope, ['token', 'request', 'privateRequest'], 'plugin lifecycle bridge request')

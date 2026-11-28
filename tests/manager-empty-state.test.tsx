@@ -28,6 +28,7 @@ function registry(state: Partial<ModelProviderSnapshot> = {}, catalog: Partial<C
     subscribe: () => () => {},
     refresh,
     management,
+    hasLiveSource: () => false,
   } as unknown as ModelProviderRegistry
 }
 

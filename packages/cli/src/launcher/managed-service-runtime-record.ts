@@ -12,6 +12,7 @@ import type {
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ChildProcess } from 'node:child_process'
 import type { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
+import type { ManagedServiceClientBorrowScope } from './managed-service-client-borrow.js'
 
 export interface ManagedServiceActivationAccess {
   readonly owner: ManagedServiceOwnerV1
@@ -42,6 +43,7 @@ export interface ManagedServiceClientState {
 export interface ManagedServiceLeaseState {
   readonly client: ManagedServiceClientState
   readonly lease: ManagedServiceLeaseV1
+  readonly borrow?: ManagedServiceClientBorrowScope
 }
 
 export interface ManagedServiceMaterializationState {

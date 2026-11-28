@@ -8,6 +8,11 @@ import {
   type ServiceConfigScope,
   type StageServiceConfigInput,
 } from '../config/service-config.js'
+import {
+  fencePackageProfileWrite,
+  fencePackageServiceFile,
+  ProfilePluginConfigFenceBusyError,
+} from '../config/profile-plugin-config-fence.js'
 import type { HostServiceConfigPersistence } from './service-config.js'
 
 interface StoredState {
@@ -173,6 +178,16 @@ export class PackagePluginServiceConfigStore {
   }): Promise<HomeConfigPluginServiceProfile> {
     this.assertProfile(input.profileId)
     const filePath = this.file(input.pluginId, input.serviceId)
+    return await this.serial(filePath, async () => await this.readUnlocked(input))
+  }
+
+  private async readUnlocked(input: {
+    readonly profileId: string
+    readonly pluginId: string
+    readonly serviceId: string
+    readonly initialConfig: JsonValue
+  }, writeLocked = false): Promise<HomeConfigPluginServiceProfile> {
+    const filePath = this.file(input.pluginId, input.serviceId)
     let raw: unknown
     try {
       raw = JSON.parse(await readFile(filePath, 'utf8')) as unknown
@@ -192,7 +207,35 @@ export class PackagePluginServiceConfigStore {
     const state = serviceState(record.state, 'package plugin service configuration')
     if (state.candidate !== undefined && state.candidate.generation !== this.generation) {
       const { candidate: _candidate, ...active } = state
-      await publishAtomic(filePath, { version: 1, pluginId: input.pluginId, serviceId: input.serviceId, state: active })
+      if (!writeLocked) {
+        let releaseProfile: () => Promise<void>
+        try {
+          releaseProfile = await fencePackageProfileWrite(this.root, this.profileId)
+        } catch (error) {
+          // Return last-good state without changing a candidate protected by a live Manager.
+          if (error instanceof ProfilePluginConfigFenceBusyError) return structuredClone(active)
+          throw error
+        }
+        try {
+          const releaseFile = await fencePackageServiceFile(
+            this.root,
+            this.profileId,
+            input.pluginId,
+            input.serviceId,
+          )
+          try {
+            return await this.readUnlocked(input, true)
+          } finally {
+            await releaseFile()
+          }
+        } finally {
+          await releaseProfile()
+        }
+      }
+      await publishAtomic(
+        filePath,
+        { version: 1, pluginId: input.pluginId, serviceId: input.serviceId, state: active },
+      )
       return structuredClone(active)
     }
     return structuredClone(state)
@@ -329,6 +372,68 @@ export class PackagePluginServiceConfigStore {
     ) => { readonly state: HomeConfigPluginServiceProfile; readonly result: T },
   ): Promise<T> {
     const filePath = this.file(input.pluginId, input.serviceId)
+    return await this.serial(filePath, async () => {
+      const releaseProfile = await fencePackageProfileWrite(this.root, this.profileId)
+      try {
+        const releaseFile = await fencePackageServiceFile(this.root, this.profileId, input.pluginId, input.serviceId)
+        try {
+          const state = await this.readUnlocked(input, true)
+          const next = operation(state)
+          await publishAtomic(filePath, {
+            version: 1,
+            pluginId: input.pluginId,
+            serviceId: input.serviceId,
+            state: next.state,
+          })
+          return next.result
+        } finally {
+          await releaseFile()
+        }
+      } finally {
+        await releaseProfile()
+      }
+    })
+  }
+
+  /** Exclude normal service config writers while a recovery checks the unmodified file. */
+  async withLockedRawState<T>(pluginId: string, serviceId: string, action: (raw: unknown) => Promise<T>): Promise<T> {
+    const filePath = this.file(pluginId, serviceId)
+    return await this.serial(filePath, async () => {
+      const releaseFile = await fencePackageServiceFile(this.root, this.profileId, pluginId, serviceId)
+      try {
+        let handle: Awaited<ReturnType<typeof open>>
+        try {
+          handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return await action(undefined)
+          throw error
+        }
+        try {
+          const info = await handle.stat()
+          if (
+            !info.isFile() || info.nlink !== 1 || info.size > 8 * 1024 * 1024
+            || process.geteuid !== undefined && info.uid !== process.geteuid()
+            || process.platform !== 'win32' && (info.mode & 0o077) !== 0
+          ) throw new Error('package state unavailable')
+          const raw = JSON.parse(await handle.readFile('utf8')) as unknown
+          if (
+            !raw || typeof raw !== 'object' || Array.isArray(raw)
+            || (raw as Record<string, unknown>).version !== 1
+            || (raw as Record<string, unknown>).pluginId !== pluginId
+            || (raw as Record<string, unknown>).serviceId !== serviceId
+          ) throw new Error('package state unavailable')
+          serviceState((raw as Record<string, unknown>).state, 'package plugin service configuration')
+          return await action(raw)
+        } finally {
+          await handle.close()
+        }
+      } finally {
+        await releaseFile()
+      }
+    })
+  }
+
+  private async serial<T>(filePath: string, action: () => Promise<T>): Promise<T> {
     const previous = queues.get(filePath) ?? Promise.resolve()
     let release!: () => void
     const current = new Promise<void>(resolve => {
@@ -338,15 +443,7 @@ export class PackagePluginServiceConfigStore {
     queues.set(filePath, tail)
     await previous.catch(() => undefined)
     try {
-      const state = await this.read(input)
-      const next = operation(state)
-      await publishAtomic(filePath, {
-        version: 1,
-        pluginId: input.pluginId,
-        serviceId: input.serviceId,
-        state: next.state,
-      })
-      return next.result
+      return await action()
     } finally {
       release()
       if (queues.get(filePath) === tail) queues.delete(filePath)

@@ -11,6 +11,7 @@ import {
 import {
   abortServiceConfigCandidate,
   commitServiceConfigCandidate,
+  guardedHomeServiceConfigPersistence,
   markServiceConfigAppRestartApplied,
   readServiceConfigState,
   stageServiceConfigCandidate,
@@ -120,6 +121,33 @@ function startupConfiguration(providers: readonly unknown[]) {
 }
 
 describe('Host service configuration narrow API', () => {
+  it('checks the configured owner under the write lock before staging and committing', async () => {
+    const target = await configPath()
+    const persistence = guardedHomeServiceConfigPersistence(plugin => {
+      if (plugin.entry !== 'cordisx:cli-proxy-api') throw new Error('owner changed')
+    })
+    const scope = {
+      profileId: 'default',
+      pluginId: 'cli-proxy-api',
+      serviceId: 'providers-runtime',
+      generation,
+      ownerToken,
+      expectedRevision: 0,
+      config: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.initialConfiguration,
+      applies: 'service-restart' as const,
+      initialConfig: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.initialConfiguration,
+    }
+    const { candidateRevision } = await persistence.stage(scope, target)
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      plugins: config.plugins.map(plugin => ({ ...plugin, entry: 'replacement.js' })),
+    }), target)
+    await expect(persistence.commit({ ...scope, candidateRevision }, target)).rejects.toThrow('owner changed')
+    const stored = (await loadHomeConfig(target)).plugins[0]!.services!['providers-runtime']!.profiles.default!
+    expect(stored.revision).toBe(0)
+    expect(stored.candidate?.revision).toBe(candidateRevision)
+  })
+
   it('applies a validated CAS candidate through one owning-service restart and redacts secretRef', async () => {
     const target = await configPath()
     const restart = vi.fn(async () => ({ generation: 'provider-fleet-1', rollback: async () => undefined }))

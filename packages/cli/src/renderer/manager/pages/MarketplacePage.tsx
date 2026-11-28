@@ -1,7 +1,7 @@
 import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { managerCopy } from '../../ui-copy.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 import { useMemo, useState } from 'react'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import type { MarketplaceModel } from '../../marketplace.js'
@@ -20,11 +20,10 @@ import { productLocale } from '../../ui-copy.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
 import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
 import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
+import { useMarketplaceInstalled } from '../model/use-marketplace-installed.js'
 
 const COPY = {
   'zh-CN': {
-    tools: '搜索和筛选商店插件',
-    search: '搜索插件…',
     officialOnly: '仅官方',
     officialOn: '已启用官方插件筛选',
     officialOff: '仅显示官方插件',
@@ -55,8 +54,6 @@ const COPY = {
     empty: '没有匹配的插件',
   },
   en: {
-    tools: 'Search and filter Marketplace plugins',
-    search: 'Search plugins…',
     officialOnly: 'Official only',
     officialOn: 'Official-only filter is enabled',
     officialOff: 'Show Official plugins only',
@@ -124,10 +121,7 @@ export function MarketplacePage(
       ),
     [pluginManagementSnapshot],
   )
-  const installed = useMemo(
-    () => new Map(snapshot.plugins.map(plugin => [`${plugin.source}\0${plugin.id}`, plugin])),
-    [snapshot.plugins],
-  )
+  const installed = useMarketplaceInstalled(catalog.plugins, snapshot, pluginManagement)
   const results = useMemo(
     () =>
       searchMarketplaceCatalog(catalog.plugins.filter(plugin => !hidden.has(`${plugin.feedUrl}\0${plugin.id}`)), {
@@ -162,12 +156,10 @@ export function MarketplacePage(
   }
   return (
     <section className="cxr-page cxr-browse-page cxr-marketplace" data-marketplace-discovery-page="true">
-      <SearchToolbar
-        toolbarLabel={copy.tools}
-        aria-label={copy.search}
-        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+      <ManagerBrowseSearch
+        kind="marketplace"
+        locale={snapshot.localization.locale}
         value={query}
-        placeholder={copy.search}
         onChange={setQuery}
         actions={
           <>
@@ -201,7 +193,7 @@ export function MarketplacePage(
           const href = result.plugin.homepage ?? result.plugin.source
           const favorite = favorites.has(result.plugin.identity)
           const trustLabels = marketplaceTrustLabels(result.plugin, snapshot.localization.locale)
-          const installedPlugin = installed.get(`${result.plugin.source}\0${result.plugin.id}`)
+          const installedPlugin = installed.get(result.plugin.identity)
           const managedInstalled = installedPlugin !== undefined
             && installedPlugin.package !== undefined
             && installedPlugin.development === undefined
@@ -212,7 +204,7 @@ export function MarketplacePage(
           const anotherInstallRunning = installer.installingIdentity !== undefined && !installing
           const updateAvailable = installedVersion !== undefined && !exactVersionInstalled
           const primaryLabel = installing
-            ? copy.cancelInstall
+            ? installer.cancellable ? copy.cancelInstall : copy.installing
             : installedVersion !== undefined
             ? copy.uninstall
             : unmanagedInstalled
@@ -229,10 +221,11 @@ export function MarketplacePage(
             : installer.available
             ? copy.install
             : copy.installUnavailable
-          const primaryDisabled = !installing && (installedVersion !== undefined
-            ? !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin?.id
-            : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
-              || !installer.available)
+          const primaryDisabled = installing && !installer.cancellable || !installing && (installedVersion !== undefined
+                ? installedPlugin === undefined || !lifecycle.canRun(installedPlugin, 'uninstall')
+                  || lifecycle.busyPluginId === installedPlugin.id
+                : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
+                  || !installer.available)
           const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
             ? []
             : [
@@ -240,7 +233,10 @@ export function MarketplacePage(
                 id: installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
                 label: installedPlugin.status === 'configured-disabled' ? copy.enable : copy.disable,
                 icon: installedPlugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin',
-                disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
+                disabled: !lifecycle.canRun(
+                  installedPlugin,
+                  installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
+                ) || lifecycle.busyPluginId === installedPlugin.id,
                 onSelect: () =>
                   void lifecycle.run(
                     installedPlugin,

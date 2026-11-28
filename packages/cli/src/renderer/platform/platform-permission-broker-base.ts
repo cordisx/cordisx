@@ -37,8 +37,9 @@ import type {
 import { CapabilityRiskCatalog } from '../../capability-risk-catalog.js'
 import type { RuntimeServiceCapabilityOwner } from '../../service-capability-ownership.js'
 import { ServiceCapabilityOwnership } from './service-capability-ownership.js'
-import { PermissionOnceGrantLedger } from '../../permission-model-v2.js'
+import { normalizePermissionPolicyRecordV2, PermissionOnceGrantLedger } from '../../permission-model-v2.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
+import { normalizePermissionPolicyRecordV3 } from '../../permission-model-v3.js'
 import {
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV4,
@@ -72,6 +73,38 @@ import {
   scopeAllows,
 } from './platform-permission-types.js'
 
+/** A process-local, monotonic fence; it does not replace the profile owner barrier. */
+class PermissionPolicyRevisionMap extends Map<string, CordisXPersistedPermissionPolicyRecord> {
+  #revision = 0n
+
+  get revision(): bigint {
+    return this.#revision
+  }
+
+  invalidate(): void {
+    this.#revision++
+  }
+
+  override set(key: string, value: CordisXPersistedPermissionPolicyRecord): this {
+    super.set(key, value)
+    this.invalidate()
+    return this
+  }
+
+  override delete(key: string): boolean {
+    const deleted = super.delete(key)
+    if (deleted) this.invalidate()
+    return deleted
+  }
+
+  override clear(): void {
+    if (this.size > 0) {
+      super.clear()
+      this.invalidate()
+    }
+  }
+}
+
 export abstract class PlatformPermissionBrokerBase {
   private readonly serviceOwnership: ServiceCapabilityOwnership
   protected readonly registrations = new Map<string, Registration>()
@@ -86,7 +119,7 @@ export abstract class PlatformPermissionBrokerBase {
   protected certifiedProjectionAvailable = false
 
   /** One profile ledger index for both the retiring v1 records and authoritative v2 records. */
-  protected readonly policyRecords = new Map<string, CordisXPersistedPermissionPolicyRecord>()
+  protected readonly policyRecords = new PermissionPolicyRevisionMap()
 
   protected readonly audit = new Map<string, AuditRecord>()
 
@@ -164,6 +197,28 @@ export abstract class PlatformPermissionBrokerBase {
   protected readonly migrationTasks: Promise<void>[] = []
 
   protected domPolicyCommitTail: Promise<void> = Promise.resolve()
+
+  protected runtimePolicyCommitTail: Promise<void> = Promise.resolve()
+
+  private pendingRuntimePolicyCommit: {
+    readonly records: readonly CordisXPermissionPolicyRecordV2[]
+    readonly publish: () => void
+    readonly assertPublish: () => void
+    adopted: boolean
+    adopting: boolean
+    failed: boolean
+    onUnknown?: () => void
+  } | undefined
+
+  private pendingDomPolicyCommit: {
+    readonly records: readonly CordisXPermissionPolicyRecordV3[]
+    readonly publish: () => void
+    readonly assertPublish: () => void
+    adopted: boolean
+    adopting: boolean
+    failed: boolean
+    onUnknown?: () => void
+  } | undefined
 
   protected changeBatchDepth = 0
 
@@ -402,6 +457,10 @@ export abstract class PlatformPermissionBrokerBase {
     return [...this.registrations.values()].some(candidate => candidate.token === registration.token)
   }
 
+  protected isAuthorizationCurrent(registration: Registration, revision: bigint): boolean {
+    return this.isRegistered(registration) && this.policyRecords.revision === revision
+  }
+
   runtimeExactRequest(
     identity: CordisXPluginIdentity,
     capability: CordisXPlatformCapability,
@@ -420,17 +479,154 @@ export abstract class PlatformPermissionBrokerBase {
     return Promise.resolve(this.store.writeV3(records))
   }
 
+  protected commitRuntimePolicyRecords(
+    records: readonly CordisXPermissionPolicyRecordV2[],
+    publish: () => void,
+    assertCurrent: () => void = () => {},
+  ): Promise<void> {
+    const task = this.runtimePolicyCommitTail.then(async () => {
+      assertCurrent()
+      const pending = {
+        records: records.map(record => normalizePermissionPolicyRecordV2(record)),
+        publish,
+        assertPublish: assertCurrent,
+        adopted: false,
+        adopting: false,
+        failed: false,
+      }
+      this.pendingRuntimePolicyCommit = pending
+      try {
+        await this.persistV2(pending.records)
+        if (pending.failed) throw new Error('Runtime permission adoption is uncertain')
+        if (!pending.adopted) {
+          assertCurrent()
+          publish()
+          this.changed()
+        }
+      } catch (error) {
+        if (pending.adopted || pending.failed) {
+          try {
+            this.pendingRuntimePolicyCommit?.onUnknown?.()
+          } catch { /* the write remains uncertain */ }
+        }
+        throw error
+      } finally {
+        if (this.pendingRuntimePolicyCommit === pending) this.pendingRuntimePolicyCommit = undefined
+      }
+    })
+    this.runtimePolicyCommitTail = task.catch(() => undefined)
+    return task
+  }
+
+  protected adoptPendingStandaloneRuntimePolicy(
+    requestId: string,
+    records: readonly CordisXPermissionPolicyRecordV2[],
+    afterPublish: () => void,
+    onUnknown: () => void,
+  ): boolean {
+    const pending = this.pendingRuntimePolicyCommit
+    if (
+      !pending || pending.adopted || pending.adopting || pending.failed
+      || JSON.stringify(pending.records) !== JSON.stringify(records)
+      || this.store.canAdoptStandaloneV2?.(requestId, records) !== true
+    ) return false
+    pending.adopting = true
+    pending.onUnknown = onUnknown
+    try {
+      pending.assertPublish()
+      pending.publish()
+      afterPublish()
+      if (this.store.markAdoptedStandaloneV2?.(requestId, records) !== true) {
+        throw new Error('Runtime permission adoption is uncertain')
+      }
+      pending.adopted = true
+      this.changed()
+      return true
+    } catch {
+      pending.failed = true
+      try {
+        onUnknown()
+      } catch { /* the write remains uncertain */ }
+      return false
+    } finally {
+      pending.adopting = false
+    }
+  }
+
   protected commitDomPolicyRecords(
     records: readonly CordisXPermissionPolicyRecordV3[],
     publish: () => void,
+    assertCurrent: () => void = () => {},
+    assertPublish: () => void = assertCurrent,
   ): Promise<void> {
     const task = this.domPolicyCommitTail.then(async () => {
-      await this.persistV3(records)
-      publish()
-      this.changed()
+      assertCurrent()
+      const pending = {
+        records: records.map(record => normalizePermissionPolicyRecordV3(record)),
+        publish,
+        assertPublish,
+        adopted: false,
+        adopting: false,
+        failed: false,
+      }
+      this.pendingDomPolicyCommit = pending
+      try {
+        await this.persistV3(pending.records)
+        if (pending.failed) throw new Error('Standalone permission adoption is uncertain')
+        if (!pending.adopted) {
+          assertPublish()
+          publish()
+          this.changed()
+        }
+      } catch (error) {
+        if (pending.adopted || pending.failed) {
+          try {
+            this.pendingDomPolicyCommit?.onUnknown?.()
+          } catch { /* the write remains uncertain */ }
+        }
+        throw error
+      } finally {
+        if (this.pendingDomPolicyCommit === pending) this.pendingDomPolicyCommit = undefined
+      }
     })
     this.domPolicyCommitTail = task.catch(() => undefined)
     return task
+  }
+
+  /** Adopt only the exact standalone request currently waiting on its owner. */
+  protected adoptPendingStandaloneDomPolicy(
+    requestId: string,
+    records: readonly CordisXPermissionPolicyRecordV3[],
+    afterPublish: () => void,
+    onUnknown: () => void,
+  ): boolean {
+    const pending = this.pendingDomPolicyCommit
+    if (
+      !pending || pending.adopted || pending.adopting || pending.failed
+      || JSON.stringify(pending.records) !== JSON.stringify(records)
+      || this.store.canAdoptStandaloneV3?.(requestId, records) !== true
+    ) return false
+    pending.adopting = true
+    pending.onUnknown = onUnknown
+    try {
+      pending.assertPublish()
+      pending.publish()
+      afterPublish()
+      if (this.store.markAdoptedStandaloneV3?.(requestId, records) !== true) {
+        throw new Error('Standalone permission adoption is uncertain')
+      }
+      pending.adopted = true
+      this.changed()
+      return true
+    } catch {
+      pending.failed = true
+      try {
+        onUnknown()
+      } catch { /* the write remains uncertain */ }
+      return false
+    } finally {
+      pending.adopting = false
+    }
   }
 
   protected persistV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {

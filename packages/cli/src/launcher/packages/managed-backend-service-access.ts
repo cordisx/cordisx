@@ -26,7 +26,9 @@ export async function managedBackendRuntimeServiceAccess(
     snapshotError = error
   }
   const staged = await loadStagedPluginPackage(homeDir, item.digest)
-  if ('startup' in staged.manifest.runtimeManifest && snapshotError !== undefined) throw snapshotError
+  const manifest = staged.manifest.runtimeManifest
+  const startup = 'startup' in manifest ? manifest.startup : undefined
+  if (startup !== undefined && snapshotError !== undefined) throw snapshotError
   const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
   if (service === undefined || service.declaration.kind !== 'managed-backend') {
     throw new PackageLifecycleError(
@@ -60,14 +62,14 @@ export async function managedBackendRuntimeServiceAccess(
     artifactDirectory: path.dirname(path.dirname(servicePath)),
     runtimeEntry: `./services/${serviceId}.mjs`,
     runtimeResources,
-    ...(!('startup' in staged.manifest.runtimeManifest) ? {} : {
+    ...(startup === undefined ? {} : {
       ...(snapshot === undefined ? {} : { selectedConfiguration: snapshot }),
       startup: {
         pluginId: item.id,
         pluginGeneration: item.moduleGeneration,
         source: staged.identitySource,
         sourceRevision: item.digest,
-        startup: staged.manifest.runtimeManifest.startup,
+        startup,
         dependencies: staged.manifest.dependencies.map(dependency => dependency.id),
         services: staged.serviceModules.flatMap(module =>
           module.declaration.kind === 'managed-backend' ? [module.declaration] : []

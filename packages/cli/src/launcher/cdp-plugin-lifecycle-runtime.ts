@@ -1,9 +1,6 @@
 import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import {
-  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
-  type CordisXPluginActivationRecordV1,
-} from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { EntityDirectoryAuthority } from './entity-directory.js'
 import type { PluginGenerationGraphLease } from './plugin-generation-loader.js'
 import type {
@@ -15,7 +12,23 @@ import type {
   RuntimeReadinessObservation,
 } from './plugin-lifecycle.js'
 import type { RollbackPlan } from './packages/authority.js'
-import type { PackageActivationTuple } from './packages/types.js'
+import {
+  activationRecord,
+  assertSharedCdpCleanup,
+  assertSharedCdpOperation,
+  assertSharedCdpPublication,
+  assertSharedCdpReadiness,
+  type BrowserGraphAdmission,
+  type BrowserGraphBootstrapRefresh,
+  type CdpSharedAdmission,
+  createCdpDepartureObserver,
+  createCdpSharedAdmission,
+  type GenerationOwner,
+  mutationArtifactLeases,
+  reloadCdpSessions,
+  type SharedAdmissionState,
+} from './cdp-shared-admission.js'
+export type { BrowserGraphAdmission, BrowserGraphBootstrapRefresh, CdpSharedAdmission } from './cdp-shared-admission.js'
 import {
   entityInstallationId,
   type OwnerDocumentLeaseRegistry,
@@ -28,57 +41,23 @@ import {
   refreshProductionGraphBootstraps,
 } from './production-graph-admission.js'
 import { CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
-
-function activationRecord(tuple: PackageActivationTuple): CordisXPluginActivationRecordV1 {
-  return {
-    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
-    schemaVersion: 1,
-    recordKind: 'active',
-    profileId: tuple.profileId,
-    revision: tuple.revision,
-    lastGoodRevision: tuple.lastGoodRevision,
-    runtimeGeneration: tuple.runtimeGeneration,
-    plugins: tuple.plugins,
-  }
-}
-
-function mutationArtifactLeases(mutation: PluginRuntimeMutation): readonly PluginGenerationGraphLease[] {
-  return mutation.runtimeArtifactLeases
-    ?? (mutation.runtimeArtifactLease === undefined ? [] : [mutation.runtimeArtifactLease])
-}
-
-type GenerationOwner =
-  | { readonly kind: 'join'; readonly token: symbol; readonly session: CdpSession }
-  | {
-    readonly kind: 'browser-graph-admission'
-    readonly token: symbol
-    readonly transactionId: string
-    readonly expectedRegistryEpoch: number
-  }
-  | { readonly kind: 'transaction'; readonly transactionId: string; readonly fence: RuntimeGenerationFence }
-
-export type BrowserGraphAdmission = (
-  input: Readonly<{
-    transactionId: string
-    active: CordisXPluginActivationRecordV1
-    expectedRegistryEpoch: number
-    sessions: readonly CdpSession[]
-  }>,
-) => Promise<Readonly<{ commit(): void; rollback(): Promise<void> }>>
-
-export type BrowserGraphBootstrapRefresh = (
-  active: CordisXPluginActivationRecordV1,
-  registryEpoch: number,
-) => Promise<void>
+import { projectCdpDevelopmentState } from './cdp-development-projection.js'
+import { CdpRendererConfiguration } from './cdp-renderer-configuration.js'
+import { projectCdpPluginBundles } from './cdp-plugin-bundle-projection.js'
+import type { RendererConfigOperation } from './renderer-config-management.js'
 
 /** Broadcast one reversible generation transaction to every injected Codex renderer. */
 export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly sessions = new Set<CdpSession>()
   private readonly joining = new Set<CdpSession>()
   private readonly staged = new Map<string, readonly CdpSession[]>()
+  private readonly departures = createCdpDepartureObserver(this.sessions, this.staged, () => this.sharedAdmission)
+  readonly onNoReadySessions = this.departures.subscribe
+  readonly onConfigSeatsChanged = this.departures.subscribeChange
   private readonly stagedMutations = new Map<string, PluginRuntimeMutation>()
   private readonly fences = new Map<string, RuntimeGenerationFence>()
   private registryEpoch = 0
+  private ownerEpochInitialized = false
   private permissionIdentities: PluginPermissionIdentityRegistry | undefined
   private ownerDocumentAuthority: {
     readonly leases: OwnerDocumentLeaseRegistry
@@ -95,10 +74,24 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly retiredTransactionArtifactLeases = new Map<string, Set<string>>()
   private developmentVersion = 0
   private generationOwner: GenerationOwner | undefined
+  private sharedAdmission: SharedAdmissionState | undefined
+  private pendingSharedReloads = 0
   private browserGraphAdmission: BrowserGraphAdmission | undefined
   private browserGraphBootstrapRefresh: BrowserGraphBootstrapRefresh | undefined
   private browserGraphTerminalError: ((error: unknown) => void) | undefined
   private browserGraphTransportReady = false
+  private readonly configuration = new CdpRendererConfiguration(this.sessions, () => {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      return undefined
+    }
+    const token = Symbol('plugin-configuration')
+    this.generationOwner = { kind: 'configuration', token }
+    return () => {
+      if (this.generationOwner?.kind === 'configuration' && this.generationOwner.token === token) {
+        this.generationOwner = undefined
+      }
+    }
+  })
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
     this.permissionIdentities = permissionIdentities
@@ -170,6 +163,29 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     return this.registryEpoch
   }
 
+  /** Seed a new native client from its already-authenticated service owner before any CDP seat joins. */
+  initializeOwnerRegistryEpoch(epoch: number): void {
+    if (
+      !Number.isSafeInteger(epoch) || epoch < 0 || this.sessions.size !== 0 || this.joining.size !== 0
+      || this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0
+      || this.registryEpoch !== 0 || this.ownerEpochInitialized
+    ) throw new Error('native adapter registry epoch is unavailable')
+    this.registryEpoch = epoch
+    this.ownerEpochInitialized = true
+  }
+
+  /** A single admitted renderer owns schema validation and the configuration transaction. */
+  readonly pluginConfiguration = (operation: RendererConfigOperation) =>
+    this.configuration.pluginConfiguration(operation)
+
+  /** Read only from one already-admitted Desktop seat, under the generation fence. */
+  readonly managerConfigProof = (pluginId: string) => this.configuration.managerConfigProof(pluginId)
+
+  managerConfigSeat(): { readonly token: symbol; readonly session: CdpSession } | undefined {
+    if (this.sessions.size !== 1 || this.joining.size !== 0) return undefined
+    return { token: this.departures.token(), session: [...this.sessions][0]! }
+  }
+
   setBrowserGraphAdmission(admission: BrowserGraphAdmission | undefined): void {
     if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot replace browser graph admission during a generation transaction')
@@ -200,23 +216,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     await this.browserGraphBootstrapRefresh(active, this.registryEpoch)
   }
 
-  private async projectPluginBundles(
-    session: CdpSession,
-    snapshot: CordisXPluginBundleManagerSnapshotV1,
-  ): Promise<Readonly<{ revision: number; pluginRevision: number }>> {
-    return await evaluateRuntimeOperation(
-      session,
-      `(async () => { try {
-      const runtime = globalThis.__cordisxRuntime
-      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-      return { ok: true, result: runtime.adoptPluginBundleSnapshot(${JSON.stringify(snapshot)}) }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
-    )
-  }
-
   async synchronizePluginBundles(snapshot: CordisXPluginBundleManagerSnapshotV1): Promise<void> {
     const acknowledgements = await Promise.all(
-      [...this.sessions].map(async session => await this.projectPluginBundles(session, snapshot)),
+      [...this.sessions].map(async session => await projectCdpPluginBundles(session, snapshot)),
     )
     if (
       acknowledgements.some(ack => (
@@ -229,7 +231,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     session: CdpSession,
     snapshot: CordisXPluginBundleManagerSnapshotV1,
   ): Promise<void> {
-    const acknowledgement = await this.projectPluginBundles(session, snapshot)
+    const acknowledgement = await projectCdpPluginBundles(session, snapshot)
     if (
       acknowledgement.revision !== snapshot.revision
       || acknowledgement.pluginRevision !== snapshot.pluginRevision
@@ -247,11 +249,73 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.browserGraphTransportReady = true
   }
 
-  cancelPreparation(transactionId: string): void {
+  cancelPreparation(transactionId: string, sharedToken?: symbol): void {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     if (this.staged.has(transactionId) || this.stagedMutations.has(transactionId)) {
       throw new Error('cannot cancel a staged plugin generation')
     }
     this.releaseTransaction(transactionId, 'abort')
+  }
+
+  /**
+   * Freeze the exact CDP documents for a higher-level owner barrier. The
+   * owner, not CDP, supplies the shared transaction epoch. This is an
+   * internal capability and must never be constructed from renderer input.
+   */
+  beginSharedAdmission(transactionId: string): CdpSharedAdmission {
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(transactionId)
+      || this.generationOwner !== undefined || this.sharedAdmission !== undefined
+      || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.sessions.size === 0
+      || this.pendingSharedReloads !== 0
+    ) throw new Error('CDP shared admission is unavailable')
+    const state: SharedAdmissionState = {
+      token: Symbol('cdp-shared-admission'),
+      transactionId,
+      sessions: [...this.sessions],
+      listeners: new Set(),
+      invalid: false,
+      released: false,
+    }
+    this.sharedAdmission = state
+    this.generationOwner = { kind: 'shared-admission', token: state.token, transactionId }
+    const runtime = this
+    return createCdpSharedAdmission({
+      sessions: runtime.sessions,
+      fences: runtime.fences,
+      get generationOwner() {
+        return runtime.generationOwner
+      },
+      set generationOwner(value) {
+        runtime.generationOwner = value
+      },
+      get sharedAdmission() {
+        return runtime.sharedAdmission
+      },
+      set sharedAdmission(value) {
+        runtime.sharedAdmission = value
+      },
+      get registryEpoch() {
+        return runtime.registryEpoch
+      },
+      get browserGraphAdmission() {
+        return runtime.browserGraphAdmission
+      },
+      get browserGraphTransportReady() {
+        return runtime.browserGraphTransportReady
+      },
+      set browserGraphTransportReady(value) {
+        runtime.browserGraphTransportReady = value
+      },
+      stage: async (mutation, token) => await runtime.stage(mutation, token),
+      publish: async (id, token) => await runtime.publish(id, token),
+      complete: async (id, token) => await runtime.complete(id, token),
+      finalize: async (id, token) => await runtime.finalize(id, token),
+      rollback: async (id, token) => await runtime.rollback(id, token),
+      cancelPreparation: (id, token) => runtime.cancelPreparation(id, token),
+      adoptRecoveredActivation: async (active, epoch, token) =>
+        await runtime.adoptRecoveredActivation(active, epoch, token),
+    }, state)
   }
 
   prepare(transactionId: string): RuntimeGenerationFence {
@@ -323,14 +387,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
-    this.sessions.add(session)
-    return () => {
-      this.sessions.delete(session)
-      for (const [transactionId, sessions] of this.staged) {
-        const remaining = sessions.filter(item => item !== session)
-        if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
-      }
-    }
+    this.departures.add(session)
+    return () => this.departures.remove(session)
   }
 
   /** Reserve one boot-ready renderer for cold recovery before normal admission. */
@@ -344,6 +402,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     const token = Symbol('renderer-join')
     this.generationOwner = { kind: 'join', token, session }
     this.joining.add(session)
+    this.departures.changed()
     let settled = false
     return {
       commit: developmentVersion => {
@@ -357,14 +416,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         }
         this.generationOwner = undefined
         settled = true
-        this.sessions.add(session)
-        return () => {
-          this.sessions.delete(session)
-          for (const [transactionId, sessions] of this.staged) {
-            const remaining = sessions.filter(item => item !== session)
-            if (remaining.length !== sessions.length) this.staged.set(transactionId, remaining)
-          }
-        }
+        this.departures.add(session)
+        return () => this.departures.remove(session)
       },
       abort: () => {
         if (settled) return
@@ -373,6 +426,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         if (this.generationOwner?.kind === 'join' && this.generationOwner.token === token) {
           this.generationOwner = undefined
         }
+        this.departures.changed()
       },
     }
   }
@@ -383,7 +437,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.fences.delete(transactionId)
     this.retiredTransactionArtifactLeases.delete(transactionId)
     if (this.generationOwner?.kind === 'transaction' && this.generationOwner.transactionId === transactionId) {
-      this.generationOwner = undefined
+      const shared = this.sharedAdmission
+      this.generationOwner = shared?.transactionId === transactionId && !shared.released
+        ? { kind: 'shared-admission', token: shared.token, transactionId }
+        : undefined
     }
     this.permissionIdentities?.[permission](transactionId)
     this.ownerDocumentAuthority?.leases[permission](transactionId)
@@ -429,37 +486,23 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     }
   }
 
-  private async projectDevelopmentState(
-    session: CdpSession,
-    state: CordisXLocalDevelopmentSnapshot,
-  ): Promise<void> {
-    await evaluateRuntimeOperation(
-      session,
-      `(async () => { try {
-      await globalThis.__cordisxBoot
-      const runtime = globalThis.__cordisxRuntime
-      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-      return { ok: true, result: runtime.updateLocalDevelopmentStatus(${JSON.stringify(state)}) }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
-    )
-  }
-
   async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
     this.developmentStates.set(state.sourcePath, structuredClone(state))
     this.developmentVersion += 1
-    await Promise.all([...this.sessions].map(async session => await this.projectDevelopmentState(session, state)))
+    await Promise.all([...this.sessions].map(async session => await projectCdpDevelopmentState(session, state)))
   }
 
   async synchronizeDevelopmentStatus(session: CdpSession): Promise<number> {
     while (true) {
       const version = this.developmentVersion
       const states = [...this.developmentStates.values()].map(state => structuredClone(state))
-      for (const state of states) await this.projectDevelopmentState(session, state)
+      for (const state of states) await projectCdpDevelopmentState(session, state)
       if (version === this.developmentVersion) return version
     }
   }
 
-  async stage(mutation: PluginRuntimeMutation): Promise<RuntimeReadinessObservation> {
+  async stage(mutation: PluginRuntimeMutation, sharedToken?: symbol): Promise<RuntimeReadinessObservation> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = [...this.sessions]
     if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
     const fence = this.fences.get(mutation.transactionId)
@@ -638,6 +681,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
       for (const result of results) if (result.status === 'fulfilled') receipts.push(result.value)
       if (failed !== undefined) throw failed.reason
+      if (this.sharedAdmission) assertSharedCdpReadiness(receipts, mutation)
       const first = receipts[0]!
       if (
         receipts.some(item =>
@@ -654,7 +698,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     }
   }
 
-  async publish(transactionId: string): Promise<RuntimePublicationObservation> {
+  async publish(transactionId: string, sharedToken?: symbol): Promise<RuntimePublicationObservation> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     const mutation = this.stagedMutations.get(transactionId)
     const resourcePublication = mutation === undefined
@@ -683,11 +728,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         || item.registryEpoch !== first.registryEpoch
       )
     ) throw new Error('CordisX renderer publications disagree')
+    if (this.sharedAdmission) assertSharedCdpPublication(results, mutation)
     this.registryEpoch = first.registryEpoch
     return first
   }
 
-  async complete(transactionId: string): Promise<RuntimeCleanupObservation> {
+  async complete(transactionId: string, sharedToken?: symbol): Promise<RuntimeCleanupObservation> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     const results = await Promise.all(
       sessions.map(async session =>
@@ -709,10 +756,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         || item.registryEpoch !== first.registryEpoch
       )
     ) throw new Error('CordisX renderer cleanup observations disagree')
+    const mutation = this.stagedMutations.get(transactionId)
+    if (this.sharedAdmission) assertSharedCdpCleanup(results, mutation)
     return first
   }
 
-  async finalize(transactionId: string): Promise<void> {
+  async finalize(transactionId: string, sharedToken?: symbol): Promise<void> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     const mutation = this.stagedMutations.get(transactionId)
     await Promise.all(sessions.map(async session =>
@@ -752,7 +802,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.releaseTransaction(transactionId, 'commit')
   }
 
-  async rollback(transactionId: string): Promise<RuntimeCleanupObservation> {
+  async rollback(transactionId: string, sharedToken?: symbol): Promise<RuntimeCleanupObservation> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     if (sessions.length === 0) {
       const mutation = this.stagedMutations.get(transactionId)
@@ -808,7 +859,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     return first
   }
 
-  async recoverRollback(plan: RollbackPlan): Promise<RuntimeCleanupObservation> {
+  async recoverRollback(plan: RollbackPlan, sharedToken?: symbol): Promise<RuntimeCleanupObservation> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = [...this.sessions, ...this.joining]
     const recovery = {
       transactionId: plan.transactionId,
@@ -856,7 +908,12 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     return first
   }
 
-  async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
+  async adoptRecoveredActivation(
+    active: CordisXPluginActivationRecordV1,
+    registryEpoch: number,
+    sharedToken?: symbol,
+  ): Promise<void> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = [...this.sessions, ...this.joining]
     await Promise.all(
       sessions.map(async session => await this.adoptRecoveredActivationFor(session, active, registryEpoch)),
@@ -887,7 +944,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.recoveredSessions.add(session)
   }
 
-  async commit(transactionId: string): Promise<void> {
+  async commit(transactionId: string, sharedToken?: symbol): Promise<void> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     await Promise.all(sessions.map(async session =>
       await evaluateRuntimeOperation(
@@ -903,7 +961,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.releaseTransaction(transactionId, 'commit')
   }
 
-  async abort(transactionId: string): Promise<void> {
+  async abort(transactionId: string, sharedToken?: symbol): Promise<void> {
+    assertSharedCdpOperation(this.sharedAdmission, sharedToken)
     const sessions = this.staged.get(transactionId) ?? []
     const mutation = this.stagedMutations.get(transactionId)
     await Promise.all(sessions.map(async session =>
@@ -926,20 +985,12 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   async reload(
     input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string },
   ): Promise<void> {
-    const sessions = [...this.sessions]
-    if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
-    await Promise.all(sessions.map(async session =>
-      await evaluateRuntimeOperation(
-        session,
-        `(async () => { try {
-      const runtime = globalThis.__cordisxRuntime
-      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-      await runtime.reloadPluginGeneration(${JSON.stringify(input.pluginId)}, ${
-          JSON.stringify(input.moduleGeneration)
-        }, ${JSON.stringify(input.runtimeGeneration)})
-      return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
-      )
-    ))
+    if (this.sharedAdmission) throw new Error('CDP shared admission blocks renderer reload')
+    this.pendingSharedReloads += 1
+    try {
+      await reloadCdpSessions([...this.sessions], input)
+    } finally {
+      this.pendingSharedReloads -= 1
+    }
   }
 }

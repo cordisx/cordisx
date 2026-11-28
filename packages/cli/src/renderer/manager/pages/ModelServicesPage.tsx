@@ -10,7 +10,7 @@ import { IconButton } from '../../host-ui/IconButton.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { HostMenuSurface } from '../../host-ui/HostMenu.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 import { ProviderAction } from '../../model-provider-actions.js'
 import { modelProviderCopy } from '../../model-provider-copy.js'
 import css from '../../model-providers.css?inline'
@@ -52,6 +52,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<ReadonlySet<CatalogFilter>>(() => new Set(['selectable']))
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const [sharedAvailable, setSharedAvailable] = useState(false)
   const transfer = useModelTransfer(client, locale, () => {
     setFilters(new Set())
     void registry?.refresh()
@@ -109,7 +110,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected
   const loading = state.loading || catalog.loading || Boolean(state.startup && !state.startup.snapshot)
   const refreshing = loading || state.refreshing === true || catalog.refreshing === true
-  const unavailable = !registry || !client && !state.startup
+  const unavailable = !registry || !client && !state.startup && !registry.hasLiveSource()
   const failed = Boolean(state.error) || Boolean(client && !catalog.connected && !catalog.loading)
   const canCreate = Boolean(onCreate && client && catalog.connected && catalog.canCreateConnection && !loading)
   const refresh = () => {
@@ -117,6 +118,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
     void client?.refresh()
   }
   const noConnections = state.providers.length === 0 && catalog.views.length === 0
+  const showCatalogState = registry?.standaloneModelServices === undefined || !sharedAvailable || !noConnections
   const filtering = filters.size !== 1 || !filters.has('selectable')
   const noMatches = normalized.length > 0
     && !providers.some(({ provider }) =>
@@ -150,13 +152,11 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
       >
         <EmptyStateIllustrationStyles />
         <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
-        <SearchToolbar
-          toolbarLabel={t('catalog.tools')}
-          clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        <ManagerBrowseSearch
+          kind="model-services"
+          locale={locale}
           value={query}
           onChange={setQuery}
-          aria-label={copy.search}
-          placeholder={copy.search}
           actions={
             <>
               <CatalogFilterMenu
@@ -257,7 +257,18 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           aria-busy={refreshing}
           data-empty-layout={noConnections ? 'hero' : undefined}
         >
-          {transfer.exporting ? null : <SharedModelServices client={client} locale={locale} />}
+          {transfer.exporting
+            ? null
+            : (
+              <SharedModelServices
+                client={registry?.standaloneModelServices ?? client}
+                locale={locale}
+                showWhenEmpty={registry?.standaloneModelServices !== undefined
+                  || client?.modelServicesWritable === false}
+                reconcile={registry?.standaloneModelServices !== undefined || client?.modelServicesWritable === false}
+                onAvailabilityChange={setSharedAvailable}
+              />
+            )}
           {transfer.exporting || state.entries.length === 0
             ? null
             : (
@@ -273,7 +284,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                 ))}
               </section>
             )}
-          {!noConnections && !loading && (failed || unavailable)
+          {showCatalogState && !noConnections && !loading && (failed || unavailable)
             ? (
               <EmptyState
                 family="model-services"
@@ -322,7 +333,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
               key={provider.providerId}
               provider={provider}
               modelsLabel={copy.models}
-              {...(catalog.connected ? { readOnly: t('catalog.readOnly') } : {})}
+              {...(catalog.connected || provider.readOnly ? { readOnly: t('catalog.readOnly') } : {})}
               bindingState={catalog.connected ? 'unbound' : managementState}
               startupState={state.startup}
               locale={locale}
@@ -349,7 +360,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           {transfer.exporting && views.length === 0
             ? <p className="cxr-empty">{locale.startsWith('zh') ? '没有可导出的连接' : 'No exportable connections'}</p>
             : null}
-          {!transfer.exporting && (noConnections
+          {!transfer.exporting && showCatalogState && (noConnections
               || (noMatches || noFilterMatches) && !loading && !failed)
             ? (
               <EmptyState

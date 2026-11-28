@@ -19,12 +19,23 @@ interface Draft {
   readonly purpose: 'create' | 'rotate'
   readonly ref: ChannelCredentialRef
   readonly captureId: string
+  readonly journalReference?: string
   readonly revision: number
   readonly expiresAt: number
 }
 const sameRef = (left: ChannelCredentialRef, right: ChannelCredentialRef) =>
   left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 const rejected = (code: string): ChannelCredentialDraftResult => ({ status: 'rejected', code })
+const undispatchedTenantResults = new WeakSet<ChannelCredentialDraftResult>()
+function rejectedUndispatchedTenant(code: string): ChannelCredentialDraftResult {
+  const result = Object.freeze(rejected(code))
+  undispatchedTenantResults.add(result)
+  return result
+}
+/** Owner-only evidence that this result was produced before configuration mutation. */
+export function isUndispatchedTenantResult(result: ChannelCredentialDraftResult): boolean {
+  return undispatchedTenantResults.has(result)
+}
 const TENANT_LOOKUP_TIMEOUT_MS = 5_000
 async function boundedTenantLookup(operation: Promise<string>): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -82,6 +93,10 @@ export class ChannelCredentialDraftBroker {
       readonly now?: () => number
       readonly discoverTenant?: typeof discoverChannelTenant
       readonly validateCredentials?: typeof validateChannelCredentials
+      /** Optional Host-private crash recovery journal; never receives a secret value. */
+      readonly recordDraft?: (reference: string) => Promise<void>
+      readonly retireDraft?: (reference: string) => Promise<void>
+      readonly cleanupDraft?: (reference: string) => Promise<boolean>
     },
   ) {
     this.timer = setInterval(() => {
@@ -216,6 +231,9 @@ export class ChannelCredentialDraftBroker {
       }
       this.drafts.delete(id)
       this.input.store.forget(draft.captureId)
+      if (draft.journalReference !== undefined) {
+        await this.input.retireDraft?.(draft.journalReference).catch(() => undefined)
+      }
       const projection = await this.input.projection?.().catch(() => undefined)
       return { status: 'applied', code: 'APPLIED', ref: draft.ref, ...(projection === undefined ? {} : { projection }) }
     } catch (error) {
@@ -253,13 +271,52 @@ export class ChannelCredentialDraftBroker {
     })
     if (index < 0) return rejected('TARGET_UNAVAILABLE')
     const entry = pending[index]!
-    const tenantId = request.tenantId === undefined || request.tenantId === ''
-      ? await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
-        adapterId: account.adapterId,
-        accountId: account.accountId,
-        secret: await this.input.store.readChannelReference(text(entry.secretRef), this.input.profileId),
-      }))
-      : text(request.tenantId)
+    let tenantId: string
+    if (request.tenantId === undefined || request.tenantId === '') {
+      try {
+        tenantId = await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+          adapterId: account.adapterId,
+          accountId: account.accountId,
+          secret: await this.input.store.readChannelReference(text(entry.secretRef), this.input.profileId),
+        }))
+      } catch (error) {
+        if (!this.live(documentId)) return rejected('STALE_GENERATION')
+        const code = error instanceof Error && [
+            'CREDENTIAL_UNAVAILABLE',
+            'TENANT_DISCOVERY_PERMISSION_DENIED',
+            'TENANT_DISCOVERY_FAILED',
+          ].includes(error.message)
+          ? error.message
+          : 'TENANT_DISCOVERY_FAILED'
+        return rejectedUndispatchedTenant(code)
+      }
+    } else {
+      tenantId = text(request.tenantId)
+      let discovered: string | undefined
+      let checking = true
+      try {
+        discovered = text(
+          await boundedTenantLookup((async () => {
+            const secret = await this.input.store.readChannelReferenceSilently(
+              text(entry.secretRef),
+              this.input.profileId,
+            )
+            if (!checking || !this.live(documentId)) throw new Error('TENANT_DISCOVERY_FAILED')
+            return await (this.input.discoverTenant ?? discoverChannelTenant)({
+              adapterId: account.adapterId,
+              accountId: account.accountId,
+              secret,
+            })
+          })()),
+        )
+      } catch {
+        /* Manual identity remains available when silent verification is unavailable. */
+      } finally {
+        checking = false
+      }
+      if (!this.live(documentId)) return rejected('STALE_GENERATION')
+      if (discovered !== undefined && tenantId !== discovered) return rejectedUndispatchedTenant('TENANT_MISMATCH')
+    }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
     const resolved = {
       ref: { ...account, tenantId },
@@ -310,19 +367,23 @@ export class ChannelCredentialDraftBroker {
       accountId: account.accountId,
       secret,
     })
-    if (!account.tenantId && request.purpose === 'create') {
+    let discovered: string | undefined
+    if (request.purpose === 'create') {
       try {
-        account = {
-          ...account,
-          tenantId: await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+        discovered = text(
+          await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
             adapterId: account.adapterId,
             accountId: account.accountId,
             secret,
           })),
-        }
+        )
       } catch { /* Authenticated credentials remain useful while tenant metadata is unavailable. */ }
     }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
+    if (discovered !== undefined) {
+      if (account.tenantId && account.tenantId !== discovered) return rejected('TENANT_MISMATCH')
+      account = { ...account, tenantId: discovered }
+    }
     const configuration = await this.input.service.descriptor()
     if (!configuration.writable) return rejected('PERMISSION_DENIED')
     if (request.expectedRevision !== undefined) {
@@ -354,6 +415,21 @@ export class ChannelCredentialDraftBroker {
       profileId: this.input.profileId,
       connectionId: `draft-${randomBytes(20).toString('hex')}`,
     })
+    const journalReference = this.input.recordDraft === undefined
+      ? undefined
+      : this.input.store.referenceFor(capture.captureId)
+    if (this.input.recordDraft !== undefined) {
+      if (journalReference === undefined) {
+        this.input.store.forget(capture.captureId)
+        return { status: 'unavailable', code: 'CREDENTIAL_UNAVAILABLE' }
+      }
+      try {
+        await this.input.recordDraft(journalReference)
+      } catch {
+        this.input.store.forget(capture.captureId)
+        return { status: 'unavailable', code: 'DRAFT_JOURNAL_UNAVAILABLE' }
+      }
+    }
     const draft: Draft = {
       id,
       owner,
@@ -361,6 +437,7 @@ export class ChannelCredentialDraftBroker {
       purpose: request.purpose as 'create' | 'rotate',
       ref: account,
       captureId: capture.captureId,
+      ...(journalReference === undefined ? {} : { journalReference }),
       revision: configuration.revision,
       expiresAt: this.now() + 10 * 60_000,
     }
@@ -379,10 +456,17 @@ export class ChannelCredentialDraftBroker {
     }
   }
   private async remove(draft: Draft): Promise<boolean> {
-    const result = await this.input.store.remove(draft.captureId)
-    if (result.state !== 'unset') return false
+    if (draft.journalReference !== undefined && this.input.cleanupDraft !== undefined) {
+      if (!await this.input.cleanupDraft(draft.journalReference)) return false
+    } else {
+      const result = await this.input.store.remove(draft.captureId)
+      if (result.state !== 'unset') return false
+    }
     this.drafts.delete(draft.id)
     this.input.store.forget(draft.captureId)
+    if (draft.journalReference !== undefined) {
+      await this.input.retireDraft?.(draft.journalReference).catch(() => undefined)
+    }
     return true
   }
   private async expire() {

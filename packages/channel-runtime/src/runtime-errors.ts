@@ -1,4 +1,5 @@
 import { ChannelIntegrityError } from './runtime-validation.js'
+import type { StoredAdapterState } from './store.js'
 import type { ChannelCapability, ChannelPermissionDecision } from './types.js'
 export class RetryableChannelError extends Error {
   readonly code: string
@@ -59,4 +60,18 @@ export function secretStateForStartFailure(
   if (error.name === 'CHANNEL_SECRET_MISSING') return 'missing'
   if (error.name === 'CHANNEL_SECRET_UNAVAILABLE' || error.name === 'CHANNEL_SECRET_REF_INVALID') return 'unavailable'
   return descriptor.secretState
+}
+
+/** A last-good adapter remains ready only while this runtime owns its generation. */
+export function failedAdapterState(
+  current: StoredAdapterState,
+  error: unknown,
+  activeGeneration: number | undefined,
+): StoredAdapterState {
+  return {
+    ...current,
+    connectionState: activeGeneration === current.generation ? current.connectionState : 'unavailable',
+    secretState: secretStateForStartFailure(current, error),
+    lastErrorCode: errorCode(error),
+  }
 }

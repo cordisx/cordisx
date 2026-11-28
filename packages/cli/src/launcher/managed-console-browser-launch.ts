@@ -3,14 +3,22 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import {
   type ManagedConsoleBrowserGateway,
+  MAX_STANDALONE_CONSOLE_ORIGINS,
   openManagedConsoleBrowserGateway,
 } from './managed-console-browser-gateway.js'
+import type { ManagedBrowserConsoleBoundary } from './managed-service-browser-console-broker.js'
 
 /** App builds whose browser resolver and cookie boundary have native evidence. */
 const VERIFIED_CODE_DIRECTORIES = new Map([
   ['25679', 'f056dea6c8c27d5221903826d59e2becfa209a4d'],
   ['25894', '699937d138fa785a0e6c724bbc5d01f243f4e4a4'],
 ])
+
+interface StandalonePreparation {
+  cancelled: boolean
+  cleanupFailed: boolean
+  readonly settled: Promise<void>
+}
 
 export function verifiedManagedConsoleBrowserApp(executable: string, build: string, signature: string): boolean {
   const hash = VERIFIED_CODE_DIRECTORIES.get(build.trim())
@@ -53,9 +61,14 @@ export async function supportsManagedConsoleBrowserLaunch(
 /** The launcher owns the resolver and gateway for the lifetime of its isolated App. */
 export class ManagedConsoleBrowserLaunch {
   private gateway: ManagedConsoleBrowserGateway | undefined
+  private standaloneGateways: readonly ManagedConsoleBrowserGateway[] = []
+  private standaloneBoundary: ManagedBrowserConsoleBoundary | undefined
   private ready = false
+  private standalonePreparation: StandalonePreparation | undefined
+  private closing: Promise<void> | undefined
+  private cleanupFailed = false
 
-  readonly boundary = () => this.ready ? this.gateway?.boundary : undefined
+  readonly boundary = () => this.ready ? this.gateway?.boundary ?? this.standaloneBoundary : undefined
 
   async prepare(executable: string, hostArgs: readonly string[], signal: AbortSignal): Promise<readonly string[]> {
     if (!await supportsManagedConsoleBrowserLaunch(executable, hostArgs, signal)) return hostArgs
@@ -64,14 +77,84 @@ export class ManagedConsoleBrowserLaunch {
     return this.gateway ? [...hostArgs, this.gateway.hostArgument] : hostArgs
   }
 
+  /** A standalone Manager uses the browser's localhost handling and a separate origin. */
+  async prepareStandalone(signal: AbortSignal): Promise<readonly string[]> {
+    if (
+      signal.aborted || this.gateway !== undefined || this.standaloneGateways.length > 0
+      || this.standalonePreparation || this.closing || this.cleanupFailed
+    ) {
+      throw new Error('managed browser console unavailable')
+    }
+    let settle!: () => void
+    const settled = new Promise<void>(resolve => settle = resolve)
+    const preparation: StandalonePreparation = { cancelled: false, cleanupFailed: false, settled }
+    this.standalonePreparation = preparation
+    const assertPreparing = () => {
+      signal.throwIfAborted()
+      if (preparation.cancelled) throw new Error('managed browser console unavailable')
+    }
+    const gateways: ManagedConsoleBrowserGateway[] = []
+    try {
+      for (let index = 0; index < MAX_STANDALONE_CONSOLE_ORIGINS; index++) {
+        assertPreparing()
+        gateways.push(await openManagedConsoleBrowserGateway())
+      }
+      assertPreparing()
+      this.standaloneGateways = gateways
+      this.standaloneBoundary = {
+        open(input) {
+          for (const gateway of gateways) {
+            const route = gateway.boundary.open(input)
+            if (route) return route
+          }
+          return undefined
+        },
+      }
+      this.ready = true
+      return gateways.map(gateway => gateway.origin)
+    } catch (error) {
+      const closed = await Promise.allSettled(gateways.map(async gateway => await gateway.close()))
+      if (closed.some(result => result.status === 'rejected')) {
+        preparation.cleanupFailed = true
+        this.cleanupFailed = true
+      }
+      throw error
+    } finally {
+      if (this.standalonePreparation === preparation) this.standalonePreparation = undefined
+      settle()
+    }
+  }
+
   markReady() {
     this.ready = this.gateway !== undefined
   }
 
   async close() {
+    if (this.closing) return await this.closing
+    const preparation = this.standalonePreparation
+    if (preparation) preparation.cancelled = true
     this.ready = false
     const gateway = this.gateway
+    const standalone = this.standaloneGateways
     this.gateway = undefined
-    await gateway?.close()
+    this.standaloneGateways = []
+    this.standaloneBoundary = undefined
+    const closing = (async () => {
+      const results = await Promise.allSettled([
+        ...[...(gateway ? [gateway] : []), ...standalone].map(async item => await item.close()),
+        ...(preparation ? [preparation.settled] : []),
+      ])
+      if (preparation?.cleanupFailed || results.some(result => result.status === 'rejected')) {
+        this.cleanupFailed = true
+        throw new Error('managed browser console cleanup unavailable')
+      }
+      if (this.cleanupFailed) throw new Error('managed browser console cleanup unavailable')
+    })()
+    this.closing = closing
+    try {
+      await closing
+    } finally {
+      if (this.closing === closing) this.closing = undefined
+    }
   }
 }

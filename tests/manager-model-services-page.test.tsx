@@ -23,6 +23,7 @@ describe('Manager model services catalog', () => {
       snapshot: () => state,
       subscribe: () => () => {},
       refresh: async () => {},
+      hasLiveSource: () => false,
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {
@@ -59,6 +60,7 @@ describe('Manager model services catalog', () => {
       snapshot: () => state,
       subscribe: () => () => {},
       refresh: async () => {},
+      hasLiveSource: () => false,
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {
@@ -107,6 +109,7 @@ describe('Manager model services catalog', () => {
         state = { ...state, loading: false }
         for (const listener of listeners) listener()
       },
+      hasLiveSource: () => false,
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {

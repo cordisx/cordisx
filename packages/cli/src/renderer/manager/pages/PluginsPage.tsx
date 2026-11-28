@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { ActionGroup } from '../../host-ui/ActionGroup.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy, productLocale } from '../../ui-copy.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
@@ -55,11 +55,10 @@ export function PluginsPage(
       aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-label')}
       data-unified-plugins-page="true"
     >
-      <SearchToolbar
-        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+      <ManagerBrowseSearch
+        kind="plugins"
+        locale={snapshot.localization.locale}
         value={query}
-        aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-search-label')}
-        placeholder={managerCopy(snapshot.localization.locale, 'plugins.collection-search-placeholder')}
         onChange={setQuery}
       />
 
@@ -122,7 +121,8 @@ export function PluginsPage(
                     plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable',
                   )}
                   loading={lifecycle.busyPluginId === plugin.id}
-                  disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                  disabled={!lifecycle.canRun(plugin, plugin.status === 'configured-disabled' ? 'enable' : 'disable')
+                    || lifecycle.busyPluginId === plugin.id}
                   onClick={() =>
                     void lifecycle.run(
                       plugin,
@@ -155,7 +155,7 @@ export function PluginsPage(
                       id: 'uninstall',
                       label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'),
                       icon: 'uninstall-plugin',
-                      disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id,
+                      disabled: !lifecycle.canRun(plugin, 'uninstall') || lifecycle.busyPluginId === plugin.id,
                       onSelect: () =>
                         void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }),
                     },

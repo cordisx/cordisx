@@ -26,8 +26,8 @@ a running instance with different launch options is never restarted implicitly.
 CLI mode defaults to Codex; `claude-code` selects the original Claude Code
 terminal. The `cordisx cli` alias remains supported. `-s`/`-m` mean
 `--service`/`--model`. Both must be supplied together, and arguments after `--`
-belong to the selected client. `--profile` selects an existing CordisX Codex
-service profile, while client profile arguments belong after `--`.
+belong to the selected client. `--profile` selects an existing CordisX service
+profile, while client profile arguments belong after `--`.
 
 CLI processes have separate terminal sessions and reuse the same selected
 CordisX gateway. Starting two terminals never restarts two Host services.
@@ -58,9 +58,12 @@ For Claude Code an invocation-scoped `--settings` overlay pins the endpoint and
 credential helper, so a user settings `env` entry cannot redirect the explicitly
 selected service. The key stays in the child environment, never command arguments
 or a settings file. Existing tool permissions are retained; the launcher does
-not enable bypass mode. An unauthenticated loopback managed gateway can also
-serve Claude Code; a managed bearer gateway is rejected until a Claude-specific
-credential adapter is provided. Gateway support for a model remains necessary.
+not enable bypass mode. A loopback managed gateway can also serve Claude Code.
+When it needs bearer authentication, the existing owner issues a command-backed
+credential lease for that CLI session; the upstream credential is not put in
+arguments or the settings overlay. The gateway must support Anthropic Messages
+for the selected model. Managed gateway catalogs do not yet declare that
+protocol, so an incompatible gateway can return an error after launch.
 
 ## Select an existing plugin service
 
@@ -70,6 +73,7 @@ enabled and logged in. List the exact provider and model IDs:
 ```sh
 cordisx cli --list
 cordisx cli --list --profile work
+cordisx cli --list --profile work --owner-app codex
 ```
 
 Use an exact provider ID and model ID from that output:
@@ -85,7 +89,26 @@ the live Host's existing gateway and credentials. The CLI does not export plugin
 login or copy credentials into Codex configuration. It holds a launch-scoped
 command-backed credential lease and releases it when the child exits or startup
 fails. Owner/service replacement invalidates the lease; start a new CLI session.
-An orphaned launch expires. The existing App and unrelated services are retained.
+The wrapper asks its terminal child to exit and, if it does not respond, ends it
+after a short grace period. It does not replay the interrupted request. An
+orphaned launch expires. The existing App and unrelated services are retained.
+
+In the standalone service candidate, a plugin change is rejected while an
+active terminal uses that plugin or a dependent. Finish the affected session
+and retry. Unrelated active terminals retain their leases; new terminal launches
+may be temporarily unavailable during a plugin change. This guard does not yet
+cover native adapters or external model API clients.
+
+The CLI discovers the single live owner among configured App namespaces that
+contain the selected profile; `--owner-app ID` requires that exact namespace.
+Multiple claiming owners, an insecure or unverifiable endpoint, and an owner
+change are errors: the CLI never picks one by order. A standalone service owner
+can supply dynamic plugin services as well. This does not make Desktop and
+service mode concurrent owners: one profile still has one runtime owner. Codex
+CLI's host-isolated data root is resolved only from its own Codex profile.
+Shared model-service declarations do not use an owner lease, so `--owner-app`
+applies to listing or selecting a live plugin/Manager service, not to those
+independent declarations.
 
 `--list` merges the live catalog with compatible shared declarations; `managed: true` marks
 plugin/Manager gateways, and shared declarations carry `source: "model-service"`.

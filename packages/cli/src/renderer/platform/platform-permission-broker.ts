@@ -56,10 +56,9 @@ export class PermissionBroker extends PlatformUsagePermissionBroker {
             }
           })
         }
-        const operationId = `snapshot:${this.generation}:${
-          registration.generation.moduleGeneration ?? 'host'
-        }:${registration.identity.id}`
-        const plan = this.planV2(registration, 'enable', this.binding(registration, operationId))
+        // Snapshot plans only read declarations and are never submitted as
+        // authorization decisions. Keep the ID bounded when generations are long.
+        const plan = this.planV2(registration, 'enable', this.binding(registration, 'snapshot'))
         const denied = new Set(this.requiredDenied(registration.identity))
         return plan.declarations.map(item => {
           const declaration = registration.declarationsV2.get(item.capability)!
@@ -218,6 +217,7 @@ export class PermissionBroker extends PlatformUsagePermissionBroker {
   }
 
   dispose(): void {
+    this.policyRecords.invalidate()
     this.disposeUsagePermissions()
     this.disposeVisualInteractions()
     this.clearAgentRuntimeConnection()

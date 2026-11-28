@@ -5,7 +5,7 @@ import { waitForChromeDebugPort } from './chrome-debug-port.js'
 import { launchObservedChrome, observeChromeReadiness } from './chrome-launch-diagnostics.js'
 
 /** Shared isolated browser policy keeps native fixtures equivalent on macOS and Linux CI. */
-function chromeLaunchArguments(profile: string): string[] {
+function chromeLaunchArguments(profile: string, extraArgs: readonly string[]): string[] {
   return [
     '--headless=new',
     '--no-first-run',
@@ -20,12 +20,13 @@ function chromeLaunchArguments(profile: string): string[] {
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
+    ...extraArgs,
     'about:blank',
   ]
 }
 
-export function launchChrome(executable: string, profile: string) {
-  return launchObservedChrome(executable, chromeLaunchArguments(profile))
+export function launchChrome(executable: string, profile: string, extraArgs: readonly string[] = []) {
+  return launchObservedChrome(executable, chromeLaunchArguments(profile, extraArgs))
 }
 
 export async function waitForChromeTarget(
@@ -33,24 +34,29 @@ export async function waitForChromeTarget(
   browser: ChildProcess,
   stderr: () => string,
 ): Promise<string> {
-  const deadline = Date.now() + 15_000
-  const diagnostics = observeChromeReadiness(browser, [0, 5_000, 10_000])
+  const launchDeadline = Date.now() + 30_000
+  const diagnostics = observeChromeReadiness(browser, [0, 5_000, 10_000, 20_000])
   try {
     // Chrome binds its own port and publishes it in this browser's private profile.
     const port = await waitForChromeDebugPort(
       browser,
       () => diagnostics.readActivePort(() => readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')),
       stderr,
-      Math.max(0, deadline - Date.now()),
+      Math.max(0, launchDeadline - Date.now()),
     )
     diagnostics.activePort(port)
-    while (Date.now() < deadline) {
+    // A published debug port does not mean the first page target exists yet.
+    // Give the first target a separate bounded wait after the cold launch.
+    const targetDeadline = Date.now() + 10_000
+    while (Date.now() < targetDeadline) {
       if (browser.exitCode !== null || browser.signalCode !== null) {
         throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
       }
       diagnostics.targetPoll()
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) })
+        const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+          signal: AbortSignal.timeout(Math.max(1, Math.min(1_000, targetDeadline - Date.now()))),
+        })
         diagnostics.pageTargets({ status: response.status })
         if (response.ok) {
           const targets = await response.json() as Array<

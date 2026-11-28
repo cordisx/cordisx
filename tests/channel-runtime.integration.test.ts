@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -312,6 +312,51 @@ describe('launcher-side Channel runtime and simulator', () => {
     expect(secondRuntime.snapshot().accounts[0]).toMatchObject({ generation: 2, lastGoodRevision: 2 })
     expect(JSON.stringify(secondRuntime.snapshot())).not.toContain('bindings')
     await secondRuntime.dispose()
+  })
+
+  it('does not report an interrupted owner as ready when a new adapter fails to start', async () => {
+    const file = await storePath()
+    const permissions = new SimulatedPermissionBroker()
+    const first = await ChannelRuntime.open({ permissions, storePath: file })
+    const handle = await first.activate(new SimulatedChannelAdapter(), SIMULATOR_ADAPTER_IDENTITY)
+    await handle.receive(createEnvelope('interrupted-owner'))
+    // Preserve exactly what an abrupt owner exit leaves on disk, then release this fixture's adapter.
+    const interruptedStore = await readFile(file)
+    await first.dispose()
+    await writeFile(file, interruptedStore)
+
+    const recovered = await ChannelRuntime.open({ permissions, storePath: file })
+    try {
+      expect(recovered.snapshot().accounts[0]).toMatchObject({
+        connectionState: 'unavailable',
+        generation: 1,
+        lastGoodRevision: 1,
+        inbound: { pending: 1 },
+      })
+      await expect(recovered.activate(
+        new SimulatedChannelAdapter({ configurationRevision: 2, failStart: true }),
+        SIMULATOR_ADAPTER_IDENTITY,
+      )).rejects.toThrow('start failure')
+      expect(recovered.snapshot().accounts[0]).toMatchObject({
+        connectionState: 'unavailable',
+        generation: 1,
+        lastGoodRevision: 1,
+        lastErrorCode: 'ERROR',
+        inbound: { pending: 1 },
+      })
+      const replacement = await recovered.activate(
+        new SimulatedChannelAdapter({ configurationRevision: 2 }),
+        SIMULATOR_ADAPTER_IDENTITY,
+      )
+      expect(recovered.snapshot().accounts[0]).toMatchObject({
+        connectionState: 'ready',
+        generation: 2,
+        lastGoodRevision: 2,
+      })
+      await expect(replacement.drainInbound()).resolves.toBe(1)
+    } finally {
+      await recovered.dispose()
+    }
   })
 
   it('drains inbound events and retries outbound notifications with bounded backoff', async () => {

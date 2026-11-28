@@ -22,6 +22,8 @@ import {
 } from '../../permission-model-v3.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
 import { isPermissionPolicyRecordV3 } from '../../permission-persistence.js'
+import { prepareStandaloneDomPolicyHandoff } from '../standalone-dom-policy-adoption.js'
+import type { StandaloneDomPolicyAdoption } from '../../standalone-permission-contract.js'
 
 import { certifiedArtifactKey, object, platformIdentityKey } from './platform-manifest.js'
 import {
@@ -325,6 +327,111 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
     return isPermissionPolicyRecordV3(this.policyRecords.get(this.domLeaseKey(key)))
   }
 
+  /** Read the current generation's lease without starting another permission request. */
+  hasDomLease(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): boolean {
+    const registration = this.registration(identity, view)
+    return registration !== undefined && this.validDomLease(registration, pointId) !== undefined
+      && this.domLeaseVisible(registration, pointId)
+  }
+
+  /** Re-project a lease after a Host review has passed its final fence. */
+  refreshDomAccess(): void {
+    this.changed()
+  }
+
+  /** Adopt an owner-confirmed Channel Manager policy after comparing this renderer's snapshot. */
+  async adoptStandaloneDomPolicies(
+    input: StandaloneDomPolicyAdoption & {
+      readonly signal?: AbortSignal
+      readonly onUnknown?: () => void
+    },
+  ): Promise<boolean> {
+    return await this.adoptManagerDomPolicies(input, false)
+  }
+
+  /** Called only after the native runtime verifies a service-signed policy handoff. */
+  async adoptOwnerManagerPolicies(
+    input: StandaloneDomPolicyAdoption & { readonly onUnknown?: () => void },
+  ): Promise<boolean> {
+    return await this.adoptManagerDomPolicies(input, true)
+  }
+
+  private async adoptManagerDomPolicies(
+    input: StandaloneDomPolicyAdoption & { readonly signal?: AbortSignal; readonly onUnknown?: () => void },
+    nativeOwner: boolean,
+  ): Promise<boolean> {
+    const prepared = await prepareStandaloneDomPolicyHandoff(input, {
+      profileId: this.profileId,
+      catalogVersion: this.catalog.version,
+      registration: identity => this.registration(identity),
+      isRegistered: registration => this.isRegistered(registration),
+      waitForWrite: async () => await this.domPolicyCommitTail,
+      policies: () => [...this.policyRecords.values()],
+      ...(nativeOwner
+        ? {
+          targetAllowed: (identity: CordisXPluginIdentity, pointId: string) =>
+            identity.source.length > 0 && ['manager.settings.navigation-items', 'manager.content'].includes(pointId),
+        }
+        : {}),
+    })
+    if (!prepared) return false
+    const { captured, registration, changes, updates } = prepared
+    if (
+      input.signal?.aborted || this.registration(captured.identity)?.token !== registration.token
+      || !this.isRegistered(registration)
+    ) return false
+    const clearChangedLeases = () => {
+      for (const change of changes) {
+        this.clearExactDomLease(registration, change.pointId)
+        const pointKey = this.domPointKey(captured.identity, change.pointId, captured.moduleGeneration)
+        const plan = this.domPromptPlans.get(pointKey)
+        this.domPromptPlans.delete(pointKey)
+        this.domRequests.delete(pointKey)
+        const pendingKey = this.domPendingReviewKey(captured.identity, captured.moduleGeneration)
+        if (this.pendingDomReviews.get(pendingKey)?.pointId === change.pointId) {
+          this.pendingDomReviews.delete(pendingKey)
+        }
+        if (plan) {
+          try {
+            this.promptV2?.cancelV3?.(plan.planId, plan.binding)
+          } catch { /* the policy remains authoritative */ }
+        }
+      }
+    }
+    if (captured.origin) {
+      if (!input.onUnknown) return false
+      try {
+        return this.adoptPendingStandaloneDomPolicy(
+          captured.requestId,
+          updates,
+          clearChangedLeases,
+          input.onUnknown,
+        )
+      } catch {
+        return false
+      }
+    }
+    if (changes.length === 0) return true
+    this.batchChanges(() => {
+      for (const change of changes) this.policyRecords.set(change.key, change.record)
+      clearChangedLeases()
+      this.changed()
+    })
+    return true
+  }
+
+  private domLeaseVisible(registration: Registration, pointId: string): boolean {
+    try {
+      return this.promptV2?.isDomLeaseVisible?.(
+        registration.identity,
+        pointId,
+        registration.generation.moduleGeneration,
+      ) !== false
+    } catch {
+      return false
+    }
+  }
+
   domPolicies(): readonly DomPermissionPolicyEntry[] {
     return Object.freeze(
       [...this.policyRecords.values()].flatMap(record => {
@@ -380,6 +487,9 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
     }
     const lease = this.validDomLease(registration, pointId)
     if (lease !== undefined) {
+      if (!this.domLeaseVisible(registration, pointId)) {
+        return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
+      }
       return Object.freeze({
         authorized: true,
         state: 'allowed',
@@ -505,6 +615,7 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       ]))
     }`
     const plan = this.domPlan(registration, pointId, operationId)
+    let revision = this.policyRecords.revision
     const item = plan.declarations[0]!
     const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({
       profileId: plan.profileId,
@@ -554,6 +665,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
           policy: 'inherit',
         })
       }
+      if (!this.isAuthorizationCurrent(registration, revision)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
+          policy: 'inherit',
+        })
+      }
       if (decision === undefined) {
         this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit review cancelled or timed out')
         return Object.freeze({
@@ -563,12 +682,43 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
           policy: 'inherit',
         })
       }
-      const selected = await this.commitDomDecision(plan, decision)
+      let selected: CordisXPermissionDecisionV2
+      try {
+        selected = await this.commitDomDecision(
+          plan,
+          decision,
+          () => {
+            if (!this.isAuthorizationCurrent(registration, revision)) throw new Error('Invalidated permission request')
+          },
+          () => {
+            if (this.policyRecords.revision !== revision) throw new Error('Invalidated permission policy')
+          },
+        )
+      } catch (error) {
+        if (this.isAuthorizationCurrent(registration, revision)) throw error
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: this.isRegistered(registration)
+            ? 'permission.policy-invalidated'
+            : 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
+      if (selected === 'allow-persistent' || selected === 'deny-persistent') revision++
       if (!this.isRegistered(registration)) {
         return Object.freeze({
           authorized: false,
           state: 'denied',
           reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
+      if (!this.isAuthorizationCurrent(registration, revision)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
           policy: 'inherit',
         })
       }
@@ -602,14 +752,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       origin = 'explicit-user'
     }
     const granted = this.grantDomAccess(registration, pointId, plan, item, origin)
-    return this.isRegistered(registration)
-      ? granted
-      : Object.freeze({
-        authorized: false,
-        state: 'denied',
-        reason: 'permission.generation-invalidated',
-        policy: 'inherit',
-      })
+    if (this.isAuthorizationCurrent(registration, revision)) return granted
+    this.clearExactDomLease(registration, pointId)
+    return Object.freeze({
+      authorized: false,
+      state: 'denied',
+      reason: this.isRegistered(registration) ? 'permission.policy-invalidated' : 'permission.generation-invalidated',
+      policy: 'inherit',
+    })
   }
 
   protected grantDomAccess(
@@ -666,6 +816,8 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
   protected async commitDomDecision(
     plan: CordisXPermissionAuthorizationPlanV3,
     decision: CordisXPermissionAuthorizationDecisionV3,
+    assertCurrent: () => void,
+    assertPublish: () => void,
   ): Promise<CordisXPermissionDecisionV2> {
     if (
       decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3
@@ -697,9 +849,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
         policy: selected.decision,
       })
       const key = permissionRecordKeyV3(record)
-      await this.commitDomPolicyRecords([record], () => {
-        this.policyRecords.set(key, record)
-      })
+      await this.commitDomPolicyRecords(
+        [record],
+        () => {
+          this.policyRecords.set(key, record)
+        },
+        assertCurrent,
+        assertPublish,
+      )
     }
     return selected.decision
   }

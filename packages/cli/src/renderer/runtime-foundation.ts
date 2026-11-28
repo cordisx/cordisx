@@ -116,13 +116,10 @@ import { createHostAgentTaskDetailsNavigator } from './host-ui/AgentTaskDetailsN
 import {
   type AgentRuntimeConnection,
   type AgentRuntimeRouteScope,
-  BrowserPermissionAuthorizationPromptV2,
   BrowserPermissionPolicyStore,
-  BrowserPermissionPrompt,
   CordisXPlatformService,
   MemoryPermissionPolicyStore,
   normalizePluginManifest,
-  PermissionBroker,
   type PlatformPermissionSnapshot,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
@@ -193,6 +190,7 @@ import {
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
   platformAdapterCapabilityProvider,
+  serviceModelCapabilityProvider,
 } from './capability-availability.js'
 import { CORDISX_PLUGIN_PRINCIPAL, PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
@@ -275,19 +273,7 @@ export const createRuntimeDisconnectPluginConsoleVisibility = (runtimeScope: Run
     notify: () => runtimeScope.pluginConsole()!.visibilityChanged(runtimeScope.consoleAffectedPluginIds),
   })
 
-export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) =>
-  new PermissionBroker(
-    runtimeScope.permissionStore()!,
-    new BrowserPermissionPrompt(),
-    () => new Date(),
-    30000,
-    runtimeScope.metadata()!.profileId,
-    runtimeScope.generation()!,
-    runtimeScope.generationVisibility()!,
-    runtimeScope.pluginConsole()!,
-    new BrowserPermissionAuthorizationPromptV2(document),
-    runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
-  )
+export { createRuntimeBroker } from './runtime-permission-broker.js'
 
 export const createRuntimeHostDomAuthority = (runtimeScope: RuntimeClosureScope) =>
   new HostDomAuthority({
@@ -327,10 +313,13 @@ export const createRuntimeSimulatorV4Persistence = (runtimeScope: RuntimeClosure
   },
 })
 
-export const createRuntimeAgentLoopHost = (runtimeScope: RuntimeClosureScope) =>
-  runtimeScope.playgroundMockAgentLoop()! ?? (runtimeScope.bindingPlatformAdapter === undefined
-    ? new UnavailableAgentLoopHost()
-    : new BindingAgentLoopHost(runtimeScope.bindingPlatformAdapter, runtimeScope.metadata()!.workspaceCwd))
+export const createRuntimeAgentLoopHost = (runtimeScope: RuntimeClosureScope) => {
+  const cwd = runtimeScope.metadata()!.workspaceCwd
+  return runtimeScope.playgroundMockAgentLoop()!
+    ?? (runtimeScope.bindingPlatformAdapter === undefined || cwd === undefined
+      ? new UnavailableAgentLoopHost()
+      : new BindingAgentLoopHost(runtimeScope.bindingPlatformAdapter, cwd))
+}
 
 export const createRuntimeAgentLoopBrokerV2 = (runtimeScope: RuntimeClosureScope) =>
   new CordisXAgentLoopBrokerV2(
@@ -666,10 +655,12 @@ export const createRuntimeExternalProviderStatuses = (runtimeScope: RuntimeClosu
 
 export const createRuntimeCapabilityAvailability = (runtimeScope: RuntimeClosureScope) =>
   new CapabilityAvailabilityRegistry([
-    platformAdapterCapabilityProvider(runtimeScope.agentAdapter()!.status(), {
-      providerId: 'desktop-current-connection',
-      kind: 'current-connection',
-    }),
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? serviceModelCapabilityProvider(runtimeScope.platformAdapter()!.status())
+      : platformAdapterCapabilityProvider(runtimeScope.agentAdapter()!.status(), {
+        providerId: 'desktop-current-connection',
+        kind: 'current-connection',
+      }),
     ...externalProviderCapabilityProviders(runtimeScope.externalProviderStatuses()!),
     channelManagerCapabilityProvider(),
     ...hostLocalCapabilityProviders({
@@ -687,6 +678,7 @@ export const createRuntimeCapabilityAvailability = (runtimeScope: RuntimeClosure
         rawBridgeExposed: false,
       },
       configurationWritable: runtimeScope.configBridge()! !== undefined,
+      configurationPartiallyWritable: runtimeScope.standaloneDesktopPackageConfigBridge() !== undefined,
       packageLifecycleAvailable: runtimeScope.lifecycleBridge()! !== undefined,
     }),
   ])
@@ -850,7 +842,11 @@ export const createRuntimeRegisterController = (
     applies: configApplies,
     raw: controller.item.config,
     revision: controller.item.revision,
-    writable: runtimeScope.configBridge()! !== undefined
+    writable: (runtimeScope.configBridge()! !== undefined
+      || runtimeScope.metadata()!.hostKind === 'standalone'
+        && runtimeScope.standaloneDesktopPackageConfigBridge() !== undefined
+        && runtimeScope.metadata()!.standaloneDesktopPackageConfig?.plugins.includes(controller.item.id) === true
+        && configApplies === 'live')
       && controller.item.enabled
       && controllerHasRuntimeModule(controller)
       && configApplies !== 'service-restart',

@@ -1,13 +1,20 @@
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
+import {
+  processIdentityStatus,
+  processStartIdentity,
+  readSupervisorState,
+  supervisorPaths,
+} from '../packages/cli/src/cli/supervisor-state.js'
 import { stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 
 const run = promisify(execFile)
-const cli = path.resolve('packages/cli/dist/src/cli.js')
+const cli = process.env.CORDISX_SERVICE_MODE_TEST_CLI ?? path.resolve('packages/cli/dist/src/cli.js')
 const profile = 'service-fixture'
 const scope = ['--mode', 'service', 'codex', profile, '--json']
 
@@ -23,7 +30,7 @@ async function removeFixture(root: string) {
 }
 
 it('runs the production CLI and installed backend without Desktop, then reaps both owners', async () => {
-  const root = await mkdtemp('/tmp/cx-service-test-')
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-test-'))
   const home = path.join(root, 'home')
   const env: NodeJS.ProcessEnv = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith('CORDISX_')),
@@ -40,6 +47,14 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     })).stdout
   const lifecycle = async (action: string) => JSON.parse(await cmd(action, ...scope))
   const bindingPath = path.join(home, 'run', 'model-api', profile, 'server.json')
+  const backends = new Map<number, string>()
+  const owners = new Map<number, string>()
+  let restrictedDirectory: string | undefined
+  const rememberBackend = async (pid: number) => {
+    const startedAt = await processStartIdentity(pid)
+    expect(startedAt).toBeDefined()
+    if (startedAt !== undefined) backends.set(pid, startedAt)
+  }
   try {
     await mkdir(home)
     await stageServiceModePlugin(root, home, profile, true)
@@ -53,6 +68,9 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     })
     expect(reused.pid).toBe(ready.pid)
     expect(await lifecycle('status')).toMatchObject({ pid: ready.pid, modelApiUrl: ready.modelApiUrl })
+    const initialOwner = await readSupervisorState(supervisorPaths(home, 'codex', profile))
+    expect(initialOwner).toMatchObject({ pid: ready.pid, mode: 'service', serviceCleanup: 'pending' })
+    owners.set(ready.pid, initialOwner!.processStartedAt)
     expect(JSON.parse(await cmd('cli', '--list', '--profile', profile))).toMatchObject({
       kind: 'list',
       providers: expect.arrayContaining([expect.objectContaining({
@@ -103,7 +121,6 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       status: 'ok',
       services: [],
     })
-    await expect(cmd('start', 'codex', profile, '--json')).rejects.toThrow('owned by service mode')
     await expect(cmd('run', 'codex', profile)).rejects.toThrow('already has a runtime owner')
     const listing = JSON.parse(await cmd('plugin', 'list', '--profile', profile, '--json'))
     expect(listing).toMatchObject({
@@ -142,6 +159,7 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       pid: expect.any(Number),
       port: expect.any(Number),
     })
+    await rememberBackend(result.pid)
     const ps = await run('/bin/ps', ['-axo', 'pid=,ppid=,comm='])
     const children = ps.stdout.trim().split('\n').map(line => line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/))
       .filter(row => row?.[2] === String(ready.pid))
@@ -160,13 +178,31 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     expect(enabled.status).toBe('applied')
     const reenabled = await response(binding.baseUrl)
     expect(reenabled.output_text).toBe('local fixture')
+    await rememberBackend(reenabled.pid)
 
     const restarted = await lifecycle('restart')
     expect(restarted.pid).not.toBe(ready.pid)
+    const restartedOwner = await readSupervisorState(supervisorPaths(home, 'codex', profile))
+    expect(restartedOwner).toMatchObject({ pid: restarted.pid, serviceCleanup: 'pending' })
+    owners.set(restarted.pid, restartedOwner!.processStartedAt)
     expect(() => process.kill(ready.pid, 0)).toThrow(/ESRCH/)
     expect(() => process.kill(reenabled.pid, 0)).toThrow(/ESRCH/)
     const afterRestart = await response(restarted.modelApiUrl)
     expect(afterRestart.output_text).toBe('local fixture')
+    await rememberBackend(afterRestart.pid)
+    const streamAbort = new AbortController()
+    try {
+      const stream = await fetch(restarted.modelApiUrl + '/responses', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: modelId, input: 'hold-open-fixture', stream: true }),
+        signal: streamAbort.signal,
+      })
+      expect(stream.status).toBe(200)
+      expect((await stream.body!.getReader().read()).done).toBe(false)
+    } finally {
+      streamAbort.abort()
+    }
     await expect(lifecycle('stop')).resolves.toMatchObject({ status: 'stopped' })
     expect(() => process.kill(restarted.pid, 0)).toThrow(/ESRCH/)
     expect(() => process.kill(afterRestart.pid, 0)).toThrow(/ESRCH/)
@@ -174,8 +210,55 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     await expect(fetch(`http://127.0.0.1:${afterRestart.port}/health`)).rejects.toThrow()
     await expect(readFile(bindingPath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await cmd('logs', ...scope)).toContain('service-ready')
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+      const failureOwner = await lifecycle('start')
+      const ownerState = await readSupervisorState(supervisorPaths(home, 'codex', profile))
+      expect(ownerState).toMatchObject({ pid: failureOwner.pid, serviceCleanup: 'pending' })
+      owners.set(failureOwner.pid, ownerState!.processStartedAt)
+      const failureBinding = JSON.parse(await readFile(bindingPath, 'utf8'))
+      const failureKey = (await readFile(failureBinding.accessKeyFile, 'utf8')).trim()
+      const failureResponse = await (await fetch(failureBinding.baseUrl + '/responses', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${failureKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: modelId, input: 'fixture only' }),
+      })).json()
+      await rememberBackend(failureResponse.pid)
+      const serviceHome = path.join(home, 'managed-services', 'fixture-service', 'gateway')
+      expect((await stat(serviceHome)).isDirectory()).toBe(true)
+      restrictedDirectory = serviceHome
+      await chmod(restrictedDirectory, 0o000)
+      await expect(lifecycle('stop')).rejects.toThrow(/service cleanup failed/i)
+      expect(await readSupervisorState(supervisorPaths(home, 'codex', profile)))
+        .toMatchObject({ phase: 'failed', serviceCleanup: 'failed' })
+      expect(() => process.kill(failureOwner.pid, 0)).toThrow(/ESRCH/)
+      expect(() => process.kill(failureResponse.pid, 0)).toThrow(/ESRCH/)
+    }
   } finally {
+    if (restrictedDirectory) await chmod(restrictedDirectory, 0o700).catch(() => undefined)
+    const current = await readSupervisorState(supervisorPaths(home, 'codex', profile)).catch(() => undefined)
+    if (current?.mode === 'service') owners.set(current.pid, current.processStartedAt)
     await lifecycle('stop').catch(() => undefined)
+    for (const [pid, startedAt] of owners) {
+      if (await processIdentityStatus(pid, startedAt) !== 'alive') continue
+      const command = await run('/bin/ps', ['-p', String(pid), '-o', 'args=']).then(result => result.stdout).catch(() =>
+        ''
+      )
+      if (!command.includes(cli) || !command.includes('service-owner')) {
+        throw new Error('test service owner identity could not be confirmed')
+      }
+      process.kill(-pid, 'SIGKILL')
+      await expect.poll(async () => await processIdentityStatus(pid, startedAt), { timeout: 2_000 }).toBe('dead')
+    }
+    for (const [pid, startedAt] of backends) {
+      if (await processIdentityStatus(pid, startedAt) !== 'alive') continue
+      const command = await run('/bin/ps', ['-p', String(pid), '-o', 'args=']).then(result => result.stdout).catch(() =>
+        ''
+      )
+      if (command.includes(root + path.sep) && command.includes('/server.mjs ')) {
+        process.kill(pid, 'SIGKILL')
+        await expect.poll(async () => await processIdentityStatus(pid, startedAt), { timeout: 2_000 }).toBe('dead')
+      }
+    }
     await removeFixture(root)
   }
 }, 90000)

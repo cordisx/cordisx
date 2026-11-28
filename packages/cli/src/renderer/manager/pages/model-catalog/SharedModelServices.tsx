@@ -6,11 +6,12 @@ import type { CordisXConfigFormIcon } from '../../../../contracts.js'
 import type {
   ModelServiceInput,
   ModelServiceProtocol,
+  ModelServicesClient,
   ModelServicesReadResult,
+  ModelServicesSaveResult,
   ModelServiceView,
 } from '../../../../model-service-contracts.js'
 import { HostSchemaFormPage, schemaFormSnapshot } from '../../../host-ui/SchemaForm.js'
-import type { ModelCatalogClient } from '../../../model-catalog-client.js'
 import { managerCopy } from '../../../ui-copy.js'
 import {
   SharedServiceAdvanced,
@@ -145,18 +146,32 @@ function serviceSchema(locale: string, draft: Draft, creating: boolean) {
   }) as unknown as SchemaFormOptionsV1['schema']
 }
 
-function ServiceEditor({ service, locale, save, close }: {
+function ServiceEditor({ service, locale, save, close, canSave }: {
   readonly service: ModelServiceView | undefined
   readonly locale: string
   readonly save: (input: ModelServiceInput) => Promise<string | undefined>
   readonly close: () => void
+  readonly canSave: boolean
 }) {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const creating = service === undefined
   const [draft, setDraft] = useState<Draft>(() => draftOf(service))
   const [advanced, setAdvanced] = useState(() => sharedServiceAdvancedDraft(service))
+  const editor = useRef<HTMLElement>(null)
+  const initial = useRef({ draft: JSON.stringify(draft), advanced: JSON.stringify(advanced) })
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>()
+  const dirty = initial.current.draft !== JSON.stringify(draft) || initial.current.advanced !== JSON.stringify(advanced)
+  useEffect(() => {
+    const view = editor.current?.closest('[data-manager-surface="standalone"]')?.ownerDocument.defaultView
+    if (!dirty || !view) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    view.addEventListener('beforeunload', warn)
+    return () => view.removeEventListener('beforeunload', warn)
+  }, [dirty])
   const schema = useMemo(() => serviceSchema(locale, draft, creating), [
     locale,
     creating,
@@ -170,7 +185,7 @@ function ServiceEditor({ service, locale, save, close }: {
     mounted.current = false
   }, [])
   const submit = async () => {
-    if (busy || !valid) return
+    if (busy || !valid || !canSave) return
     setBusy(true)
     setFailure(undefined)
     const error = await save({ ...inputFromDraft(draft), ...sharedServiceAdvancedInput(advanced, service) })
@@ -181,6 +196,7 @@ function ServiceEditor({ service, locale, save, close }: {
   }
   return (
     <section
+      ref={editor}
       className="cxmc-editor"
       aria-label={t(creating ? 'catalog.sharedServiceAdd' : 'catalog.sharedServiceEdit')}
     >
@@ -197,7 +213,13 @@ function ServiceEditor({ service, locale, save, close }: {
         footer={
           <div className="cxf-form-action-buttons cxmc-editor-actions">
             <Button tag="button" variant="outline" disabled={busy} onClick={close}>{t('catalog.cancel')}</Button>
-            <Button tag="button" theme="primary" loading={busy} disabled={!valid} onClick={() => void submit()}>
+            <Button
+              tag="button"
+              theme="primary"
+              loading={busy}
+              disabled={!valid || !canSave}
+              onClick={() => void submit()}
+            >
               {t('catalog.save')}
             </Button>
           </div>
@@ -223,32 +245,94 @@ function ServiceEditor({ service, locale, save, close }: {
   )
 }
 
-export function SharedModelServices({ client, locale }: {
-  readonly client: ModelCatalogClient | undefined
+type ServiceSnapshot = Extract<ModelServicesReadResult, { status: 'ok' }>
+interface ServiceEditing {
+  readonly id?: string
+  readonly base: ServiceSnapshot
+}
+
+export function SharedModelServices({
+  client,
+  locale,
+  showWhenEmpty = false,
+  reconcile = false,
+  onAvailabilityChange,
+}: {
+  readonly client: ModelServicesClient | undefined
   readonly locale: string
+  readonly showWhenEmpty?: boolean
+  readonly reconcile?: boolean
+  readonly onAvailabilityChange?: (available: boolean) => void
 }) {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const [state, setState] = useState<ModelServicesReadResult | undefined>()
-  const [editing, setEditing] = useState<{ readonly id?: string } | undefined>()
+  const [editing, setEditing] = useState<ServiceEditing | undefined>()
   const [notice, setNotice] = useState<string | undefined>()
+  const [readUnavailable, setReadUnavailable] = useState(false)
+  const editingRef = useRef(editing)
+  const writing = useRef(false)
+  const readSequence = useRef(0)
+  editingRef.current = editing
   const available = client?.modelServicesAvailable === true
   const reload = useCallback(async () => {
     if (!client || !available) return
-    setState(await client.modelServicesRead())
+    const sequence = ++readSequence.current
+    let result: ModelServicesReadResult
+    try {
+      result = await client.modelServicesRead()
+    } catch {
+      result = { status: 'rejected', code: 'unavailable' }
+    }
+    if (sequence !== readSequence.current) return
+    setReadUnavailable(result.status !== 'ok')
+    setState(previous =>
+      result.status === 'ok' || editingRef.current === undefined && !writing.current ? result : previous
+    )
   }, [client, available])
   useEffect(() => {
     void reload()
-  }, [reload])
-  if (!available || state === undefined || state.status !== 'ok') return null
+    const timer = reconcile
+      ? setInterval(() => {
+        if (editingRef.current === undefined && !writing.current) void reload()
+      }, 10_000)
+      : undefined
+    return () => {
+      readSequence.current++
+      if (timer !== undefined) clearInterval(timer)
+    }
+  }, [reload, reconcile])
+  useEffect(() => {
+    onAvailabilityChange?.(available && !readUnavailable && state?.status === 'ok')
+  }, [available, readUnavailable, state?.status, onAvailabilityChange])
+  useEffect(() => () => onAvailabilityChange?.(false), [onAvailabilityChange])
+  if (state === undefined || state.status !== 'ok' || !available && editing === undefined) return null
   const services = state.services
+  const canMutate = available && !readUnavailable && client?.modelServicesWritable !== false
+  const changeEditing = (next: ServiceEditing | undefined) => {
+    editingRef.current = next
+    setEditing(next)
+  }
 
-  const write = async (next: readonly ModelServiceInput[]): Promise<string | undefined> => {
-    const result = await client!.modelServicesSave({ expectedRevision: state.revision, services: next })
-    await reload()
+  const write = async (next: readonly ModelServiceInput[], revision = state.revision): Promise<string | undefined> => {
+    if (!client || !client.modelServicesAvailable || !canMutate) return t('catalog.sharedServiceReadUnavailable')
+    setNotice(undefined)
+    writing.current = true
+    let result: ModelServicesSaveResult
+    try {
+      try {
+        result = await client.modelServicesSave({ expectedRevision: revision, services: next })
+      } catch {
+        result = { status: 'unknown', code: 'result-unknown' }
+      }
+      await reload()
+    } finally {
+      writing.current = false
+    }
     if (result.status === 'applied') {
       setNotice(t('catalog.sharedServiceSaved'))
       return undefined
     }
+    if (result.status === 'unknown') return t('catalog.sharedServiceUnknown')
     return result.code === 'conflict'
       ? t('catalog.sharedServiceConflict')
       : result.code === 'invalid'
@@ -256,15 +340,21 @@ export function SharedModelServices({ client, locale }: {
       : t('catalog.failed')
   }
   const saveOne = async (input: ModelServiceInput) => {
-    const others = services.filter(service => service.id !== (editing?.id ?? input.id)).map(inputOf)
-    const position = services.findIndex(service => service.id === editing?.id)
+    const base = editing?.base ?? state
+    if (editing?.id === undefined && base.services.some(service => service.id === input.id)) {
+      return t('catalog.sharedServiceInvalid')
+    }
+    const others = base.services.filter(service => service.id !== (editing?.id ?? input.id)).map(inputOf)
+    const position = base.services.findIndex(service => service.id === editing?.id)
     const next = [...others]
     next.splice(position < 0 ? next.length : position, 0, input)
-    return await write(next)
+    return await write(next, base.revision)
   }
-  const editingService = editing?.id === undefined ? undefined : services.find(service => service.id === editing.id)
+  const editingService = editing?.id === undefined
+    ? undefined
+    : editing.base.services.find(service => service.id === editing.id)
 
-  if (services.length === 0 && editing === undefined) return null
+  if (!showWhenEmpty && services.length === 0 && editing === undefined) return null
 
   return (
     <section className="cxms-shared" aria-label={t('catalog.sharedServices')} data-shared-model-services="true">
@@ -274,12 +364,29 @@ export function SharedModelServices({ client, locale }: {
         </div>
         {editing === undefined
           ? (
-            <Button tag="button" variant="outline" onClick={() => setEditing({})}>
+            <Button tag="button" variant="outline" disabled={!canMutate} onClick={() => changeEditing({ base: state })}>
               {t('catalog.sharedServiceAdd')}
             </Button>
           )
           : null}
       </header>
+      {readUnavailable || !available
+        ? (
+          <div role="status" className="cxms-shared-notice">
+            {t('catalog.sharedServiceReadUnavailable')}
+            {available
+              ? (
+                <Button tag="button" variant="text" onClick={() => void reload()}>
+                  {t('catalog.sharedServiceRetryRead')}
+                </Button>
+              )
+              : null}
+          </div>
+        )
+        : null}
+      {available && !readUnavailable && client?.modelServicesWritable === false
+        ? <p role="status" className="cxms-shared-notice">{t('catalog.sharedServicesReadOnly')}</p>
+        : null}
       {notice === undefined ? null : <p role="status" className="cxms-shared-notice">{notice}</p>}
       {editing === undefined
         ? null
@@ -289,7 +396,8 @@ export function SharedModelServices({ client, locale }: {
             service={editingService}
             locale={locale}
             save={saveOne}
-            close={() => setEditing(undefined)}
+            close={() => changeEditing(undefined)}
+            canSave={canMutate}
           />
         )}
       {services.length === 0
@@ -320,8 +428,9 @@ export function SharedModelServices({ client, locale }: {
                     tag="button"
                     variant="text"
                     aria-label={`${t('catalog.sharedServiceEdit')} ${service.displayName}`}
+                    disabled={!canMutate || editing !== undefined}
                     onClick={() =>
-                      setEditing({ id: service.id })}
+                      changeEditing({ id: service.id, base: state })}
                   >
                     {t('catalog.sharedServiceEditShort')}
                   </Button>
@@ -329,12 +438,15 @@ export function SharedModelServices({ client, locale }: {
                     tag="button"
                     variant="text"
                     theme="danger"
+                    disabled={!canMutate || editing !== undefined}
                     onClick={() =>
                       void write(
                         services.filter(item =>
                           item.id !== service.id
                         ).map(inputOf),
-                      )}
+                      ).then(error => {
+                        if (error !== undefined) setNotice(error)
+                      })}
                   >
                     {t('catalog.sharedServiceDelete')}
                   </Button>

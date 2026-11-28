@@ -13,11 +13,16 @@ import { failInstallation } from './cdp-installation-cleanup.js'
 import { admitBootstrappedRenderer } from './cdp-renderer-admission.js'
 import { cdpInstallationAborted } from './cdp-session.js'
 import * as support from './cdp-installation-support.js'
-import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
+import { installMarketplaceArtifactBinding, type RemoteMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
 import { installManagementCdpBinding, type ManagementCdpBinding } from './management-cdp-binding.js'
+import { installPermissionCdpBinding } from './permission-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import { type AgentContextCdpOptions, installAgentContextCdpBinding } from './agent-context-cdp.js'
 import { observeComposerDiagnostics } from './composer-diagnostics.js'
+import {
+  installRemotePluginLifecycleBinding,
+  type RemotePluginLifecycleBinding,
+} from './remote-plugin-lifecycle-cdp.js'
 
 export async function install(
   target: support.CdpTarget,
@@ -60,7 +65,13 @@ export async function install(
   activateDocument?: (identifier: string) => Promise<void>,
   observeRetirement?: (session: support.CdpSession) => Promise<CdpTargetRetirementObserver>,
   agentContext?: AgentContextCdpOptions,
+  remoteLifecycle?: RemotePluginLifecycleBinding & { readonly runtime: support.CdpPluginLifecycleRuntime },
+  remoteOwnerDocuments?: { readonly request: (payload: unknown) => Promise<unknown> },
+  remoteMarketplaceArtifact?: RemoteMarketplaceArtifactBinding,
 ): Promise<support.InstalledScript> {
+  if (lifecycle && remoteLifecycle) throw new Error('plugin lifecycle owner is ambiguous')
+  if (ownerDocuments && remoteOwnerDocuments) throw new Error('owner document authority is ambiguous')
+  if (lifecycle && remoteMarketplaceArtifact) throw new Error('Marketplace artifact authority is ambiguous')
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
       throw new Error('icon theme preference broadcast requires persistence context')
@@ -74,13 +85,17 @@ export async function install(
   const providerController = provider === undefined ? undefined : new AbortController()
   const historyController = history === undefined ? undefined : new AbortController()
   const configController = config === undefined ? undefined : new AbortController()
-  const ownerDocumentController = ownerDocuments === undefined ? undefined : new AbortController()
+  const ownerDocumentController = ownerDocuments === undefined && remoteOwnerDocuments === undefined
+    ? undefined
+    : new AbortController()
   const serviceConfigController = serviceConfig === undefined ? undefined : new AbortController()
   const credentialController = credential === undefined ? undefined : new AbortController()
   const actionsController = actions === undefined ? undefined : new AbortController()
   const permissionController = permission === undefined ? undefined : new AbortController()
   const iconThemePreferenceController = iconThemePreference === undefined ? undefined : new AbortController()
-  const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
+  const lifecycleController = lifecycle === undefined && remoteLifecycle === undefined
+    ? undefined
+    : new AbortController()
   const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
   const managedServiceUIController = managedServiceUI === undefined ? undefined : new AbortController()
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
@@ -160,60 +175,39 @@ export async function install(
     if (agentContext) removeAgentContextBinding = await installAgentContextCdpBinding(session, agentContext)
     await installRuntimeBindings(session, [
       support.MARKETPLACE_BINDING,
-      ...(lifecycle === undefined ? [] : [support.MARKETPLACE_ARTIFACT_BINDING]),
+      ...(lifecycle === undefined && remoteMarketplaceArtifact === undefined
+        ? []
+        : [support.MARKETPLACE_ARTIFACT_BINDING]),
       ...(provider === undefined ? [] : [support.PROVIDER_BINDING]),
       ...(history === undefined ? [] : [support.AGENT_HISTORY_BINDING]),
       ...(config === undefined ? [] : [support.CONFIG_BINDING]),
-      ...(ownerDocuments === undefined ? [] : [support.OWNER_DOCUMENT_BINDING]),
+      ...(ownerDocuments === undefined && remoteOwnerDocuments === undefined ? [] : [support.OWNER_DOCUMENT_BINDING]),
       ...(serviceConfig === undefined ? [] : [support.SERVICE_CONFIG_BINDING]),
       ...(credential === undefined ? [] : [support.CHANNEL_CREDENTIAL_BINDING]),
       ...(actions === undefined ? [] : [support.CHANNEL_ACTIONS_BINDING]),
       ...(permission === undefined ? [] : [support.PERMISSION_BINDING]),
+      ...(permission?.remote === undefined ? [] : [support.PERMISSION_ONCE_BINDING]),
       ...(iconThemePreference === undefined ? [] : [support.ICON_THEME_PREFERENCE_BINDING]),
-      ...(lifecycle === undefined ? [] : [support.PLUGIN_LIFECYCLE_BINDING]),
+      ...(lifecycle === undefined && remoteLifecycle === undefined ? [] : [support.PLUGIN_LIFECYCLE_BINDING]),
       ...(publisherGrant === undefined ? [] : [support.PUBLISHER_GRANT_BINDING]),
       ...(managedServiceUI === undefined ? [] : [support.MANAGED_SERVICE_UI_BINDING]),
     ])
-    let activeMarketplaceRequests = 0
-    removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
-      if (params.name !== support.MARKETPLACE_BINDING || typeof params.payload !== 'string') return
-      const payload = params.payload
-      void (async () => {
-        let requestId = 'invalid'
-        try {
-          const requestValue = support.parseMarketplaceBindingRequest(JSON.parse(payload) as unknown)
-          requestId = requestValue.requestId
-          if (activeMarketplaceRequests >= support.MAX_MARKETPLACE_REQUESTS) {
-            throw new Error('too many concurrent marketplace feed requests')
-          }
-          activeMarketplaceRequests += 1
-          try {
-            const response = await support.fetchMarketplaceFeed(requestValue.url, marketplaceController.signal)
-            await support.sendMarketplaceBindingResponse(session, {
-              requestId,
-              ok: response.status >= 200 && response.status < 300,
-              status: response.status,
-              url: response.url,
-              text: response.text,
-            })
-          } finally {
-            activeMarketplaceRequests -= 1
-          }
-        } catch (error) {
-          await support.sendMarketplaceBindingResponse(session, {
-            requestId,
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          }).catch(() => undefined)
-        }
-      })()
-    })
-    if (lifecycle !== undefined) {
+    removeBindingListener = support.installMarketplaceFeedBinding(session, marketplaceController.signal)
+    if (lifecycle !== undefined || remoteMarketplaceArtifact !== undefined) {
       removeMarketplaceArtifactBindingListener = installMarketplaceArtifactBinding({
         session,
-        handler: lifecycle.handler,
+        ...(lifecycle === undefined ? { remote: remoteMarketplaceArtifact! } : { handler: lifecycle.handler }),
         gate: lifecycleRequests,
         signal: marketplaceController.signal,
+      })
+    }
+    if (remoteLifecycle !== undefined) {
+      removeLifecycleBindingListener = installRemotePluginLifecycleBinding({
+        session,
+        binding: remoteLifecycle,
+        signal: lifecycleController!.signal,
+        respond: async value => await support.sendPluginLifecycleBindingResponse(session, value),
+        error: support.pluginLifecycleBridgeError,
       })
     }
     managementBinding = await installManagementCdpBinding(session, management, lifecycleRequests)
@@ -308,7 +302,7 @@ export async function install(
             activeConfigRequests += 1
             let value: unknown
             try {
-              value = await lifecycleRequests.exclusive(async () => await config.handle(request))
+              value = await lifecycleRequests.exclusive(async () => await config.handle(request, session))
             } finally {
               activeConfigRequests -= 1
             }
@@ -324,7 +318,7 @@ export async function install(
       })
     }
     let activeOwnerDocumentRequests = 0
-    if (ownerDocuments !== undefined) {
+    if (ownerDocuments !== undefined || remoteOwnerDocuments !== undefined) {
       removeOwnerDocumentBindingListener = session.onEvent('Runtime.bindingCalled', params => {
         if (params.name !== support.OWNER_DOCUMENT_BINDING || typeof params.payload !== 'string') return
         const payload = params.payload
@@ -349,54 +343,61 @@ export async function install(
             }
             activeOwnerDocumentRequests += 1
             try {
-              const value = isWalletSpendRequest(parsed)
-                ? await ownerDocuments.walletSpend?.handle(
-                  parsed,
-                  () => ownerDocumentController?.signal.aborted !== true,
-                )
-                  ?? { status: 'unavailable', code: 'unsupported' }
-                : isPluginHttpRequest(parsed)
-                ? await ownerDocuments.http.handle(
-                  parsed,
-                  () =>
-                    readNativeHttpAccount(
-                      session,
-                      params.executionContextId,
-                      () => ownerDocumentController?.signal.aborted !== true,
-                      reason => ownerDocuments.http.reportNativeAccountUnavailable(parsed, reason),
-                      nativeSubmission?.accountCapability,
-                    ),
-                  history === undefined ? undefined : Object.assign(() => history.host.readWorkUsage(), {
-                    current: (snapshot: { readonly scopeId: string; readonly epoch: string }) =>
-                      history.host.workUsageCurrent(snapshot),
-                  }),
-                )
-                : isNativeAgentSessionRequest(parsed) && ownerDocuments.nativeSessions !== undefined
-                ? await ownerDocuments.nativeSessions.handle(parsed)
-                : isAgentToolRequest(parsed) && ownerDocuments.agentTools !== undefined
-                ? await ownerDocuments.agentTools.handle(parsed, async request => {
-                  if (ownerDocumentController?.signal.aborted || !Number.isInteger(params.executionContextId)) {
-                    throw new Error('agent tool renderer closed or context missing')
-                  }
-                  const evaluated = await session.send('Runtime.evaluate', {
-                    expression: `globalThis.__cordisxDispatchAgentToolV1(${JSON.stringify(request)})`,
-                    contextId: params.executionContextId,
-                    awaitPromise: true,
-                    returnByValue: true,
-                  }, 25_000)
-                  if (ownerDocumentController?.signal.aborted || evaluated.exceptionDetails !== undefined) {
-                    throw new Error('agent tool renderer unavailable')
-                  }
-                  return (evaluated.result as { value?: unknown } | undefined)?.value
-                })
-                : entityRequest && ownerDocuments.entities !== undefined
-                ? await ownerDocuments.entities.handle(parsed)
-                : await (async () => {
-                  const request = support.parseOwnerDocumentBindingRequest(parsed)
-                  return request.operation === 'load'
-                    ? await ownerDocuments.load(request)
-                    : await ownerDocuments.replace(request)
-                })()
+              const value = await (async () => {
+                if (remoteOwnerDocuments) {
+                  return await remoteOwnerDocuments.request(support.parseOwnerDocumentBindingRequest(parsed))
+                }
+                const local = ownerDocuments
+                if (!local) throw new Error('owner document authority is unavailable')
+                return isWalletSpendRequest(parsed)
+                  ? await local.walletSpend?.handle(
+                    parsed,
+                    () => ownerDocumentController?.signal.aborted !== true,
+                  )
+                    ?? { status: 'unavailable', code: 'unsupported' }
+                  : isPluginHttpRequest(parsed)
+                  ? await local.http.handle(
+                    parsed,
+                    () =>
+                      readNativeHttpAccount(
+                        session,
+                        params.executionContextId,
+                        () => ownerDocumentController?.signal.aborted !== true,
+                        reason => local.http.reportNativeAccountUnavailable(parsed, reason),
+                        nativeSubmission?.accountCapability,
+                      ),
+                    history === undefined ? undefined : Object.assign(() => history.host.readWorkUsage(), {
+                      current: (snapshot: { readonly scopeId: string; readonly epoch: string }) =>
+                        history.host.workUsageCurrent(snapshot),
+                    }),
+                  )
+                  : isNativeAgentSessionRequest(parsed) && local.nativeSessions !== undefined
+                  ? await local.nativeSessions.handle(parsed)
+                  : isAgentToolRequest(parsed) && local.agentTools !== undefined
+                  ? await local.agentTools.handle(parsed, async request => {
+                    if (ownerDocumentController?.signal.aborted || !Number.isInteger(params.executionContextId)) {
+                      throw new Error('agent tool renderer closed or context missing')
+                    }
+                    const evaluated = await session.send('Runtime.evaluate', {
+                      expression: `globalThis.__cordisxDispatchAgentToolV1(${JSON.stringify(request)})`,
+                      contextId: params.executionContextId,
+                      awaitPromise: true,
+                      returnByValue: true,
+                    }, 25_000)
+                    if (ownerDocumentController?.signal.aborted || evaluated.exceptionDetails !== undefined) {
+                      throw new Error('agent tool renderer unavailable')
+                    }
+                    return (evaluated.result as { value?: unknown } | undefined)?.value
+                  })
+                  : entityRequest && local.entities !== undefined
+                  ? await local.entities.handle(parsed)
+                  : await (async () => {
+                    const request = support.parseOwnerDocumentBindingRequest(parsed)
+                    return request.operation === 'load'
+                      ? await local.load(request)
+                      : await local.replace(request)
+                  })()
+              })()
               await support.sendOwnerDocumentBindingResponse(session, { requestId, ok: true, value })
             } finally {
               activeOwnerDocumentRequests -= 1
@@ -528,43 +529,13 @@ export async function install(
         })()
       })
     }
-    let activePermissionRequests = 0
     if (permission !== undefined) {
-      removePermissionBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
-        if (params.name !== support.PERMISSION_BINDING || typeof params.payload !== 'string') return
-        const payload = params.payload
-        void (async () => {
-          let requestId = 'invalid'
-          try {
-            if (Buffer.byteLength(payload) > support.MAX_PERMISSION_REQUEST_BYTES) {
-              throw new Error('permission request exceeds maximum size')
-            }
-            const request = support.parsePermissionBindingRequest(JSON.parse(payload) as unknown, permission)
-            requestId = request.requestId
-            if (permissionController?.signal.aborted === true) {
-              throw new Error('permission persistence bridge is closed')
-            }
-            if (activePermissionRequests >= support.MAX_PERMISSION_REQUESTS) {
-              throw new Error('too many concurrent permission requests')
-            }
-            activePermissionRequests += 1
-            try {
-              const value = await lifecycleRequests.exclusive(
-                async () => await support.persistPermissionPolicies(permission, request.records),
-              )
-              await support.sendPermissionBindingResponse(session, { requestId, ok: true, value })
-            } finally {
-              activePermissionRequests -= 1
-            }
-          } catch {
-            await support.sendPermissionBindingResponse(session, {
-              requestId,
-              ok: false,
-              error: 'Permission policy request was rejected',
-            }).catch(() => undefined)
-          }
-        })()
-      })
+      removePermissionBindingListener = installPermissionCdpBinding(
+        session,
+        permission,
+        lifecycleRequests,
+        permissionController!,
+      )
     }
     let activeIconThemePreferenceRequests = 0
     if (iconThemePreference !== undefined) {
@@ -851,7 +822,7 @@ export async function install(
         clearContexts()
       }
     }
-    const generationRuntime = lifecycle?.runtime ?? developmentRuntime
+    const generationRuntime = lifecycle?.runtime ?? remoteLifecycle?.runtime ?? developmentRuntime
     const documentSource = newDocumentSource ?? source
     await installDocumentBootstrap(
       {
@@ -902,7 +873,7 @@ export async function install(
       ...(configController === undefined ? {} : { configController, removeConfigBindingListener }),
       configBindingInstalled: config !== undefined,
       ...(ownerDocumentController === undefined ? {} : { ownerDocumentController, removeOwnerDocumentBindingListener }),
-      ownerDocumentBindingInstalled: ownerDocuments !== undefined,
+      ownerDocumentBindingInstalled: ownerDocuments !== undefined || remoteOwnerDocuments !== undefined,
       ...(serviceConfigController === undefined ? {} : { serviceConfigController, removeServiceConfigBindingListener }),
       serviceConfigBindingInstalled: serviceConfig !== undefined,
       ...(credentialController === undefined ? {} : { credentialController, removeCredentialBindingListener }),
@@ -911,13 +882,15 @@ export async function install(
       actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
+      permissionOnceBindingInstalled: permission?.remote !== undefined,
       ...(iconThemePreferenceController === undefined
         ? {}
         : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),
       iconThemePreferenceBindingInstalled: iconThemePreference !== undefined,
       ...(unregisterIconThemePreferenceBroadcast === undefined ? {} : { unregisterIconThemePreferenceBroadcast }),
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
-      lifecycleBindingInstalled: lifecycle !== undefined,
+      lifecycleBindingInstalled: lifecycle !== undefined || remoteLifecycle !== undefined,
+      marketplaceArtifactBindingInstalled: lifecycle !== undefined || remoteMarketplaceArtifact !== undefined,
       ...(managementBinding.controller === undefined
         ? {}
         : {

@@ -123,7 +123,7 @@ interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, '
   readonly fallback?: 'initials' | 'neutral'
 }
 
-const SHARED_REACT_STYLES = `${searchCss}
+export const SHARED_REACT_STYLES = `${searchCss}
 ${actionGroupCss}
 ${identityCss}
 .cxr-ui-identity-visual{display:inline-flex;width:40px;height:40px;flex:0 0 40px}
@@ -524,20 +524,25 @@ declare global {
 }
 
 /** Publish one Host-owned React singleton for every plugin in this renderer generation. */
-export function installSharedReactRuntime(document: Document): SharedReactRuntime {
+export function installSharedReactRuntime(
+  document: Document,
+  options: { readonly externalStyles?: boolean } = {},
+): SharedReactRuntime {
   if (globalThis.__cordisxSharedReactRuntime !== undefined) {
     throw new Error('CordisX shared React runtime is already installed')
   }
-  const style = document.createElement('style')
+  const style = options.externalStyles ? undefined : document.createElement('style')
   const view = document.defaultView
   const installedAnimationFrameFallback = view !== null && typeof view.requestAnimationFrame !== 'function'
   if (installedAnimationFrameFallback) {
     view.requestAnimationFrame = callback => view.setTimeout(() => callback(view.performance.now()), 16)
     view.cancelAnimationFrame = handle => view.clearTimeout(handle)
   }
-  style.dataset.cordisxSharedReact = 'true'
-  style.textContent = SHARED_REACT_STYLES
-  ;(document.head ?? document.documentElement).append(style)
+  if (style) {
+    style.dataset.cordisxSharedReact = 'true'
+    style.textContent = SHARED_REACT_STYLES
+    ;(document.head ?? document.documentElement).append(style)
+  }
   const theme = new HostThemeProjection(document)
   const roots = new Set<Root>()
   let disposed = false
@@ -625,7 +630,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       for (const root of roots) root.unmount()
       roots.clear()
       theme.dispose()
-      style.remove()
+      style?.remove()
       if (installedAnimationFrameFallback && view !== null) {
         Reflect.deleteProperty(view, 'requestAnimationFrame')
         Reflect.deleteProperty(view, 'cancelAnimationFrame')

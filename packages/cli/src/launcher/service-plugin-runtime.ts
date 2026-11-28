@@ -3,15 +3,27 @@ import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../plugin-lifecycle-contrac
 import type { PackageActivationTuple } from './packages/types.js'
 import type { PluginLifecycleRuntime, PluginRuntimeMutation } from './plugin-lifecycle-model.js'
 
+export interface ServicePluginRuntime extends PluginLifecycleRuntime {
+  /** Advance the dormant headless runtime after an acknowledged renderer transaction. */
+  adoptRegistryEpoch(epoch: number): void
+}
+
+/** Channel remains owned by the service even when renderers are attached. */
+export function assertServiceMutationAllowed(mutation: Pick<PluginRuntimeMutation, 'previous' | 'candidate'>): void {
+  const channel = (plugins: typeof mutation.previous.plugins) => plugins.find(plugin => plugin.id === 'channel')
+  if (JSON.stringify(channel(mutation.previous.plugins)) !== JSON.stringify(channel(mutation.candidate.plugins))) {
+    throw new Error('Stop service mode before changing Channel activation')
+  }
+}
+
 /** Observes package publication for a Node-only owner. Backend adoption and
  * cleanup are performed by the surrounding ManagedServicePluginLifecycleRuntime. */
-export function createServicePluginRuntime(runtimeGeneration: string): PluginLifecycleRuntime {
+export function createServicePluginRuntime(): ServicePluginRuntime {
   const record = (tuple: PackageActivationTuple) => ({
     ...tuple,
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1 as const,
     recordKind: 'active' as const,
-    runtimeGeneration,
   })
   let registryEpoch = 0
   let transaction: { id: string; epoch: string; staged?: PluginRuntimeMutation } | undefined
@@ -38,10 +50,7 @@ export function createServicePluginRuntime(runtimeGeneration: string): PluginLif
     async stage(mutation) {
       // Channel is a profile-owned ingress/consumer, not a managed-backend transaction.
       // Until it can be replaced transactionally, change it only with the service stopped.
-      const channel = (plugins: typeof mutation.previous.plugins) => plugins.find(plugin => plugin.id === 'channel')
-      if (JSON.stringify(channel(mutation.previous.plugins)) !== JSON.stringify(channel(mutation.candidate.plugins))) {
-        throw new Error('Stop service mode before changing Channel activation')
-      }
+      assertServiceMutationAllowed(mutation)
       if (
         transaction?.id !== mutation.transactionId || mutation.transactionEpoch !== transaction.epoch
         || mutation.expectedRegistryEpoch !== registryEpoch || mutation.afterRegistryEpoch !== registryEpoch + 1
@@ -92,6 +101,12 @@ export function createServicePluginRuntime(runtimeGeneration: string): PluginLif
     },
     async reload() {
       throw new Error('Renderer reload is unavailable in service mode; use cordisx restart --mode service')
+    },
+    adoptRegistryEpoch(epoch) {
+      if (transaction !== undefined || !Number.isSafeInteger(epoch) || epoch < registryEpoch) {
+        throw new Error('Service registry epoch cannot be adopted')
+      }
+      registryEpoch = epoch
     },
   }
 }

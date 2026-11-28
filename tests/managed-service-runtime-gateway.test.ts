@@ -12,6 +12,54 @@ import {
 } from './managed-service-runtime-fixture.js'
 
 describe('managed service runtime gateway lifecycle', () => {
+  it('reserves logout against native connections and plugin consumer leases', async () => {
+    const { root, home } = await fixture()
+    const host = runtime(home)
+    const identity = { pluginId: 'client-plugin', pluginGeneration: 'client-one', serviceId: 'client-service' }
+    const binding = host.bind({
+      owner: owner(identity.pluginId, identity.pluginGeneration),
+      source: 'https://plugins.example.test/client',
+      declaration: declaration(identity.serviceId, identity.pluginId, [
+        { pluginId: identity.pluginId, operations: ['models.list'] },
+      ]),
+      artifactDirectory: root,
+    }, new AbortController().signal)
+    try {
+      const registration = await binding.registry.register(definition(identity.serviceId), {
+        revision: `sha256:${'8'.repeat(64)}`,
+      })
+      expect((await registration.ensureReady()).status).toBe('ready')
+      const connection = () =>
+        prepareNativeManagedGatewayConnection(host, {
+          binding: registration.binding,
+          compositionOrigin: 'api',
+          models: { generation: 'one', defaultAlias: 'one', aliases: [{ alias: 'one', gatewayModelId: 'one/one' }] },
+        })
+      const native = connection()
+      expect(host.reserveServiceClients(identity)).toBeUndefined()
+      native.dispose()
+      const lease = await binding.client.acquire(registration.binding.identity)
+      if (lease.status !== 'ready') throw new Error('consumer lease was unavailable')
+      expect(host.reserveServiceClients(identity)).toBeUndefined()
+      binding.client.release(lease.lease)
+      expect(host.reserveServiceClients({ ...identity, pluginGeneration: 'other' })).toBeUndefined()
+      const reservation = host.reserveServiceClients(identity)!
+      expect(reservation.isCurrent()).toBe(true)
+      expect(() => connection()).toThrow('unavailable')
+      expect((await binding.client.acquire(registration.binding.identity)).status).toBe('unavailable')
+      expect(reservation.release()).toBe(true)
+      const resumed = connection()
+      resumed.dispose()
+      const fenced = host.reserveServiceClients(identity)!
+      fenced.fence()
+      expect(fenced.release()).toBe(false)
+      expect(() => connection()).toThrow('unavailable')
+      expect((await binding.client.acquire(registration.binding.identity)).status).toBe('unavailable')
+    } finally {
+      await binding.dispose()
+    }
+  }, 20_000)
+
   it('rejects invalid runtime and definition configuration before launch', async () => {
     const { root, home } = await fixture()
     expect(() => runtime(home, { failuresBeforeUnhealthy: Number.NaN })).toThrow('threshold is invalid')
@@ -208,6 +256,14 @@ describe('managed service runtime gateway lifecycle', () => {
     await expect(import('node:fs/promises').then(m => m.access(cfgPathA))).rejects.toBeTruthy()
     gateway.client.release(leaseA.lease)
     gateway.client.release(leaseB.lease)
-    await Promise.all([sourceA.dispose(), sourceB.dispose(), gateway.dispose()])
+    const sourceIdentity = {
+      pluginId: 'source-a-plugin',
+      pluginGeneration: 'source-a-plugin-one',
+      serviceId: 'source-a-service',
+    }
+    expect(host.reserveServiceClients(sourceIdentity)).toBeUndefined()
+    await gateway.dispose()
+    expect(host.reserveServiceClients(sourceIdentity)?.release()).toBe(true)
+    await Promise.all([sourceA.dispose(), sourceB.dispose()])
   }, 20_000)
 })

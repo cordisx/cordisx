@@ -8,9 +8,13 @@ import { pathToFileURL } from 'node:url'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
-import { runSupervisorCommand, waitForState } from '../packages/cli/src/cli/supervisor-command.js'
+import {
+  runSupervisorCommand as runDefaultSupervisor,
+  waitForState,
+} from '../packages/cli/src/cli/supervisor-command.js'
 import {
   acquireSupervisorStartLock,
+  clientSupervisorPaths,
   processStartIdentity,
   readSupervisorState,
   supervisorPaths,
@@ -23,6 +27,10 @@ import { shortcutKey } from '../packages/cli/src/shortcuts/model.js'
 const cliVersion = JSON.parse(
   await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'),
 ) as { readonly version: string }
+
+// The general supervisor tests also cover the retained legacy App owner.
+const runSupervisorCommand: typeof runDefaultSupervisor = (invocation, runtime, onState) =>
+  runDefaultSupervisor(invocation, { ...runtime, internalSupervisorLegacyAppOwner: true }, onState)
 
 describe('supervisor management commands', () => {
   it('does not signal a live PID or remove its state when legacy identity is uncertain', async () => {
@@ -88,6 +96,41 @@ describe('supervisor management commands', () => {
       pid: null,
       failure: 'CordisX background supervisor exited before renderer readiness',
     })
+  })
+
+  it('does not report an exited service client as connected', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-failed-client-status-'))
+    const output: string[] = []
+    try {
+      await writeSupervisorState(clientSupervisorPaths(root, 'codex', 'default'), {
+        schemaVersion: 1,
+        appId: 'codex',
+        profileId: 'default',
+        clientOfService: true,
+        clientConnection: 'connected',
+        phase: 'failed',
+        pid: process.pid,
+        processStartedAt: (await processStartIdentity(process.pid))!,
+        instanceToken: 'a'.repeat(32),
+        createdAt: new Date().toISOString(),
+        version: cliVersion.version,
+        effectiveConfig: 'fixture',
+        failure: 'fixture failed',
+        failedAt: new Date().toISOString(),
+      })
+      await runDefaultSupervisor(parseCordisXCli(['status', '--json']), {
+        env: { CORDISX_HOME: root },
+        stdout: value => output.push(value),
+      })
+      expect(JSON.parse(output.pop()!)).toMatchObject({
+        status: 'failed',
+        connection: 'disconnected',
+        pid: null,
+        failure: 'fixture failed',
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('rejects an idempotent start whose effective configuration differs', async () => {
@@ -582,6 +625,90 @@ describe('supervisor management commands', () => {
       await server.close()
     }
   })
+
+  it.each(['completed', 'failed', 'unconfirmed', 'replaced', 'bad-completion', 'legacy', 'legacy-failed'] as const)(
+    'reports the service cleanup receipt when it is %s',
+    async outcome => {
+      // Unix socket paths have a small platform limit; keep this fixture root short.
+      const root = await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'cx-stop-receipt-'))
+      const paths = supervisorPaths(root, 'codex', 'default')
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
+      const token = 'a'.repeat(64)
+      let stopWork: Promise<void> | undefined
+      let control: Awaited<ReturnType<typeof startSupervisorControlServer>> | undefined
+      try {
+        const state = {
+          schemaVersion: 1 as const,
+          mode: 'service' as const,
+          appId: 'codex',
+          profileId: 'default',
+          phase: 'ready' as const,
+          pid: child.pid!,
+          processStartedAt: (await processStartIdentity(child.pid!))!,
+          instanceToken: token,
+          createdAt: new Date().toISOString(),
+          version: cliVersion.version,
+          effectiveConfig: 'service',
+          ...(outcome.startsWith('legacy') ? {} : { serviceCleanup: 'pending' as const }),
+        }
+        expect(state.processStartedAt).toBeDefined()
+        await writeSupervisorState(paths, state)
+        control = await startSupervisorControlServer({
+          socketPath: paths.socket,
+          token,
+          stop: () => {
+            stopWork = (async () => {
+              try {
+                if (outcome === 'completed') {
+                  await writeSupervisorState(paths, { ...state, phase: 'stopping', serviceCleanup: 'completed' })
+                } else if (outcome === 'bad-completion') {
+                  await writeSupervisorState(paths, { ...state, serviceCleanup: 'completed' })
+                } else if (outcome === 'failed' || outcome === 'legacy-failed') {
+                  await writeSupervisorState(paths, {
+                    ...state,
+                    phase: 'failed',
+                    ...(outcome === 'failed' ? { serviceCleanup: 'failed' as const } : {}),
+                    failure: 'synthetic cleanup failure',
+                    failedAt: new Date().toISOString(),
+                  })
+                } else if (outcome === 'replaced') {
+                  await writeSupervisorState(paths, { ...state, instanceToken: 'b'.repeat(64) })
+                }
+              } finally {
+                child.kill('SIGTERM')
+              }
+            })()
+            void stopWork.catch(() => undefined)
+          },
+        })
+        const output: string[] = []
+        const stopped = runSupervisorCommand(
+          parseCordisXCli(['stop', '--mode', 'service', 'codex', 'default', '--json']),
+          {
+            env: { CORDISX_HOME: root },
+            stdout: line => output.push(line),
+          },
+        )
+        if (outcome === 'completed' || outcome === 'legacy') {
+          await stopped
+          expect(JSON.parse(output[0]!)).toMatchObject({ status: 'stopped' })
+          await expect(readSupervisorState(paths)).resolves.toBeUndefined()
+        } else {
+          await expect(stopped).rejects.toThrow(/service cleanup/i)
+          expect(output).toEqual([])
+          expect(await readSupervisorState(paths)).toMatchObject({
+            instanceToken: outcome === 'replaced' ? 'b'.repeat(64) : token,
+          })
+        }
+        await stopWork
+      } finally {
+        await control?.close()
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+    15_000,
+  )
 
   it('stops only the fenced detached process group for the selected instance', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))

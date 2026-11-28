@@ -31,6 +31,9 @@ The bundled revision and owning source for this entry are recorded in
 - For Channel connection listing, chat bindings, message listening/history, or
   sending through a configured account, inbound image/audio/file/video handling,
   or bot-owned reactions, read [the Channel guide](references/channel.md).
+- For the independent management page or a standalone background service, read
+  [the management guide](references/management.md). Check the installed CLI's
+  help and reuse the selected profile's existing owner before opening a page.
 - For reproducible Channel memory/persona model validation, read
   [the Host-owned methodology](https://github.com/cordisx/cordisx/blob/main/.agents/docs/channel-memory-model-validation.md#durable-methodology-and-scenario-matrix).
   Separate persona core, style delivery and project CI/Protocol release evidence;

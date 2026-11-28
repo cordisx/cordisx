@@ -15,10 +15,12 @@ function PermissionItem({
   item,
   viewModel,
   onSelectionChange,
+  requireTrustedEvents,
 }: {
   readonly item: PermissionAuthorizationItemProjection
   readonly viewModel: PermissionAuthorizationViewModel
   readonly onSelectionChange: () => void
+  readonly requireTrustedEvents: boolean
 }) {
   const risk = viewModel.plan.declarations.find(declaration => declaration.capability === item.capability)!.sensitivity
   const selected = item.authorizationOptions.find(option => option.selected)?.value
@@ -27,6 +29,7 @@ function PermissionItem({
     onSelectionChange()
   }
   const keyboard = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (requireTrustedEvents && !event.nativeEvent.isTrusted) return
     const target = event.target as HTMLElement
     const radio = target.closest<HTMLElement>('[data-permission-decision]')
     const index = item.authorizationOptions.findIndex(option => option.value === radio?.dataset.permissionDecision)
@@ -101,8 +104,11 @@ function PermissionItem({
               {...{ role: 'radio', tabIndex: option.selected ? 0 : -1 }}
               aria-checked={option.selected}
               data-permission-decision={option.value}
+              onClick={({ e }) => {
+                if (requireTrustedEvents && e.nativeEvent.isTrusted) choose(option.value)
+              }}
               onChange={checked => {
-                if (checked) choose(option.value)
+                if (!requireTrustedEvents && checked) choose(option.value)
               }}
             >
               {option.label}
@@ -138,18 +144,28 @@ export function PermissionAuthorizationView({
   overlay,
   onSelectionChange,
   finish,
+  externalStyles,
+  requireTrustedEvents,
+  hideManage,
 }: {
   readonly projection: PermissionAuthorizationDialogProjection
   readonly viewModel: PermissionAuthorizationViewModel
   readonly overlay: HTMLElement
   readonly onSelectionChange: () => void
   readonly finish: (result: PermissionAuthorizationDialogResult) => void
+  readonly externalStyles: boolean
+  readonly requireTrustedEvents: boolean
+  readonly hideManage: boolean
 }) {
   const headingId = `cxp-heading-${viewModel.plan.planId.replaceAll(/[^A-Za-z0-9_-]/g, '-')}`
   return (
     <ConfigProvider globalConfig={{ attach: () => overlay }}>
-      <style data-permission-authorization-components="true">{HOST_TDESIGN_REACT_STYLES}</style>
-      <style data-permission-authorization-style="true">{PERMISSION_AUTHORIZATION_STYLES}</style>
+      {externalStyles
+        ? null
+        : <style data-permission-authorization-components="true">{HOST_TDESIGN_REACT_STYLES}</style>}
+      {externalStyles
+        ? null
+        : <style data-permission-authorization-style="true">{PERMISSION_AUTHORIZATION_STYLES}</style>}
       <section className="cxp-dialog" role="dialog" aria-modal="true" aria-labelledby={headingId}>
         <header className="cxp-header">
           <span className="cxp-icon">
@@ -176,21 +192,24 @@ export function PermissionAuthorizationView({
               item={item}
               viewModel={viewModel}
               onSelectionChange={onSelectionChange}
+              requireTrustedEvents={requireTrustedEvents}
             />
           ))}
         </div>
         <footer className="cxp-actions">
-          <Button
-            tag="button"
-            type="button"
-            theme="default"
-            variant="outline"
-            className="cxp-button cxp-manage"
-            data-permission-action="manage"
-            onClick={() => finish(viewModel.managePermissions())}
-          >
-            {projection.actions.manage}
-          </Button>
+          {hideManage ? null : (
+            <Button
+              tag="button"
+              type="button"
+              theme="default"
+              variant="outline"
+              className="cxp-button cxp-manage"
+              data-permission-action="manage"
+              onClick={() => finish(viewModel.managePermissions())}
+            >
+              {projection.actions.manage}
+            </Button>
+          )}
           <Button
             tag="button"
             type="button"
@@ -209,7 +228,9 @@ export function PermissionAuthorizationView({
             className="cxp-button"
             data-permission-action="confirm"
             data-primary="true"
-            onClick={() => finish(viewModel.confirm())}
+            onClick={event => {
+              if (!requireTrustedEvents || event.nativeEvent.isTrusted) finish(viewModel.confirm())
+            }}
           >
             {projection.actions.confirm}
           </Button>

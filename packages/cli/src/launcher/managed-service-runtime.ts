@@ -23,6 +23,11 @@ import type {
 } from './managed-service-native-connection.js'
 import { ManagedServiceRuntimeNative } from './managed-service-runtime-native.js'
 import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js'
+import { ManagedServiceRuntimeClientReservations } from './managed-service-runtime-client-reservations.js'
+import type {
+  ManagedServiceClientIdentity,
+  ManagedServiceClientReservation,
+} from './managed-service-client-reservation.js'
 import {
   createManagedServiceActivationBinding,
   createManagedServiceRegistrationHandle,
@@ -48,7 +53,6 @@ import {
   ManagedServiceStartupError,
 } from './managed-service-startup-diagnostic.js'
 import {
-  managedBindingCurrent,
   managedDiagnostic,
   managedFailure,
   managedHandle,
@@ -107,7 +111,11 @@ export class ManagedServiceRuntime {
   private readonly records = new Map<string, ManagedServiceRecord>()
   private readonly registrations = new Map<string, ManagedServiceRecord>()
   private readonly pendingRegistrations = new Map<string, Promise<ManagedServiceRecord>>()
-  private readonly native = new ManagedServiceRuntimeNative(this.registrations)
+  private readonly clientReservations = new ManagedServiceRuntimeClientReservations(
+    this.records,
+    record => [...this.native.authorities.values()].some(owner => owner === record),
+  )
+  private readonly native = new ManagedServiceRuntimeNative(this.registrations, record => this.clientsBlocked(record))
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
   private readonly endpointReservations: ManagedServiceEndpointReservations
@@ -133,9 +141,23 @@ export class ManagedServiceRuntime {
       throw new Error('managed service health failure threshold is invalid')
     }
     this.failuresBeforeUnhealthy = failuresBeforeUnhealthy
-    this.broker = new ManagedServiceRuntimeBroker(this.records, this.registrations, this.fetch)
+    this.broker = new ManagedServiceRuntimeBroker(
+      this.records,
+      this.registrations,
+      this.fetch,
+      record => this.clientsBlocked(record),
+      this.clientReservations.borrowAuthority,
+    )
   }
 
+  private clientsBlocked(record: ManagedServiceRecord): boolean {
+    return this.clientReservations.blocked(record)
+  }
+
+  /** Reserve native connections and plugin consumer leases before changing a service. */
+  reserveServiceClients(identity: ManagedServiceClientIdentity): ManagedServiceClientReservation | undefined {
+    return this.clientReservations.reserve(identity)
+  }
   bind(access: ManagedServiceActivationAccess, signal: AbortSignal): ManagedServiceActivationBinding {
     return createManagedServiceActivationBinding({
       access,

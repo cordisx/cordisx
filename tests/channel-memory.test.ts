@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -31,7 +31,7 @@ const input: MemoryInput = {
   confidence: 1,
 }
 async function setup(clock?: () => string) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'channel-memory-'))
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'channel-memory-'))
   roots.push(root)
   return new ChannelMemoryStore(root, clock)
 }

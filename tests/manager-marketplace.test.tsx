@@ -210,6 +210,120 @@ const trustedFeed = {
 }
 
 describe('React Manager Marketplace', () => {
+  it('refreshes the installed badge after a transient owner lookup failure', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({ ok: true, status: 200, text: async () => JSON.stringify(trustedFeed) }),
+    )
+    await marketplace.reload()
+    const alias = `https://renderer.cordisx.invalid/plugin/${'a'.repeat(64)}`
+    const state = managerSnapshot({ plugins: [installedPlugin(alias)] })
+    const pluginInfo = vi.fn().mockRejectedValueOnce(new Error('owner busy')).mockResolvedValue({
+      canonicalSource: alias,
+    })
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(state)}
+          snapshot={state}
+          router={managerRouter()}
+          pluginManagement={{ pluginInfo } as unknown as ManagerPluginManagementBinding}
+        />,
+      )
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 400))
+      })
+      expect(pluginInfo).toHaveBeenCalledTimes(2)
+      expect(fixture.document.querySelector('[data-marketplace-plugin="trusted"] [data-marketplace-installed]'))
+        .not.toBeNull()
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('matches an installed renderer alias only to the owner-verified Marketplace source', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    const { MarketplacePluginPage } = await import(
+      '../packages/cli/src/renderer/manager/pages/MarketplacePluginPage.js'
+    )
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const sameIdSource = 'https://github.com/example/another-trusted'
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            ...trustedFeed,
+            plugins: [...trustedFeed.plugins, trustPlugin('trusted', 'Other Trusted', sameIdSource, '@example')]
+              .sort((left, right) => String(left.source).localeCompare(String(right.source))),
+          }),
+      }),
+    )
+    await marketplace.reload()
+    const alias = `https://renderer.cordisx.invalid/plugin/${'a'.repeat(64)}`
+    const state = managerSnapshot({ plugins: [installedPlugin(alias)] })
+    const pluginInfo = vi.fn(async query =>
+      query.expectedCanonicalSource === TRUSTED_SOURCE
+        ? { canonicalSource: alias }
+        : undefined
+    )
+    const binding = { pluginInfo } as unknown as ManagerPluginManagementBinding
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(state)}
+          snapshot={state}
+          router={managerRouter()}
+          pluginManagement={binding}
+        />,
+      )
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+      const cards = [...fixture.document.querySelectorAll('[data-marketplace-plugin="trusted"]')]
+      expect(cards).toHaveLength(2)
+      expect(
+        cards.find(card => card.textContent?.includes('Trusted Booster'))?.querySelector(
+          '[data-marketplace-installed]',
+        ),
+      )
+        .not.toBeNull()
+      expect(
+        cards.find(card => card.textContent?.includes('Other Trusted'))?.querySelector('[data-marketplace-installed]'),
+      )
+        .toBeNull()
+      expect(pluginInfo).toHaveBeenCalledWith(expect.objectContaining({
+        pluginId: 'trusted',
+        expectedCanonicalSource: TRUSTED_SOURCE,
+        expectedArtifactIntegrity: DIGEST,
+      }))
+      const other = marketplace.snapshot().plugins.find(item => item.source === sameIdSource)!
+      await fixture.render(
+        <MarketplacePluginPage
+          marketplace={marketplace}
+          manager={managerModel(state)}
+          snapshot={state}
+          router={managerRouter({ kind: 'marketplace-plugin', identity: other.identity })}
+          pluginManagement={binding}
+        />,
+      )
+      expect(fixture.document.querySelector('[data-marketplace-plugin-detail="trusted"] [aria-label="Installed"]'))
+        .toBeNull()
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
   it('preserves eligibility, independent Official and Certified filters, exact text tiers, and accessible provenance', async () => {
     const fixture = reactManagerFixture()
     const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')

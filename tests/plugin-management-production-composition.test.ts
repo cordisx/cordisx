@@ -4,8 +4,12 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run-command.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
+import type { DesktopOwnerRendererLifecycle } from '../packages/cli/src/cli/desktop-owner-renderer-lifecycle.js'
+import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import type { PluginLifecycleRuntime } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { attachmentHomeDigest } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { PackageLifecycleAuthority } from '../packages/cli/src/launcher/packages/authority.js'
 import {
   pluginManagementRpcPaths,
@@ -37,6 +41,76 @@ function runtime(): PluginLifecycleRuntime {
 }
 
 describe('production plugin management composition', () => {
+  it('binds Desktop lifecycle coordination to the exact owner registry', async () => {
+    const { homeDir, configPath } = await fixture()
+    const profileId = 'default'
+    const runtimeGeneration = 'desktop-generation'
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId,
+      runtimeGeneration,
+      permissionPolicies: [],
+      runtime: runtime(),
+    })
+    const scope = {
+      homeDigest: attachmentHomeDigest(homeDir),
+      ownerAppId: 'codex',
+      profileId,
+      generation: runtimeGeneration,
+    }
+    const lifecycle = { snapshot: () => ({}), attach: async () => {} } as unknown as DesktopOwnerRendererLifecycle
+    const participants = new ServiceRendererParticipants(scope)
+    const other = new ServiceRendererParticipants(scope)
+    participants.bind(lifecycle)
+    other.bind(lifecycle)
+    const participant = participants.participant
+    const input = {
+      configPath,
+      homeDir,
+      appId: 'codex',
+      profileId,
+      runtimeGeneration,
+      token: 'renderer-token',
+      coordinator,
+      processStartedAt: 'test-owner',
+      rendererParticipant: participant,
+      rendererDesktopLifecycle: { participant, participants, lifecycle },
+    }
+    const composition = await openProductionPluginManagementComposition(input)
+    try {
+      expect(composition.lifecycleParticipants?.matchesDesktop?.(participants, lifecycle)).toBe(true)
+      expect(composition.lifecycleParticipants?.matchesDesktop?.(other, lifecycle)).toBe(false)
+    } finally {
+      await composition.close()
+    }
+    await expect(openProductionPluginManagementComposition({
+      ...input,
+      rendererParticipant: other.participant,
+    })).rejects.toThrow('manager-consumer-fence-scope-invalid')
+    await expect(openProductionPluginManagementComposition({ ...input, mode: 'service' })).rejects.toThrow(
+      'manager-consumer-fence-scope-invalid',
+    )
+    const proof = new ManagerPermissionProofAuthority({
+      profileId,
+      generation: runtimeGeneration,
+      isCurrent: () => true,
+    })
+    try {
+      await expect(openProductionPluginManagementComposition({
+        ...input,
+        rendererPermissionPolicy: {
+          bootstrap: {} as never,
+          proof,
+          reserveOtherConsumers: async () => {
+            throw new Error('unexpected reservation')
+          },
+        },
+      })).rejects.toThrow('manager-consumer-fence-scope-invalid')
+    } finally {
+      proof.close()
+    }
+  })
+
   it('shares the active lifecycle coordinator across renderer and RPC access', async () => {
     const { homeDir, configPath } = await fixture()
     const runtimeGeneration = 'production-generation'

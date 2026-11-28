@@ -10,6 +10,8 @@ import {
   createManagedServiceUIBridgeHandler,
   parseManagedServiceUIBindingRequest,
 } from '../packages/cli/src/launcher/managed-service-ui-rpc.js'
+import { prepareManagedServiceUIAccountToggle } from '../packages/cli/src/launcher/managed-service-ui-route.js'
+import { managedServiceLiveHandler } from '../packages/cli/src/launcher/managed-service-live-handler.js'
 
 const token = 'managed-service-ui-test-token'
 const profileId = 'default'
@@ -92,6 +94,125 @@ function envelope(operation: string, extra: Record<string, unknown> = {}) {
 }
 
 describe('managed service UI launcher RPC', () => {
+  it('forwards an owner-only account plan through the adopted live service handler', async () => {
+    const plugin = Object.assign(source(subscription().value), {
+      prepareAccountToggle: () => ({ operations: [{ operationId: 'account.toggle', maxInvocations: 1 }] }),
+    })
+    const observation = createManagedServiceUIBridgeHandler({ token, profileId, generation, services: [] })
+    let adopted = false
+    const live = managedServiceLiveHandler(
+      observation,
+      () => adopted ? [{ ...owner, serviceId: 'gateway', source: plugin }] : [],
+      async () => [],
+    )
+    const request = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-account-toggle/v1',
+      schemaVersion: 1,
+      requestId: 'toggle-1',
+      binding,
+      accountId: 'account-one',
+      disabled: true,
+      expectedRevision: 7,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    const parsed = parseManagedServiceUIBindingRequest(envelope('toggleAccount', { binding, request }), live, owner)
+    if (parsed.operation !== 'toggleAccount') throw new Error('fixture request invalid')
+    try {
+      expect(live.prepareAccountToggle).toBeTypeOf('function')
+      await expect(live.prepareAccountToggle!(owner, parsed)).rejects.toThrow('adoption pending')
+      adopted = true
+      await expect(live.prepareAccountToggle!(owner, parsed))
+        .resolves.toMatchObject({ operations: [{ operationId: 'account.toggle' }] })
+      expect(plugin.toggleAccount).not.toHaveBeenCalled()
+      await live.disposeOwner(owner)
+      await expect(live.prepareAccountToggle!(owner, parsed)).rejects.toThrow('owner disposed')
+    } finally {
+      await live.dispose()
+    }
+  })
+
+  it('rejects an owner plan if its route retires before the plan is returned', async () => {
+    const plugin = Object.assign(source(subscription().value), {
+      prepareAccountToggle: () => ({ operations: [{ operationId: 'account.toggle', maxInvocations: 1 }] }),
+    })
+    const handler = createManagedServiceUIBridgeHandler({
+      token,
+      profileId,
+      generation,
+      services: [{ ...owner, serviceId: 'gateway', source: plugin }],
+    })
+    const routes = new Map([[token, { key: 'owner', token, owner, handler }]])
+    const request = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-account-toggle/v1',
+      schemaVersion: 1,
+      requestId: 'toggle-1',
+      binding,
+      accountId: 'account-one',
+      disabled: true,
+      expectedRevision: 7,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    const value = JSON.stringify(envelope('toggleAccount', { binding, request }))
+    try {
+      await expect(prepareManagedServiceUIAccountToggle({ value, routes, isDisposed: () => false }))
+        .resolves.toMatchObject({ operations: [{ operationId: 'account.toggle' }] })
+      const pending = prepareManagedServiceUIAccountToggle({ value, routes, isDisposed: () => false })
+      routes.delete(token)
+      await expect(pending).rejects.toThrow('managed service UI binding was replaced')
+      expect(plugin.toggleAccount).not.toHaveBeenCalled()
+    } finally {
+      await handler.dispose()
+    }
+  })
+
+  it('binds an owner-only account toggle plan to its exact source and service', async () => {
+    const sub = subscription()
+    const prepare = vi.fn(() => ({
+      operations: [{ operationId: 'account.toggle', value: { disabled: true }, maxInvocations: 1 }],
+    }))
+    const plugin = Object.assign(source(sub.value), { prepareAccountToggle: prepare })
+    const handler = createManagedServiceUIBridgeHandler({
+      token,
+      profileId,
+      generation,
+      services: [{ ...owner, serviceId: 'gateway', source: plugin }],
+    })
+    const request = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-cli-proxy-account-toggle.v1.schema.json',
+      contract: 'cordisx.managed-service-cli-proxy-account-toggle/v1',
+      schemaVersion: 1,
+      requestId: 'toggle-1',
+      binding,
+      accountId: 'account-one',
+      disabled: true,
+      expectedRevision: 7,
+      userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
+    }
+    const parsed = parseManagedServiceUIBindingRequest(envelope('toggleAccount', { binding, request }), handler, owner)
+    if (parsed.operation !== 'toggleAccount') throw new Error('fixture request invalid')
+    try {
+      expect(await handler.prepareAccountToggle!(owner, parsed)).toEqual({
+        operations: [{ operationId: 'account.toggle', value: { disabled: true }, maxInvocations: 1 }],
+      })
+      expect(prepare).toHaveBeenCalledOnce()
+      expect(plugin.toggleAccount).not.toHaveBeenCalled()
+      await expect(handler.prepareAccountToggle!({ ...owner, pluginGeneration: 'other' }, parsed)).rejects.toThrow()
+      await expect(handler.prepareAccountToggle!(owner, {
+        ...parsed,
+        binding: { ...binding, bindingId: 'other' },
+      })).rejects.toThrow()
+      expect(await handler.handle(owner, { requestId: 'get', operation: 'get', serviceId: 'gateway' }))
+        .toMatchObject({ service: { capabilities: { accountTogglePlan: true } } })
+    } finally {
+      await handler.dispose()
+    }
+  })
+
   it('exposes native providers only through an authorized live owner and safe projection', async () => {
     const sub = subscription()
     const readNativeProviders = vi.fn(async () => [{ providerId: 'p', pluginId: owner.pluginId, models: [] }])

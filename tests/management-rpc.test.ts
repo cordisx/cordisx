@@ -97,6 +97,71 @@ describe('plugin management RPC', () => {
     }
   })
 
+  it('allows observation and authentication actions to outlive ordinary mutation deadlines', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-observation-rpc-'))
+    let started!: () => void
+    const bothStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    let count = 0
+    const processStartedAt = (await processStartIdentity(process.pid))!
+    const server = await startPluginManagementRpcServer({
+      homeDir,
+      appId: 'codex',
+      profileId: 'default',
+      configPath: path.join(homeDir, 'config.json'),
+      generation: 'generation-1',
+      processStartedAt,
+      service: {} as PluginManagementService,
+      managerRenderer: async () => {
+        if (++count === 4) started()
+        await new Promise(resolve => setTimeout(resolve, 61_000))
+        return { status: 'ok' }
+      },
+    })
+    try {
+      const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      const endpoint = (await readPluginManagementRpcEndpoint(paths))!
+      const common = {
+        kind: 'manager-renderer' as const,
+        action: 'call' as const,
+        gateway: { pid: process.pid, processStartedAt, instanceToken: 'a'.repeat(64) },
+        browserSessionId: 'b'.repeat(64),
+        handle: { rendererId: 'c'.repeat(64), ownerGeneration: 'generation-1', grant: 'd'.repeat(64) },
+        channel: 'managed-service-ui',
+      }
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const observation = requestPluginManagementRpc(paths, endpoint, {
+        ...common,
+        payload: JSON.stringify({ operation: 'closed' }),
+      })
+      const mutation = requestPluginManagementRpc(paths, endpoint, {
+        ...common,
+        payload: JSON.stringify({ operation: 'toggleAccount' }),
+      })
+      const authentication = requestPluginManagementRpc(paths, endpoint, {
+        ...common,
+        payload: JSON.stringify({ operation: 'authenticate' }),
+      })
+      const logout = requestPluginManagementRpc(paths, endpoint, {
+        ...common,
+        payload: JSON.stringify({ operation: 'logout' }),
+      })
+      const rejected = expect(mutation).rejects.toThrow('plugin management request timed out')
+      await bothStarted
+      await vi.advanceTimersByTimeAsync(60_000)
+      await rejected
+      await vi.advanceTimersByTimeAsync(1_000)
+      await expect(observation).resolves.toEqual({ status: 'ok' })
+      await expect(authentication).resolves.toEqual({ status: 'ok' })
+      await expect(logout).resolves.toEqual({ status: 'ok' })
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
   it('awaits async responses over a bounded Unix socket path', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cx-rpc-'))
     const homeDir = path.join(root, 'a'.repeat(140))

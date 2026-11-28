@@ -129,6 +129,15 @@ describe('permission authorization information architecture', () => {
     expect(highRisk.authorizationOptions.find(item => item.value === 'deny-once')?.selected).toBe(true)
   })
 
+  it('offers only session decisions when the connected owner cannot persist a native review', () => {
+    const viewModel = new PermissionAuthorizationViewModel(model().plan, { sessionOnly: true })
+    const options = viewModel.project(projectionInput('en')).items.flatMap(item => item.authorizationOptions)
+    expect(options.some(item => item.value === 'allow-persistent' || item.value === 'deny-persistent')).toBe(false)
+    expect(() => viewModel.select('models.read', 'allow-persistent')).toThrow('permission decision is not allowed')
+    viewModel.select('models.read', 'allow-once')
+    expect(viewModel.confirm()).toMatchObject({ status: 'confirmed' })
+  })
+
   it('reprojects locale without losing the request or selected authorization lifetime', () => {
     const viewModel = model()
     viewModel.select('agent.events.read', 'deny-persistent')

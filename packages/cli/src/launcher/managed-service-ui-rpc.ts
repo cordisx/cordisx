@@ -11,6 +11,7 @@ import { managedServiceUIBindingEqual as bindingEqual } from './managed-service-
 export { parseManagedServiceUIBindingRequest } from './managed-service-ui-request.js'
 import { createStartupHostUIBridgeHandler } from './startup-host-ui-rpc.js'
 import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
+import type { ManagedServiceNodeUIAccountTogglePlanV1 } from '@cordisx/protocol/managed-service-context/v1'
 import { createStartupUIRPC, type StartupUIObserverBinding, type StartupUIRequest } from './startup-ui-rpc.js'
 import type {
   ManagedServiceBindingV1,
@@ -171,6 +172,11 @@ export interface ManagedServiceUIBridgeHandler {
     request: ManagedServiceUIBindingRequest,
     documentSignal?: AbortSignal,
   ): Promise<unknown>
+  /** Owner-only plan lookup; it is never a renderer RPC operation. */
+  prepareAccountToggle?(
+    owner: ManagedServiceUIOwner,
+    request: Extract<ManagedServiceUIBindingRequest, { readonly operation: 'toggleAccount' }>,
+  ): Promise<ManagedServiceNodeUIAccountTogglePlanV1>
   replaceServices?(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
   disposeOwner(owner: ManagedServiceUIOwner): Promise<void>
   dispose(): Promise<void>
@@ -284,6 +290,22 @@ export function createManagedServiceUIBridgeHandler(input: {
     profileId: input.profileId,
     generation: input.generation,
     ...(hostStartup ? { hostStartup } : {}),
+    async prepareAccountToggle(owner, request) {
+      const resolved = resolve(owner, request.serviceId, request.binding)
+      const source = resolved.source as ManagedServiceSourceV1 & {
+        prepareAccountToggle?: (
+          request: ManagedServiceCliProxyAccountToggleRequestV1,
+        ) => ManagedServiceNodeUIAccountTogglePlanV1
+      }
+      if (!source.prepareAccountToggle || !source.toggleAccount || !source.readAccounts) {
+        throw new Error('managed service UI account toggle plan is unavailable')
+      }
+      const plan = structuredClone(source.prepareAccountToggle(clone(request.request)))
+      if (resolve(owner, request.serviceId, request.binding).source !== source) {
+        throw new Error('managed service UI binding was replaced')
+      }
+      return plan
+    },
     async handle(owner, request, documentSignal) {
       if (request.operation === 'readWebEntry' || request.operation === 'cancelWebEntry') {
         return clone(await webEntries.handle(owner, request))
@@ -348,6 +370,10 @@ export function createManagedServiceUIBridgeHandler(input: {
             capabilities: {
               logout: typeof resolved.source.logout === 'function',
               readCatalog: typeof resolved.source.readCatalog === 'function',
+              readAccounts: typeof resolved.source.readAccounts === 'function',
+              accountTogglePlan: typeof (resolved.source as ManagedServiceSourceV1 & {
+                    prepareAccountToggle?: unknown
+                  }).prepareAccountToggle === 'function' && typeof resolved.source.toggleAccount === 'function',
               accountControl: [
                 resolved.source.readAccounts,
                 resolved.source.toggleAccount,

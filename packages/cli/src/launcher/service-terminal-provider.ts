@@ -1,53 +1,67 @@
-import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
+import { StartupRequirementsCoordinator } from '../cli/startup-requirements.js'
 import type { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
+import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { createNativeProviderCredentialBroker } from './native-provider-credential-broker.js'
+import { startupProviderAdmission, waitForNativeStartupProvider } from './startup-provider-admission.js'
 import { createTerminalProviderAuthority } from './terminal-provider.js'
-import { startupProviderAdmission } from './startup-provider-admission.js'
-import { StartupRequirementsCoordinator } from '../cli/startup-requirements.js'
 
+/** A headless profile owner lends bounded provider leases without starting a Desktop app. */
 export function createServiceTerminalProvider(input: {
-  activation: ManagedServiceNativeActivation
-  managed?: ManagedCatalogComposition
+  readonly activation: ManagedServiceNativeActivation
+  readonly managed?: ManagedCatalogComposition
 }) {
-  const plugins = nativeModelProviderCatalog(input.activation)
-  const catalog = async () => [
-    ...(input.managed?.catalog() ?? []),
-    ...(await plugins()).filter(provider => !input.managed?.owns(provider.providerId)),
-  ]
-  const resolve = (providerId: string) =>
-    input.managed?.owns(providerId)
-      ? input.managed.nativeConnection(providerId)
-      : input.activation.prepareNativeConnection(providerId)
+  const { activation, managed } = input
+  const pluginCatalog = nativeModelProviderCatalog(activation)
+  const catalog = async () => {
+    const host = managed?.catalog() ?? []
+    const ids = new Set(host.map(provider => provider.providerId))
+    const plugins = (await pluginCatalog()).flatMap(provider => {
+      if (ids.has(provider.providerId)) return []
+      if (!activation.startup.hasProvider(provider.providerId)) return [provider]
+      const target = activation.startup.providerReference(provider.providerId)
+      if (!target || target.pluginId !== provider.pluginId) return []
+      const admission = activation.startup.nativeCatalogAdmission(target)
+      if (!admission.available) return []
+      const models = provider.models.filter(model => admission.modelIds.has(model.id))
+      return models.length === 0 ? [] : [{ ...provider, models }]
+    })
+    return [...host, ...plugins]
+  }
+  const resolve = (id: string) =>
+    managed?.owns(id) ? managed.nativeConnection(id) : activation.prepareNativeConnection(id)
   const credentials = createNativeProviderCredentialBroker({ resolve })
-  const authority = createTerminalProviderAuthority({
-    startup: startupProviderAdmission(input.activation.startup, input.activation.startupObserver),
-    catalog,
-    owns: providerId =>
-      input.managed?.owns(providerId) === true
-      || input.activation.nativeProviderIds.includes(providerId),
-    resolve,
-    credentials,
-    waitRequirements: async (providerId, modelId, signal) => {
-      const target = providerId === undefined ? undefined : input.activation.startup.providerReference(providerId)
+  const terminal = createTerminalProviderAuthority({
+    startup: startupProviderAdmission(activation.startup, activation.startupObserver),
+    waitRequirements: async (providerId, model, signal) => {
+      const target = providerId === undefined ? undefined : activation.startup.providerReference(providerId)
       if (providerId !== undefined && target === undefined) {
         const provider = (await catalog()).find(entry => entry.providerId === providerId)
-        if (!provider || (modelId !== undefined && !provider.models.some(model => model.id === modelId))) {
+        if (!provider || model !== undefined && !provider.models.some(entry => entry.id === model)) {
           throw new Error('Selected provider/model is not available in this profile')
         }
       }
-      return new StartupRequirementsCoordinator(input.activation.startup).wait({
-        mode: 'command',
-        timeoutMs: 55_000,
-        ...(target === undefined ? {} : { explicit: { target, ...(modelId === undefined ? {} : { modelId }) } }),
-        ...(signal === undefined ? {} : { signal }),
-      })
+      return target === undefined
+        ? await new StartupRequirementsCoordinator(activation.startup).wait({
+          mode: 'command',
+          timeoutMs: 55_000,
+          ...(signal === undefined ? {} : { signal }),
+        })
+        : await waitForNativeStartupProvider(activation.startup, target, model, signal)
     },
+    catalog,
+    owns: id => managed?.owns(id) === true || activation.nativeProviderIds.includes(id),
+    resolve,
+    currentHostConnection: (id, model, connection) =>
+      managed?.owns(id) ? managed.isCurrentNativeConnection(id, model, connection.value) : undefined,
+    credentials,
   })
   return {
-    request: authority.request,
+    request: terminal.request,
+    reserveForService: terminal.reserveForService,
+    reserveForLifecycle: terminal.reserveForLifecycle,
     async close() {
-      authority.close()
+      terminal.close()
       await credentials.close()
     },
   }

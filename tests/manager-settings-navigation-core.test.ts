@@ -65,6 +65,7 @@ describe('Manager settings navigation permission discovery', () => {
     capability: 'ui.extension-points.render' as const,
     fingerprint: 'review-fingerprint',
     scope: { extensionPoints: ['manager.settings.navigation-items'] },
+    policy: 'ask' as const,
   }
 
   it('projects only an exact active Host permission review', () => {
@@ -88,6 +89,17 @@ describe('Manager settings navigation permission discovery', () => {
       { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
       [{ ...permission, scope: { extensionPoints: ['manager.content'] } }],
     )).toBeUndefined()
+  })
+
+  it('moves to the remaining review when a pending surface already has a persistent policy', () => {
+    expect(resolveManagerSettingsNavigationPermissionReview(
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
+      [
+        { ...permission, policy: 'allow' },
+        { ...permission, fingerprint: 'content-fingerprint', scope: { extensionPoints: ['manager.content'] } },
+      ],
+    )).toEqual({ capability: 'ui.extension-points.render', fingerprint: 'content-fingerprint' })
   })
 })
 

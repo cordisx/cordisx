@@ -577,6 +577,112 @@ export function registerAdmissionTests() {
     expect(lookup).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects a reviewed activation after a persistent policy changes without changing the decision set', async () => {
+    const { root, home } = await workspace()
+    const policies: Array<import('../../packages/cli/src/permission-contracts.js').CordisXPermissionPolicyRecordV4> = []
+    const runtime = new FormalRuntime()
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      loadPermissionPolicies: async () => policies,
+      runtime,
+    })
+    const staged = await coordinator.handle(
+      request({ kind: 'inspect-local', sourceDirectory: await localPackageV5(root) }),
+    )
+    const review = () =>
+      coordinator.permissionReviewPlanV4({
+        requestId: 'policy-review',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 0,
+        target: { kind: 'candidate', candidateId: staged.candidateId! },
+      })
+    const initial = (await review())!
+    const hostDom = initial.declarations.find(item => item.capability === 'ui.host-dom.read')!
+    policies.push({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+      schemaVersion: 4,
+      key: {
+        profileId: initial.profileId,
+        identity: initial.identity,
+        capability: hostDom.capability,
+        scope: hostDom.scope,
+        securityFingerprint: hostDom.securityFingerprint,
+      },
+      policy: 'deny-persistent',
+    })
+    const stale = (await review())!
+    const deferredReview = () =>
+      coordinator.permissionReviewPlanV7({
+        requestId: 'policy-review-v7',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 0,
+        target: { kind: 'candidate', candidateId: staged.candidateId! },
+      })
+    const staleDeferred = (await deferredReview())!
+    const decisionFor = (plan: typeof stale) => ({
+      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+      schemaVersion: 4 as const,
+      origin: 'explicit-user' as const,
+      planId: plan.planId,
+      operation: plan.operation,
+      profileId: plan.profileId,
+      identity: plan.identity,
+      binding: plan.binding,
+      decisions: plan.declarations.filter(item => item.decisionRequired).map(item => ({
+        capability: item.capability,
+        scope: item.scope,
+        securityFingerprint: item.securityFingerprint,
+        decision: 'allow-once' as const,
+      })),
+    })
+    policies[0] = { ...policies[0]!, policy: 'allow-persistent' }
+    const fresh = (await review())!
+    const freshDeferred = (await deferredReview())!
+    expect(fresh.declarations.filter(item => item.decisionRequired).map(item => item.capability))
+      .toEqual(stale.declarations.filter(item => item.decisionRequired).map(item => item.capability))
+    expect(fresh.binding.operationId).not.toBe(stale.binding.operationId)
+    expect(freshDeferred.binding.operationId).not.toBe(staleDeferred.binding.operationId)
+    const apply = (plan: typeof stale) =>
+      coordinator.applyPermissionReviewV4({
+        requestId: 'policy-apply',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 0,
+        decision: decisionFor(plan),
+      })
+    await expect(apply(stale)).rejects.toThrow()
+    await expect(coordinator.applyPermissionReviewV7({
+      requestId: 'policy-apply-v7',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision: {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json',
+        schemaVersion: 7,
+        origin: 'explicit-user',
+        planId: staleDeferred.planId,
+        operation: staleDeferred.operation,
+        profileId: staleDeferred.profileId,
+        identity: staleDeferred.identity,
+        binding: staleDeferred.binding,
+        decisions: staleDeferred.declarations.filter(item => item.decisionRequired).map(item => ({
+          capability: item.capability,
+          scope: item.scope,
+          securityFingerprint: item.securityFingerprint,
+          decision: 'allow-once' as const,
+        })),
+      },
+    })).rejects.toThrow()
+    expect(runtime.calls).toEqual([])
+    expect(await apply(fresh)).toMatchObject({ outcome: 'applied', revision: 1 })
+  })
+
   it('refuses lifecycle activation when an exact persistent policy denies required Host DOM access', async () => {
     const { root, home } = await workspace()
     const policies: Array<import('../../packages/cli/src/permission-contracts.js').CordisXPermissionPolicyRecordV4> = []

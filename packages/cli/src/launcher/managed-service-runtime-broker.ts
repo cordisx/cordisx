@@ -1,5 +1,6 @@
 import { MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA } from './managed-service-browser-console-broker.js'
 import { MANAGED_CONSOLE_RESULT_SCHEMA } from './managed-service-console-broker.js'
+import type { ManagedServiceClientBorrowAuthority } from './managed-service-client-borrow.js'
 import type {
   ManagedServiceAcquireResultV1,
   ManagedServiceBoundClientV1,
@@ -35,6 +36,8 @@ export class ManagedServiceRuntimeBroker {
     private readonly records: Map<string, ManagedServiceRecord>,
     private readonly registrations: Map<string, ManagedServiceRecord>,
     private readonly fetch: typeof globalThis.fetch,
+    private readonly clientsBlocked: (record: ManagedServiceRecord) => boolean = () => false,
+    private readonly borrowAuthority?: ManagedServiceClientBorrowAuthority,
   ) {}
 
   boundClient(state: ManagedServiceClientState): ManagedServiceBoundClientV1 {
@@ -71,20 +74,40 @@ export class ManagedServiceRuntimeBroker {
     if (signal?.aborted) return managedFailure('cancelled', 'cancelled', true)
     const record = this.records.get(managedIdentityKey(identity))
     if (record === undefined || record.disposed) return managedFailure('unavailable', 'stale-generation', true)
+    const borrow = this.borrowAuthority?.current()
+    if (borrow) {
+      if (!borrow.permits(record, client) || !this.clientsBlocked(record)) {
+        borrow.reject()
+        return managedFailure('unavailable', 'health-check-failed', true)
+      }
+    } else if (this.clientsBlocked(record)) return managedFailure('unavailable', 'health-check-failed', true)
     if (record.state !== 'ready' || record.brokerHandle === undefined) {
       return managedFailure('unavailable', 'health-check-failed', true)
     }
     const grant = record.access.declaration.consumerGrants.find(item => item.pluginId === client.pluginId)
     if (grant === undefined) return managedFailure('unavailable', 'unsupported', false)
+    if (
+      borrow && borrow.operations.some(operation =>
+        !grant.operations.includes(operation)
+        || !record.definition.operations.some(item => item.operationId === operation)
+      )
+    ) {
+      borrow.reject()
+      return managedFailure('unavailable', 'unsupported', false)
+    }
     const leaseHandle = managedHandle('msl') as `msl_${string}`
     const lease: ManagedServiceLeaseV1 = Object.freeze({
       leaseHandle,
       binding: record.binding,
       brokerHandle: record.brokerHandle,
-      operations: Object.freeze([...grant.operations]),
+      operations: Object.freeze(borrow ? [...borrow.operations] : [...grant.operations]),
     })
-    record.leases.set(leaseHandle, { client, lease })
+    record.leases.set(leaseHandle, { client, lease, ...(borrow === undefined ? {} : { borrow }) })
     client.leases.add(leaseHandle)
+    if (borrow && !borrow.addLease(leaseHandle, () => this.releaseHandle(client, leaseHandle))) {
+      this.releaseHandle(client, leaseHandle)
+      return managedFailure('unavailable', 'health-check-failed', true)
+    }
     return { status: 'ready', projection: projectManagedServiceRecord(record), lease }
   }
 
@@ -99,6 +122,7 @@ export class ManagedServiceRuntimeBroker {
       || !managedBindingCurrent(lease.binding, record.binding, record.disposed)
       || !managedBindingCurrent(state.lease.binding, record.binding, record.disposed)
       || lease.brokerHandle !== state.lease.brokerHandle || state.lease.brokerHandle !== record.brokerHandle
+      || state.borrow !== undefined && !state.borrow.current()
     ) return undefined
     return { record, state }
   }
@@ -113,18 +137,41 @@ export class ManagedServiceRuntimeBroker {
     const acquired = this.currentLease(client, lease)
     if (acquired === undefined) return managedFailure('stale-generation', 'stale-generation', false)
     const { record, state } = acquired
-    if (!state.lease.operations.includes(operationId)) return managedFailure('unavailable', 'unsupported', false)
+    const currentBorrow = this.borrowAuthority?.current()
+    if (currentBorrow !== state.borrow) {
+      currentBorrow?.reject()
+      state.borrow?.reject()
+      return managedFailure('unavailable', 'unsupported', false)
+    }
+    if (!state.lease.operations.includes(operationId)) {
+      state.borrow?.reject()
+      return managedFailure('unavailable', 'unsupported', false)
+    }
     const operation = record.definition.operations.find(item => item.operationId === operationId)
     if (
       operation === undefined || operation.responseSchema === MANAGED_CONSOLE_RESULT_SCHEMA
       || operation.responseSchema === MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA
       || record.origin === undefined
     ) {
+      state.borrow?.reject()
       return managedFailure('unavailable', 'unsupported', false)
     }
+    let requestValue = value
+    let finishBorrowedInvocation: (() => void) | undefined
+    if (state.borrow) {
+      try {
+        requestValue = structuredClone(value)
+        if (requestValue !== undefined) assertManagedSafeValue(requestValue)
+        finishBorrowedInvocation = state.borrow.beginInvocation(operationId, requestValue)
+      } catch {
+        state.borrow.reject()
+      }
+      if (!finishBorrowedInvocation) return managedFailure('unavailable', 'unsupported', false)
+    }
     try {
-      if (operation.requestSchema !== undefined) await record.schemas.validate(operation.requestSchema, value)
+      if (operation.requestSchema !== undefined) await record.schemas.validate(operation.requestSchema, requestValue)
       if (this.currentLease(client, lease)?.state !== state) {
+        state.borrow?.reject()
         return managedFailure('stale-generation', 'stale-generation', false)
       }
       const timeout = AbortSignal.timeout(operation.timeoutMs)
@@ -132,11 +179,11 @@ export class ManagedServiceRuntimeBroker {
         ? record.lifecycle.signal
         : AbortSignal.any([record.lifecycle.signal, signal])
       const url = new URL(operation.path, record.origin)
-      if (value !== undefined && operation.requestEncoding === 'query') {
-        if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      if (requestValue !== undefined && operation.requestEncoding === 'query') {
+        if (requestValue === null || typeof requestValue !== 'object' || Array.isArray(requestValue)) {
           throw new Error('managed service query operation requires an object')
         }
-        for (const [key, item] of Object.entries(value)) {
+        for (const [key, item] of Object.entries(requestValue)) {
           if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
             url.searchParams.set(key, String(item))
           } else {
@@ -144,15 +191,15 @@ export class ManagedServiceRuntimeBroker {
           }
         }
       }
-      const useBody = value !== undefined && operation.requestEncoding !== 'query'
+      const useBody = requestValue !== undefined && operation.requestEncoding !== 'query'
       const response = await this.fetch(url, {
         method: operation.method,
         headers: {
           ...this.authorizationHeaders(record, operation.httpAuthentication),
           ...(useBody ? { 'Content-Type': 'application/json' } : {}),
         },
-        ...(useBody ? { body: JSON.stringify(value) } : {}),
-        signal: AbortSignal.any([operationSignal, timeout]),
+        ...(useBody ? { body: JSON.stringify(requestValue) } : {}),
+        signal: AbortSignal.any([operationSignal, timeout, ...(state.borrow ? [state.borrow.signal] : [])]),
       })
       if (!response.ok) throw new Error('managed service operation failed')
       const bytes = await readManagedResponseBody(response, MAX_BODY_BYTES)
@@ -160,6 +207,7 @@ export class ManagedServiceRuntimeBroker {
       assertManagedSafeValue(parsed)
       await record.schemas.validate(operation.responseSchema, parsed)
       if (this.currentLease(client, lease)?.state !== state) {
+        state.borrow?.reject()
         return managedFailure('stale-generation', 'stale-generation', false)
       }
       const invocationHandle = managedHandle('msi') as `msi_${string}`
@@ -173,12 +221,15 @@ export class ManagedServiceRuntimeBroker {
         value: safe,
       })
     } catch {
+      state.borrow?.reject()
       if (record.disposed) return managedFailure('stale-generation', 'disposed', false)
       return managedFailure(
         signal?.aborted ? 'cancelled' : 'failed',
         signal?.aborted ? 'cancelled' : 'health-check-failed',
         true,
       )
+    } finally {
+      finishBorrowedInvocation?.()
     }
   }
 
@@ -197,6 +248,11 @@ export class ManagedServiceRuntimeBroker {
     request: ManagedServiceMaterializationRequestV1,
     signal?: AbortSignal,
   ): Promise<ManagedServiceMaterializationResultV1> {
+    const borrow = this.borrowAuthority?.current()
+    if (borrow) {
+      borrow.reject()
+      return managedFailure('unavailable', 'unsupported', false)
+    }
     if (!client.active) return managedFailure('stale-generation', 'stale-generation', false)
     if (signal?.aborted) return managedFailure('cancelled', 'cancelled', true)
     const target = this.registrations.get(request.target.registrationHandle)
@@ -210,6 +266,10 @@ export class ManagedServiceRuntimeBroker {
       if (sourceLeases.has(source.source)) return managedFailure('failed', 'materialization-failed', false)
       const record = this.registrations.get(source.lease.binding.registrationHandle)
       const lease = record?.leases.get(source.lease.leaseHandle)
+      if (lease?.borrow) {
+        lease.borrow.reject()
+        return managedFailure('unavailable', 'unsupported', false)
+      }
       if (
         record === undefined || !managedBindingCurrent(source.lease.binding, record.binding, record.disposed)
         || lease?.client !== client || !managedBindingCurrent(lease.lease.binding, record.binding, record.disposed)
@@ -320,7 +380,9 @@ export class ManagedServiceRuntimeBroker {
   private releaseHandle(client: ManagedServiceClientState, leaseHandle: string): void {
     client.leases.delete(leaseHandle)
     for (const record of this.records.values()) {
-      if (record.leases.get(leaseHandle)?.client !== client) continue
+      const lease = record.leases.get(leaseHandle)
+      if (lease?.client !== client) continue
+      lease.borrow?.removeLease(leaseHandle)
       record.leases.delete(leaseHandle)
       for (const [invocationHandle, invocation] of record.invocations) {
         if (invocation.leaseHandle === leaseHandle) record.invocations.delete(invocationHandle)

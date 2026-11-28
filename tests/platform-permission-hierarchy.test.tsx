@@ -46,6 +46,28 @@ function permission(
 }
 
 describe('React Manager permission detail', () => {
+  it('shows permission policy as read-only when the owner supplies only a snapshot', async () => {
+    const fixture = reactManagerFixture()
+    const { PermissionDetailPage } = await import('../packages/cli/src/renderer/manager/pages/PermissionDetailPage.js')
+    const item = permission('models.read')
+    const state = managerSnapshot({ permissions: [item] })
+    const model = managerModel(state, { permissionPolicyWritable: false })
+    const router = managerRouter({
+      kind: 'permission',
+      pluginId: 'demo',
+      capability: item.capability,
+      fingerprint: item.fingerprint,
+    })
+    try {
+      await fixture.render(<PermissionDetailPage model={model} snapshot={state} router={router} />)
+      expect(fixture.element('.t-select input')).toHaveProperty('disabled', true)
+      expect(fixture.document.body.textContent).toContain('Permissions are read-only here.')
+      expect(model.setPermissionPolicy).not.toHaveBeenCalled()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
   it('keeps editable authorization independent from unavailable providers and dispatches the exact scope through official Select', async () => {
     const fixture = reactManagerFixture()
     const { PermissionDetailPage } = await import('../packages/cli/src/renderer/manager/pages/PermissionDetailPage.js')

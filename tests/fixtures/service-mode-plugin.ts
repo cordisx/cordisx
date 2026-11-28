@@ -3,26 +3,85 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
 import { allowedDecisionV4 } from '../../packages/cli/src/launcher/plugin-lifecycle-model.js'
-import { PLUGIN_PACKAGE_SCHEMA_V14 } from '../../packages/cli/src/launcher/packages/manifest.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
+import {
+  PLUGIN_PACKAGE_SCHEMA_V14,
+  PLUGIN_PACKAGE_SCHEMA_V15,
+  PLUGIN_PACKAGE_SCHEMA_V16,
+} from '../../packages/cli/src/launcher/packages/manifest.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../../packages/cli/src/channel-exact-request-permissions.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15,
+} from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 import { declaration, definition } from '../managed-service-runtime-fixture.js'
+import { consoleBackend, consoleExports, consoleOperations } from './managed-public-console-plugin.js'
 
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`
-export const backend = `#!/usr/bin/env node
+export const backend = String.raw`#!/usr/bin/env node
 import { createServer } from 'node:http'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 const server = createServer(async (request, response) => {
   if (request.headers.authorization !== 'Bearer ' + process.env.SERVICE_TOKEN) return response.writeHead(401).end()
   if (request.url === '/health') return response.writeHead(204).end()
-  if (request.method !== 'POST' || !request.url.startsWith('/v1/responses')) return response.writeHead(404).end()
+  if (request.method !== 'POST' || !['/v1/responses', '/v1/messages'].some(path => request.url.startsWith(path))) {
+    return response.writeHead(404).end()
+  }
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = JSON.parse(Buffer.concat(chunks))
+  if (Array.isArray(body.input) && JSON.stringify(body.input).includes('hold-open-fixture')) {
+    writeFileSync(path.join(process.env.HOME, 'fixture-response-open'), 'ready')
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.flushHeaders()
+    return
+  }
+  if (body.input === 'hold-open-fixture') {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write('data: fixture-ready\n\n')
+    return
+  }
+  if (request.url.startsWith('/v1/messages')) {
+    response.setHeader('content-type', 'application/json')
+    return response.end(JSON.stringify({
+      id: 'msg_fixture', type: 'message', role: 'assistant', model: body.model,
+      content: [{ type: 'text', text: 'local fixture response' }], stop_reason: 'end_turn',
+      stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
+    }))
+  }
+  if (body.stream) {
+    const message = {
+      id: 'msg_fixture', type: 'message', status: 'completed', role: 'assistant',
+      content: [{ type: 'output_text', text: 'local fixture response', annotations: [] }],
+    }
+    const completed = {
+      id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: body.model,
+      output: [message], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }
+    const events = [
+      { type: 'response.output_item.done', output_index: 0, item: message },
+      { type: 'response.completed', response: completed },
+    ]
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    for (const event of events) response.write('event: ' + event.type + '\ndata: ' + JSON.stringify(event) + '\n\n')
+    return response.end()
+  }
   response.setHeader('content-type', 'application/json')
   response.end(JSON.stringify({model: body.model, output_text: 'local fixture', pid: process.pid, port: server.address().port}))
 })
 server.listen(Number(process.argv[2]), '127.0.0.1')
 process.on('SIGTERM', () => server.close(() => process.exit(0)))
+`
+const authHelper = String.raw`#!/usr/bin/env node
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+const marker = path.join(process.env.HOME, 'fixture-authenticated')
+const action = process.argv[2]
+appendFileSync(path.join(process.env.HOME, 'fixture-auth-actions'), action + '\n')
+if (action === 'login') writeFileSync(marker, 'ready')
+if (action === 'logout' && existsSync(marker)) unlinkSync(marker)
+process.exit(existsSync(marker) ? 0 : 1)
 `
 
 export async function stageServiceModePlugin(
@@ -31,8 +90,22 @@ export async function stageServiceModePlugin(
   profileId: string,
   withService: boolean,
   canonicalSource: string | null = 'https://example.test/fixtures',
+  browserSource = 'export function apply() { throw new Error("Desktop fixture must never activate") }',
+  options: {
+    readonly pluginId?: string
+    readonly version?: 14 | 15 | 16
+    readonly withoutStartup?: boolean
+    readonly channelExact?: boolean
+    readonly expectedConfigMarker?: string
+    readonly uiPoints?: readonly string[]
+    readonly authentication?: boolean
+    readonly logout?: boolean
+    readonly nodeConfig?: boolean
+    readonly browserConsole?: boolean
+  } = {},
 ) {
-  const id = withService ? 'fixture-service' : 'fixture-desktop'
+  const id = options.pluginId ?? (withService ? 'fixture-service' : 'fixture-desktop')
+  const providerId = options.pluginId === undefined ? 'fixture-provider' : `${id}-provider`
   const dir = path.join(root, id)
   await mkdir(dir)
   const routes = [{ alias: 'fixture', gatewayModelId: 'fixture-model' }]
@@ -42,62 +115,178 @@ export async function stageServiceModePlugin(
     defaultAlias: 'fixture',
     routes,
   }
-  const value = definition('gateway')
-  const service = `
+  const authAction = (action: string) => ({
+    executable: { kind: 'package-relative' as const, path: './auth.mjs' as const },
+    arguments: [action],
+    timeoutMs: 5_000,
+    outcomes: [
+      { exitCode: 0, state: 'authenticated' as const },
+      { exitCode: 1, state: 'authentication-required' as const },
+    ],
+  })
+  const serviceDefinition = definition('gateway')
+  const backendSource = options.browserConsole ? consoleBackend : backend
+  const value = {
+    ...serviceDefinition,
+    ...(options.browserConsole ? { operations: [...serviceDefinition.operations, ...consoleOperations] } : {}),
+    ...(options.authentication
+      ? {
+        authentication: {
+          mode: 'cli' as const,
+          status: authAction('status'),
+          login: authAction('login'),
+          ...(options.logout ? { logout: authAction('logout') } : {}),
+        },
+      }
+      : {}),
+  }
+  const version = options.version ?? 14
+  const progressive = version === 15 || version === 16 && options.withoutStartup !== true
+  const registration = `
 export async function apply(ctx, input) {
+  ${
+    options.expectedConfigMarker === undefined ? '' : `
+    if (input.configuration?.value?.marker !== ${JSON.stringify(options.expectedConfigMarker)}) {
+    throw new Error('Fixture startup configuration did not reach the service')
+  }
+  `
+  }
   const handle = await ctx.managedServices.register(${JSON.stringify(value)}, { revision: '${
     digest(JSON.stringify(value))
   }' })
   ctx.effect(() => () => handle.dispose())
+  ${
+    progressive || options.authentication ? '' : `
   const ready = await handle.ensureReady({ signal: input.signal })
   if (ready.status !== 'ready') throw new Error('Fixture did not start')
   const result = await handle.publishNativeProvider({
-    providerId: 'fixture-provider', compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
+    providerId: ${JSON.stringify(providerId)}, compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
   })
   if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
+  `
+  }
 }
 apply.inject = ['managedServices']
 `
+  const nodeConfig = options.nodeConfig
+    ? `export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture',
+        validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { marker: { type: 'string' } } }) }`
+    : ''
+  const service = (!progressive ? registration : `${nodeConfig}
+${registration}
+export async function prepare(ctx, input) {
+  const ready = await input.registration.ensureReady({ signal: input.signal })
+  if (ready.status !== 'ready') throw new Error('Fixture did not start')
+  await input.startup.reportCatalog({
+    contract: 'cordisx.startup-catalog-report/v1',
+    target: { pluginId: input.owner.pluginId, capabilityId: input.capability.id },
+    generation: input.generation, sequence: 1,
+    catalog: { state: 'known', generation: 'fixture', modelIds: ['fixture'], digest: '${
+    digest(JSON.stringify(['fixture', ['fixture']]))
+  }' },
+  })
+  const result = await input.registration.publishNativeProvider({
+    providerId: input.capability.providerId, compositionOrigin: 'api', catalog: ${JSON.stringify(catalog)}
+  })
+  if (result.status !== 'accepted') throw new Error('Fixture publication was rejected')
+}
+`) + (options.browserConsole ? consoleExports : '')
+  const runtimeSchema = version === 16
+    ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V16
+    : version === 15
+    ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V15
+    : CORDISX_PLUGIN_MANIFEST_SCHEMA_V14
   const runtime = JSON.stringify({
-    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
-    schemaVersion: 14,
+    $schema: runtimeSchema,
+    schemaVersion: version,
     id,
-    capabilities: [],
+    capabilities: [
+      ...(options.uiPoints === undefined ? [] : [{
+        name: 'ui.extension-points.render',
+        required: true,
+        scope: { extensionPoints: options.uiPoints },
+      }]),
+      ...(options.channelExact
+        ? [{
+          name: 'channel.accounts.connect',
+          required: false,
+          scope: { runtime: 'exact-request' },
+        }]
+        : []),
+    ],
     services: withService
       ? [{
         ...declaration('gateway', id, []),
-        runtimeResources: [{
-          path: './server.mjs',
-          mode: 'executable',
-          byteLength: Buffer.byteLength(backend),
-          digest: digest(backend),
-        }],
+        runtimeResources: [
+          {
+            path: './server.mjs',
+            mode: 'executable',
+            byteLength: Buffer.byteLength(backendSource),
+            digest: digest(backendSource),
+          },
+          ...(options.authentication
+            ? [{
+              path: './auth.mjs',
+              mode: 'executable',
+              byteLength: Buffer.byteLength(authHelper),
+              digest: digest(authHelper),
+            }]
+            : []),
+        ],
       }]
       : [],
+    ...(progressive
+      ? {
+        startup: {
+          contract: 'cordisx.startup-declaration/v1',
+          pages: [],
+          capabilities: withService
+            ? [{
+              id: 'provider',
+              serviceId: 'gateway',
+              kind: 'provider',
+              providerId,
+              compositionOrigin: 'api',
+              dependsOn: [],
+              milestones: [],
+              wait: { interactive: 'background', command: 'when-selected' },
+              success: {
+                allOf: [{ kind: 'service-ready' }, { kind: 'catalog-known' }, { kind: 'provider-published' }],
+              },
+            }]
+            : [],
+        },
+      }
+      : {}),
   })
   await Promise.all([
     writeFile(
       path.join(dir, 'index.mjs'),
-      'export function apply() { throw new Error("Desktop fixture must never activate") }',
+      browserSource,
     ),
     writeFile(path.join(dir, 'gateway.mjs'), service),
-    writeFile(path.join(dir, 'server.mjs'), backend, { mode: 0o755 }),
+    writeFile(path.join(dir, 'server.mjs'), backendSource, { mode: 0o755 }),
+    ...(options.authentication ? [writeFile(path.join(dir, 'auth.mjs'), authHelper, { mode: 0o755 })] : []),
     writeFile(path.join(dir, 'runtime.json'), runtime),
     writeFile(
       path.join(dir, 'cordisx-package.json'),
       JSON.stringify({
-        $schema: PLUGIN_PACKAGE_SCHEMA_V14,
-        schemaVersion: 14,
+        $schema: version === 16
+          ? PLUGIN_PACKAGE_SCHEMA_V16
+          : version === 15
+          ? PLUGIN_PACKAGE_SCHEMA_V15
+          : PLUGIN_PACKAGE_SCHEMA_V14,
+        schemaVersion: version,
         id,
         version: '1.0.0',
         ...(canonicalSource === null ? {} : { canonicalSource }),
         entry: './index.mjs',
         distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-        compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14] },
+        compatibility: { runtimeAbi: 1, protocolSchemas: [runtimeSchema] },
         dependencies: [],
         runtimeManifest: {
           path: './runtime.json',
-          schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+          schema: runtimeSchema,
           digest: digest(runtime),
         },
       }),
@@ -124,7 +313,7 @@ apply.inject = ['managedServices']
     ...identity,
     target: { kind: 'candidate', candidateId: staged.candidateId },
   })
-  if (!plan || plan.declarations.some(declaration => declaration.decisionRequired)) {
+  if (!plan || options.uiPoints === undefined && plan.declarations.some(declaration => declaration.decisionRequired)) {
     throw new Error('Unexpected fixture permission review')
   }
   const applied = await coordinator.applyPermissionReviewV4({

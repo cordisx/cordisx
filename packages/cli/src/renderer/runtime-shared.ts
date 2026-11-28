@@ -1,4 +1,5 @@
 import type { CordisXPluginManifestV16 } from '../channel-exact-request-permissions.js'
+import type { StandaloneDomPolicyAdopter } from '../standalone-permission-contract.js'
 import type { DeferredPermissionDecision } from '../permission-deferral.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
@@ -251,7 +252,8 @@ export function cloneRendererValue<Value>(value: Value): Value {
 export interface CordisXRuntimeMetadata {
   readonly serviceCapabilityOwners?: readonly RuntimeServiceCapabilityOwner[]
   readonly version: string
-  readonly workspaceCwd: string
+  /** Omitted when a standalone owner has not granted a workspace. */
+  readonly workspaceCwd?: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
   readonly profileId: string
   readonly appId?: string
@@ -264,6 +266,8 @@ export interface CordisXRuntimeMetadata {
   /** Host-private bootstrap token, stripped before runtime metadata is retained. */
   readonly agentContextBridgeToken?: string
   readonly configBridgeToken?: string
+  /** Host-private, owner-proved Desktop package configuration scope. */
+  readonly standaloneDesktopPackageConfig?: { readonly token: string; readonly plugins: readonly string[] }
   readonly nativeSessionBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
   readonly ownerDocumentBindings?: readonly {
@@ -299,10 +303,31 @@ export interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
-  /** Development-only host with explicit semantic seats and no Codex DOM probes. */
-  readonly hostKind?: 'codex' | 'playground'
+  /** Host-selected runtime; standalone has no Codex DOM seats or Playground simulator. */
+  readonly hostKind?: 'codex' | 'playground' | 'standalone'
+  /** Non-authoritative identifier for this owner-attached renderer. */
+  readonly standaloneRendererId?: string
+  /** The service owner coordinates persistent Manager UI policies for installed graphs. */
+  readonly standaloneInstalledPolicyReview?: true
+  /** The service owner coordinates persistent UI policies for the configured Channel. */
+  readonly standaloneConfiguredPolicyReview?: true
+  /** Owner-selected configured graphs that support coordinated persistent UI review. */
+  readonly standaloneConfiguredPluginPolicyReview?: readonly string[]
+  /** Host-private owner and resource check supplied by the standalone session. */
+  readonly standaloneReviewSession?: () => Promise<boolean>
+  readonly standaloneWriteUncertain?: (source?: 'permission-policy') => void
+  /** One-shot Host registration; removed before metadata reaches runtime or plugins. */
+  readonly standalonePolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void
+  /** Service-attached native clients must not fall back to browser-local policy storage. */
+  readonly ownerPermissionSnapshot?: true
+  /** The service has enabled its authenticated native permission bridge. */
+  readonly nativeOwnerPermissionReview?: true
+  readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
+  /** Session-private signer; removed before metadata reaches runtime or plugins. */
+  readonly standalonePermissionSigner?:
+    import('../independent-manager/standalone-permission-signer.js').StandalonePermissionSigner
   /** Host-only presentation preview; never exposed through plugin Contexts. */
-  readonly managerPresentationMode?: 'workspace'
+  readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */
   readonly nativeAppVersion?: string
   readonly executionPlatform: 'posix' | 'win32'
@@ -321,6 +346,12 @@ export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'packag
   }
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
+  /** Owner-issued initial graph for a configured plugin in an independent Host. */
+  readonly standaloneConfiguredGraph?: true
+  /** Owner-issued placeholder without a loaded plugin graph. */
+  readonly standaloneUnavailable?: true
+  /** Owner-issued initial graph for an installed package in an independent Host. */
+  readonly standaloneInstalledGraph?: true
   /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
@@ -547,6 +578,32 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
+  /** Actual configured graphs loaded into this independent renderer. */
+  configuredPluginGraphGenerations?(): readonly { readonly pluginId: string; readonly moduleGeneration: string }[]
+  /** Native owner readback of a configured archive loaded by this renderer. */
+  configuredPluginProvenance?(pluginId: string): {
+    readonly version: string
+    readonly integrity: string
+    readonly moduleGeneration: string
+  } | undefined
+  /** Host-private adoption of an owner-confirmed standalone Channel view. */
+  adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
+  /** Apply only a service-signed transition for this native adapter session. */
+  adoptOwnerManagerPolicy?(packet: unknown): Promise<boolean | 'origin'>
+  /** Adopt an owner-confirmed configuration write without replacing this Manager. */
+  adoptStandaloneDesktopPackageConfig?(
+    value: import('./standalone-desktop-package-config-binding.js').StandaloneDesktopConfigAdoption,
+  ): Promise<boolean>
+  /** Host-private confirmation through this standalone renderer's own managed-service capability. */
+  confirmStandaloneManagedServiceState?(
+    input: import('../managed-service-state-confirmation.js').ManagedServiceStateConfirmation,
+  ): Promise<boolean>
+  /** Adopt an owner-confirmed account projection in this renderer only. */
+  adoptStandaloneManagedServiceAccounts?(
+    input: import('../managed-service-account-adoption.js').ManagedServiceAccountAdoption,
+  ): Promise<boolean>
+  /** Host-private registry readback for confirming an attached renderer's snapshot. */
+  pluginRegistryEpoch(): number
   /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */
   releaseCertifiedPermissionChannel():
     | import('./certified-permission-channel.js').CertifiedPermissionDocumentChannel
@@ -784,7 +841,10 @@ export function createController(item: RuntimeBrowserPlugin, pluginConsole: Plug
       activation,
       principalLive: true,
       manifest,
-      status: !item.enabled || (!isolated && module === undefined) ? 'configured-disabled' : 'active',
+      status: item.standaloneUnavailable ? 'failed' : !item.enabled || (!isolated && module === undefined)
+        ? 'configured-disabled'
+        : 'active',
+      ...(item.standaloneUnavailable ? { error: 'This plugin is not yet available in the standalone Manager.' } : {}),
     }
   } catch (error) {
     return {

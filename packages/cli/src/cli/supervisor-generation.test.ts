@@ -7,9 +7,9 @@ import { launchFingerprint } from './launch-fingerprint.js'
 import { type CordisXManagedInvocation, parseCordisXCli } from './parse.js'
 import { runSupervisorCommand } from './supervisor-command.js'
 import {
+  clientSupervisorPaths,
   processStartIdentity,
   readSupervisorState,
-  supervisorPaths,
   type SupervisorState,
   writeSupervisorState,
 } from './supervisor-state.js'
@@ -25,12 +25,13 @@ describe('supervisor startup generation', () => {
     roots.push(root)
     await ensureHomeConfig({ env: { CORDISX_HOME: root } })
     const invocation = parseCordisXCli(['start', '--json']) as CordisXManagedInvocation
-    const paths = supervisorPaths(root, 'codex', 'default')
+    const paths = clientSupervisorPaths(root, 'codex', 'default')
     const startedAt = (await processStartIdentity(process.pid))!
     const original: SupervisorState = {
       schemaVersion: 1,
       appId: 'codex',
       profileId: 'default',
+      clientOfService: true,
       phase: 'starting',
       pid: process.pid,
       processStartedAt: startedAt,

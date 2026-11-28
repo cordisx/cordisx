@@ -224,6 +224,49 @@ export interface ManagerModel {
   /** Host-private shared execution preferences, independent of installed Channel transports. */
   chatExecution?: import('./channel-execution-workflow.js').ChannelExecutionWorkflow
   readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
+  /** False when the active owner only supplies a permission snapshot. */
+  readonly permissionPolicyWritable?: boolean
+  /** A service-attached native client can use Web for eligible UI reviews. */
+  readonly permissionReviewInWeb?: boolean
+  readonly permissionHistory?: (
+    pluginId: string,
+  ) => Promise<readonly import('../permission-decision-history.js').PermissionDecisionHistoryItem[]>
+  readonly pluginAuthorizationHistory?: (
+    pluginId: string,
+  ) => Promise<readonly import('../permission-decision-history.js').PluginAuthorizationHistoryItem[]>
+  /** Host-private review of an owner-selected configured Channel page. */
+  readonly standaloneDomReview?: {
+    readonly native?: boolean
+    describe(identity: CordisXPluginIdentity, pointId: string):
+      | Readonly<{
+        version: string
+        integrity: string
+        authorized: boolean
+        policy: 'inherit' | 'allow' | 'deny'
+        persistentAvailable?: boolean
+        resetAvailable?: boolean
+      }>
+      | undefined
+    request(identity: CordisXPluginIdentity, pointId: string): Promise<boolean>
+    reset(identity: CordisXPluginIdentity, pointId: string, event: Event): Promise<boolean>
+  }
+  /** Host-owned controls for a service-synchronized declared runtime policy. */
+  readonly standaloneRuntimeReview?: {
+    readonly native: boolean
+    describe(identity: CordisXPluginIdentity, capability: string, fingerprint: string):
+      | Readonly<{
+        policy: import('../permission-contracts.js').CordisXPermissionPolicyV2
+        options: readonly import('../permission-contracts.js').CordisXPermissionPolicyV2[]
+      }>
+      | undefined
+    set(
+      identity: CordisXPluginIdentity,
+      capability: string,
+      fingerprint: string,
+      policy: import('../permission-contracts.js').CordisXPermissionPolicyV2,
+      event: Event,
+    ): Promise<boolean>
+  }
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1
   clearPluginConsole?(id: string): void

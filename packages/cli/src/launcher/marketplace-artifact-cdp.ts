@@ -1,6 +1,7 @@
 import type { CdpSession } from './cdp-session.js'
 import {
   inspectMarketplaceArtifactPackage,
+  type MarketplaceArtifactBindingRequest,
   parseMarketplaceArtifactBindingRequest,
   previewMarketplaceArtifactPackage,
 } from './marketplace-artifact.js'
@@ -11,6 +12,13 @@ export const MARKETPLACE_ARTIFACT_RECEIVER = '__cordisxMarketplaceArtifactReceiv
 
 interface MarketplaceArtifactRequestGate {
   run<Value>(task: () => Promise<Value>, respond: (value: Value) => Promise<void>): Promise<void>
+}
+
+export interface RemoteMarketplaceArtifactBinding {
+  request(
+    request: Exclude<MarketplaceArtifactBindingRequest, { readonly kind: 'cancel' }>,
+    signal: AbortSignal,
+  ): Promise<unknown>
 }
 
 async function sendMarketplaceArtifactBindingResponse(
@@ -25,10 +33,14 @@ async function sendMarketplaceArtifactBindingResponse(
 
 export function installMarketplaceArtifactBinding(options: {
   readonly session: CdpSession
-  readonly handler: PluginLifecycleBridgeHandler
+  readonly handler?: PluginLifecycleBridgeHandler
+  readonly remote?: RemoteMarketplaceArtifactBinding
   readonly gate: MarketplaceArtifactRequestGate
   readonly signal: AbortSignal
 }): () => void {
+  if ((options.handler === undefined) === (options.remote === undefined)) {
+    throw new Error('Marketplace artifact authority is ambiguous')
+  }
   const artifactRequests = new Map<string, AbortController>()
   const abortRequests = (): void => {
     for (const controller of artifactRequests.values()) controller.abort()
@@ -53,12 +65,17 @@ export function installMarketplaceArtifactBinding(options: {
         artifactRequests.set(requestId, controller)
         try {
           const signal = AbortSignal.any([options.signal, controller.signal])
-          if (request.kind === 'preview') {
-            const value = await previewMarketplaceArtifactPackage(options.handler, request.request, signal)
+          if (options.remote !== undefined) {
+            // The service can call back into this renderer while inspecting a
+            // candidate, so the native CDP generation gate must remain free.
+            const value = await options.remote.request(request, signal)
+            await sendMarketplaceArtifactBindingResponse(options.session, { requestId, ok: true, value })
+          } else if (request.kind === 'preview') {
+            const value = await previewMarketplaceArtifactPackage(options.handler!, request.request, signal)
             await sendMarketplaceArtifactBindingResponse(options.session, { requestId, ok: true, value })
           } else {
             await options.gate.run(
-              async () => await inspectMarketplaceArtifactPackage(options.handler, request.request, signal),
+              async () => await inspectMarketplaceArtifactPackage(options.handler!, request.request, signal),
               async value =>
                 await sendMarketplaceArtifactBindingResponse(options.session, { requestId, ok: true, value }),
             )

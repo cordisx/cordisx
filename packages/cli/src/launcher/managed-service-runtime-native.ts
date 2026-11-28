@@ -13,7 +13,10 @@ export class ManagedServiceRuntimeNative {
   readonly authorities = new Map<string, ManagedServiceRecord>()
   readonly publications = new ManagedNativeProviderPublications()
 
-  constructor(private readonly registrations: ReadonlyMap<string, ManagedServiceRecord>) {}
+  constructor(
+    private readonly registrations: ReadonlyMap<string, ManagedServiceRecord>,
+    private readonly clientsBlocked: (record: ManagedServiceRecord) => boolean = () => false,
+  ) {}
 
   prepareNativeConnection(
     request: NativeManagedGatewayConnectionRequest,
@@ -23,6 +26,7 @@ export class ManagedServiceRuntimeNative {
       record === undefined || !managedBindingCurrent(request.binding, record.binding, record.disposed)
       || record.state !== 'ready'
       || record.origin === undefined
+      || this.clientsBlocked(record)
     ) throw new Error('selected managed service connection is unavailable or stale')
     const declaredOrigin = record.definition.compositionOrigins?.find(origin => origin.id === request.compositionOrigin)
     const authentication = record.definition.httpAuthentication
@@ -31,8 +35,7 @@ export class ManagedServiceRuntimeNative {
       throw new Error('selected managed service connection is incomplete')
     }
     const authorityId = managedHandle('msn')
-    this.authorities.set(authorityId, record)
-    return createNativeManagedGatewayConnection({
+    const session = createNativeManagedGatewayConnection({
       pluginId: record.binding.identity.pluginId,
       serviceId: record.binding.identity.serviceId,
       serviceGeneration: record.binding.serviceGeneration,
@@ -45,6 +48,8 @@ export class ManagedServiceRuntimeNative {
         if (this.authorities.get(authorityId) === record) this.authorities.delete(authorityId)
       },
     })
+    this.authorities.set(authorityId, record)
+    return session
   }
 
   listNativeProviderIds(pluginIds?: readonly string[]): readonly string[] {

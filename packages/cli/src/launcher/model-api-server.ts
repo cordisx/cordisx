@@ -3,6 +3,7 @@ import { request as httpsRequest } from 'node:https'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pipeline } from 'node:stream'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import { safeDiagnosticMessage } from './diagnostic-redaction.js'
@@ -397,9 +398,7 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
             ]
           ) delete outputHeaders[name]
           res.writeHead(reply.statusCode ?? 502, outputHeaders)
-          reply.on('end', resolve)
-          reply.on('error', reject)
-          reply.pipe(res)
+          pipeline(reply, res, error => error ? reject(error) : resolve())
         })
         upstream.on('error', reject)
         upstream.end(req.method === 'POST' ? bytes : undefined)

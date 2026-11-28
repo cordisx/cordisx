@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
-import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
+import { ManagerBrowseSearch } from '../components/ManagerBrowseSearch.js'
 
 export function RoutesPage(
   { snapshot, router }: { readonly snapshot: ManagerSnapshot; readonly router: ManagerRouter },
@@ -23,11 +23,10 @@ export function RoutesPage(
   )
   return (
     <section className="cxr-page cxr-browse-page">
-      <SearchToolbar
-        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+      <ManagerBrowseSearch
+        kind="routes"
+        locale={snapshot.localization.locale}
         value={query}
-        aria-label={managerCopy(snapshot.localization.locale, 'routes.search-label')}
-        placeholder={managerCopy(snapshot.localization.locale, 'routes.search-placeholder')}
         onChange={setQuery}
       />
       <ManagerBrowseResults className="cxr-list">

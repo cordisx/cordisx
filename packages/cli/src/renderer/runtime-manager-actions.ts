@@ -1,4 +1,5 @@
 import { usagePermissionAvailability } from './usage-availability.js'
+import { managerCopy } from './ui-copy.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -450,7 +451,11 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
           developmentReloadAvailable: developmentReloadAvailable(runtimeScope, controller.item.id),
         }),
         status: controller.status,
-        ...(controller.error === undefined ? {} : { error: controller.error }),
+        ...(controller.error === undefined ? {} : {
+          error: controller.item.standaloneUnavailable
+            ? managerCopy(locale, 'plugins.standalone-unavailable')
+            : controller.error,
+        }),
         ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
       }
     }),
@@ -719,6 +724,28 @@ export const createRuntimeUpdatePluginConfig = (
     const controller = runtimeScope.activeController()!(id)
     if (controller === undefined) {
       throw new Error(`unknown CordisX plugin: ${id}`)
+    }
+    const standaloneConfig = runtimeScope.standaloneDesktopPackageConfigBridge()
+    if (
+      runtimeScope.metadata()!.hostKind === 'standalone' && standaloneConfig
+      && runtimeScope.metadata()!.standaloneDesktopPackageConfig?.plugins.includes(id)
+    ) {
+      const registry = runtimeScope.configuration()!
+      const descriptor = registry.descriptor(id, runtimeScope.i18nService?.getSnapshot().locale ?? 'en')
+      if (!descriptor.writable || descriptor.applies !== 'live') {
+        throw new Error('plugin configuration is unavailable')
+      }
+      const candidate = registry.stage(id, expectedRevision, operations)
+      await standaloneConfig.request(id, expectedRevision, operations, candidate, revision => {
+        const current = registry.descriptor(id, runtimeScope.i18nService?.getSnapshot().locale ?? 'en')
+        if (
+          runtimeScope.disposed || runtimeScope.activeController()!(id) !== controller
+          || !current.writable || current.revision !== expectedRevision
+        ) throw new Error('plugin configuration is stale')
+        registry.commit(id, revision, candidate)
+        runtimeScope.notify()!()
+      })
+      return
     }
     if (runtimeScope.configBridge()! === undefined) {
       throw new Error('plugin configuration writer is unavailable in this launcher mode')

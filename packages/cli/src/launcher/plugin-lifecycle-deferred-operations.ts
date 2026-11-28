@@ -9,8 +9,6 @@ import type {
   CordisXPermissionAuthorizationPlanV4,
 } from '../permission-contracts.js'
 import {
-  assertBundlePolicyDecision,
-  assertDeferredPermissionDecision,
   type DeferredPermissionDecision,
   type DeferredPermissionPlan,
   deferValidatedPermissionPlan,
@@ -29,10 +27,13 @@ import {
   resultBase,
   safeError,
   validateDecisionV4,
+  validateDecisionV7,
 } from './plugin-lifecycle-model.js'
 import { PluginLifecycleCoordinatorTransaction } from './plugin-lifecycle-transaction.js'
+import { PermissionReviewGate } from './permission-review-gate.js'
 
 export abstract class PluginLifecycleCoordinatorDeferred extends PluginLifecycleCoordinatorTransaction {
+  protected readonly permissionReviewGate = new PermissionReviewGate()
   abstract permissionReviewPlanV2(
     input: HostPermissionLifecycleReviewV2Request,
   ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined>
@@ -93,7 +94,7 @@ export abstract class PluginLifecycleCoordinatorDeferred extends PluginLifecycle
     readonly expectedRevision: number
     readonly decision: DeferredPermissionDecision
   }): Promise<CordisXPluginLifecycleResultV1> {
-    return await this.applyPermissionReviewV7Internal(input)
+    return await this.permissionReviewGate.run(async () => await this.applyPermissionReviewV7Internal(input))
   }
 
   /** Bundle-coordinator-only: choices are derived from the reviewed exact member policy. */
@@ -104,7 +105,9 @@ export abstract class PluginLifecycleCoordinatorDeferred extends PluginLifecycle
     readonly expectedRevision: number
     readonly decision: DeferredPermissionDecision
   }, selections: Readonly<Record<string, 'allow' | 'deny'>>): Promise<CordisXPluginLifecycleResultV1> {
-    return await this.applyPermissionReviewV7Internal(input, selections)
+    return await this.permissionReviewGate.run(async () =>
+      await this.applyPermissionReviewV7Internal(input, selections)
+    )
   }
 
   private async applyPermissionReviewV7Internal(input: {
@@ -195,11 +198,9 @@ export abstract class PluginLifecycleCoordinatorDeferred extends PluginLifecycle
     const reviewedPlan = decision.schemaVersion === 7 && bundlePolicySelections !== undefined
       ? withBundlePolicyIntent(plan as DeferredPermissionPlan, new Set(Object.keys(bundlePolicySelections)))
       : plan
-    if (decision.schemaVersion === 7 && bundlePolicySelections !== undefined) {
-      assertBundlePolicyDecision(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
-    } else if (decision.schemaVersion === 7) {
+    if (decision.schemaVersion === 7) {
       if (plan.schemaVersion !== 7) throw new Error('permission plan version mismatch')
-      assertDeferredPermissionDecision(plan, decision)
+      validateDecisionV7(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
     } else {
       if (plan.schemaVersion !== 4) throw new Error('permission plan version mismatch')
       validateDecisionV4(plan, decision)

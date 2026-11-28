@@ -3,17 +3,20 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { runSupervisorCommandWithStartupGate } from '../packages/cli/src/cli/supervisor-command.js'
 import {
+  clientSupervisorPaths,
   processStartIdentity,
   readSupervisorState,
-  supervisorPaths,
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
 import type { StartupGate } from '../packages/cli/src/cli/startup-gate.js'
 import { shortcutKey } from '../packages/cli/src/shortcuts/model.js'
+
+// These cases exercise presentation around an already simulated native client.
+vi.mock('../packages/cli/src/cli/startup-caller-wait.js', () => ({ waitForStartupCaller: async () => {} }))
 
 function fakeGate(events: string[], actions: Array<'retry' | 'dismiss'> = []): StartupGate {
   return {
@@ -39,7 +42,7 @@ function fakeGate(events: string[], actions: Array<'retry' | 'dismiss'> = []): S
 describe('supervisor startup gate', () => {
   it('is visible before Host spawn and opens only after Host and renderer readiness', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-startup-gate-'))
-    const paths = supervisorPaths(root, 'codex', 'default')
+    const paths = clientSupervisorPaths(root, 'codex', 'default')
     const startedAt = await processStartIdentity(process.pid)
     const entryId = shortcutKey(await realpath(root), 'codex', 'default', 'shared')
     const events: string[] = []
@@ -74,6 +77,7 @@ describe('supervisor startup gate', () => {
               await writeSupervisorState(paths, {
                 ...state,
                 phase: 'ready',
+                clientConnection: 'connected',
                 hostPid: process.pid,
                 hostProcessStartedAt: startedAt!,
                 cdpEndpoint: 'http://127.0.0.1:49991',
@@ -104,7 +108,7 @@ describe('supervisor startup gate', () => {
 
   it('turns a failed launch into an explicit retry and keeps the gate until success', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-startup-gate-retry-'))
-    const paths = supervisorPaths(root, 'codex', 'default')
+    const paths = clientSupervisorPaths(root, 'codex', 'default')
     const events: string[] = []
     let spawned = 0
     const children = [
@@ -139,6 +143,7 @@ describe('supervisor startup gate', () => {
                     : {
                       ...state,
                       phase: 'ready',
+                      clientConnection: 'connected',
                       hostPid: process.pid,
                       hostProcessStartedAt: hostStartedAt!,
                       cdpEndpoint: 'http://127.0.0.1:49992',
@@ -168,7 +173,7 @@ describe('supervisor startup gate', () => {
 
   it('reuses an already-ready Host without asking the gate to hide it again', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-startup-gate-ready-'))
-    const paths = supervisorPaths(root, 'codex', 'default')
+    const paths = clientSupervisorPaths(root, 'codex', 'default')
     const startedAt = await processStartIdentity(process.pid)
     const firstEvents: string[] = []
     let spawned = 0
@@ -190,6 +195,7 @@ describe('supervisor startup gate', () => {
               await writeSupervisorState(paths, {
                 ...state,
                 phase: 'ready',
+                clientConnection: 'connected',
                 hostPid: process.pid,
                 hostProcessStartedAt: startedAt!,
                 cdpEndpoint: 'http://127.0.0.1:49993',

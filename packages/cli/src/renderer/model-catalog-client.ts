@@ -158,7 +158,11 @@ export class ModelCatalogClient {
 
   /** Whether the Host offers the top-level model-service declarations to this document. */
   get modelServicesAvailable(): boolean {
-    return this.channel.modelServicesRead !== undefined && this.channel.modelServicesSave !== undefined
+    return this.channel.modelServicesRead !== undefined
+  }
+
+  get modelServicesWritable(): boolean {
+    return this.channel.modelServicesSave !== undefined
   }
 
   async modelServicesRead(): Promise<ModelServicesReadResult> {

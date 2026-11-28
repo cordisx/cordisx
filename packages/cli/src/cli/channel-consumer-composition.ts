@@ -18,6 +18,7 @@ import { logicalContinuationManagement } from '../launcher/logical-continuation-
 export function configuredLaunchCleanup(input: {
   readonly documents: OwnerDocumentBridgeHandler
   readonly credentials: ChannelCredentialBridgeHandler | undefined
+  readonly managerCredentials?: { close(): Promise<void> }
   readonly channel: () => Promise<void>
   readonly providers: () => Promise<void>
 }): () => Promise<void> {
@@ -30,6 +31,7 @@ export function configuredLaunchCleanup(input: {
         () => input.documents.http.dispose(),
         () => input.documents.agentTools?.close(),
         () => input.credentials?.dispose?.(),
+        () => input.managerCredentials?.close(),
         input.channel,
         input.providers,
       ]

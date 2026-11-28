@@ -129,6 +129,31 @@ export function platformAdapterCapabilityProvider(
   })
 }
 
+/** Web's model catalog is provided by the shared CordisX service. */
+export function serviceModelCapabilityProvider(status: CordisXPlatformAdapterStatus): CordisXCapabilityProviderReport {
+  const available = status.mode !== 'unavailable' && status.supportedCapabilities.includes('models.read')
+  const reason = available
+    ? message('provider.service-models.supported', 'The CordisX service provides the model catalog.')
+    : message('provider.service-models.unavailable', 'The CordisX service model catalog is unavailable.')
+  return report({
+    providerId: 'cordisx-service-models',
+    providerName: message('provider.service-models.name', 'CordisX service'),
+    kind: 'host-local',
+    family: 'platform',
+    status: available ? 'supported' : 'unavailable',
+    reason,
+    routes: PLATFORM_CAPABILITIES.map(capability =>
+      route(
+        capability,
+        available && capability === 'models.read' ? 'supported' : 'unavailable',
+        capability === 'models.read'
+          ? reason
+          : message('route.service-models.unavailable', 'This service capability is unavailable.'),
+      )
+    ),
+  })
+}
+
 /** Public Channel Manager reads and credential workflows are served by the single Host provider. */
 export function channelManagerCapabilityProvider(): CordisXCapabilityProviderReport {
   const reason = message(
@@ -150,6 +175,7 @@ export function hostLocalCapabilityProviders(input: {
   readonly agentStatus: CordisXAgentEventStatus
   readonly historyStatus: CordisXAgentHistoryStatus
   readonly configurationWritable: boolean
+  readonly configurationPartiallyWritable?: boolean
   readonly packageLifecycleAvailable?: boolean
 }): readonly CordisXCapabilityProviderReport[] {
   const agentAvailable = input.agentStatus.mode !== 'unavailable'
@@ -206,6 +232,11 @@ export function hostLocalCapabilityProviders(input: {
       status: input.configurationWritable ? 'supported' : 'degraded',
       reason: input.configurationWritable
         ? message('provider.configuration.supported', 'Validated configuration and the Host writer are available.')
+        : input.configurationPartiallyWritable
+        ? message(
+          'provider.configuration.partial',
+          'Some verified plugin fields can be saved when the owner and session are available.',
+        )
         : message(
           'provider.configuration.degraded',
           'Configuration descriptors are available, but the Host writer is unavailable.',
@@ -458,6 +489,8 @@ const EN_MESSAGES = {
   'provider.channel-manager.supported': 'The Host Channel Manager can project redacted accounts and bindings.',
   'provider.configuration.name': 'Host configuration',
   'provider.configuration.supported': 'Validated configuration and the Host writer are available.',
+  'provider.configuration.partial':
+    'Some verified plugin fields can be saved when the owner and session are available.',
   'provider.configuration.degraded': 'Configuration descriptors are available, but the Host writer is unavailable.',
   'provider.console.name': 'Host plugin console',
   'provider.console.unavailable': 'The Console protocol is defined, but this Host has not published a console service.',
@@ -493,6 +526,7 @@ const ZH_MESSAGES = {
   'provider.channel-manager.supported': '宿主 Channel 管理器可投影已脱敏的账号与绑定。',
   'provider.configuration.name': '宿主配置',
   'provider.configuration.supported': '校验后的配置与宿主写入器当前可用。',
+  'provider.configuration.partial': '部分已验证的插件字段可在后台和会话允许时保存。',
   'provider.configuration.degraded': '配置描述可用，但宿主写入器暂不可用。',
   'provider.console.name': '宿主插件 Console',
   'provider.console.unavailable': 'Console 协议已定义，但当前宿主尚未发布 Console 服务。',

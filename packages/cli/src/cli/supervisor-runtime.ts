@@ -19,6 +19,7 @@ import { startSupervisorControlServer, type SupervisorControlServer } from './su
 import { logHostLifecycle } from './host-lifecycle.js'
 import {
   acquireSupervisorStartLock,
+  clientSupervisorPaths,
   hasMatchingProcessIdentity,
   processStartIdentity,
   readSupervisorState,
@@ -47,11 +48,12 @@ async function acquirePublishedSupervisor(input: {
   readonly profile: string
   readonly fingerprint: string
   readonly token: string
+  readonly client?: boolean
   readonly publicationTimeoutMs?: number
 }): Promise<{ readonly state: SupervisorState; readonly release: () => Promise<void> }> {
   const startedAt = await processStartIdentity(process.pid)
   if (startedAt === undefined) throw new Error('background supervisor identity is unavailable')
-  const paths = supervisorPaths(input.home, input.app, input.profile)
+  const paths = (input.client ? clientSupervisorPaths : supervisorPaths)(input.home, input.app, input.profile)
   const deadline = Date.now() + (input.publicationTimeoutMs ?? SUPERVISOR_PUBLICATION_TIMEOUT_MS)
   while (Date.now() < deadline) {
     let release
@@ -73,6 +75,7 @@ async function acquirePublishedSupervisor(input: {
           || result.state.processStartedAt !== startedAt
           || result.state.appId !== input.app
           || result.state.profileId !== input.profile
+          || (result.state.clientOfService === true) !== (input.client === true)
           || result.state.effectiveConfig !== input.fingerprint
           || result.state.instanceToken !== input.token
         )
@@ -102,8 +105,20 @@ export async function createSupervisorRuntime(
     debugPort: number,
     account?: NativeAccountCapabilityDescriptor,
     signal?: AbortSignal,
+    clientFingerprint?: string,
   ) => Promise<void>
-  readonly markServiceReady: (modelApiUrl: string, signal: AbortSignal) => Promise<void>
+  readonly markServiceReady: (
+    modelApiUrl: string,
+    signal: AbortSignal,
+    web?: { readonly status: 'ready' | 'unavailable' | 'disabled'; readonly origin?: string },
+  ) => Promise<void>
+  readonly markServiceWebUnavailable: () => Promise<void>
+  readonly markClientDisconnected: () => Promise<boolean>
+  readonly markClientReconnected: (expected: string, next: string, signal: AbortSignal) => Promise<boolean>
+  readonly refreshClientFingerprint: (expected: string, next: string) => Promise<boolean>
+  readonly markServiceCleanup: (
+    outcome: { readonly ok: true } | { readonly ok: false; readonly failure: string },
+  ) => Promise<boolean>
   readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>, debugPort?: number) => Promise<boolean>
   /** Record why this generation is exiting while its published record is still current. */
   readonly markFailed: (failure: string) => Promise<void>
@@ -113,6 +128,11 @@ export async function createSupervisorRuntime(
   readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
 }> {
   const emitDiagnostic = bindDiagnostic()
+  const client = environment.CORDISX_SUPERVISOR_CLIENT === '1'
+  if (environment.CORDISX_SUPERVISOR_CLIENT !== undefined && !client) {
+    throw new Error('Invalid supervisor client role')
+  }
+  const selectedSupervisorPaths = client ? clientSupervisorPaths : supervisorPaths
   const home = environment.CORDISX_SUPERVISOR_HOME
   const app = environment.CORDISX_SUPERVISOR_APP
   const profile = environment.CORDISX_SUPERVISOR_PROFILE
@@ -120,7 +140,7 @@ export async function createSupervisorRuntime(
   if (dataMode !== undefined && dataMode !== 'shared' && dataMode !== 'host-isolated') {
     throw new Error('Invalid owned Host data mode')
   }
-  const fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
+  let fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
   const tokenFile = environment.CORDISX_SUPERVISOR_TOKEN_FILE
   const selectedHome = home && app === 'codex' && profile && (options.platform ?? process.platform) === 'darwin'
     ? await realpath(home)
@@ -139,7 +159,7 @@ export async function createSupervisorRuntime(
     ? dockScope(
       selectedEntry,
       dockRecord,
-      supervisorPaths(home, 'codex', profile).directory,
+      selectedSupervisorPaths(home, 'codex', profile).directory,
     )
     : undefined
   let control: SupervisorControlServer | undefined
@@ -176,7 +196,7 @@ export async function createSupervisorRuntime(
   let recoveryAttempt = 0
   const onStartupRecovery = async (waitingForUser: boolean): Promise<void> => {
     if (!home || !app || !profile) throw new Error('Missing startup recovery owner')
-    const paths = supervisorPaths(home, app, profile)
+    const paths = selectedSupervisorPaths(home, app, profile)
     const current = await readSupervisorState(paths)
     if (
       !current || current.phase !== 'starting' || current.pid !== process.pid
@@ -203,6 +223,7 @@ export async function createSupervisorRuntime(
       profile,
       fingerprint,
       token,
+      ...(client ? { client: true } : {}),
       ...(options.publicationTimeoutMs === undefined ? {} : { publicationTimeoutMs: options.publicationTimeoutMs }),
     })
     releaseStartupOperation = published.release
@@ -211,7 +232,7 @@ export async function createSupervisorRuntime(
       supervisorToken = token
       diagnostic({ event: 'supervisor-generation', supervisorGeneration: diagnosticRef(token) })
       control = await startSupervisorControlServer({
-        socketPath: supervisorPaths(home, app, profile).socket,
+        socketPath: selectedSupervisorPaths(home, app, profile).socket,
         token,
         stop: () => {
           logHostLifecycle(
@@ -223,7 +244,7 @@ export async function createSupervisorRuntime(
           process.kill(process.pid, 'SIGTERM')
         },
         readPresentation: async () => {
-          const paths = supervisorPaths(home, app, profile)
+          const paths = selectedSupervisorPaths(home, app, profile)
           const before = await readSupervisorState(paths)
           if (
             before?.pid !== process.pid || before.instanceToken !== token || before.phase !== 'ready'
@@ -239,7 +260,7 @@ export async function createSupervisorRuntime(
         ...(dock
           ? {
             refreshDock: async (requestedRecord?: string, signal?: AbortSignal) => {
-              const paths = supervisorPaths(home, app, profile)
+              const paths = selectedSupervisorPaths(home, app, profile)
               let stage = 'owner'
               let refreshed = false
               try {
@@ -280,8 +301,14 @@ export async function createSupervisorRuntime(
           }
           : {}),
       })
+      if (client) {
+        // A client may spend time starting its service. Once its authenticated
+        // control endpoint exists, let stop cancel this generation promptly.
+        await releaseStartupOperation?.()
+        releaseStartupOperation = undefined
+      }
     } catch (error) {
-      await releaseStartupOperation()
+      await releaseStartupOperation?.()
       releaseStartupOperation = undefined
       throw error
     }
@@ -293,7 +320,7 @@ export async function createSupervisorRuntime(
     async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return false
-      const current = await readSupervisorState(supervisorPaths(home, app, profile))
+      const current = await readSupervisorState(selectedSupervisorPaths(home, app, profile))
       if (
         current === undefined
         || current.pid !== process.pid
@@ -304,7 +331,7 @@ export async function createSupervisorRuntime(
       const hostProcessStartedAt = await processStartIdentity(pid)
       if (hostProcessStartedAt === undefined) throw new Error('launched Host exited before identity capture')
       const published = await updateSupervisorState(
-        supervisorPaths(home, app, profile),
+        selectedSupervisorPaths(home, app, profile),
         current,
         latest => latest.phase !== 'starting' ? undefined : ({ ...latest, hostPid: pid, hostProcessStartedAt }),
       )
@@ -319,7 +346,7 @@ export async function createSupervisorRuntime(
           hostCwd: process.cwd(),
           debugPort,
           hostStartedAt: hostProcessStartedAt,
-          readyStatePath: supervisorPaths(home, app, profile).state,
+          readyStatePath: selectedSupervisorPaths(home, app, profile).state,
           readyInstanceToken: supervisorToken,
           onStartupRecovery,
           enableManagedConsole: options.enableManagedConsole?.() === true,
@@ -333,9 +360,12 @@ export async function createSupervisorRuntime(
       }
       return mainAgents !== undefined
     },
-    async markReady(debugPort, account, signal): Promise<void> {
+    async markReady(debugPort, account, signal, clientFingerprint): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
-      const current = await readSupervisorState(supervisorPaths(home, app, profile))
+      if (clientFingerprint !== undefined && (!client || !/^[a-f0-9]{64}$/u.test(clientFingerprint))) {
+        throw new Error('Invalid client launch fingerprint')
+      }
+      const current = await readSupervisorState(selectedSupervisorPaths(home, app, profile))
       if (
         current === undefined
         || current.pid !== process.pid
@@ -354,7 +384,7 @@ export async function createSupervisorRuntime(
           hostCwd: process.cwd(),
           debugPort,
           hostStartedAt: current.hostProcessStartedAt,
-          readyStatePath: supervisorPaths(home, app, profile).state,
+          readyStatePath: selectedSupervisorPaths(home, app, profile).state,
           readyInstanceToken: supervisorToken,
           onStartupRecovery,
           enableManagedConsole: options.enableManagedConsole?.() === true,
@@ -373,25 +403,34 @@ export async function createSupervisorRuntime(
           : undefined,
         async () => {
           if (signal?.aborted) throw cdpInstallationAborted()
-          const published = await updateSupervisorState(supervisorPaths(home, app, profile), current, latest => {
-            if (signal?.aborted || latest.phase !== 'starting') return undefined
-            return {
-              ...latest,
-              phase: 'ready',
-              ...(startupSurface === undefined ? {} : { startupSurface }),
-              cdpEndpoint: `http://127.0.0.1:${debugPort}`,
-            }
-          })
+          const published = await updateSupervisorState(
+            selectedSupervisorPaths(home, app, profile),
+            current,
+            latest => {
+              if (signal?.aborted || latest.phase !== 'starting' || latest.effectiveConfig !== fingerprint) {
+                return undefined
+              }
+              return {
+                ...latest,
+                phase: 'ready',
+                ...(clientFingerprint === undefined ? {} : { effectiveConfig: clientFingerprint }),
+                ...(client ? { clientConnection: 'connected' as const } : {}),
+                ...(startupSurface === undefined ? {} : { startupSurface }),
+                cdpEndpoint: `http://127.0.0.1:${debugPort}`,
+              }
+            },
+          )
           if (!published) throw new Error('background supervisor generation is no longer starting')
+          fingerprint = clientFingerprint ?? fingerprint
         },
       )
       mainAgents = undefined
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
     },
-    async markServiceReady(modelApiUrl, signal) {
+    async markServiceReady(modelApiUrl, signal, web) {
       if (!home || !app || !profile || !supervisorToken || !control) throw new Error('Missing service supervisor owner')
-      const paths = supervisorPaths(home, app, profile)
+      const paths = selectedSupervisorPaths(home, app, profile)
       const owner = await readSupervisorState(paths)
       if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken || owner.mode !== 'service') {
         throw new Error('Service supervisor generation is no longer current')
@@ -402,15 +441,115 @@ export async function createSupervisorRuntime(
           paths,
           owner,
           latest =>
-            latest.phase === 'starting' && !signal.aborted ? { ...latest, phase: 'ready', modelApiUrl } : undefined,
+            latest.phase === 'starting' && !signal.aborted
+              ? {
+                ...latest,
+                phase: 'ready',
+                modelApiUrl,
+                serviceCleanup: 'pending',
+                ...(web === undefined ? {} : { webStatus: web.status }),
+                ...(web?.origin === undefined ? {} : { managerPublicOrigin: web.origin }),
+              }
+              : undefined,
         )
       ) throw new Error('Service supervisor is no longer starting')
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
     },
+    async markServiceWebUnavailable() {
+      if (!home || !app || !profile || !supervisorToken) return
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return
+      await updateSupervisorState(paths, owner, latest => {
+        if (latest.mode !== 'service' || latest.phase !== 'ready') return undefined
+        const { managerPublicOrigin: _managerPublicOrigin, ...withoutOrigin } = latest
+        return { ...withoutOrigin, webStatus: 'unavailable' }
+      })
+    },
+    async markClientDisconnected() {
+      if (!client || !home || !app || !profile || !supervisorToken) return false
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return false
+      return await updateSupervisorState(paths, owner, latest =>
+        latest.clientOfService && latest.phase === 'ready'
+          ? { ...latest, clientConnection: 'disconnected' }
+          : undefined)
+    },
+    async markClientReconnected(expected, next, signal) {
+      if (
+        !client || !home || !app || !profile || !supervisorToken || signal.aborted
+        || !/^[a-f0-9]{64}$/u.test(expected) || !/^[a-f0-9]{64}$/u.test(next)
+      ) return false
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return false
+      const changed = await updateSupervisorState(
+        paths,
+        owner,
+        latest =>
+          latest.clientOfService && latest.phase === 'ready' && latest.clientConnection === 'disconnected'
+            && latest.effectiveConfig === expected && !signal.aborted
+            ? { ...latest, clientConnection: 'connected', effectiveConfig: next }
+            : undefined,
+      )
+      if (changed && fingerprint === expected) fingerprint = next
+      return changed
+    },
+    async refreshClientFingerprint(expected, next) {
+      if (
+        !client || !home || !app || !profile || !supervisorToken
+        || !/^[a-f0-9]{64}$/u.test(expected) || !/^[a-f0-9]{64}$/u.test(next)
+      ) return false
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return false
+      const changed = await updateSupervisorState(
+        paths,
+        owner,
+        latest =>
+          latest.clientOfService && latest.phase === 'ready' && latest.clientConnection === 'connected'
+            && latest.effectiveConfig === expected
+            ? { ...latest, effectiveConfig: next }
+            : undefined,
+      )
+      if (changed && fingerprint === expected) fingerprint = next
+      return changed
+    },
+    async markServiceCleanup(outcome): Promise<boolean> {
+      if (!home || !app || !profile || !supervisorToken) return false
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (
+        !owner || owner.mode !== 'service' || owner.pid !== process.pid
+        || owner.instanceToken !== supervisorToken || owner.effectiveConfig !== fingerprint
+      ) return false
+      return await updateSupervisorState(paths, owner, latest => {
+        if (latest.mode !== 'service' || latest.serviceCleanup !== 'pending') return undefined
+        const {
+          modelApiUrl: _modelApiUrl,
+          managerPublicOrigin: _managerPublicOrigin,
+          webStatus: _webStatus,
+          ...withoutEndpoint
+        } = latest
+        if (outcome.ok) {
+          if (latest.phase !== 'ready') return undefined
+          return { ...withoutEndpoint, phase: 'stopping', serviceCleanup: 'completed' }
+        }
+        if (latest.phase === 'failed') return { ...withoutEndpoint, serviceCleanup: 'failed' }
+        return {
+          ...withoutEndpoint,
+          phase: 'failed',
+          serviceCleanup: 'failed',
+          failure: outcome.failure,
+          failedAt: new Date().toISOString(),
+        }
+      })
+    },
     async markFailed(failure): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
-      const paths = supervisorPaths(home, app, profile)
+      const paths = selectedSupervisorPaths(home, app, profile)
       const current = await readSupervisorState(paths)
       if (
         current === undefined
@@ -421,8 +560,20 @@ export async function createSupervisorRuntime(
       ) return
       await updateSupervisorState(paths, current, latest => {
         if (latest.phase === 'stopping' || latest.phase === 'failed') return undefined
-        const { cdpEndpoint: _cdpEndpoint, modelApiUrl: _modelApiUrl, ...withoutEndpoint } = latest
-        return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
+        const {
+          cdpEndpoint: _cdpEndpoint,
+          modelApiUrl: _modelApiUrl,
+          managerPublicOrigin: _managerPublicOrigin,
+          webStatus: _webStatus,
+          ...withoutEndpoint
+        } = latest
+        return {
+          ...withoutEndpoint,
+          ...(latest.clientOfService ? { clientConnection: 'disconnected' as const } : {}),
+          phase: 'failed',
+          failure,
+          failedAt: new Date().toISOString(),
+        }
       })
     },
     async close(): Promise<void> {

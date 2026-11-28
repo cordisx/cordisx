@@ -25,13 +25,17 @@ vi.mock('../packages/cli/src/launcher/managed-service-candidate.js', () => ({
   activateManagedServiceCandidate: spies.activate,
 }))
 
-function plugin(config: unknown, generation = 'plugin-1', schemaVersion = 15) {
+function plugin(config: unknown, generation = 'plugin-1', schemaVersion = 15, hasStartup = true) {
   return {
     id: 'aiden',
     enabled: true,
     config,
     package: { version: '1', digest: `sha256:${'a'.repeat(64)}`, moduleGeneration: generation },
-    manifest: { schemaVersion, services: [{ kind: 'managed-backend', id: 'gateway' }] },
+    manifest: {
+      schemaVersion,
+      services: [{ kind: 'managed-backend', id: 'gateway' }],
+      ...(schemaVersion === 16 && hasStartup ? { startup: { contract: 'fixture' } } : {}),
+    },
   }
 }
 function owner(
@@ -108,12 +112,32 @@ describe('production selected managed-service configuration wiring', () => {
     await expect(current.validateInitialActivation!({ plugins: [] })).rejects.toThrow('requires installed plugin aiden')
     spies.staged.mockResolvedValue({ manifest: { runtimeManifest: legacy.manifest } })
     await expect(current.validateInitialActivation!({ plugins: [{ id: 'aiden', digest: legacy.package.digest }] }))
-      .rejects.toThrow('requires a v15 managed backend for aiden')
+      .rejects.toThrow('requires a managed backend with startup for aiden')
     spies.load.mockResolvedValue([legacy])
     await expect(current.activate({}, { pluginIds: ['aiden'] })).rejects.toThrow(
-      'requires a v15 managed backend for aiden',
+      'requires a managed backend with startup for aiden',
     )
     expect(spies.access).not.toHaveBeenCalled()
+  })
+
+  it('uses selected startup configuration for a v16 managed backend and rejects an absent startup plan', async () => {
+    const explicit = { marker: 'selected' }
+    const current = owner('cold', 'host-1', false, { aiden: explicit })
+    const selected = plugin({ marker: 'stored' }, 'module-v16', 16)
+    spies.staged.mockResolvedValue({ manifest: { runtimeManifest: selected.manifest } })
+    spies.load.mockResolvedValue([selected])
+    await current.validateInitialActivation!({ plugins: [{ id: 'aiden', digest: selected.package.digest }] })
+    await current.activate({}, { pluginIds: ['aiden'] })
+    expect(spies.access).toHaveBeenCalledOnce()
+    expect(spies.access.mock.calls[0]![4]).toBe(explicit)
+
+    const withoutStartup = plugin({}, 'module-v16', 16, false)
+    spies.staged.mockResolvedValue({ manifest: { runtimeManifest: withoutStartup.manifest } })
+    await expect(current.validateInitialActivation!({ plugins: [{ id: 'aiden', digest: selected.package.digest }] }))
+      .rejects.toThrow()
+    spies.load.mockResolvedValue([withoutStartup])
+    await expect(current.activate({}, { pluginIds: ['aiden'] })).rejects.toThrow()
+    expect(spies.access).toHaveBeenCalledOnce()
   })
 
   it('reloads selected config for each initial/update activation with its selected module generation', async () => {
@@ -130,7 +154,7 @@ describe('production selected managed-service configuration wiring', () => {
     expect(spies.access.mock.calls.map(call => call[3])).toEqual(['host-1', 'host-1'])
   })
 
-  it.each([14, 15])('preserves undefined config for schema %s and does not synthesize a default', async schema => {
+  it.each([14, 15, 16])('preserves undefined config for schema %s and does not synthesize a default', async schema => {
     const current = owner('cold')
     spies.load.mockResolvedValue([plugin(undefined, 'module-1', schema)])
     await current.activate({}, { pluginIds: ['aiden'] })

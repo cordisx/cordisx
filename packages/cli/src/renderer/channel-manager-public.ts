@@ -38,12 +38,15 @@ interface PublicChannelManagerInput {
   readonly hostGeneration: string
   readonly projection: () => ChannelManagerProjectionV1
   readonly credentials?: ChannelCredentialWorkflow
-  readonly configurationAvailable?: () => boolean
+  readonly configurationAvailable?: (connection: ChannelManagerConnectionProjection) => boolean
   readonly update?: (
     ref: ChannelManagerConnectionProjection['ref'],
     patch: { displayName?: string; selectors?: readonly string[] },
   ) => Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }>
   readonly actionsAvailable: () => boolean
+  readonly connectionControlAvailable?: () => boolean
+  readonly connectionReconnectAvailable?: () => boolean
+  readonly logsAvailable?: () => boolean
   readonly runAction: (
     action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
     input: Record<string, unknown>,
@@ -220,10 +223,17 @@ export class PublicChannelManagerController {
       const token = this.connectionTokens.get(key) ?? opaqueToken()
       this.connectionTokens.set(key, token)
       this.connectionTargets.set(token, { ref: connection.ref })
-      const actionOperations = this.input.actionsAvailable() && !connection.pendingTenant
+      const actionOperations = connection.pendingTenant ? [] : this.input.actionsAvailable()
         ? (runtime?.connectionState === 'disabled'
           ? ['connection.enable'] as const
           : ['connection.disable', 'connection.reconnect'] as const)
+        : this.input.connectionControlAvailable?.()
+        ? (connection.enabled
+          ? [
+            'connection.disable' as const,
+            ...(this.input.connectionReconnectAvailable?.() ? ['connection.reconnect' as const] : []),
+          ]
+          : ['connection.enable'] as const)
         : []
       const credentialOperations = this.input.credentials !== undefined && !connection.pendingTenant
           && ['feishu', 'lark'].includes(kind)
@@ -232,8 +242,10 @@ export class PublicChannelManagerController {
       const availableOperations = [
         ...actionOperations,
         ...credentialOperations,
-        ...(this.input.configurationAvailable?.() ? ['connection.update'] as const : []),
-        ...(projection.logs === undefined || connection.pendingTenant ? [] : ['logs.query'] as const),
+        ...(this.input.configurationAvailable?.(connection) ? ['connection.update'] as const : []),
+        ...(projection.logs === undefined || connection.pendingTenant || this.input.logsAvailable?.() === false
+          ? []
+          : ['logs.query'] as const),
       ]
       return [{
         connectionToken: token,
@@ -312,7 +324,7 @@ export class PublicChannelManagerController {
       profileId: this.input.profileId,
       hostGeneration: this.input.hostGeneration,
       revision: this.revision,
-      observedAt: new Date().toISOString(),
+      observedAt: projection.observedAt ?? new Date().toISOString(),
       availableOperations: this.input.credentials === undefined
         ? []
         : ['target.credential.capture.create', 'credential.capture', 'target.connection.create', 'connection.create'],
@@ -633,7 +645,9 @@ export class PublicChannelManagerController {
       throw new Error('TARGET_UNAVAILABLE')
     }
     const projection = this.input.projection()
-    if (projection.logs === undefined) throw new Error('OPERATION_UNAVAILABLE')
+    if (projection.logs === undefined || this.input.logsAvailable?.() === false) {
+      throw new Error('OPERATION_UNAVAILABLE')
+    }
     const filterDigest = JSON.stringify({ levels: [...levels].sort(), events: [...events].sort() })
     let offset = 0
     if (request.query.cursor !== undefined) {

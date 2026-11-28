@@ -20,6 +20,7 @@ export async function harness(options: Readonly<{
   submissionAvailable?: boolean
   documentTimeOrigin?: () => number
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
+  modelServices?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['modelServices']
   defaultProviderId?: string
   defaultModelId?: string
   isStartupProvider?: (id: string) => boolean
@@ -39,6 +40,7 @@ export async function harness(options: Readonly<{
     ...(options.taskExecutionUrl === undefined ? {} : { taskExecutionUrl: options.taskExecutionUrl }),
     ...(options.submissionAvailable === undefined ? {} : { submissionAvailable: options.submissionAvailable }),
     ...(options.management ? { management: options.management } : {}),
+    ...(options.modelServices ? { modelServices: options.modelServices } : {}),
     ...(options.catalogSubscribe === undefined ? {} : { catalogSubscribe: options.catalogSubscribe }),
     catalog: async () =>
       options.catalog?.() ?? [{

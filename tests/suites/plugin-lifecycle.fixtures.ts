@@ -244,6 +244,7 @@ export async function localPackage(input: {
   code?: string
   dependencies?: readonly { id: string; version: string }[]
   requiredCapability?: boolean
+  canonicalSource?: string
 }): Promise<string> {
   const source = path.join(input.root, `${input.id}-${Math.random().toString(36).slice(2)}`)
   await mkdir(path.join(source, 'src'), { recursive: true })
@@ -265,6 +266,7 @@ export async function localPackage(input: {
             schemaVersion: 1,
             id: input.id,
             version: input.version ?? '1.0.0',
+            ...(input.canonicalSource === undefined ? {} : { canonicalSource: input.canonicalSource }),
             entry: './src/index.ts',
             compatibility: { runtimeAbi: 1, protocol: 1 },
             dependencies: input.dependencies ?? [],
@@ -286,7 +288,7 @@ export async function localPackage(input: {
   return source
 }
 
-export async function localPackageV4(root: string): Promise<string> {
+export async function localPackageV4(root: string, modelsOnlyOptional = false): Promise<string> {
   const source = path.join(root, `permission-v4-${Math.random().toString(36).slice(2)}`)
   await mkdir(path.join(source, 'src'), { recursive: true })
   const runtime = {
@@ -295,8 +297,8 @@ export async function localPackageV4(root: string): Promise<string> {
     id: 'permission-v4',
     name: 'Permission V4',
     capabilities: [
-      { name: 'models.read', required: true, scope: { providers: ['codex'] } },
-      {
+      { name: 'models.read', required: !modelsOnlyOptional, scope: { providers: ['codex'] } },
+      ...(modelsOnlyOptional ? [] : [{
         name: 'tasks.control',
         required: false,
         rationale: {
@@ -307,7 +309,7 @@ export async function localPackageV4(root: string): Promise<string> {
         },
         security: { dataUse: 'ephemeral', retention: 'none', externalTransfer: false },
         scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }] },
-      },
+      }]),
     ],
     services: [],
   } as const

@@ -12,6 +12,7 @@ export interface ManagerPluginManagementState {
 
 export function usePluginManagementSnapshot(
   binding: ManagerPluginManagementBinding | undefined,
+  activationRevision?: number,
 ): ManagerPluginManagementState {
   const [state, setState] = useState<ManagerPluginManagementState>({
     snapshot: undefined,
@@ -39,5 +40,27 @@ export function usePluginManagementSnapshot(
       unsubscribe()
     }
   }, [binding])
+  useEffect(() => {
+    if (binding === undefined || activationRevision === undefined) return undefined
+    let active = true
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const snapshot = await binding.query()
+        if (!active) return
+        if (snapshot.activationRevision === activationRevision) {
+          setState({ snapshot, loading: false, error: undefined })
+          return
+        }
+      } catch { /* The owner may still be completing a lifecycle handoff. */ }
+      if (active && ++attempts < 120) timer = setTimeout(() => void refresh(), 250)
+    }
+    timer = setTimeout(() => void refresh(), 50)
+    return () => {
+      active = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [binding, activationRevision])
   return state
 }

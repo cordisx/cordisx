@@ -3,6 +3,50 @@ import { ChannelCredentialWorkflow } from '../packages/cli/src/renderer/channel-
 
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'test' }
 describe('Host credential entry authorization timing', () => {
+  it('captures the service revision when a connection creation starts', async () => {
+    let serviceRevision = 7
+    const request = vi.fn(async (input: Record<string, unknown>) =>
+      input.operation === 'capture'
+        ? {
+          status: 'applied' as const,
+          code: 'CAPTURED',
+          draftId: 'private-draft',
+          ref: account,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }
+        : { status: 'applied' as const, code: 'DISCARDED' }
+    )
+    const flow = new ChannelCredentialWorkflow({
+      revision: () => 1,
+      serviceRevision: () => serviceRevision,
+      advance: () => {},
+      target: () => undefined,
+      connectionToken: () => 'unused',
+      available: () => true,
+      prompt: async input => await input.submit(account, 'fixture-secret', input.signal),
+      request,
+      adopt: () => {},
+    })
+    try {
+      const issued = await flow.issue({
+        operation: 'target.credential.capture.create',
+        adapterKind: 'feishu',
+        purpose: 'create',
+        target: { kind: 'root' },
+        expectedRevision: 1,
+      } as never, 'owner')
+      serviceRevision = 8
+      await expect(flow.execute(
+        { operation: 'credential.capture', target: issued.target } as never,
+        'owner',
+        () => true,
+        async () => true,
+      )).resolves.toMatchObject({ status: 'applied' })
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ operation: 'capture', expectedRevision: 7 }))
+    } finally {
+      flow.dispose()
+    }
+  })
   it('reuses the opaque connection target when a pending account is resolved', async () => {
     const pending = { ...account, tenantId: '' }, order: string[] = []
     const request = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED', ref: account, projection: {} }))
@@ -175,6 +219,74 @@ describe('Host credential entry authorization timing', () => {
       expect(reportFailure).toHaveBeenCalledExactlyOnceWith('TENANT_DISCOVERY_PERMISSION_DENIED')
     } finally {
       flow.dispose()
+    }
+  })
+  it('waits for private draft cleanup and stops subsequent operations when cleanup fails', async () => {
+    for (const succeeds of [true, false]) {
+      let finishDiscard!: (value: { status: 'applied' | 'unavailable'; code: string }) => void
+      const discarded = new Promise<{ status: 'applied' | 'unavailable'; code: string }>(resolve => {
+        finishDiscard = resolve
+      })
+      let revision = 1
+      const flow = new ChannelCredentialWorkflow({
+        revision: () => revision,
+        advance: () => {
+          revision += 1
+        },
+        target: () => account,
+        connectionToken: () => 'connection',
+        available: () => true,
+        prompt: async input => await input.submit(account, 'synthetic-fixture-value', input.signal),
+        request: async input =>
+          input.operation === 'capture'
+            ? {
+              status: 'applied',
+              code: 'CAPTURED',
+              draftId: 'private-draft',
+              ref: account,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            }
+            : await discarded,
+        adopt: () => {},
+      })
+      try {
+        const request = () =>
+          ({
+            operation: 'target.credential.capture.rotate',
+            target: { kind: 'connection', connectionToken: 'connection' },
+            expectedRevision: revision,
+          }) as never
+        const first = await flow.issue(request(), 'owner')
+        expect(
+          await flow.execute(
+            { operation: 'credential.capture', target: first.target } as never,
+            'owner',
+            () => true,
+            async () => true,
+          ),
+        ).toMatchObject({ status: 'applied' })
+        flow.retireOwner('owner')
+        let settled = false
+        const next = flow.issue(request(), 'owner').then(value => {
+          settled = true
+          return value
+        })
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        finishDiscard(
+          succeeds
+            ? { status: 'applied', code: 'DISCARDED' }
+            : { status: 'unavailable', code: 'CREDENTIAL_CLEANUP_UNAVAILABLE' },
+        )
+        expect(await next).toMatchObject(
+          succeeds
+            ? { status: 'applied' }
+            : { status: 'unavailable', code: 'CREDENTIAL_CLEANUP_UNAVAILABLE' },
+        )
+      } finally {
+        finishDiscard({ status: 'applied', code: 'DISCARDED' })
+        flow.dispose()
+      }
     }
   })
 })

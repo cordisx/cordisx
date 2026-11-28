@@ -1,6 +1,7 @@
-import type { ChannelStoreState } from './store.js'
+import type { ChannelStoreState, StoredAdapterState } from './store.js'
 import type { ChannelRuntimeSnapshot } from './types.js'
 import type { ChannelPermissionBroker, ChannelPluginIdentity } from './types.js'
+import type { ActiveConnection } from './runtime-state.js'
 import { digest } from './runtime-validation.js'
 
 export async function visibleConnections(
@@ -22,7 +23,26 @@ export async function visibleConnections(
   return visible
 }
 
-export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): ChannelRuntimeSnapshot {
+function currentConnectionState(
+  adapter: StoredAdapterState,
+  active: ActiveConnection | undefined,
+): ChannelRuntimeSnapshot['accounts'][number]['connectionState'] {
+  if (adapter.connectionState !== 'ready') return adapter.connectionState
+  if (active?.generation !== adapter.generation) return 'unavailable'
+  try {
+    if (!active.connection.connectionState) return 'ready'
+    const state = active.connection.connectionState()
+    return state === 'ready' || state === 'retrying' || state === 'unavailable' ? state : 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+export function runtimeSnapshot(
+  state: ChannelStoreState,
+  observedAt: string,
+  active: ReadonlyMap<string, ActiveConnection>,
+): ChannelRuntimeSnapshot {
   const accounts = Object.entries(state.adapters)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, adapter]) => {
@@ -32,7 +52,8 @@ export function runtimeSnapshot(state: ChannelStoreState, observedAt: string): C
         ref: adapter.ref,
         adapterKind: adapter.kind,
         implementationStatus: adapter.implementationStatus,
-        connectionState: adapter.connectionState,
+        // Persisted readiness is not evidence of current ownership or transport health.
+        connectionState: currentConnectionState(adapter, active.get(key)),
         secretState: adapter.secretState,
         generation: adapter.generation,
         lastGoodRevision: adapter.lastGoodRevision,

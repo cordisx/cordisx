@@ -30,9 +30,10 @@ const unavailable = (reason: ManagedServiceConsoleUnavailableV1['reason']): Mana
   reason,
 })
 
-/** A browser route is leased to one current view per service for an admitted plugin owner. */
+/** A browser route is leased to one current view per service and renderer document. */
 export class ManagedServiceBrowserConsoleRPC {
-  private readonly owners = new Map<string, Map<string, BrowserView>>()
+  private readonly owners = new Map<string, Map<string, Map<AbortSignal | symbol, BrowserView>>>()
+  private readonly noDocument = Symbol('no-document')
 
   constructor(private readonly boundary: () => ManagedBrowserConsoleBoundary | undefined) {}
 
@@ -44,8 +45,10 @@ export class ManagedServiceBrowserConsoleRPC {
     documentSignal?: AbortSignal,
   ): Promise<ManagedServiceConsoleBrowserEntryResultV1> {
     const service = binding.identity.serviceId
-    let views = this.owners.get(owner)
-    const previous = views?.get(service)
+    const document = documentSignal ?? this.noDocument
+    let services = this.owners.get(owner)
+    let views = services?.get(service)
+    const previous = views?.get(document)
     if (request.action === 'retire') {
       if (
         previous?.id === request.viewId && previous.generation === request.serviceGeneration
@@ -60,8 +63,11 @@ export class ManagedServiceBrowserConsoleRPC {
     const boundary = this.boundary()
     if (!reader.browserConsole || !boundary) return unavailable('unsupported')
     if (previous) this.retire(owner, service, previous)
-    views = this.owners.get(owner)
-    if (!views) this.owners.set(owner, views = new Map())
+    services = this.owners.get(owner)
+    if (!services) this.owners.set(owner, services = new Map())
+    views = services.get(service)
+    if (!views) services.set(service, views = new Map())
+    if (views.size >= 16) return unavailable('unsupported')
     const view: BrowserView = {
       controller: new AbortController(),
       reader,
@@ -69,7 +75,7 @@ export class ManagedServiceBrowserConsoleRPC {
       id: request.viewId,
       ...(documentSignal === undefined ? {} : { documentSignal }),
     }
-    views.set(service, view)
+    views.set(document, view)
     if (documentSignal) {
       const abort = () => this.retire(owner, service, view)
       documentSignal.addEventListener('abort', abort, { once: true })
@@ -79,7 +85,7 @@ export class ManagedServiceBrowserConsoleRPC {
     try {
       const prepared = await reader.browserConsole.read(view.generation, view.controller.signal, boundary)
       if (prepared.status === 'available') view.route = prepared.route
-      if (view.controller.signal.aborted || this.owners.get(owner)?.get(service) !== view) {
+      if (view.controller.signal.aborted || this.owners.get(owner)?.get(service)?.get(document) !== view) {
         return unavailable('cancelled')
       }
       if (view.reader.serviceGeneration !== view.generation) return unavailable('stale-generation')
@@ -100,10 +106,13 @@ export class ManagedServiceBrowserConsoleRPC {
   }
 
   private retire(owner: string, service: string, view: BrowserView) {
-    const views = this.owners.get(owner)
-    if (views?.get(service) === view) {
-      views.delete(service)
-      if (!views.size) this.owners.delete(owner)
+    const services = this.owners.get(owner)
+    const views = services?.get(service)
+    const document = view.documentSignal ?? this.noDocument
+    if (views?.get(document) === view) {
+      views.delete(document)
+      if (!views.size) services?.delete(service)
+      if (!services?.size) this.owners.delete(owner)
     }
     view.stopDocumentLifetime?.()
     view.controller.abort()
@@ -111,8 +120,10 @@ export class ManagedServiceBrowserConsoleRPC {
   }
 
   disposeOwner(owner: string) {
-    const views = this.owners.get(owner)
-    if (views) { for (const [service, view] of views) this.retire(owner, service, view) }
+    const services = this.owners.get(owner)
+    if (services) {
+      for (const [service, views] of services) for (const view of views.values()) this.retire(owner, service, view)
+    }
   }
 
   dispose() {

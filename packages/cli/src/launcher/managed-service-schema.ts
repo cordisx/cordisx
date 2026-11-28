@@ -8,6 +8,8 @@ import { readManagedContainedFile } from './managed-service-runtime-support.js'
 const PROTOCOL_SCHEMA_PREFIX = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/'
 const DEFINITION_SCHEMA = `${PROTOCOL_SCHEMA_PREFIX}managed-service-definition.v1.schema.json`
 const COMMON_SCHEMA = `${PROTOCOL_SCHEMA_PREFIX}managed-service-common.v1.schema.json`
+const UI_COMMON_SCHEMA = `${PROTOCOL_SCHEMA_PREFIX}ui-common.v1.schema.json`
+const ACCOUNTS_SCHEMA = `${PROTOCOL_SCHEMA_PREFIX}managed-service-cli-proxy-accounts.v1.schema.json`
 const MAX_SCHEMA_BYTES = 512 * 1024
 const require = createRequire(import.meta.url)
 const MANAGED_SERVICE_ENVIRONMENT = {
@@ -76,8 +78,35 @@ function protocolRoot(): string {
 }
 
 function normalizeProtocolSchema(schema: string, value: unknown): unknown {
-  if (schema !== DEFINITION_SCHEMA || value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
   const record = value as Record<string, unknown>
+  if (schema === COMMON_SCHEMA) {
+    const definitions = record.$defs
+    if (!definitions || typeof definitions !== 'object' || Array.isArray(definitions)) return value
+    const defs = definitions as Record<string, unknown>
+    const identity = defs.identity
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity)) return value
+    const identityRecord = identity as Record<string, unknown>
+    const fields = identityRecord.properties
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return value
+    const properties = fields as Record<string, unknown>
+    if (properties.source !== undefined) return value
+    // Older packages omitted the source already present in the v1 type and Host binding.
+    return {
+      ...record,
+      $defs: {
+        ...defs,
+        identity: {
+          ...identityRecord,
+          properties: {
+            ...properties,
+            source: { type: 'string', format: 'uri', maxLength: 4096, pattern: '^https://[^/?#@]+(?:[/?#]|$)' },
+          },
+        },
+      },
+    }
+  }
+  if (schema !== DEFINITION_SCHEMA) return value
   if (record.properties === null || typeof record.properties !== 'object' || Array.isArray(record.properties)) {
     return value
   }
@@ -143,6 +172,7 @@ export class ManagedServiceSchemaRegistry {
   private readonly package: ManagedServiceSchemaPackage | undefined
   private readonly validators = new Map<string, Promise<ValidateFunction>>()
   private packageSchemas: Promise<void> | undefined
+  private commonSchemas: Promise<void> | undefined
 
   constructor(options: ManagedServiceSchemaRegistryOptions = {}) {
     this.provided = options.schemas ?? {}
@@ -181,9 +211,7 @@ export class ManagedServiceSchemaRegistry {
   }
 
   private async loadValidator(schema: string): Promise<ValidateFunction> {
-    if (schema === DEFINITION_SCHEMA && this.ajv.getSchema(COMMON_SCHEMA) === undefined) {
-      this.ajv.addSchema(this.provided[COMMON_SCHEMA] ?? await readProtocolSchema(COMMON_SCHEMA), COMMON_SCHEMA)
-    }
+    if (schema === DEFINITION_SCHEMA || schema === ACCOUNTS_SCHEMA) await this.loadCommonSchemas()
     if (schema.startsWith(PROTOCOL_SCHEMA_PREFIX)) return this.ajv.compile(await readProtocolSchema(schema))
     if (this.package !== undefined && packageSchemaPath(this.package.source, schema) !== undefined) {
       if (this.provided[schema] !== undefined) throw new Error('managed service package schema source is conflicting')
@@ -194,6 +222,22 @@ export class ManagedServiceSchemaRegistry {
     const provided = this.provided[schema]
     if (provided !== undefined) return this.ajv.compile(provided)
     throw new Error('managed service schema is not available offline')
+  }
+
+  private async loadCommonSchemas(): Promise<void> {
+    this.commonSchemas ??= (async () => {
+      for (const schema of [UI_COMMON_SCHEMA, COMMON_SCHEMA]) {
+        if (this.ajv.getSchema(schema) !== undefined) continue
+        const value = normalizeProtocolSchema(schema, this.provided[schema] ?? await readProtocolSchema(schema))
+        if (this.ajv.getSchema(schema) === undefined) this.ajv.addSchema(value, schema)
+      }
+    })()
+    try {
+      await this.commonSchemas
+    } catch (error) {
+      this.commonSchemas = undefined
+      throw error
+    }
   }
 
   private async loadPackageSchemas(): Promise<void> {

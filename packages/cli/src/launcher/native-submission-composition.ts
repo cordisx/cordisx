@@ -68,17 +68,15 @@ import {
   openNativeCodexConfiguration,
   openNativeCodexExecution,
 } from './native-codex-settings-composition.js'
-import type { CodexChatSettingsGuard } from './codex-chat-settings.js'
 import { nativeApiProviderRequest } from './native-api-provider-request.js'
 import { codexCreationSelection } from './codex-creation-selection.js'
 import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
-import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
 import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-catalog-discovery.js'
-import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
-import type { HomeConfigProvider } from '../config/home-config.js'
+import type { NativeSubmissionCatalogOptions, NativeSubmissionCompletionStage } from './native-submission-options.js'
+export type { NativeSubmissionCatalogOptions, NativeSubmissionCompletionStage } from './native-submission-options.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
 import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
@@ -114,6 +112,10 @@ export interface NativeSubmissionComposition {
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
   readonly environment: Readonly<Record<string, string>>
+  readonly suspendRemoteProvider?: () => void
+  readonly reconnectRemoteProvider?: (
+    owner: NonNullable<ExistingTerminalProviderSource['expectedOwner']>,
+  ) => Promise<void>
   close(): Promise<void>
 }
 export interface NativeSubmissionBootstrap {
@@ -132,35 +134,6 @@ export class NativeSubmissionCompatibilityError extends Error {
     this.name = 'NativeSubmissionCompatibilityError'
   }
 }
-export interface NativeSubmissionCatalogOptions {
-  readonly chatSettingsGuard?: CodexChatSettingsGuard
-  readonly logicalHistory?: (params: unknown) => Promise<unknown>
-  readonly logicalOwner?: import('./profile-logical-conversation-owner.js').ProfileLogicalConversationOwner
-  readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
-  readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
-  readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
-  readonly channelSectionName?: () => string | undefined
-  readonly remoteTerminalProvider?: ExistingTerminalProviderSource
-  readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
-  readonly defaultProviderId?: string
-  readonly defaultModelId?: string
-  readonly launchSelection?: { providerId: string; model?: string }
-  readonly configModelCatalogs?: Readonly<Record<string, string>>
-  readonly dynamicModelCatalog?: boolean
-  readonly nativeModelDiscovery?: boolean
-  readonly selectorIcons?: ModelSelectorIconOverrides
-  readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
-  readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
-  readonly providerBindings?: readonly HomeConfigProviderBinding[]
-  /** `model-service` declarations, merged into the catalog read from `config.toml`. */
-  readonly declaredProviders?: readonly HomeConfigProvider[]
-}
-export type NativeSubmissionCompletionStage =
-  | 'native-submission-completion-start'
-  | 'native-submission-resource-analysis-ready'
-  | 'native-submission-managed-catalog-ready'
-  | 'native-submission-native-catalog-ready'
-  | 'native-submission-controller-bound'
 export function nativeAppServerIntermediaryPath(): string {
   return fileURLToPath(new URL('../../assets/launcher/native-app-server-intermediary.mjs', import.meta.url))
 }
@@ -336,6 +309,13 @@ export async function prepareNativeSubmissionBootstrap(
           } catch { /* Diagnostics must not change native submission startup. */ }
         }
         reportStage('native-submission-completion-start')
+        const clientScope = completeOptions.nativeClientScope ?? completeOptions.managedCatalog
+        if (
+          completeOptions.nativeClientScope && completeOptions.managedCatalog
+          && (path.resolve(completeOptions.nativeClientScope.homeDir)
+              !== path.resolve(completeOptions.managedCatalog.homeDir)
+            || completeOptions.nativeClientScope.profileId !== completeOptions.managedCatalog.profileId)
+        ) throw new Error('native client profile scope is ambiguous')
         let channelSession: import('./channel-native-sessions.js').ChannelNativeSessions | undefined
         if (completeOptions.contextObserver) {
           contextObserver = completeOptions.contextObserver
@@ -617,6 +597,9 @@ export async function prepareNativeSubmissionBootstrap(
           completeOptions.defaultProviderId && completeOptions.defaultModelId
           && activation.startup?.providerReference(completeOptions.defaultProviderId) === undefined
         ) {
+          // Do not reject a valid service-owned selection just because its
+          // first asynchronous catalog read has not returned yet.
+          await providerSources.refreshForSelection()
           const launchProvider = (await catalog()).find(provider =>
             provider.providerId === completeOptions.defaultProviderId
           )
@@ -651,24 +634,32 @@ export async function prepareNativeSubmissionBootstrap(
           display: () => terminalProviderDisplays(),
           owns: id => managed?.owns(id) === true || hasPluginProvider(id),
           resolve: resolveConnection,
+          currentHostConnection: (id, model, connection) =>
+            managed?.owns(id) ? managed.isCurrentNativeConnection(id, model, connection.value) : undefined,
           credentials,
         })
         const homeConfigPath = completeOptions.managedCatalog === undefined
           ? undefined
           : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
+        if (completeOptions.ownerModelServicesRead && homeConfigPath) {
+          throw new Error('model-service authority is ambiguous')
+        }
+        const modelServices = completeOptions.ownerModelServicesRead
+          ? { read: completeOptions.ownerModelServicesRead }
+          : homeConfigPath === undefined
+          ? undefined
+          : {
+            read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
+            save: async (request: import('../model-service-contracts.js').ModelServicesSaveRequest) => {
+              const parsed = parseModelServicesSaveRequest(request)
+              return parsed === undefined
+                ? { status: 'rejected' as const, code: 'invalid' as const }
+                : await saveModelServices(homeConfigPath, parsed)
+            },
+          }
         const cdp = createNativeSubmissionCdpAuthority({
           ...(discovered.accountCapability ? { accountCapability: discovered.accountCapability } : {}),
-          ...(homeConfigPath === undefined ? {} : {
-            modelServices: {
-              read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
-              save: async request => {
-                const parsed = parseModelServicesSaveRequest(request)
-                return parsed === undefined
-                  ? { status: 'rejected', code: 'invalid' }
-                  : await saveModelServices(homeConfigPath, parsed)
-              },
-            },
-          }),
+          ...(modelServices === undefined ? {} : { modelServices }),
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           ...(taskExecutionUrl === undefined ? {} : { taskExecutionUrl }),
           submissionAvailable: discovered.transforms.length > 0,
@@ -703,7 +694,7 @@ export async function prepareNativeSubmissionBootstrap(
         const { composition: logicalComposition, migration: logicalMigration } = createDesktopLogicalServices({
           control,
           owner: completeOptions.logicalOwner,
-          profileId: completeOptions.managedCatalog?.profileId,
+          profileId: clientScope?.profileId,
           identity: scope => cdp.desktopIdentity(scope),
           ownerIdentity: scope => cdp.desktopOwnerIdentity(scope),
           dispatchIdentity: scope =>
@@ -768,11 +759,11 @@ export async function prepareNativeSubmissionBootstrap(
           creationDefaults: async () => (await chatExecution?.creationDefaults())?.settings ?? {},
           ...(startup === undefined ? {} : { startup }),
           directory: path.join(
-            completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
+            clientScope?.homeDir ?? path.dirname(codexHome),
             'apps',
             'codex',
             'profiles',
-            completeOptions.managedCatalog?.profileId ?? 'default',
+            clientScope?.profileId ?? 'default',
             'agent-task-intents',
           ),
           catalog: () => chatConfiguration?.catalog() ?? catalog(),
@@ -922,7 +913,7 @@ export async function prepareNativeSubmissionBootstrap(
           integrationStatus: async input =>
             agentBridge === undefined
               ? await createIntegrationStatus({
-                cordisxHomeDir: completeOptions.managedCatalog!.homeDir,
+                cordisxHomeDir: clientScope?.homeDir ?? path.dirname(codexHome),
                 caller: 'codex',
               })(input)
               : await agentBridge.status(input),
@@ -981,6 +972,10 @@ export async function prepareNativeSubmissionBootstrap(
           },
           installation: { authority: cdp, ...discovered },
           environment: Object.freeze({ ...environment, ...providerSyncEnvironment }),
+          ...(remote === undefined ? {} : {
+            suspendRemoteProvider: () => remote!.suspend(),
+            reconnectRemoteProvider: async owner => await remote!.reconnect(owner),
+          }),
           close,
         }
       })()

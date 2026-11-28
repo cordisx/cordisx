@@ -19,6 +19,11 @@ import { BrowserPermissionAuthorizationPromptV2 } from '../platform/platform-per
 import type { ManagerPermissionSnapshot, ManagerPluginSnapshot } from '../manager.js'
 
 type ReviewPlan = CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
+type ReviewOptions = {
+  readonly sessionOnly?: boolean
+  readonly requireTrustedEvents?: boolean
+  readonly externalStyles?: boolean
+}
 
 function permissionAvailability(
   plan: ReviewPlan,
@@ -53,6 +58,7 @@ function prompt(
   plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
   plan: ReviewPlan,
   permissions: readonly ManagerPermissionSnapshot[],
+  options: ReviewOptions,
 ): BrowserPermissionAuthorizationPromptV2 {
   const availability = permissionAvailability(plan, permissions)
   return new BrowserPermissionAuthorizationPromptV2(document, (_current, identity) => ({
@@ -61,7 +67,7 @@ function prompt(
     resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
     scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
     requestSource: identity.source,
-  }))
+  }), options)
 }
 
 function identity(plugin: Pick<ManagerPluginSnapshot, 'id' | 'source'>): CordisXPluginIdentity {
@@ -73,12 +79,13 @@ export async function requestPluginAuthorizationV2(
   plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
   plan: CordisXPermissionAuthorizationPlanV2,
   permissions: readonly ManagerPermissionSnapshot[],
+  options: ReviewOptions = {},
 ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined> {
   if (plan.declarations.length === 0) {
     const result = new PermissionAuthorizationViewModel(plan).confirm()
     return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
   }
-  const authorization = prompt(document, plugin, plan, permissions)
+  const authorization = prompt(document, plugin, plan, permissions, options)
   try {
     return await authorization.request(plan, identity(plugin))
   } finally {
@@ -91,12 +98,13 @@ export async function requestPluginAuthorizationV4(
   plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
   plan: CordisXPermissionAuthorizationPlanV4,
   permissions: readonly ManagerPermissionSnapshot[],
+  options: ReviewOptions = {},
 ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
   if (!plan.declarations.some(item => item.decisionRequired)) {
     const result = new PermissionAuthorizationViewModel(plan).confirm()
     return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
   }
-  const authorization = prompt(document, plugin, plan, permissions)
+  const authorization = prompt(document, plugin, plan, permissions, options)
   try {
     return await authorization.requestV4(plan, identity(plugin))
   } finally {
@@ -110,6 +118,7 @@ export async function requestPluginAuthorizationV7(
   plugin: Pick<ManagerPluginSnapshot, 'id' | 'source' | 'name'>,
   plan: DeferredPermissionPlan,
   permissions: readonly ManagerPermissionSnapshot[],
+  options: ReviewOptions = {},
 ): Promise<DeferredPermissionDecision | undefined> {
   const pending = plan.declarations.filter((item): item is CordisXPermissionAuthorizationItemV4 =>
     item.decisionRequired && item.authorizationMode !== 'deferred'
@@ -121,7 +130,7 @@ export async function requestPluginAuthorizationV7(
     schemaVersion: 4,
     declarations: pending,
   }
-  const choice = await requestPluginAuthorizationV4(document, plugin, review, permissions)
+  const choice = await requestPluginAuthorizationV4(document, plugin, review, permissions, options)
   if (choice === undefined) return undefined
   const result: DeferredPermissionDecision = {
     ...choice,

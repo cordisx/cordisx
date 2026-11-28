@@ -147,6 +147,35 @@ async function fixture() {
 }
 
 describe('remote native provider consumer over private management RPC', () => {
+  it('retires old leases and stale reads before binding to the verified replacement owner', async () => {
+    const f = await fixture()
+    const lease = await f.client.prepare(selection)
+    const gate = deferred<void>()
+    f.setGate(gate.promise)
+    const oldRead = f.client.refresh()
+    void oldRead.catch(() => undefined)
+    await new Promise(resolve => setImmediate(resolve))
+    f.client.suspend()
+    expect(await f.client.catalog()).toEqual([])
+    expect(await lease.validate()).toBe(false)
+    f.setGate(undefined)
+    const owner = {
+      pid: process.pid,
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      generation: 'original-generation',
+    }
+    await expect(f.client.reconnect({ ...owner, generation: 'wrong-generation' })).rejects.toThrow()
+    await f.client.reconnect(owner)
+    expect((await f.client.catalog()).map(item => item.providerId)).toEqual(['provider-b'])
+    gate.resolve()
+    await expect(oldRead).rejects.toThrow()
+    expect((await f.client.catalog()).map(item => item.providerId)).toEqual(['provider-b'])
+    expect(f.calls.filter(call => call.kind === 'prepare')).toHaveLength(1)
+    const replacementLease = await f.client.prepare(selection)
+    expect(await replacementLease.validate()).toBe(true)
+    expect(f.calls.filter(call => call.kind === 'prepare')).toHaveLength(2)
+  })
+
   it('keeps old startup unknown, filters unmanaged entries, and never prepares during deferred discovery', async () => {
     const f = await fixture()
     const pending = deferred<void>()
@@ -160,6 +189,29 @@ describe('remote native provider consumer over private management RPC', () => {
     await client.refresh()
     expect((await client.catalog()).map(p => p.providerId)).toEqual(['provider-b'])
     expect((await client.catalog())[0]).not.toHaveProperty('defaultModelId')
+    expect(f.calls.every(call => call.kind === 'list')).toBe(true)
+  })
+
+  it('waits for the owner catalog before validating an explicit launch selection', async () => {
+    const f = await fixture()
+    const pending = deferred<void>()
+    f.setGate(pending.promise)
+    const remote = new RemoteTerminalProviderClient(f.source)
+    cleanups.push(() => remote.close())
+    const source = nativeRemoteProviderSource({
+      remote,
+      localSource: () => undefined,
+      localCatalog: async () => [],
+      validateLocal: async () => false,
+    })
+    expect(await source.catalog()).toEqual([])
+    const ready = vi.fn()
+    const refresh = source.refreshForSelection().then(ready)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(ready).not.toHaveBeenCalled()
+    pending.resolve()
+    await refresh
+    expect(await source.catalog()).toMatchObject([{ providerId: 'provider-b', models: [{ id: 'model-b' }] }])
     expect(f.calls.every(call => call.kind === 'list')).toBe(true)
   })
 

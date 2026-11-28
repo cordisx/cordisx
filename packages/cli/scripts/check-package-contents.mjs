@@ -57,6 +57,7 @@ try {
     'renderer/host-ui/empty-state.css',
     'renderer/host-ui/empty-state-illustration-theme.css',
     'renderer/model-providers.css',
+    'renderer/page-header-actions.css',
     'renderer/native-logical-continuation-dialog.css',
     'renderer/manager/manager-browse.css',
     'renderer/manager/manager-navigation.css',
@@ -70,6 +71,7 @@ try {
     'renderer/manager/manager-about.css',
     'renderer/manager/manager-collection.css',
     'renderer/manager/manager-compact-shell.css',
+    'renderer/manager/manager-standalone.css',
     'renderer/manager/pages/model-services.css',
     'renderer/manager/pages/model-catalog/model-catalog.css',
   ]
@@ -227,11 +229,28 @@ try {
       'dist/bundled-plugins/@cordisx/channel/dist/channel.js',
       'dist/bundled-plugins/@cordisx/channel/dist/channel.d.ts',
       'dist/bundled-plugins/@cordisx/channel/dist/service.mjs',
+      'dist/bundled-plugins/@cordisx/channel.archive',
+      'dist/bundled-plugins/@cordisx/channel-archive.json',
       'dist/bundled-plugins/@cordisx/plugin-cli-proxy-api/dist/runtime/module.js',
     ]
   ) {
     if (!files.includes(required)) throw new Error(`missing bundled runtime: ${required}`)
   }
+  for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
+    const bundledManifest = JSON.parse(
+      readFileSync(path.join(extractedRoot, 'package/dist/bundled-plugins', name, 'package.json'), 'utf8'),
+    )
+    if (bundledManifest.name !== name || bundledManifest.cordisxSource !== manifest.cordisxSources?.[name]) {
+      throw new Error(`bundled runtime does not match declared source: ${name}`)
+    }
+  }
+  const archiveRoot = path.join(extractedRoot, 'package/dist/bundled-plugins/@cordisx')
+  const channelArchive = readFileSync(path.join(archiveRoot, 'channel.archive'))
+  const channelArchiveMetadata = JSON.parse(readFileSync(path.join(archiveRoot, 'channel-archive.json'), 'utf8'))
+  if (
+    channelArchiveMetadata.source !== manifest.cordisxSources?.['@cordisx/channel']
+    || channelArchiveMetadata.integrity !== `sha256:${createHash('sha256').update(channelArchive).digest('hex')}`
+  ) throw new Error('bundled Channel archive does not match its source and integrity record')
   const leaked = files.filter(file => (
     !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
     && !bundledRoots.some(root => file.startsWith(root))
@@ -298,6 +317,10 @@ try {
       'dist/skills/cordisx-feedback/SKILL.md',
       'dist/skills/cordisx-feedback/agents/openai.yaml',
       'dist/skills/cordisx-feedback/version.json',
+      'dist/assets/manager/manager-shell.js',
+      'dist/assets/manager/manager-standalone.js',
+      'dist/assets/manager/manager-host.css',
+      'dist/assets/manager/manager-resource-worker.js',
       'dist/assets/illustrations/model-services.svg',
       'dist/assets/illustrations/model-services.css',
       'dist/assets/feedback/feedback-manifest.schema.json',

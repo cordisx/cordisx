@@ -29,6 +29,7 @@ import type { PermissionPersistenceContext } from '../launcher/permission-rpc.js
 import type { CordisXLauncherOptions } from './parse.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
 import { cleanupErrorAfterOwnedBrowserExit } from '../launcher/loopback-permissions.js'
+import { runOwnerConnectionLoop } from './owner-connection-loop.js'
 import {
   logHostLifecycle,
   observeHostExit,
@@ -72,8 +73,12 @@ export async function completeHostReadiness(
   }
 }
 
-export async function runInjectedHost(input: {
+export type InjectedHostInput = {
   readonly signal?: AbortSignal
+  /** Loss of an independent owner retires injection but does not close a ready App. */
+  readonly ownerSignal?: AbortSignal
+  /** Called only after the previous owner-scoped renderer was fully removed. */
+  readonly reconnectOwner?: (signal: AbortSignal) => Promise<OwnerReconnectionSession>
   readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
   readonly source: string | (() => string)
   readonly newDocumentSource?: string | (() => string)
@@ -83,6 +88,8 @@ export async function runInjectedHost(input: {
   readonly agentHistoryBridgeToken: string
   readonly configBridge?: ConfigBridgeHandler
   readonly ownerDocuments?: OwnerDocumentBridgeHandler
+  readonly remoteOwnerDocuments?: WatchInjectionOptions['remoteOwnerDocuments']
+  readonly remoteMarketplaceArtifact?: WatchInjectionOptions['remoteMarketplaceArtifact']
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
@@ -93,6 +100,7 @@ export async function runInjectedHost(input: {
     readonly handler: PluginLifecycleBridgeHandler
     readonly runtime: CdpPluginLifecycleRuntime
   }
+  readonly remotePluginLifecycle?: WatchInjectionOptions['remotePluginLifecycle']
   readonly pluginManagement?: PluginManagementBridgeHandler
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly viteDevelopment?: boolean
@@ -128,7 +136,30 @@ export async function runInjectedHost(input: {
   readonly mainInspector?: boolean
   readonly hiddenUntilReady?: boolean
   readonly startupNavigation?: WatchInjectionOptions['startupNavigation']
-}): Promise<void> {
+}
+
+export type OwnerReconnectionSession = {
+  readonly input: Pick<
+    InjectedHostInput,
+    | 'ownerSignal'
+    | 'source'
+    | 'newDocumentSource'
+    | 'hasLoopbackGraph'
+    | 'pluginArtifactOrigin'
+    | 'productionGraphBootstrap'
+    | 'agentHistoryBridgeToken'
+    | 'permissionPersistence'
+    | 'remoteOwnerDocuments'
+    | 'remoteMarketplaceArtifact'
+    | 'remotePluginLifecycle'
+    | 'pluginManagement'
+    | 'agentContext'
+    | 'onReady'
+  >
+  readonly close: () => Promise<void>
+}
+
+export async function runInjectedHost(input: InjectedHostInput): Promise<void> {
   const emitDiagnostic = bindDiagnostic()
   const controller = new AbortController()
   const abort = () => controller.abort(input.signal?.reason)
@@ -154,64 +185,87 @@ export async function runInjectedHost(input: {
   const rendererReady = new Promise<void>(resolve => {
     markReady = resolve
   })
-  let reportedReady = false
-  const watcher = watchAndInject({
-    ...(input.nativeSubmission === undefined ? {} : { nativeSubmission: input.nativeSubmission }),
-    port: input.debugPort,
-    source: input.source,
-    ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
-    signal: controller.signal,
-    ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
-      providerFleet: input.providerFleet,
-      providerBridgeToken: input.providerBridgeToken,
-    }),
-    agentHistoryHost: input.agentHistoryHost,
-    agentHistoryBridgeToken: input.agentHistoryBridgeToken,
-    ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
-    ...(input.ownerDocuments === undefined ? {} : { ownerDocuments: input.ownerDocuments }),
-    ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
-    ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
-    ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
-    ...(input.agentContext === undefined ? {} : { agentContext: input.agentContext }),
-    ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
-    ...(input.iconThemePreferencePersistence === undefined
-      ? {}
-      : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
-    ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
-    ...(input.pluginManagement === undefined ? {} : { pluginManagement: input.pluginManagement }),
-    ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
-    ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
-    hasLoopbackGraph: input.hasLoopbackGraph,
-    launcherOwnedNativeTarget: !input.launcher.attach,
-    ownedHostExited: () =>
-      !input.launcher.attach && launched !== undefined
-      && (launched.exitCode !== null || launched.signalCode !== null),
-    ...(input.startupNavigation === undefined ? {} : { startupNavigation: input.startupNavigation }),
-    ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
-    ...(input.productionGraphBootstrap === undefined
-      ? {}
-      : { productionGraphBootstrap: input.productionGraphBootstrap }),
-    ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
-    ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
-    ...(input.managedServiceUI === undefined ? {} : { managedServiceUI: input.managedServiceUI }),
-    onReady: async () => {
-      if (reportedReady) return
-      reportedReady = true
-      await completeHostReadiness(controller, async signal => {
-        try {
-          await input.onReady?.(signal)
-        } catch (error) {
-          lifecycle({ event: 'readiness-failed' })
-          throw error
+  let watcherCleanupConfirmed = false
+  const startWatcher = (input: InjectedHostInput, first: boolean): Promise<void> => {
+    watcherCleanupConfirmed = false
+    let reportedReady = false
+    const watcherSignal = input.ownerSignal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, input.ownerSignal])
+    return watchAndInject({
+      ...(input.nativeSubmission === undefined ? {} : { nativeSubmission: input.nativeSubmission }),
+      port: input.debugPort,
+      source: input.source,
+      ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
+      signal: watcherSignal,
+      ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
+        providerFleet: input.providerFleet,
+        providerBridgeToken: input.providerBridgeToken,
+      }),
+      agentHistoryHost: input.agentHistoryHost,
+      agentHistoryBridgeToken: input.agentHistoryBridgeToken,
+      ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
+      ...(input.ownerDocuments === undefined ? {} : { ownerDocuments: input.ownerDocuments }),
+      ...(input.remoteOwnerDocuments === undefined ? {} : { remoteOwnerDocuments: input.remoteOwnerDocuments }),
+      ...(input.remoteMarketplaceArtifact === undefined
+        ? {}
+        : { remoteMarketplaceArtifact: input.remoteMarketplaceArtifact }),
+      ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
+      ...(input.channelCredentialBridge === undefined
+        ? {}
+        : { channelCredentialBridge: input.channelCredentialBridge }),
+      ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
+      ...(input.agentContext === undefined ? {} : { agentContext: input.agentContext }),
+      ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
+      ...(input.iconThemePreferencePersistence === undefined
+        ? {}
+        : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
+      ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+      ...(input.remotePluginLifecycle === undefined ? {} : { remotePluginLifecycle: input.remotePluginLifecycle }),
+      ...(input.pluginManagement === undefined ? {} : { pluginManagement: input.pluginManagement }),
+      ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
+      ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
+      hasLoopbackGraph: input.hasLoopbackGraph,
+      launcherOwnedNativeTarget: !input.launcher.attach,
+      ownedHostExited: () =>
+        !input.launcher.attach && launched !== undefined
+        && (launched.exitCode !== null || launched.signalCode !== null),
+      ...(!first || input.startupNavigation === undefined ? {} : { startupNavigation: input.startupNavigation }),
+      ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
+      ...(input.productionGraphBootstrap === undefined
+        ? {}
+        : { productionGraphBootstrap: input.productionGraphBootstrap }),
+      ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
+      ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
+      ...(input.managedServiceUI === undefined ? {} : { managedServiceUI: input.managedServiceUI }),
+      onReady: async () => {
+        if (reportedReady) return
+        reportedReady = true
+        const complete = async (signal?: AbortSignal) => {
+          try {
+            await input.onReady?.(signal)
+          } catch (error) {
+            lifecycle({ event: 'readiness-failed' })
+            throw error
+          }
         }
-      })
-      rendererIsReady = true
-      input.browserConsole?.markReady()
-      markReady()
-      input.stdout('[cordisx] CDP renderer ready')
-    },
-    onStatus: message => input.stdout(`[cordisx] ${message}`),
-  })
+        if (first) await completeHostReadiness(controller, complete)
+        else await complete(watcherSignal)
+        rendererIsReady = true
+        if (first) {
+          input.browserConsole?.markReady()
+          markReady()
+        }
+        input.stdout(first ? '[cordisx] CDP renderer ready' : '[cordisx] service connection restored')
+      },
+      onStatus: message => input.stdout(`[cordisx] ${message}`),
+      onCleanupConfirmed: () => {
+        watcherCleanupConfirmed = true
+      },
+    })
+  }
+  const watcher = startWatcher(input, true)
+  let watchLifetime = watcher
   let profileLease = input.profileLease
   let primaryError: unknown
   let retainProfileLease = false
@@ -268,13 +322,38 @@ export async function runInjectedHost(input: {
       launched = input.prelaunchedHost.child
       if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
     }
+    const { newDocumentSource: _oldDocumentSource, ...restartBase } = input
+    void _oldDocumentSource
+    watchLifetime = runOwnerConnectionLoop({
+      initial: input,
+      initialWatcher: watcher,
+      signal: controller.signal,
+      isReady: () => rendererIsReady,
+      isDisconnected: current => current.ownerSignal?.aborted === true,
+      cleanupConfirmed: () => watcherCleanupConfirmed,
+      start: current => startWatcher(current, false),
+      ...(input.reconnectOwner === undefined ? {} : {
+        reconnect: async signal => {
+          const session = await input.reconnectOwner!(signal)
+          return { value: { ...restartBase, ...session.input }, close: session.close }
+        },
+      }),
+      report: event =>
+        input.stdout(
+          event === 'cleanup-uncertain'
+            ? '[cordisx] service connection lost; renderer cleanup could not be fully confirmed'
+            : event === 'reconnect-failed'
+            ? '[cordisx] service reconnection could not be safely completed'
+            : '[cordisx] service connection lost; CordisX is disconnected and the App remains open',
+        ),
+    })
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),
         ready: rendererReady,
         signal: controller.signal,
       }),
-      watcher,
+      watchLifetime,
     ])
   } catch (error) {
     lifecycle({ event: 'lifecycle-failed' })
@@ -296,7 +375,7 @@ export async function runInjectedHost(input: {
           ? cleanupErrorAfterOwnedBrowserExit(error)
           : error,
       beforeHostTermination: [
-        watcher,
+        watchLifetime,
         ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
         Promise.resolve(input.agentHistoryHost.dispose()),
       ],

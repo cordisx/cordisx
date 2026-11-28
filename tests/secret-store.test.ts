@@ -31,6 +31,21 @@ class MemoryKeychain implements LauncherKeychainBackend {
 }
 
 describe('launcher Host-private channel secret store', () => {
+  it('uses only the scoped noninteractive reader for optional credential lookup', async () => {
+    const backend = new MemoryKeychain()
+    const interactive = vi.spyOn(backend, 'read')
+    const silentReadBackend = { read: vi.fn(async () => 'fixture-secret') }
+    const store = new LauncherSecretStore({ platform: 'darwin', backend, silentReadBackend })
+    const reference = channelKeychainReference({ profileId: 'work', connectionId: 'fixture' })
+    await expect(store.readChannelReferenceSilently(reference, 'work')).resolves.toBe('fixture-secret')
+    await expect(store.readChannelReferenceSilently(reference, 'other')).rejects.toThrow('CREDENTIAL_UNAVAILABLE')
+    expect(silentReadBackend.read).toHaveBeenCalledOnce()
+    expect(interactive).not.toHaveBeenCalled()
+    const withoutSilentReader = new LauncherSecretStore({ platform: 'darwin', backend })
+    await expect(withoutSilentReader.readChannelReferenceSilently(reference, 'work'))
+      .rejects.toThrow('CREDENTIAL_UNAVAILABLE')
+    expect(interactive).not.toHaveBeenCalled()
+  })
   it('can deny Keychain authentication UI for hidden startup access', async () => {
     const invoke = vi.fn(async operation => Buffer.from(operation === 'status' ? 'unset' : 'fixture-secret'))
     const backend = createMacOSKeychainBackend({ allowAuthenticationUI: false, timeoutMs: 10_000, invoke })

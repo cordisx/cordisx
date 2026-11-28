@@ -9,6 +9,7 @@ interface ServiceConfigGlobals {
 const globals = globalThis as ServiceConfigGlobals
 
 afterEach(() => {
+  vi.useRealTimers()
   delete globals.__cordisxServiceConfigRequestV1
   delete globals.__cordisxServiceConfigReceiveV1
 })
@@ -51,6 +52,30 @@ describe('browser service configuration bridge', () => {
     const bridge = BrowserServiceConfigBridge.connect('token', 'smoke', 'generation')
     await expect(bridge.list('cli-proxy-api')).resolves.toEqual([])
     expect(calls).toBe(2)
+    bridge.dispose()
+  })
+
+  it('does not retry or report cancellation when a dispatched configuration write times out', async () => {
+    vi.useFakeTimers()
+    const binding = vi.fn()
+    globals.__cordisxServiceConfigRequestV1 = binding
+    const bridge = BrowserServiceConfigBridge.connect('token', 'smoke', 'generation')
+    const pending = bridge.mutate({
+      contract: 'cordisx.service-config-mutation/v1',
+      schemaVersion: 1,
+      identity: { source: 'https://example.test/plugin', pluginId: 'channel', serviceId: 'runtime' },
+      scope: { profileId: 'smoke', generation: 'generation' },
+      expectedRevision: 0,
+      configuration: {},
+    })
+    let settled = false
+    void pending.finally(() => settled = true).catch(() => {})
+    const rejection = expect(pending).rejects.toThrow('write result is unknown')
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(71_000)
+    await rejection
+    expect(binding).toHaveBeenCalledOnce()
     bridge.dispose()
   })
 })

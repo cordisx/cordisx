@@ -67,12 +67,20 @@ export interface ChannelManagerProjectionV1 {
   readonly contract: 'cordisx.channel-manager-projection/v1'
   readonly schemaVersion: 1
   readonly status: ChannelProductStatus
+  /** Time the Host observed this projection, if it represents a bounded snapshot. */
+  readonly observedAt?: string
   readonly service: {
     readonly configurationKind: 'host'
     readonly configApplies: 'service-restart'
     readonly revision: number
     readonly lastGoodRevision: number
     readonly writable: boolean
+    /** Present only when the service owner supplies coordinated connection control. */
+    readonly connectionControl?: 'enable-disable'
+    /** Present only when the owner also supports coordinated reconnect. */
+    readonly connectionReconnect?: true
+    /** Present only when the owner supplies coordinated pending-tenant resolution. */
+    readonly pendingTenantResolution?: true
   }
   readonly connections: readonly ChannelManagerConnectionProjection[]
   readonly routes: readonly ChannelManagerRouteProjection[]
@@ -210,6 +218,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
     'contract',
     'schemaVersion',
     'status',
+    'observedAt',
     'service',
     'connections',
     'routes',
@@ -221,15 +230,36 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   if (projection.contract !== 'cordisx.channel-manager-projection/v1' || projection.schemaVersion !== 1) {
     throw new TypeError('Channel Manager projection contract is unsupported')
   }
+  const observedAt = projection.observedAt === undefined
+    ? undefined
+    : boundedText(projection.observedAt, 'Channel Manager projection.observedAt', 64)
+  if (observedAt !== undefined && Number.isNaN(Date.parse(observedAt))) {
+    throw new TypeError('Channel Manager projection.observedAt is invalid')
+  }
   const service = object(projection.service, 'Channel Manager projection.service')
   exactKeys(
     service,
-    ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable'],
+    [
+      'configurationKind',
+      'configApplies',
+      'revision',
+      'lastGoodRevision',
+      'writable',
+      'connectionControl',
+      'connectionReconnect',
+      'pendingTenantResolution',
+    ],
     'Channel Manager projection.service',
   )
   if (
     service.configurationKind !== 'host' || service.configApplies !== 'service-restart'
     || typeof service.writable !== 'boolean'
+    || service.connectionControl !== undefined
+      && (service.connectionControl !== 'enable-disable' || service.writable !== true)
+    || service.connectionReconnect !== undefined
+      && (service.connectionReconnect !== true || service.connectionControl !== 'enable-disable')
+    || service.pendingTenantResolution !== undefined
+      && (service.pendingTenantResolution !== true || service.writable !== true)
   ) {
     throw new TypeError('Channel Manager service projection is invalid')
   }
@@ -392,6 +422,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
   return {
     contract: 'cordisx.channel-manager-projection/v1',
     schemaVersion: 1,
+    ...(observedAt === undefined ? {} : { observedAt }),
     status: oneOf(
       projection.status,
       ['implemented', 'verified', 'experimental', 'unavailable', 'planned'],
@@ -403,6 +434,9 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       revision: boundedInteger(service.revision, 'Channel Manager projection.service.revision'),
       lastGoodRevision: boundedInteger(service.lastGoodRevision, 'Channel Manager projection.service.lastGoodRevision'),
       writable: service.writable,
+      ...(service.connectionControl === 'enable-disable' ? { connectionControl: 'enable-disable' as const } : {}),
+      ...(service.connectionReconnect === true ? { connectionReconnect: true as const } : {}),
+      ...(service.pendingTenantResolution === true ? { pendingTenantResolution: true as const } : {}),
     },
     connections,
     routes,
@@ -423,6 +457,7 @@ export function withRuntimeProjection(
   const updates = new Map(runtime.accounts.map(item => [accountKey(item), item]))
   return normalizeProjection({
     ...base,
+    ...(base.observedAt === undefined ? {} : { observedAt: runtime.observedAt }),
     accounts: base.accounts.map(account => {
       const update = updates.get(accountKey(account))
       const { accountName: _name, accountAvatar: _avatar, ...prior } = account

@@ -128,7 +128,7 @@ export interface ConfigBridgeHandler {
   readonly token: string
   readonly profileId: string
   readonly generation: string
-  handle(request: ConfigBindingRequest): Promise<unknown>
+  handle(request: ConfigBindingRequest, seat?: object): Promise<unknown>
 }
 
 export function createConfigBridgeHandler(input: {
@@ -142,6 +142,12 @@ export function createConfigBridgeHandler(input: {
   readonly packagePlugins?: {
     readonly homeDir: string
     readonly runtimeGeneration: string
+    /** Optional owner-only coordination for configuration from the exact native seat. */
+    readonly mutate?: (
+      request: ConfigBindingRequest,
+      seat: object | undefined,
+      action: (request: ConfigBindingRequest) => Promise<unknown>,
+    ) => Promise<unknown>
   }
 }): ConfigBridgeHandler {
   const identities = new Map(
@@ -163,7 +169,7 @@ export function createConfigBridgeHandler(input: {
     token: input.token,
     profileId: input.profileId,
     generation: input.generation,
-    async handle(request) {
+    async handle(request, seat) {
       const configuredIdentity = identities.get(request.identity.pluginId)
       let packageOwned = false
       if (configuredIdentity !== request.identity.source) {
@@ -182,54 +188,76 @@ export function createConfigBridgeHandler(input: {
         generation: request.scope.generation,
         ownerToken: input.token,
       }
+      const mutate = async (action: (request: ConfigBindingRequest) => Promise<unknown>) =>
+        input.packagePlugins?.mutate ? await input.packagePlugins.mutate(request, seat, action) : await action(request)
       if (request.operation === 'stage') {
         if (packageOwned) {
-          return await packageConfig!.stage(
-            request.identity.pluginId,
-            request.expectedRevision!,
-            request.config!,
-            input.token,
+          return await mutate(async storedRequest =>
+            await packageConfig!.stage(
+              request.identity.pluginId,
+              request.expectedRevision!,
+              storedRequest.config!,
+              input.token,
+            )
           )
         }
         if (input.configuredPluginConfig !== undefined) {
-          return await input.configuredPluginConfig.stage({
+          return await mutate(async storedRequest =>
+            await input.configuredPluginConfig!.stage({
+              ...scope,
+              expectedRevision: request.expectedRevision!,
+              config: storedRequest.config!,
+            })
+          )
+        }
+        return await mutate(async storedRequest =>
+          await stagePluginConfigCandidate({
             ...scope,
             expectedRevision: request.expectedRevision!,
-            config: request.config!,
-          })
-        }
-        return stagePluginConfigCandidate({
-          ...scope,
-          expectedRevision: request.expectedRevision!,
-          config: request.config!,
-        }, input.configPath)
+            config: storedRequest.config!,
+          }, input.configPath)
+        )
       }
       if (request.operation === 'commit') {
         if (packageOwned) {
-          return await packageConfig!.commit(request.identity.pluginId, request.candidateRevision!, input.token)
+          return await mutate(async () =>
+            await packageConfig!.commit(request.identity.pluginId, request.candidateRevision!, input.token)
+          )
         }
         if (input.configuredPluginConfig !== undefined) {
-          return await input.configuredPluginConfig.commit({
-            ...scope,
-            candidateRevision: request.candidateRevision!,
-          })
+          return await mutate(async () =>
+            await input.configuredPluginConfig!.commit({
+              ...scope,
+              candidateRevision: request.candidateRevision!,
+            })
+          )
         }
-        return commitPluginConfigCandidate(
-          { ...scope, candidateRevision: request.candidateRevision! },
-          input.configPath,
+        return await mutate(async () =>
+          await commitPluginConfigCandidate(
+            { ...scope, candidateRevision: request.candidateRevision! },
+            input.configPath,
+          )
         )
       }
       if (packageOwned) {
-        return await packageConfig!.abort(request.identity.pluginId, request.candidateRevision!, input.token)
+        return await mutate(async () =>
+          await packageConfig!.abort(request.identity.pluginId, request.candidateRevision!, input.token)
+        )
       }
       if (input.configuredPluginConfig !== undefined) {
-        return await input.configuredPluginConfig.abort({
-          ...scope,
-          candidateRevision: request.candidateRevision!,
-        })
+        return await mutate(async () =>
+          await input.configuredPluginConfig!.abort({
+            ...scope,
+            candidateRevision: request.candidateRevision!,
+          })
+        )
       }
-      await abortPluginConfigCandidate({ ...scope, candidateRevision: request.candidateRevision! }, input.configPath)
-      return undefined
+      return await mutate(async () =>
+        await abortPluginConfigCandidate(
+          { ...scope, candidateRevision: request.candidateRevision! },
+          input.configPath,
+        )
+      )
     },
   }
 }

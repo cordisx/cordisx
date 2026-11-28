@@ -7,9 +7,10 @@ import {
   RuntimeBrowserPlugin,
 } from './runtime-shared.js'
 import { start } from './runtime-start.js'
+import { prepareNativePermissionBootstrap } from './native-permission-bootstrap.js'
 
-export function prepareCordisXViteReactRuntime(document: Document): () => void {
-  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document)
+export function prepareCordisXViteReactRuntime(document: Document, externalStyles = false): () => void {
+  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document, { externalStyles })
   let disposed = false
   return () => {
     if (disposed) return
@@ -104,13 +105,22 @@ export function installCordisX(
 ): Promise<CordisXRuntimeHandle> {
   return serializeCordisXBoot(
     metadata,
-    async () =>
-      await start(plugins, metadata, internalBootstrap, {
-        signal,
-        ...(options.certifiedPermissionChannel === undefined
-          ? {}
-          : { certifiedPermissionChannel: options.certifiedPermissionChannel }),
-      }),
+    async () => {
+      await globalThis.__cordisxRuntime?.dispose()
+      const prepared = await prepareNativePermissionBootstrap(metadata, signal)
+      try {
+        return await start(plugins, prepared, internalBootstrap, {
+          previousRuntimeDisposed: true,
+          signal,
+          ...(options.certifiedPermissionChannel === undefined
+            ? {}
+            : { certifiedPermissionChannel: options.certifiedPermissionChannel }),
+        })
+      } catch (error) {
+        if (metadata.nativeOwnerPermissionReview) prepared.standalonePermissionSigner?.close()
+        throw error
+      }
+    },
     signal,
   )
 }
@@ -126,15 +136,20 @@ export function installCordisXComposition(
   return serializeCordisXBoot(metadata, async () => {
     let disposeSharedReactRuntime: (() => void) | undefined
     let runtime: CordisXRuntimeHandle | undefined
+    let prepared: CordisXRuntimeMetadata | undefined
     try {
       await globalThis.__cordisxRuntime?.dispose()
       signal?.throwIfAborted()
-      const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(document)
+      prepared = await prepareNativePermissionBootstrap(metadata, signal)
+      const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(
+        document,
+        metadata.hostKind === 'standalone',
+      )
       disposeSharedReactRuntime = preparedSharedReactRuntimeDisposer
       const plugins = await loadPlugins()
       signal?.throwIfAborted()
       assertRequestedGeneration(metadata)
-      runtime = await start(plugins, metadata, internalBootstrap, {
+      runtime = await start(plugins, prepared, internalBootstrap, {
         previousRuntimeDisposed: true,
         disposePreparedSharedReactRuntime: preparedSharedReactRuntimeDisposer,
         signal,
@@ -143,6 +158,7 @@ export function installCordisXComposition(
       publish()
       return runtime
     } catch (error) {
+      if (metadata.nativeOwnerPermissionReview) prepared?.standalonePermissionSigner?.close()
       try {
         retire()
       } catch (cleanupError) {

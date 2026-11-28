@@ -6,6 +6,7 @@ import {
   type CordisXOwnerDocumentReplaceCommandV1,
   type CordisXOwnerDocumentReplaceResultV1,
   type CordisXOwnerDocumentsV1,
+  ownerDocumentWriteResultUnknown,
 } from '../durable-document-contracts.js'
 import type { CordisXJsonValue, CordisXPluginIdentity } from '../contracts.js'
 
@@ -16,6 +17,9 @@ const MAX_WATCHES = 64
 const MAX_LISTENERS = 256
 const MAX_PENDING_REQUESTS = 64
 const REQUEST_TIMEOUT_MS = 5_000
+// A generation handoff can briefly reject otherwise valid observations. Keep
+// the last known snapshot during that window, but report a sustained outage.
+const WATCH_HANDOFF_GRACE_MS = 10_000
 
 declare global {
   var __cordisxOwnerDocumentRequestV1: ((payload: string) => void) | undefined
@@ -36,6 +40,7 @@ interface DocumentWatch {
   timer: ReturnType<typeof setInterval>
   polling: boolean
   lastKey?: string
+  unavailableSince?: number
 }
 
 export interface OwnerDocumentPrincipalBinding {
@@ -128,7 +133,10 @@ export class BrowserOwnerDocumentBridge {
       )}
   }
 
-  constructor() {
+  constructor(private readonly pollIntervalMs = POLL_INTERVAL_MS) {
+    if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < POLL_INTERVAL_MS || pollIntervalMs > 5_000) {
+      throw new Error('owner document polling interval is invalid')
+    }
     globalThis[OWNER_DOCUMENT_RECEIVER] = this.#receive
   }
 
@@ -189,6 +197,15 @@ export class BrowserOwnerDocumentBridge {
           documentId: watch.documentId,
         }) as CordisXOwnerDocumentLoadResultV1,
       )
+      if (
+        result.status === 'unavailable' && result.code === 'host-unavailable' && result.recoverable
+        && result.diagnostic === 'owner document request was rejected'
+      ) {
+        watch.unavailableSince ??= Date.now()
+        if (Date.now() - watch.unavailableSince < WATCH_HANDOFF_GRACE_MS) return
+      } else {
+        delete watch.unavailableSince
+      }
       this.#publish(watch, result)
     } catch {
       /* next bounded poll retries launcher availability */
@@ -218,7 +235,7 @@ export class BrowserOwnerDocumentBridge {
       }
       watch.timer = setInterval(() => {
         void this.#poll(watch!)
-      }, POLL_INTERVAL_MS)
+      }, this.pollIntervalMs)
       this.#watches.set(key, watch)
       void this.#poll(watch)
     }
@@ -324,15 +341,20 @@ class BoundOwnerDocuments implements CordisXOwnerDocumentsV1 {
       }
       // The launcher is the commit authority. Once it returns accepted, a
       // concurrent renderer retirement must not rewrite durable success to stale.
-      const result = immutable(
-        await this.#bridge.request(this.#token, {
-          operation: 'replace',
-          documentId: command.documentId,
-          expectedRevision: command.expectedRevision,
-          schemaVersion: command.schemaVersion,
-          value,
-        }) as CordisXOwnerDocumentReplaceResultV1,
-      )
+      let result: CordisXOwnerDocumentReplaceResultV1
+      try {
+        result = immutable(
+          await this.#bridge.request(this.#token, {
+            operation: 'replace',
+            documentId: command.documentId,
+            expectedRevision: command.expectedRevision,
+            schemaVersion: command.schemaVersion,
+            value,
+          }) as CordisXOwnerDocumentReplaceResultV1,
+        )
+      } catch {
+        return ownerDocumentWriteResultUnknown()
+      }
       if (result.status === 'accepted') {
         this.#bridge.publish(this.#token, command.documentId, { status: 'loaded', snapshot: result.snapshot })
       }
@@ -382,14 +404,37 @@ export class CordisXOwnerDocumentBroker {
   #clients = new Set<BoundOwnerDocuments>()
   #bridge: BrowserOwnerDocumentBridge | undefined
   #bindings = new Map<string, string>()
+  #models: import('./platform-models-binding.js').BrowserPlatformModelsBridge | undefined
 
-  constructor(bridge?: BrowserOwnerDocumentBridge, bindings: readonly OwnerDocumentPrincipalBinding[] = []) {
+  constructor(
+    bridge?: BrowserOwnerDocumentBridge,
+    bindings: readonly OwnerDocumentPrincipalBinding[] = [],
+    models?: import('./platform-models-binding.js').BrowserPlatformModelsBridge,
+  ) {
     this.#bridge = bridge
+    this.#models = models
     this.registerBindings(bindings)
+  }
+
+  async listModels(
+    identity: { readonly id: string; readonly source: string },
+    moduleGeneration: string,
+    requestId: string,
+    input: import('../contracts.js').CordisXModelsListInput,
+  ): Promise<import('../contracts.js').CordisXPlatformResult<import('../contracts.js').CordisXModelPage>> {
+    const token = this.#bindings.get(identityKey(identity, moduleGeneration))
+    if (!token || !this.#models) {
+      return { ok: false, error: { code: 'adapter-unavailable', message: 'Service model catalog unavailable' } }
+    }
+    return await this.#models.list(token, requestId, input)
   }
 
   registerBindings(bindings: readonly OwnerDocumentPrincipalBinding[]): void {
     for (const binding of bindings) this.#bindings.set(identityKey(binding, binding.moduleGeneration), binding.token)
+  }
+
+  modelsAvailable(): boolean {
+    return this.#models !== undefined
   }
 
   bind(input: BoundOwnerDocumentInput): CordisXOwnerDocumentsV1 & { dispose(): void } {
@@ -408,6 +453,8 @@ export class CordisXOwnerDocumentBroker {
     for (const client of [...this.#clients]) client.dispose()
     this.#clients.clear()
     this.#bridge?.dispose()
+    this.#models?.dispose()
+    this.#models = undefined
     this.#bridge = undefined
   }
 }

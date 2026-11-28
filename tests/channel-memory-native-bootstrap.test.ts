@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { expect, it } from 'vitest'
@@ -6,7 +6,7 @@ import { ChannelMemoryPersonas } from '../packages/cli/src/launcher/channel-memo
 import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
 
 it('real native start injects bound persona, pins session and suppresses repeated capsules', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'native-persona-'))
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'native-persona-'))
   try {
     const personas = new ChannelMemoryPersonas(root)
     const account = { adapterId: 'feishu', accountId: 'bot', tenantId: 'tenant' }

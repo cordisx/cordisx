@@ -28,6 +28,7 @@ import type {
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ManagedServiceNodeUISourceExtensionV1 } from '@cordisx/protocol/managed-service-context/v1'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import type { ManagedServiceWebEntryReader } from './managed-service-web-entry.js'
 
 const SUBSCRIPTION_PAGE_MAX_UPDATES = 32
@@ -216,17 +217,39 @@ function deltaChanged(
     userAction?: ManagedServiceLoginActionV1
   } = {}
   if (current.readiness !== previous.readiness) delta.readiness = current.readiness
-  if (current.auth.state !== previous.auth.state) delta.auth = current.auth
-  if (current.health.level !== previous.health.level) delta.health = current.health
-  if (
-    JSON.stringify(current.diagnostics) !== JSON.stringify(previous.diagnostics)
-  ) delta.diagnostics = current.diagnostics
-  if (
-    current.userAction.available !== previous.userAction.available
-    || current.userAction.reason !== previous.userAction.reason
-  ) delta.userAction = current.userAction
+  if (!isDeepStrictEqual(current.auth, previous.auth)) delta.auth = current.auth
+  if (!isDeepStrictEqual(current.health, previous.health)) delta.health = current.health
+  if (!isDeepStrictEqual(current.diagnostics, previous.diagnostics)) delta.diagnostics = current.diagnostics
+  if (!isDeepStrictEqual(current.userAction, previous.userAction)) delta.userAction = current.userAction
   if (Object.keys(delta).length === 0) return undefined
   return Object.freeze({ kind: 'state-changed', sequence: current.sequence, delta: Object.freeze(delta) })
+}
+
+function projectionFields(value: ManagedServiceProjectionV1, ignored: ReadonlySet<string>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !ignored.has(key)))
+}
+const observationFields = new Set(['sequence', 'observedAt'])
+const deltaFields = new Set([
+  ...observationFields,
+  'readiness',
+  'auth',
+  'health',
+  'diagnostics',
+  'userAction',
+])
+function sameProjection(left: ManagedServiceProjectionV1, right: ManagedServiceProjectionV1): boolean {
+  return isDeepStrictEqual(projectionFields(left, observationFields), projectionFields(right, observationFields))
+}
+function projectionUpdate(
+  previous: ManagedServiceProjectionV1,
+  current: ManagedServiceProjectionV1,
+): ManagedServiceProjectionUpdateV1 | undefined {
+  if (sameProjection(previous, current)) return undefined
+  if (isDeepStrictEqual(projectionFields(previous, deltaFields), projectionFields(current, deltaFields))) {
+    const delta = deltaChanged(previous, current)
+    if (delta !== undefined) return delta
+  }
+  return Object.freeze({ kind: 'snapshot-replaced', sequence: current.sequence, projection: current })
 }
 
 async function waitInterval(intervalMs: number, signal: AbortSignal): Promise<void> {
@@ -263,6 +286,8 @@ export function createManagedServiceSource(
   let sequence = 0
   let lastProjection: ManagedServiceProjectionV1 | undefined
   let loggedOut = false
+  let authenticationInFlight = false
+  let inspection: Promise<void> = Promise.resolve()
   interface SubscriptionHandle {
     readonly deliverPage: (phase: 'replay' | 'live', updates: ManagedServiceProjectionUpdateV1[]) => void
     readonly closed: () => boolean
@@ -270,22 +295,40 @@ export function createManagedServiceSource(
     lastProjection: ManagedServiceProjectionV1 | undefined
   }
   const subscriptionHandles: SubscriptionHandle[] = []
+  const ensureNotDisposed = (): void => {
+    if (disposed) throw new Error('managed service source is disposed')
+  }
+  const advanceSequence = (): void => {
+    if (sequence >= Number.MAX_SAFE_INTEGER) throw new Error('managed service sequence is exhausted')
+    sequence += 1
+  }
+  const readProjection = async () => {
+    const reading = inspection.then(async () => {
+      ensureNotDisposed()
+      const runtimeProjection = await options.registrationHandle.inspect()
+      ensureNotDisposed()
+      const candidate = projectUI(
+        options,
+        extension,
+        binding,
+        runtimeProjection,
+        sequence,
+        new Date().toISOString(),
+        loggedOut,
+      )
+      if (lastProjection === undefined || !sameProjection(lastProjection, candidate)) advanceSequence()
+      const projection = Object.freeze({ ...candidate, sequence })
+      lastProjection = projection
+      return { projection, state: runtimeProjection.state }
+    })
+    inspection = reading.then(() => undefined, () => undefined)
+    return await reading
+  }
 
   const refreshAndBroadcast = () => {
     void (async () => {
       try {
-        const runtimeProjection = await options.registrationHandle.inspect()
-        ensureNotDisposed()
-        sequence += 1
-        const uiProjection = projectUI(
-          options,
-          extension,
-          binding,
-          runtimeProjection,
-          sequence,
-          new Date().toISOString(),
-          loggedOut,
-        )
+        const { projection: uiProjection } = await readProjection()
         // Snapshot handles to avoid mutation during iteration
         const handles = subscriptionHandles.slice()
         for (const handle of handles) {
@@ -294,7 +337,7 @@ export function createManagedServiceSource(
             handle.lastProjection = uiProjection
             continue
           }
-          const delta = deltaChanged(handle.lastProjection, uiProjection)
+          const delta = projectionUpdate(handle.lastProjection, uiProjection)
           if (delta === undefined) continue
           handle.lastProjection = uiProjection
           handle.currentSequence = delta.sequence
@@ -306,25 +349,8 @@ export function createManagedServiceSource(
     })()
   }
 
-  const ensureNotDisposed = (): void => {
-    if (disposed) throw new Error('managed service source is disposed')
-  }
-
   const snapshot = async (): Promise<ManagedServiceSnapshotResultV1> => {
-    ensureNotDisposed()
-    const runtimeProjection = await options.registrationHandle.inspect()
-    ensureNotDisposed()
-    sequence += 1
-    const uiProjection = projectUI(
-      options,
-      extension,
-      binding,
-      runtimeProjection,
-      sequence,
-      new Date().toISOString(),
-      loggedOut,
-    )
-    lastProjection = uiProjection
+    const { projection: uiProjection } = await readProjection()
     return Object.freeze({ status: 'available', projection: uiProjection })
   }
 
@@ -335,6 +361,9 @@ export function createManagedServiceSource(
 
     subscribe(afterSequence: number): Promise<ManagedServiceSubscribeResultV1> {
       ensureNotDisposed()
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || afterSequence > sequence) {
+        return Promise.resolve({ status: 'unavailable', code: 'stale-generation' })
+      }
       const controller = new AbortController()
       let disposedSubscription = false
       let closed = false
@@ -352,7 +381,6 @@ export function createManagedServiceSource(
           return descriptorSnapshotSequence
         },
       }
-      sequence = Math.max(sequence, afterSequence)
       let currentSequence = sequence
       let snapshotSequence = 0
       const updates: ManagedServiceProjectionUpdateV1[] = []
@@ -457,28 +485,16 @@ export function createManagedServiceSource(
             await waitInterval(options.healthIntervalMs, controller.signal)
             if (controller.signal.aborted || disposed || disposedSubscription) break
 
-            const runtimeProjection = await options.registrationHandle.inspect()
+            const { projection: uiProjection, state } = await readProjection()
             if (controller.signal.aborted || disposed || disposedSubscription) break
 
-            if (runtimeProjection.state === 'disposed') {
+            if (state === 'disposed') {
               emitClosed('service-disposed')
               break
             }
 
-            const nextSequence = sequence + 1
-            const uiProjection = projectUI(
-              options,
-              extension,
-              binding,
-              runtimeProjection,
-              nextSequence,
-              new Date().toISOString(),
-              loggedOut,
-            )
-
             if (snapshotSequence === 0) {
-              sequence = nextSequence
-              currentSequence = sequence
+              currentSequence = uiProjection.sequence
               handle.currentSequence = currentSequence
               snapshotSequence = currentSequence
               descriptorSnapshotSequence = snapshotSequence
@@ -492,11 +508,10 @@ export function createManagedServiceSource(
               handle.lastProjection = uiProjection
             } else {
               const delta = handle.lastProjection !== undefined
-                ? deltaChanged(handle.lastProjection, uiProjection)
+                ? projectionUpdate(handle.lastProjection, uiProjection)
                 : undefined
               if (delta !== undefined) {
-                sequence = nextSequence
-                currentSequence = sequence
+                currentSequence = uiProjection.sequence
                 handle.currentSequence = currentSequence
                 updates.push(delta)
                 deliverPage('live', [delta])
@@ -533,6 +548,18 @@ export function createManagedServiceSource(
 
     authenticate(request: ManagedServiceLoginRequestV1): Promise<ManagedServiceLoginResultV1> {
       ensureNotDisposed()
+      if (authenticationInFlight) {
+        return Promise.resolve(Object.freeze({
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+          contract: 'cordisx.managed-service-login-result/v1',
+          schemaVersion: 1,
+          requestId: request.requestId,
+          binding,
+          status: 'denied' as const,
+          error: Object.freeze({ code: 'authenticating' as const, message: 'authentication is already in progress' }),
+        }))
+      }
       if (request.binding.bindingId !== binding.bindingId) {
         return Promise.resolve(Object.freeze({
           $schema:
@@ -545,9 +572,22 @@ export function createManagedServiceSource(
           error: Object.freeze({ code: 'binding-replaced' as const, message: 'binding was replaced' }),
         }))
       }
-      return options.registrationHandle.authenticate('login').then(result => {
+      if (request.expectedSequence !== sequence) {
+        return Promise.resolve(Object.freeze({
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-login-result.v1.schema.json',
+          contract: 'cordisx.managed-service-login-result/v1',
+          schemaVersion: 1,
+          requestId: request.requestId,
+          binding,
+          status: 'denied' as const,
+          error: Object.freeze({ code: 'stale-revision' as const, message: 'projection sequence is stale' }),
+        }))
+      }
+      authenticationInFlight = true
+      return Promise.resolve().then(async () => await options.registrationHandle.authenticate('login')).then(result => {
         ensureNotDisposed()
-        sequence += 1
+        advanceSequence()
         if (result.status === 'accepted' || result.status === 'ready') {
           loggedOut = false
           refreshAndBroadcast()
@@ -590,13 +630,20 @@ export function createManagedServiceSource(
             message: error instanceof Error ? error.message : 'authentication failed',
           }),
         })
+      }).finally(() => {
+        authenticationInFlight = false
       })
     },
     logout(request: ManagedServiceLogoutRequestV1): Promise<ManagedServiceLogoutResultV1> {
       ensureNotDisposed()
       const unavailable = (
         status: 'denied' | 'failed' | 'unavailable',
-        code: 'binding-replaced' | 'stale-revision' | 'service-unavailable' | 'authentication-failed',
+        code:
+          | 'binding-replaced'
+          | 'stale-revision'
+          | 'service-unavailable'
+          | 'authentication-failed'
+          | 'authenticating',
         message: string,
       ): ManagedServiceLogoutResultV1 =>
         Object.freeze({
@@ -609,6 +656,9 @@ export function createManagedServiceSource(
           status,
           error: Object.freeze({ code, message }),
         })
+      if (authenticationInFlight) {
+        return Promise.resolve(unavailable('denied', 'authenticating', 'authentication is already in progress'))
+      }
       if (request.binding.bindingId !== binding.bindingId) {
         return Promise.resolve(unavailable('failed', 'binding-replaced', 'binding was replaced'))
       }
@@ -618,31 +668,37 @@ export function createManagedServiceSource(
       if (!options.logoutAvailable) {
         return Promise.resolve(unavailable('unavailable', 'service-unavailable', 'logout is unavailable'))
       }
-      return options.registrationHandle.authenticate('logout').then(result => {
-        ensureNotDisposed()
-        sequence += 1
-        if (result.status === 'accepted' || result.status === 'ready') {
-          loggedOut = true
-          return Object.freeze({
-            $schema:
-              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
-            contract: 'cordisx.managed-service-logout-result/v1',
-            schemaVersion: 1,
-            requestId: request.requestId,
-            binding,
-            status: 'accepted' as const,
-            stateAt: 'logged-out' as const,
-            sequence,
-          })
-        }
-        return unavailable(
-          'failed',
-          'authentication-failed',
-          'diagnostic' in result ? result.diagnostic.code : result.status,
-        )
-      }).catch((error: unknown) =>
+      authenticationInFlight = true
+      return Promise.resolve().then(async () => await options.registrationHandle.authenticate('logout')).then(
+        result => {
+          ensureNotDisposed()
+          advanceSequence()
+          if (result.status === 'accepted' || result.status === 'ready') {
+            loggedOut = true
+            refreshAndBroadcast()
+            return Object.freeze({
+              $schema:
+                'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-logout-result.v1.schema.json',
+              contract: 'cordisx.managed-service-logout-result/v1',
+              schemaVersion: 1,
+              requestId: request.requestId,
+              binding,
+              status: 'accepted' as const,
+              stateAt: 'logged-out' as const,
+              sequence,
+            })
+          }
+          return unavailable(
+            'failed',
+            'authentication-failed',
+            'diagnostic' in result ? result.diagnostic.code : result.status,
+          )
+        },
+      ).catch((error: unknown) =>
         unavailable('failed', 'authentication-failed', error instanceof Error ? error.message : 'logout failed')
-      )
+      ).finally(() => {
+        authenticationInFlight = false
+      })
     },
     ...(extension?.readCatalog === undefined
       ? {}
@@ -650,6 +706,13 @@ export function createManagedServiceSource(
     ...(extension?.readAccounts === undefined
       ? {}
       : { readAccounts: () => extension.readAccounts!() }),
+    ...(extension?.prepareAccountToggle === undefined
+      ? {}
+      : {
+        prepareAccountToggle: (
+          request: Parameters<NonNullable<ManagedServiceNodeUISourceExtensionV1['prepareAccountToggle']>>[0],
+        ) => extension.prepareAccountToggle!(request),
+      }),
     ...(extension?.toggleAccount === undefined
       ? {}
       : {

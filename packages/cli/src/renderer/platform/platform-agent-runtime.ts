@@ -141,11 +141,13 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       ? declaration.scope.authorityRequester
       : undefined
     const rationale = 'rationale' in declaration ? declaration.rationale : undefined
+    let revision = this.policyRecords.revision
     if (!await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)) {
       return Object.freeze({ authorized: false })
     }
     if (
-      !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+      !this.isAuthorizationCurrent(registration, revision)
+      || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
     ) {
       return Object.freeze({ authorized: false })
     }
@@ -210,8 +212,11 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       }
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
       if (
-        !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+        !this.isAuthorizationCurrent(registration, revision)
+        || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
         || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
+        || !this.isAuthorizationCurrent(registration, revision)
+        || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
       ) {
         return Object.freeze({ authorized: false })
       }
@@ -229,15 +234,23 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
           return Object.freeze({ authorized: false })
         }
         if (
-          !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+          !this.isAuthorizationCurrent(registration, revision)
+          || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
           || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
+          || !this.isAuthorizationCurrent(registration, revision)
+          || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
         ) {
           return Object.freeze({ authorized: false })
         }
         this.policyRecords.set(permissionRecordKeyV4(record), record)
+        revision++
         this.changed()
       }
     }
+    if (
+      !this.isAuthorizationCurrent(registration, revision)
+      || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+    ) return Object.freeze({ authorized: false })
     const taskSource =
       input.scopeSource.kind === 'host-agent-task' || input.scopeSource.kind === 'host-agent-task-authority'
         ? input.scopeSource
@@ -564,6 +577,9 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     code: AgentRuntimePermissionFence['code'],
     registrationToken?: object,
   ): void {
+    // Equal-looking connections/routes may be retired and later recreated (ABA).
+    // Unregister is independently fenced by its unique registration token.
+    if (code !== 'plugin-generation-replaced') this.policyRecords.invalidate()
     if (code === 'plugin-generation-replaced' && identity !== undefined) {
       for (const [routeInstanceId, record] of this.playgroundScenarioAgentRuntimeRoutes) {
         if (record.route.owner.source === identity.source && record.route.owner.pluginId === identity.id) {
@@ -601,6 +617,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
   }
 
   protected fenceAgentRuntimeRouteInstance(routeInstanceId: string, code: AgentRuntimePermissionFence['code']): void {
+    this.policyRecords.invalidate()
     for (const [leaseId, lease] of this.agentRuntimeLeases) {
       if (lease.routeInstanceId !== routeInstanceId) continue
       this.agentRuntimeLeases.delete(leaseId)

@@ -1,0 +1,84 @@
+import React, { act } from 'react'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { expect, it, vi } from 'vitest'
+import { buildManagerStyles } from '../packages/cli/scripts/build-manager-styles.mjs'
+import { installStandaloneManager } from '../packages/cli/src/renderer/manager/install-standalone.js'
+import { PERMISSION_AUTHORIZATION_STYLES } from '../packages/cli/src/renderer/permission-authorization-styles.js'
+import { SHARED_REACT_STYLES } from '../packages/cli/src/renderer/react-runtime.js'
+import { HOST_FORM_REACT_STYLES } from '../packages/cli/src/renderer/host-ui/HostForm.js'
+import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
+
+vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
+  BrandMark: () => <span />,
+  createBrandMarkElement: (document: Document) => document.createElement('span'),
+}))
+
+it('builds the Host and model-service styles in their existing cascade order', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-style-test-'))
+  try {
+    const output = path.join(directory, 'manager-host.css')
+    await buildManagerStyles(output)
+    const actual = await readFile(output, 'utf8')
+    expect(actual.startsWith(SHARED_REACT_STYLES + '\n')).toBe(true)
+    const root = 'packages/cli/src/renderer/manager'
+    const ordered = await Promise.all([
+      'manager-navigation.css',
+      'manager-content.css',
+      'manager-compact-shell.css',
+      'manager-browse.css',
+      '../page-header-actions.css',
+      '../host-ui/empty-state-illustration-theme.css',
+      '../../../assets/illustrations/empty-state/v4-flat/plugins.css',
+      '../host-ui/empty-state.css',
+      'manager-standalone.css',
+      '../model-providers.css',
+      'pages/model-services.css',
+      'pages/model-catalog/model-catalog.css',
+    ].map(file => readFile(path.join(root, file), 'utf8')))
+    let previous = -1
+    for (const css of ordered) {
+      const position = actual.indexOf(css, previous + 1)
+      expect(position).toBeGreaterThan(previous)
+      previous = position
+    }
+    const notifications = await readFile('packages/cli/src/renderer/notifications/styles.css', 'utf8')
+    expect(actual.indexOf(notifications)).toBeGreaterThan(previous)
+    expect(actual.indexOf(PERMISSION_AUTHORIZATION_STYLES)).toBeGreaterThan(actual.indexOf(notifications))
+    expect(actual.indexOf(HOST_FORM_REACT_STYLES)).toBeGreaterThan(0)
+    expect(actual.indexOf(HOST_FORM_REACT_STYLES)).toBeLessThan(actual.indexOf(notifications))
+    expect(actual.endsWith(PERMISSION_AUTHORIZATION_STYLES)).toBe(true)
+    await buildManagerStyles(output)
+    expect(await readFile(output, 'utf8')).toBe(actual)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 30_000)
+
+it('uses only the fixed same-origin stylesheet for an external standalone shell', async () => {
+  const fixture = reactManagerFixture()
+  let dispose: (() => void) | undefined
+  try {
+    expect(() =>
+      installStandaloneManager(fixture.document, managerModel(), {
+        standaloneStyleHref: 'https://example.test/unsafe.css' as '/manager-host.css',
+      })
+    ).toThrow('fixed same-origin asset')
+    await act(async () => {
+      dispose = installStandaloneManager(fixture.document, managerModel(), { standaloneStyleHref: '/manager-host.css' })
+    })
+    const asset = fixture.document.getElementById('cordisx-react-manager-style') as HTMLLinkElement
+    expect(asset.tagName).toBe('LINK')
+    expect(asset.getAttribute('rel')).toBe('stylesheet')
+    expect(asset.getAttribute('href')).toBe('/manager-host.css')
+    expect(fixture.document.querySelector('[data-manager-surface="standalone"] [data-unified-plugins-page]'))
+      .not.toBeNull()
+    await act(async () => dispose?.())
+    dispose = undefined
+    expect(fixture.document.getElementById('cordisx-react-manager-style')).toBeNull()
+  } finally {
+    await act(async () => dispose?.())
+    await fixture.dispose()
+  }
+})

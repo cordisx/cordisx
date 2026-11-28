@@ -15,13 +15,19 @@ import { prepareClaudeMcp, projectMcpToCodex } from '../launcher/mcp-projection.
 import { codexHome } from './run-support.js'
 import type { HomeConfig } from '../config/home-config.js'
 import { MODEL_SERVICE_HEADER_ENV_PREFIX } from '../config/model-service-runtime-options.js'
-import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
+import {
+  connectExistingTerminalProvider,
+  type ExistingTerminalProviderSource,
+  TerminalOwnerDiscoveryError,
+} from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
 import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
 import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-layer.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
 import { checkTerminalClient, terminalClientName, terminalClientStartupError } from './terminal-client-check.js'
+
+const RETIRED_TERMINAL_GRACE_MS = 5_000
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
@@ -92,6 +98,23 @@ export function terminalClaudeArguments(invocation: TerminalInvocation, instruct
   ]
 }
 
+/** The verified owner supplies a command lease, never the managed gateway credential itself. */
+function claudeManagedCredentialHelper(provider: Readonly<Record<string, unknown>>): string | undefined {
+  if (provider.auth === undefined) return undefined
+  if (!provider.auth || typeof provider.auth !== 'object' || Array.isArray(provider.auth)) {
+    throw new Error('Invalid Claude Code credential helper')
+  }
+  const auth = provider.auth as Record<string, unknown>
+  const valid = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(value)
+  if (
+    !valid(auth.command) || !path.isAbsolute(auth.command) || !valid(auth.cwd) || !path.isAbsolute(auth.cwd)
+    || !Array.isArray(auth.args) || auth.args.length > 32 || !auth.args.every(valid)
+  ) throw new Error('Invalid Claude Code credential helper')
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+  return 'cd ' + quote(auth.cwd) + ' && exec ' + [auth.command, ...auth.args].map(quote).join(' ')
+}
+
 export async function runTerminalCommand(invocation: TerminalInvocation, runtime: CordisXCliRuntime): Promise<void> {
   const stdout = runtime.stdout ?? console.log
   if (invocation.help) return stdout(TERMINAL_HELP)
@@ -128,7 +151,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   }
   let request: ((input: TerminalProviderRequest) => Promise<TerminalProviderResult>) | undefined
-  let host: { homeDir: string; profileId: string } | undefined
+  let host: ExistingTerminalProviderSource | undefined
   let shared: ReturnType<typeof prepareSharedTerminalService>
   let declared: ReturnType<typeof sharedTerminalServices> = []
   let homeConfig: HomeConfig | undefined
@@ -145,22 +168,49 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   if (!invocation.list && homeConfig) {
     Object.assign(environment, mergeHomeEnvironment(environment, homeConfig.environmentVariables))
   }
-  if (invocation.service || invocation.list || invocation.profile) {
+  if (invocation.service || invocation.list || invocation.profile || invocation.ownerApp) {
     const config = homeConfig ?? await loadHomeConfig(configPath)
     declared = sharedTerminalServices(config, client)
     if (invocation.service && invocation.model) {
       shared = prepareSharedTerminalService(config, client, invocation.service, invocation.model, environment)
     }
+    if (shared && invocation.ownerApp) {
+      throw new Error('--owner-app does not apply to a shared model-service declaration')
+    }
     if (shared) Object.assign(environment, shared.environment)
-    const app = config.apps.codex
+    const app = invocation.ownerApp === undefined
+      ? config.apps.codex ?? config.apps[config.defaultApp]
+      : config.apps[invocation.ownerApp]
+    if (invocation.ownerApp !== undefined && app === undefined) throw new Error('CordisX owner app is not configured')
     const profileId = invocation.profile ?? app?.defaultProfile
-    const profile = profileId && Object.hasOwn(app?.profiles ?? {}, profileId) ? app!.profiles[profileId] : undefined
-    if (!profile || !profileId) throw new Error('Existing CordisX Codex profile required; CLI never creates profiles')
-    if (profile.dataMode === 'host-isolated' && client === 'codex') {
+    const matchingProfiles = profileId === undefined
+      ? []
+      : Object.values(config.apps).flatMap(value =>
+        Object.hasOwn(value.profiles, profileId) ? [value.profiles[profileId]!] : []
+      )
+    const profile = profileId === undefined ? undefined : invocation.ownerApp === undefined
+      ? config.apps.codex?.profiles[profileId] ?? config.apps[config.defaultApp]?.profiles[profileId]
+        ?? (matchingProfiles.length === 1 ? matchingProfiles[0] : undefined)
+      : app?.profiles[profileId]
+    if (!profile || !profileId) throw new Error('Existing CordisX profile required; CLI never creates profiles')
+    const codexProfile = Object.hasOwn(config.apps.codex?.profiles ?? {}, profileId)
+      ? config.apps.codex!.profiles[profileId]
+      : undefined
+    if (client === 'codex' && codexProfile === undefined && profile.dataMode === 'host-isolated') {
+      throw new Error('An isolated Codex profile must be configured explicitly for this profile ID')
+    }
+    if (codexProfile?.dataMode === 'host-isolated' && client === 'codex') {
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
     if (!shared && (invocation.service || invocation.list)) {
-      host = { homeDir: path.dirname(configPath), profileId }
+      host = {
+        homeDir: path.dirname(configPath),
+        profileId,
+        appIds: Object.entries(config.apps).filter(([, value]) => Object.hasOwn(value.profiles, profileId)).map((
+          [id],
+        ) => id),
+        ...(invocation.ownerApp === undefined ? {} : { selectedAppId: invocation.ownerApp }),
+      }
     }
   }
   const executable = invocation.list ? undefined : await (runtime.internalCheckTerminalClient ?? checkTerminalClient)(
@@ -170,7 +220,11 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   if (host) {
     try {
       request = await connectExistingTerminalProvider(host)
-    } catch {
+    } catch (error) {
+      if (error instanceof TerminalOwnerDiscoveryError && error.reason !== 'no-owner') throw error
+      if (invocation.ownerApp !== undefined) {
+        throw new Error('No verified CordisX owner matches --owner-app and the selected profile')
+      }
       if (!invocation.list) {
         throw new Error(
           'CordisX plugin service selection requires an already-running compatible Host; no App was started',
@@ -215,6 +269,8 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
   let claudeMcp: Awaited<ReturnType<typeof prepareClaudeMcp>> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
+  let forcedStop: ReturnType<typeof setTimeout> | undefined
+  let childExited = false
   let renewing = false, failure: Error | undefined
   try {
     if (invocation.service && invocation.model && !shared) {
@@ -257,21 +313,26 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       }
       prepared = result
     }
+    let managedClaudeHelper: string | undefined
     if (client === 'claude-code' && prepared) {
       if (!prepared.anthropicBaseUrl) throw new Error('This Host does not provide Claude Code gateway support')
       environment.ANTHROPIC_BASE_URL = prepared.anthropicBaseUrl
-      // Claude requires an auth selection even when the local plugin owns login.
-      environment.ANTHROPIC_AUTH_TOKEN = 'cordisx-local-gateway'
+      managedClaudeHelper = claudeManagedCredentialHelper(prepared.provider)
+      // Claude requires an auth selection even when the local gateway has none.
+      if (!managedClaudeHelper) environment.ANTHROPIC_AUTH_TOKEN = 'cordisx-local-gateway'
+      else delete environment.ANTHROPIC_AUTH_TOKEN
       delete environment.ANTHROPIC_API_KEY
     }
     let claudeSettings: string | undefined
     if (client === 'claude-code' && invocation.service) {
-      environment.CORDISX_TERMINAL_SERVICE_KEY = environment.ANTHROPIC_AUTH_TOKEN
+      if (managedClaudeHelper) delete environment.CORDISX_TERMINAL_SERVICE_KEY
+      else environment.CORDISX_TERMINAL_SERVICE_KEY = environment.ANTHROPIC_AUTH_TOKEN
       const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
       claudeSettings = JSON.stringify({
-        apiKeyHelper: `${quote(process.execPath)} ${
-          quote(fileURLToPath(new URL('../../assets/launcher/terminal-claude-key.mjs', import.meta.url)))
-        }`,
+        apiKeyHelper: managedClaudeHelper
+          ?? `${quote(process.execPath)} ${
+            quote(fileURLToPath(new URL('../../assets/launcher/terminal-claude-key.mjs', import.meta.url)))
+          }`,
         env: { ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_API_KEY: '' },
       })
       delete environment.ANTHROPIC_AUTH_TOKEN
@@ -356,13 +417,27 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (prepared) {
       const leaseId = prepared.leaseId
       timer = setInterval(() => {
-        if (renewing) return
+        if (renewing || failure || childExited) return
         renewing = true
         void request!({ kind: 'renew', leaseId }).then(result => {
           if (result.kind !== 'renewed') throw new Error('Invalid terminal provider renewal')
         }).catch(() => {
+          if (childExited) return
           failure = new Error('CordisX provider retired; this CLI session was stopped. Start a new session')
-          if (child?.exitCode === null) child.kill('SIGTERM')
+          clearInterval(timer)
+          const ownedChild = child
+          if (!ownedChild || ownedChild.exitCode !== null || ownedChild.signalCode !== null) return
+          try {
+            ownedChild.kill('SIGTERM')
+          } catch { /* still attempt the bounded cleanup below */ }
+          forcedStop = setTimeout(() => {
+            if (!childExited && ownedChild.exitCode === null && ownedChild.signalCode === null) {
+              try {
+                ownedChild.kill('SIGKILL')
+              } catch { /* a failed signal cannot be reported as a successful exit */ }
+            }
+          }, RETIRED_TERMINAL_GRACE_MS)
+          forcedStop.unref()
         }).finally(() => {
           renewing = false
         })
@@ -384,9 +459,15 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       const code = await new Promise<number>((resolve, reject) => {
         child!.once(
           'error',
-          error => reject(terminalClientStartupError(client, executable!, error)),
+          error => {
+            childExited = true
+            reject(terminalClientStartupError(client, executable!, error))
+          },
         )
-        child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
+        child!.once('exit', (code, signal) => {
+          childExited = true
+          resolve(code ?? (signal === 'SIGINT' ? 130 : 143))
+        })
       })
       if (failure) throw failure
       if (code !== 0) {
@@ -401,6 +482,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   } finally {
     clearInterval(timer)
+    clearTimeout(forcedStop)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
     await reviewCatalog?.close()
     await nativeLayer?.close()

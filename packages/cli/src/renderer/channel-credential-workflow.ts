@@ -20,6 +20,7 @@ interface Draft {
   readonly purpose: 'create' | 'rotate'
   readonly adapterKind: 'feishu' | 'lark'
   readonly revision: number
+  readonly serviceRevision?: number
   readonly expiresAt: number
   readonly connectionToken?: string
   readonly account?: ChannelCredentialRef
@@ -27,6 +28,8 @@ interface Draft {
 }
 export interface ChannelCredentialWorkflowInput {
   readonly revision: () => number
+  /** Capture the owner configuration revision when opening a creation flow. */
+  readonly serviceRevision?: () => number
   readonly advance: () => void
   readonly target: (token: string) => ChannelCredentialRef | undefined
   readonly connectionToken: (ref: ChannelCredentialRef) => string
@@ -59,6 +62,8 @@ const opaque = () => {
 export class ChannelCredentialWorkflow {
   private readonly drafts = new Map<string, Draft>()
   private readonly lifetime = new AbortController()
+  private readonly pendingDiscards = new Set<Promise<void>>()
+  private cleanupFailed = false
   private busy = false
   constructor(private readonly input: ChannelCredentialWorkflowInput) {}
   private now() {
@@ -71,16 +76,27 @@ export class ChannelCredentialWorkflow {
     return draft?.kind === kind && draft.owner === owner && draft.revision === this.input.revision()
       && draft.expiresAt > this.now() && !this.lifetime.signal.aborted
   }
-  private async prune() {
+  private discard(owner: string, draftId: string): Promise<void> {
+    let pending: Promise<void>
+    pending = Promise.resolve().then(async () => {
+      const result = await this.input.request({ operation: 'discard', owner, draftId })
+      if (result.status !== 'applied' || result.code !== 'DISCARDED') this.cleanupFailed = true
+    }).catch(() => {
+      this.cleanupFailed = true
+    }).finally(() => {
+      this.pendingDiscards.delete(pending)
+    })
+    this.pendingDiscards.add(pending)
+    return pending
+  }
+  private async prune(): Promise<boolean> {
     for (const [token, draft] of this.drafts) {
       if (draft.expiresAt > this.now() && draft.revision === this.input.revision()) continue
       this.drafts.delete(token)
-      if (draft.privateDraft) {
-        await this.input.request({ operation: 'discard', owner: draft.owner, draftId: draft.privateDraft }).catch(
-          () => {},
-        )
-      }
+      if (draft.privateDraft) void this.discard(draft.owner, draft.privateDraft)
     }
+    while (this.pendingDiscards.size) await Promise.all(this.pendingDiscards)
+    return !this.cleanupFailed
   }
   /** Resolve a saved pending account without exposing its stored credential to the renderer. */
   async resolveTenant(input: {
@@ -92,6 +108,7 @@ export class ChannelCredentialWorkflow {
     authorize: ChannelCredentialAuthorizer
     live: () => boolean
   }): Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }> {
+    if (!await this.prune()) return this.fail('CREDENTIAL_CLEANUP_UNAVAILABLE', 'unavailable')
     if (this.busy || input.signal.aborted || !input.live() || this.lifetime.signal.aborted) {
       return this.fail('STALE_GENERATION', 'unavailable')
     }
@@ -117,7 +134,7 @@ export class ChannelCredentialWorkflow {
     }
   }
   async issue(request: ChannelManagerTargetRequestV1, owner: string): Promise<Partial<ChannelManagerTargetResultV1>> {
-    await this.prune()
+    if (!await this.prune()) return this.fail('CREDENTIAL_CLEANUP_UNAVAILABLE', 'unavailable')
     if (!this.input.available() || this.lifetime.signal.aborted) {
       return this.fail('OPERATION_UNAVAILABLE', 'unavailable')
     }
@@ -125,12 +142,17 @@ export class ChannelCredentialWorkflow {
     let value: Draft
     if (request.operation === 'target.credential.capture.create') {
       if (!['feishu', 'lark'].includes(request.adapterKind)) return this.fail('ADAPTER_UNAVAILABLE', 'unavailable')
+      const serviceRevision = this.input.serviceRevision?.()
+      if (serviceRevision !== undefined && (!Number.isSafeInteger(serviceRevision) || serviceRevision < 0)) {
+        return this.fail('STALE_GENERATION', 'unavailable')
+      }
       value = {
         kind: 'capture',
         owner,
         purpose: 'create',
         adapterKind: request.adapterKind as 'feishu' | 'lark',
         revision: request.expectedRevision,
+        ...(serviceRevision === undefined ? {} : { serviceRevision }),
         expiresAt: this.now() + 10 * 60_000,
       }
     } else if (request.operation === 'target.credential.capture.rotate') {
@@ -175,7 +197,7 @@ export class ChannelCredentialWorkflow {
     prompt: ChannelCredentialWorkflowInput['prompt'] = this.input.prompt,
     configuration?: ChannelCredentialConfigurationWrite,
   ): Promise<Partial<ChannelManagerResultV2>> {
-    await this.prune()
+    if (!await this.prune()) return this.fail('CREDENTIAL_CLEANUP_UNAVAILABLE', 'unavailable')
     if (!this.input.available() || !active() || ownerSignal.aborted || this.lifetime.signal.aborted) {
       return this.fail('STALE_GENERATION', 'unavailable')
     }
@@ -203,14 +225,18 @@ export class ChannelCredentialWorkflow {
               purpose: draft.purpose,
               account,
               secret,
-              ...(configuration === undefined ? {} : { expectedRevision: configuration.expectedServiceRevision }),
+              ...(configuration !== undefined
+                ? { expectedRevision: configuration.expectedServiceRevision }
+                : draft.serviceRevision === undefined
+                ? {}
+                : { expectedRevision: draft.serviceRevision }),
             })
             if (result.status !== 'applied' || !result.draftId || !result.ref) {
               reportFailure?.(result.code)
               return false
             }
             if (signal.aborted || !active() || !this.live(draft, owner, 'capture')) {
-              await this.input.request({ operation: 'discard', owner, draftId: result.draftId }).catch(() => {})
+              await this.discard(owner, result.draftId)
               return false
             }
             captured = result
@@ -222,10 +248,13 @@ export class ChannelCredentialWorkflow {
           || !this.live(draft, owner, 'capture')
         ) {
           if (captured?.draftId) {
-            await this.input.request({ operation: 'discard', owner, draftId: captured.draftId }).catch(() => {})
+            await this.discard(owner, captured.draftId)
           }
           this.drafts.delete(request.target.captureToken)
-          return this.fail(accepted ? 'STALE_GENERATION' : 'CAPTURE_CANCELLED')
+          return this.fail(
+            this.cleanupFailed ? 'CREDENTIAL_CLEANUP_UNAVAILABLE' : accepted ? 'STALE_GENERATION' : 'CAPTURE_CANCELLED',
+            this.cleanupFailed ? 'unavailable' : 'rejected',
+          )
         }
         this.drafts.delete(request.target.captureToken)
         this.input.advance()
@@ -304,7 +333,7 @@ export class ChannelCredentialWorkflow {
       if (draft.owner === owner) {
         this.drafts.delete(token)
         if (draft.privateDraft) {
-          void this.input.request({ operation: 'discard', owner, draftId: draft.privateDraft }).catch(() => {})
+          void this.discard(owner, draft.privateDraft)
         }
       }
     }
@@ -313,9 +342,7 @@ export class ChannelCredentialWorkflow {
     this.lifetime.abort()
     for (const draft of this.drafts.values()) {
       if (draft.privateDraft) {
-        void this.input.request({ operation: 'discard', owner: draft.owner, draftId: draft.privateDraft }).catch(
-          () => {},
-        )
+        void this.discard(draft.owner, draft.privateDraft)
       }
     }
     this.drafts.clear()

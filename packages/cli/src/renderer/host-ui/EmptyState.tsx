@@ -4,7 +4,7 @@ import type { ManagerIconToken } from '../icons.js'
 import { HostIcon } from './HostIcon.js'
 import { EmptyStateIllustration, EmptyStateIllustrationStyles } from './EmptyStateIllustration.js'
 import type { EmptyStateFamily } from './empty-state-illustrations.js'
-import css from './empty-state.css?inline'
+import { EMPTY_STATE_STYLES } from './empty-state-styles.js'
 
 /** Host-owned list status. Actions exist only when the caller can execute them. */
 export function EmptyState({ icon, title, description, state = 'empty', action, illustration, family, presentation }: {
@@ -26,7 +26,7 @@ export function EmptyState({ icon, title, description, state = 'empty', action, 
   return (
     <>
       {family ? <EmptyStateIllustrationStyles /> : null}
-      <style>{css}</style>
+      <style>{EMPTY_STATE_STYLES}</style>
       <div
         className="cxh-empty-state"
         data-empty-state={state}

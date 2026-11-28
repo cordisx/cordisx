@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { type ManagerRoute, normalizeManagerHistory, normalizeManagerRoute } from '../model/routes.js'
+import { type ManagerRoute, normalizeManagerHistory, normalizeManagerRoute, primaryFor } from '../model/routes.js'
+import { readStandaloneManagerRoute, writeStandaloneManagerRoute } from '../model/standalone-route-storage.js'
 
 const PLAYGROUND_ROUTE_KEY = 'cordisx.playground.manager.history.v1'
 
-function initialHistory(storage?: Storage): readonly ManagerRoute[] {
+function initialHistory(storage?: Storage, standaloneStorage?: Storage): readonly ManagerRoute[] {
+  if (standaloneStorage !== undefined) {
+    const restored = readStandaloneManagerRoute(standaloneStorage) ?? { kind: 'primary', page: 'plugins' }
+    return restored.kind === 'primary' ? [restored] : [{ kind: 'primary', page: primaryFor(restored) }, restored]
+  }
   if (storage === undefined) return [{ kind: 'primary', page: 'plugins' }]
   try {
     const value = JSON.parse(storage.getItem(PLAYGROUND_ROUTE_KEY) ?? 'null')
@@ -15,12 +20,15 @@ function initialHistory(storage?: Storage): readonly ManagerRoute[] {
   }
 }
 
-export function useManagerRouter(storage?: Storage) {
-  const [history, setHistory] = useState<readonly ManagerRoute[]>(() => initialHistory(storage))
+export function useManagerRouter(storage?: Storage, standaloneStorage?: Storage) {
+  const [history, setHistory] = useState<readonly ManagerRoute[]>(() => initialHistory(storage, standaloneStorage))
   const route = history.at(-1) ?? { kind: 'primary' as const, page: 'plugins' as const }
   useEffect(() => {
     storage?.setItem(PLAYGROUND_ROUTE_KEY, JSON.stringify(history))
   }, [history, storage])
+  useEffect(() => {
+    writeStandaloneManagerRoute(standaloneStorage, route)
+  }, [route, standaloneStorage])
   const navigate = useCallback((next: ManagerRoute) => {
     const normalized = normalizeManagerRoute(next)
     setHistory(current =>

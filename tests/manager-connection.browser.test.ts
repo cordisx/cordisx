@@ -403,6 +403,65 @@ it.skipIf(!executable)(
           }
         }
       }
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+      await run(
+        "document.getElementById('manager').dataset.managerSurface='standalone';"
+          + "document.querySelector('[data-plugin-config-form] button[type=reset]').click();await Fixture.settle()",
+      )
+      const point = await run(
+        "document.querySelector('[data-config-path=name] input').scrollIntoView({block:'center'});"
+          + "const rect=document.querySelector('[data-config-path=name] input').getBoundingClientRect();"
+          + 'return {x:rect.x+rect.width/2,y:rect.y+rect.height/2}',
+      ) as { x: number; y: number }
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
+      await run('await Fixture.type("name","Local browser draft");await Fixture.publishPluginRevision()')
+      expect(await evaluate("document.querySelector('[data-config-path=name] input').value")).toBe(
+        'Local browser draft',
+      )
+      expect(await evaluate("document.querySelector('[data-plugin-config-form]').dataset.state")).toBe('conflict')
+      expect(await evaluate('document.documentElement.scrollWidth<=innerWidth')).toBe(true)
+      expect(await evaluate("document.querySelector('.cxf-alert button').disabled")).toBe(false)
+      for (const theme of ['light', 'dark']) {
+        await run(`document.documentElement.dataset.theme='${theme}';await Fixture.settle()`)
+        const bounds = await run(
+          "const rect=document.querySelector('.cxf-alert button').getBoundingClientRect();"
+            + 'return {left:rect.left,right:rect.right,width:rect.width}',
+        ) as { left: number; right: number; width: number }
+        expect(bounds.width).toBeGreaterThan(0)
+        expect(bounds.left).toBeGreaterThanOrEqual(0)
+        expect(bounds.right).toBeLessThanOrEqual(390)
+      }
+      let dialogOpened = false
+      const offDialog = cdp.onEvent('Page.javascriptDialogOpening', () => {
+        dialogOpened = true
+      })
+      const attemptedReload = cdp.send('Page.reload', {}, 20_000)
+      try {
+        await expect.poll(() => dialogOpened, { timeout: 10_000 }).toBe(true)
+        await cdp.send('Page.handleJavaScriptDialog', { accept: false })
+        await attemptedReload
+      } catch (error) {
+        await cdp.send('Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined)
+        await attemptedReload.catch(() => undefined)
+        throw error
+      } finally {
+        offDialog()
+      }
+      expect(await evaluate("document.querySelector('[data-config-path=name] input').value")).toBe(
+        'Local browser draft',
+      )
+      await click('.cxf-alert button')
+      await run(
+        "document.querySelector('[data-plugin-config-form] form').dispatchEvent("
+          + "new Event('submit',{bubbles:true,cancelable:true}));await Fixture.settle()",
+      )
+      expect(await evaluate('Fixture.pluginWrites().at(-1)[1]')).toBe(2)
       await run(
         'disposeFixture();window.disposeStandalone=await Fixture.startStandalone();await Fixture.openFormItem()',
       )

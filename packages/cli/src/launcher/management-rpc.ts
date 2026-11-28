@@ -13,6 +13,7 @@ import { constants } from 'node:fs'
 import { connect, createServer, type Server, type Socket } from 'node:net'
 import path from 'node:path'
 import type {
+  PluginManagementCatalogLookup,
   PluginManagementCatalogQuery,
   PluginManagementConfigRequest,
   PluginManagementLegacySourceMigration,
@@ -20,13 +21,36 @@ import type {
   PluginManagementSnapshot,
 } from '../management/contracts.js'
 import type { PluginManagementService } from '../management/service.js'
+import {
+  parseRendererConfigOperation,
+  type RendererConfigOperation,
+  type RendererConfigResult,
+} from './renderer-config-management.js'
+import { parsePermissionReviewOperation, type PermissionReviewOperation } from './permission-review-management.js'
+import { type ManagerServiceAuthOperation, parseManagerServiceAuthOperation } from './manager-service-auth.js'
+import {
+  type ManagerChannelCredentialOperation,
+  parseManagerChannelCredentialOperation,
+} from './manager-channel-credentials.js'
+import { type ManagerRendererOperation, parseManagerRendererOperation } from '../cli/manager-renderer-rpc.js'
+import { canonicalManagedConsoleBrowserOrigins } from './managed-console-browser-gateway.js'
+import { type OwnerAdapterRpcOperation, parseOwnerAdapterRpcOperation } from '../cli/owner-adapter-rpc.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
 export const MAX_MANAGEMENT_REQUEST_BYTES = 256 * 1024
+// A native adapter can relay a bounded owner document, whose JSON envelope
+// may contain escaped data. All other operations retain the smaller limit.
+const MAX_ADAPTER_DOCUMENT_REQUEST_BYTES = 2 * 1024 * 1024
 const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
+  | ManagerRendererOperation
+  | OwnerAdapterRpcOperation
+  | ManagerServiceAuthOperation
+  | ManagerChannelCredentialOperation
+  | PermissionReviewOperation
+  | RendererConfigOperation
   | { readonly kind: 'query' }
   | {
     readonly kind: 'codex'
@@ -49,7 +73,15 @@ export type PluginManagementRpcOperation =
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
     readonly kind: 'plugin-info'
-    readonly query: { readonly pluginId: string; readonly sourceUrl?: string; readonly version?: string }
+    readonly query: PluginManagementCatalogLookup
+  }
+  | { readonly kind: 'permission-history'; readonly pluginId: string }
+  | { readonly kind: 'plugin-authorization-history'; readonly pluginId: string }
+  | {
+    readonly kind: 'plugin-review-apply'
+    readonly reviewToken: string
+    readonly decision: unknown
+    readonly proof: unknown
   }
   | { readonly kind: 'plan'; readonly request: PluginManagementRequest }
   | { readonly kind: 'execute'; readonly request: PluginManagementRequest; readonly expectedRevision?: number }
@@ -68,6 +100,8 @@ export interface PluginManagementBridgeHandler {
   readonly profileId: string
   readonly generation: string
   readonly service: PluginManagementService
+  /** The independent service coordinates this client through its own lifecycle fleet. */
+  readonly ownerCoordinated?: true
 }
 
 export interface PluginManagementRpcEndpoint {
@@ -79,6 +113,7 @@ export interface PluginManagementRpcEndpoint {
   readonly processStartedAt: string
   readonly token: string
   readonly generation: string
+  readonly managerConsoleOrigins?: readonly string[]
   readonly mailboxId?: string
   readonly pidNamespace?: string
 }
@@ -92,6 +127,45 @@ export interface PluginManagementRpcPaths {
 
 export interface PluginManagementRpcServer {
   close(): Promise<void>
+}
+
+/** Manager observation waits are bounded by the owning renderer session, not the ordinary RPC deadline. */
+function managementRpcDeadline(operation: PluginManagementRpcOperation): number {
+  if (
+    operation.kind === 'owner-adapter'
+    && (operation.action === 'lifecycle' || operation.action === 'management' || operation.action === 'artifact')
+  ) {
+    return 180_000
+  }
+  if (
+    operation.kind === 'manager-renderer' && operation.action === 'call'
+    && operation.channel === 'plugin-management' && typeof operation.payload === 'string'
+    && Buffer.byteLength(operation.payload) <= MAX_MANAGEMENT_REQUEST_BYTES
+  ) {
+    try {
+      const value = JSON.parse(operation.payload) as { operation?: { kind?: unknown; request?: { kind?: unknown } } }
+      if (
+        value.operation?.kind === 'plugin-review-apply'
+        || value.operation?.kind === 'execute' && value.operation.request?.kind === 'plugin-execute-plan'
+      ) {
+        return 210_000
+      }
+    } catch { /* Malformed requests retain the ordinary deadline. */ }
+  }
+  if (
+    operation.kind === 'manager-renderer' && operation.action === 'call'
+    && operation.channel === 'managed-service-ui' && typeof operation.payload === 'string'
+    && Buffer.byteLength(operation.payload) <= MAX_MANAGEMENT_REQUEST_BYTES
+  ) {
+    try {
+      const value = JSON.parse(operation.payload) as { operation?: unknown }
+      if (value && ['next', 'pull', 'closed', 'startupNext'].includes(String(value.operation))) {
+        return 8 * 60 * 60_000
+      }
+      if (value?.operation === 'authenticate' || value?.operation === 'logout') return 310_000
+    } catch { /* Malformed requests retain the ordinary deadline. */ }
+  }
+  return operation.kind === 'execute' ? 180_000 : 60_000
 }
 
 export function managementMailboxRoot(paths: PluginManagementRpcPaths): string {
@@ -136,6 +210,12 @@ export function parsePluginManagementRpcRequest(
   if (
     ![
       'query',
+      'manager-renderer',
+      'owner-adapter',
+      'manager-service-auth',
+      'manager-channel-credentials',
+      'plugin-configuration',
+      'permission-review-apply',
       'model-export',
       'terminal-provider',
       'channel',
@@ -143,11 +223,25 @@ export function parsePluginManagementRpcRequest(
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
+      'permission-history',
+      'plugin-authorization-history',
+      'plugin-review-apply',
       'plan',
       'execute',
       'migrate-legacy-sources',
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
+  if (operation.kind === 'manager-renderer') parseManagerRendererOperation(operation)
+  if (operation.kind === 'owner-adapter') parseOwnerAdapterRpcOperation(operation)
+  if (
+    (operation.kind === 'permission-history' || operation.kind === 'plugin-authorization-history')
+    && (Object.keys(operation).length !== 2
+      || typeof operation.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(operation.pluginId))
+  ) throw new Error('permission history request is invalid')
+  if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
+  if (operation.kind === 'manager-service-auth') parseManagerServiceAuthOperation(operation)
+  if (operation.kind === 'manager-channel-credentials') parseManagerChannelCredentialOperation(operation)
+  if (operation.kind === 'permission-review-apply') parsePermissionReviewOperation(operation, scope.profileId)
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
     operation.kind === 'channel' && (typeof operation.operation !== 'string'
@@ -175,7 +269,18 @@ export async function handlePluginManagementRpcRequest(
   request: PluginManagementRpcRequest,
 ): Promise<unknown> {
   const operation = request.operation
+  if (operation.kind === 'manager-renderer') throw new Error('Manager renderer requires the local owner')
+  if (operation.kind === 'owner-adapter') throw new Error('Native adapter requires the local owner')
+  if (operation.kind === 'manager-service-auth') {
+    throw new Error('Local manager authentication requires the lifecycle owner')
+  }
+  if (operation.kind === 'manager-channel-credentials') {
+    throw new Error('Local manager credentials require the service owner')
+  }
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
+  if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
+  if (operation.kind === 'permission-review-apply') throw new Error('Permission review requires the lifecycle owner')
+  if (operation.kind === 'plugin-review-apply') throw new Error('Plugin review requires the admitted renderer owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
@@ -183,6 +288,14 @@ export async function handlePluginManagementRpcRequest(
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
   if (operation.kind === 'query-catalog') return await service.queryCatalog(operation.query)
   if (operation.kind === 'plugin-info') return await service.pluginInfo(operation.query)
+  if (operation.kind === 'permission-history') {
+    if (!service.permissionHistory) throw new Error('permission history is unavailable')
+    return await service.permissionHistory(operation.pluginId)
+  }
+  if (operation.kind === 'plugin-authorization-history') {
+    if (!service.pluginAuthorizationHistory) throw new Error('plugin authorization history is unavailable')
+    return await service.pluginAuthorizationHistory(operation.pluginId)
+  }
   if (operation.kind === 'plan') return await service.plan(operation.request)
   if (operation.kind === 'execute') return await service.execute(operation.request, operation.expectedRevision)
   return await service.migrateLegacySources(operation.input)
@@ -191,6 +304,11 @@ export async function handlePluginManagementRpcRequest(
 function validEndpoint(value: unknown): value is PluginManagementRpcEndpoint {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
+  try {
+    if (item.managerConsoleOrigins !== undefined) canonicalManagedConsoleBrowserOrigins(item.managerConsoleOrigins)
+  } catch {
+    return false
+  }
   return item.schemaVersion === 1
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
@@ -240,13 +358,21 @@ export async function startPluginManagementRpcServer(input: {
   readonly configPath: string
   readonly generation: string
   readonly processStartedAt: string
+  readonly managerConsoleOrigins?: readonly string[]
   readonly service: PluginManagementService
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
+  readonly permissionReview?: (operation: PermissionReviewOperation) => Promise<unknown>
+  readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
+  readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  readonly managerRenderer?: (operation: ManagerRendererOperation) => Promise<unknown>
+  readonly ownerAdapter?: (operation: OwnerAdapterRpcOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
+  if (input.managerConsoleOrigins !== undefined) canonicalManagedConsoleBrowserOrigins(input.managerConsoleOrigins)
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
   await mkdir(paths.directory, { recursive: true, mode: 0o700 })
@@ -263,7 +389,25 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'codex'
+    return request.operation.kind === 'manager-renderer'
+      ? await (input.managerRenderer?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable' }))
+      : request.operation.kind === 'owner-adapter'
+      ? await (input.ownerAdapter?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable' }))
+      : request.operation.kind === 'manager-channel-credentials'
+      ? await (input.managerChannelCredentials?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' }))
+      : request.operation.kind === 'manager-service-auth'
+      ? await (input.managerServiceAuth?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', code: 'OWNER_UNAVAILABLE' }))
+      : request.operation.kind === 'permission-review-apply'
+      ? await (input.permissionReview?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'lifecycle-unavailable' }))
+      : request.operation.kind === 'plugin-configuration'
+      ? await (input.rendererConfiguration?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'renderer-unavailable' }))
+      : request.operation.kind === 'codex'
       ? await (input.codex?.(request.operation.operation, request.operation.input, {
         ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
         ...(request.operation.callerThreadId ? { 'openai/threadId': request.operation.callerThreadId } : {}),
@@ -303,7 +447,7 @@ export async function startPluginManagementRpcServer(input: {
     socket.setEncoding('utf8')
     socket.on('data', chunk => {
       payload += chunk
-      if (Buffer.byteLength(payload) > MAX_MANAGEMENT_REQUEST_BYTES) return socket.destroy()
+      if (Buffer.byteLength(payload) > MAX_ADAPTER_DOCUMENT_REQUEST_BYTES) return socket.destroy()
       const newline = payload.indexOf('\n')
       if (newline < 0) return
       const line = payload.slice(0, newline)
@@ -313,6 +457,12 @@ export async function startPluginManagementRpcServer(input: {
         try {
           const parsed = JSON.parse(line) as { requestId?: unknown }
           if (typeof parsed.requestId === 'string') requestId = parsed.requestId
+          if (Buffer.byteLength(line) > MAX_MANAGEMENT_REQUEST_BYTES) {
+            const operation = (parsed as { operation?: { kind?: unknown; action?: unknown } }).operation
+            if (operation?.kind !== 'owner-adapter' || operation.action !== 'document') {
+              throw new Error('plugin management request exceeds maximum size')
+            }
+          }
           respond(socket, { requestId, ok: true, value: await dispatch(parsed) })
         } catch (error) {
           respond(socket, {
@@ -400,6 +550,7 @@ export async function startPluginManagementRpcServer(input: {
       processStartedAt: input.processStartedAt,
       token,
       generation: input.generation,
+      ...(input.managerConsoleOrigins === undefined ? {} : { managerConsoleOrigins: input.managerConsoleOrigins }),
       ...(mailboxId ? { mailboxId } : {}),
       ...(mailboxId && pidNamespace ? { pidNamespace } : {}),
     })
@@ -424,7 +575,9 @@ export async function requestPluginManagementRpc(
   paths: PluginManagementRpcPaths,
   endpoint: PluginManagementRpcEndpoint,
   operation: PluginManagementRpcOperation,
+  options: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
 ): Promise<unknown> {
+  if (options.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
   const requestId = `management-${randomBytes(12).toString('hex')}`
   return await new Promise((resolve, reject) => {
     const socket = connect(paths.socket)
@@ -434,11 +587,17 @@ export async function requestPluginManagementRpc(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
       operation()
     }
-    // Executing an install/update can download and stage a large package.
-    const deadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const normalDeadline = managementRpcDeadline(operation)
+    const deadline = options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
+      ? normalDeadline
+      : Math.max(1, Math.min(normalDeadline, options.timeoutMs))
     const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), deadline)
+    const abort = () => socket.destroy(new Error('MANAGER_SESSION_REVOKED'))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
     socket.setEncoding('utf8')
     socket.once('error', error => settle(() => reject(error)))
     socket.on('data', chunk => {
@@ -462,7 +621,8 @@ export async function requestPluginManagementRpc(
         settle(() => reject(error))
       }
     })
-    socket.once('connect', () =>
+    socket.once('connect', () => {
+      if (options.signal?.aborted) return abort()
       socket.write(`${
         JSON.stringify({
           version: 1,
@@ -471,7 +631,8 @@ export async function requestPluginManagementRpc(
           profileId: endpoint.profileId,
           operation,
         })
-      }\n`))
+      }\n`)
+    })
   })
 }
 

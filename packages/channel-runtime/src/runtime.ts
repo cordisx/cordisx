@@ -15,6 +15,7 @@ import {
   ChannelGenerationFencedError,
   ChannelPermissionError,
   errorCode,
+  failedAdapterState,
   RetryableChannelError,
   secretStateForStartFailure,
   UncertainChannelSendError,
@@ -175,7 +176,7 @@ export class ChannelRuntime {
             connectionState: 'unavailable',
             lastErrorCode: errorCode(error),
           }
-          : { ...current, secretState: secretStateForStartFailure(current, error), lastErrorCode: errorCode(error) }
+          : failedAdapterState(current, error, this.#connections.get(key)?.generation)
         appendAudit(
           state,
           auditRecord({
@@ -563,7 +564,7 @@ export class ChannelRuntime {
   }
 
   snapshot(): ChannelRuntimeSnapshot {
-    return runtimeSnapshot(this.#store.snapshot(), this.#now())
+    return runtimeSnapshot(this.#store.snapshot(), this.#now(), this.#connections)
   }
 
   auditSnapshot(): readonly ChannelAuditSnapshot[] {

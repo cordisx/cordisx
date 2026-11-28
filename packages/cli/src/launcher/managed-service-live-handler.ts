@@ -13,6 +13,21 @@ export function managedServiceLiveHandler(
 ): ManagedServiceUIBridgeHandler {
   let execution: ManagedServiceUIBridgeHandler | undefined
   let disposed = false
+  const activeExecution = () => {
+    if (disposed) throw new Error('managed service owner disposed')
+    const services = readSources()
+    if (services.length === 0) throw new Error('managed service owner adoption pending or unavailable')
+    execution ??= createManagedServiceUIBridgeHandler({
+      token: observation.token,
+      profileId: observation.profileId,
+      generation: observation.generation,
+      services,
+      readNativeProviders,
+      ...(nativeManagedConsole === undefined ? {} : { nativeManagedConsole }),
+      ...(browserConsoleBoundary === undefined ? {} : { browserConsoleBoundary }),
+    })
+    return execution
+  }
   return {
     token: observation.token,
     profileId: observation.profileId,
@@ -20,20 +35,12 @@ export function managedServiceLiveHandler(
     async handle(owner, request, documentSignal) {
       if (disposed) throw new Error('managed service owner disposed')
       if (String(request.operation).startsWith('startup')) return await observation.handle(owner, request)
-      const services = readSources()
-      if (services.length === 0) throw new Error('managed service owner adoption pending or unavailable')
-      if (execution === undefined) {
-        execution = createManagedServiceUIBridgeHandler({
-          token: observation.token,
-          profileId: observation.profileId,
-          generation: observation.generation,
-          services,
-          readNativeProviders,
-          ...(nativeManagedConsole === undefined ? {} : { nativeManagedConsole }),
-          ...(browserConsoleBoundary === undefined ? {} : { browserConsoleBoundary }),
-        })
-      }
-      return await execution.handle(owner, request, documentSignal)
+      return await activeExecution().handle(owner, request, documentSignal)
+    },
+    async prepareAccountToggle(owner, request) {
+      const handler = activeExecution()
+      if (!handler.prepareAccountToggle) throw new Error('managed service UI account toggle plan is unavailable')
+      return await handler.prepareAccountToggle(owner, request)
     },
     async disposeOwner(owner) {
       disposed = true

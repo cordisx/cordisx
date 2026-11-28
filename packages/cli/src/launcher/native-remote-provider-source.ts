@@ -18,6 +18,10 @@ export function nativeRemoteProviderSource(options: {
   }
   return {
     source,
+    /** An explicit launch selection must not race the initial owner catalog. */
+    refreshForSelection: async () => {
+      if (options.remote) await options.remote.refresh()
+    },
     catalog: async (): Promise<readonly NativeModelProviderCatalogEntry[]> => {
       const [local, remote] = await Promise.all([options.localCatalog(), options.remote?.catalog() ?? []])
       return Object.freeze([

@@ -26,6 +26,9 @@ interface Pending {
   readonly resolve: (records: readonly CordisXPersistedPermissionPolicyRecord[]) => void
   readonly reject: (error: Error) => void
   readonly timer: ReturnType<typeof setTimeout>
+  readonly records: readonly CordisXPersistedPermissionPolicyRecord[]
+  adopted: boolean
+  sent: boolean
 }
 
 interface PermissionResponse {
@@ -35,9 +38,7 @@ interface PermissionResponse {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cordisxPermissionPolicyRequestV1: PermissionBinding | undefined
-  // eslint-disable-next-line no-var
   var __cordisxPermissionPolicyReceiveV1: ((payload: string) => void) | undefined
 }
 
@@ -50,11 +51,19 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   private readonly pending = new Map<string, Pending>()
   private readonly records = new Map<string, CordisXPersistedPermissionPolicyRecord>()
   private closed = false
+  private uncertain = false
 
   private constructor(
     private readonly token: string,
     private readonly binding: PermissionBinding,
     initial: readonly CordisXPersistedPermissionPolicyRecord[],
+    private readonly standalone?: {
+      readonly onUnknown?: () => void
+      readonly sign?: (
+        requestId: string,
+        records: readonly CordisXPersistedPermissionPolicyRecord[],
+      ) => Promise<unknown>
+    },
   ) {
     for (const record of initial) {
       const normalized = normalizePersistedPermissionPolicyRecord(record)
@@ -66,10 +75,17 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   static connect(
     token: string,
     initial: readonly CordisXPersistedPermissionPolicyRecord[],
+    standalone?: {
+      readonly onUnknown?: () => void
+      readonly sign?: (
+        requestId: string,
+        records: readonly CordisXPersistedPermissionPolicyRecord[],
+      ) => Promise<unknown>
+    },
   ): BindingPermissionPolicyStore {
     const binding = globalThis[PERMISSION_BINDING]
     if (typeof binding !== 'function') throw new Error('Permission policy persistence bridge is unavailable')
-    return new BindingPermissionPolicyStore(token, binding, initial)
+    return new BindingPermissionPolicyStore(token, binding, initial, standalone)
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
@@ -101,8 +117,50 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     await this.writeRecords(records)
   }
 
+  canAdoptStandaloneV2(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean {
+    const pending = this.pending.get(requestId)
+    if (
+      !this.standalone || this.closed || !pending || !pending.sent || pending.adopted
+      || !pending.records.every(isPermissionPolicyRecordV2)
+    ) return false
+    try {
+      return JSON.stringify(pending.records)
+        === JSON.stringify(records.map(record => normalizePersistedPermissionPolicyRecord(record)))
+    } catch {
+      return false
+    }
+  }
+
+  markAdoptedStandaloneV2(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean {
+    if (!this.canAdoptStandaloneV2(requestId, records)) return false
+    this.pending.get(requestId)!.adopted = true
+    return true
+  }
+
   async writeV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
     await this.writeRecords(records)
+  }
+
+  canAdoptStandaloneV3(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean {
+    const pending = this.pending.get(requestId)
+    if (
+      !this.standalone || this.closed || !pending || !pending.sent || pending.adopted
+      || !pending.records.every(isPermissionPolicyRecordV3)
+    ) {
+      return false
+    }
+    try {
+      return JSON.stringify(pending.records)
+        === JSON.stringify(records.map(record => normalizePersistedPermissionPolicyRecord(record)))
+    } catch {
+      return false
+    }
+  }
+
+  markAdoptedStandaloneV3(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean {
+    if (!this.canAdoptStandaloneV3(requestId, records)) return false
+    this.pending.get(requestId)!.adopted = true
+    return true
   }
 
   async writeV4(records: readonly CordisXPermissionPolicyRecordV4[]): Promise<void> {
@@ -122,6 +180,7 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
         || record.policy !== normalized[index]!.policy
       ))
     ) {
+      if (this.standalone) this.markUnknown()
       throw new Error('Permission policy persistence returned mismatched records')
     }
     const migrations = new Set(persisted.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
@@ -170,6 +229,7 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(new Error('Permission policy persistence bridge was disposed'))
+      if (this.standalone && pending.sent) this.markUnknown()
     }
     this.pending.clear()
   }
@@ -183,17 +243,33 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        const pending = this.pending.get(requestId)
         this.pending.delete(requestId)
         reject(new Error('Permission policy persistence request timed out'))
-      }, REQUEST_TIMEOUT_MS)
-      this.pending.set(requestId, { resolve, reject, timer })
-      try {
-        this.binding(JSON.stringify({ requestId, token: this.token, records }))
-      } catch (error) {
+        if (this.standalone && pending?.sent) this.markUnknown()
+      }, this.standalone ? 75_000 : REQUEST_TIMEOUT_MS)
+      const pending: Pending = { resolve, reject, timer, records, adopted: false, sent: false }
+      this.pending.set(requestId, pending)
+      void (async () => {
+        const proof = this.standalone?.sign === undefined ? undefined : await this.standalone.sign(requestId, records)
+        if (this.standalone?.sign !== undefined && proof === undefined) {
+          throw new Error('Permission policy decision is unavailable')
+        }
+        if (this.closed || this.pending.get(requestId) !== pending) return
+        pending.sent = true
+        this.binding(JSON.stringify({
+          requestId,
+          token: this.token,
+          records,
+          ...(proof === undefined ? {} : { proof }),
+        }))
+      })().catch(error => {
+        if (this.pending.get(requestId) !== pending) return
         this.pending.delete(requestId)
         clearTimeout(timer)
-        reject(error)
-      }
+        reject(error instanceof Error ? error : new Error('Permission policy persistence is unavailable'))
+        if (this.standalone && pending.sent) this.markUnknown()
+      })
     })
   }
 
@@ -211,6 +287,12 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     clearTimeout(pending.timer)
     if (response.ok !== true) {
       pending.reject(new Error('Permission policy persistence request was rejected'))
+      if (this.standalone && pending.sent) this.markUnknown()
+      return
+    }
+    if (this.standalone && !pending.adopted) {
+      pending.reject(new Error('Permission policy adoption was not confirmed'))
+      this.markUnknown()
       return
     }
     try {
@@ -218,6 +300,15 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
       pending.resolve(response.value.map(item => normalizePersistedPermissionPolicyRecord(item)))
     } catch {
       pending.reject(new Error('Permission policy persistence response was invalid'))
+      if (this.standalone) this.markUnknown()
     }
+  }
+
+  private markUnknown(): void {
+    if (this.uncertain) return
+    this.uncertain = true
+    try {
+      this.standalone?.onUnknown?.()
+    } catch { /* the uncertain request remains rejected */ }
   }
 }

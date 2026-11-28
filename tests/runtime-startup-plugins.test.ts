@@ -1,5 +1,9 @@
 import { expect, it, vi } from 'vitest'
-import { mountStartupPlugins, PluginActivationFailure } from '../packages/cli/src/renderer/runtime-startup-plugins.js'
+import {
+  configuredStartupGraphGenerations,
+  mountStartupPlugins,
+  PluginActivationFailure,
+} from '../packages/cli/src/renderer/runtime-startup-plugins.js'
 import type { PluginController } from '../packages/cli/src/renderer/runtime-shared.js'
 
 function controller(status = 'active'): PluginController {
@@ -43,4 +47,24 @@ it('does not swallow cancellation during plugin activation', async () => {
   })
   await expect(mountStartupPlugins([controller(), controller()], mount, abort.signal)).rejects.toBe(error)
   expect(mount).toHaveBeenCalledTimes(1)
+})
+
+it('accounts for a loaded configured graph even when its plugin failed or was blocked', () => {
+  const item = {
+    id: 'configured-demo',
+    enabled: true,
+    module: {},
+    standaloneConfiguredGraph: true,
+    artifactGeneration: 'graph-1',
+  }
+  for (const status of ['active', 'failed', 'blocked', 'permission-blocked']) {
+    expect(configuredStartupGraphGenerations([{ status, item } as unknown as PluginController])).toEqual([
+      { pluginId: item.id, moduleGeneration: item.artifactGeneration },
+    ])
+  }
+  expect(configuredStartupGraphGenerations([
+    { status: 'configured-disabled', item } as unknown as PluginController,
+    { status: 'active', item: { ...item, module: undefined } } as unknown as PluginController,
+    { status: 'active', item: { ...item, package: {} } } as unknown as PluginController,
+  ])).toEqual([])
 })

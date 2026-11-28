@@ -28,6 +28,7 @@ import { composeScriptMembers } from './script-composition.js'
 import { type ScriptSourceConfig, ScriptSourceError } from './script-types.js'
 import { withAbort } from './abort.js'
 import type { ProviderSyncConnectionDefinition } from '../provider-profile-sync-contracts.js'
+import type { NativeManagedGatewayConnection } from '../managed-service-native-connection.js'
 import {
   type PortableBundle,
   type PortableConnection,
@@ -604,6 +605,13 @@ export class ManagedCatalogComposition {
   async validateSelection(id: string, model: string): Promise<boolean> {
     await this.#owner.validateCurrent()
     return this.admits(id, model)
+  }
+  /** Confirm the selected model and private connection still describe the same owner revision. */
+  isCurrentNativeConnection(id: string, model: string, connection: NativeManagedGatewayConnection): boolean {
+    const view = this.#owner.snapshot().find(item => providerId(item.id) === id)
+    return view !== undefined && this.admits(id, model)
+      && connection.service.pluginId === 'cordisx-host' && connection.service.serviceId === view.id
+      && connection.service.generation === view.scopeRevision && connection.models.generation === view.revision
   }
   nativeConnection(id: string) {
     if (!this.owns(id) || !this.options.responsesAvailable) throw new CatalogError('unsupported')

@@ -116,3 +116,32 @@ it('keeps the plugin root Form outside child pages and blocks direct root submit
   await submit()
   expect(update).toHaveBeenCalledWith('fixture', 1, [{ op: 'set', path: ['name'], value: 'root draft' }])
 })
+
+it('retains a nested item draft when another client updates the plugin revision', async () => {
+  const update = vi.fn(async () => undefined)
+  const manager = model(update)
+  dom.window.document.getElementById('root')!.setAttribute('data-manager-surface', 'standalone')
+  await act(async () => root.render(<HostForm model={manager} plugin={plugin(formPageFields())} />))
+  const form = dom.window.document.querySelector('form')!
+  await open(form, '="items"')
+  await typeChild('unsaved nested item')
+  const unload = new dom.window.Event('beforeunload', { cancelable: true })
+  dom.window.dispatchEvent(unload)
+  expect(unload.defaultPrevented).toBe(true)
+  await act(async () => root.render(<HostForm model={manager} plugin={plugin(formPageFields(), 2)} />))
+  expect(childName().value).toBe('unsaved nested item')
+  await finish(true)
+  await submit()
+  expect(update).not.toHaveBeenCalled()
+  const review = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+    button.textContent?.includes('Review latest and keep my edits')
+  )
+  expect(review?.disabled).toBe(false)
+  await act(async () => review!.click())
+  await submit()
+  expect(update).toHaveBeenCalledWith('fixture', 2, [expect.objectContaining({
+    op: 'set',
+    path: ['items'],
+    value: [expect.objectContaining({ name: 'unsaved nested item', children: [] })],
+  })])
+})

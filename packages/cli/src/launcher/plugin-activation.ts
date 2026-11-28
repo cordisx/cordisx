@@ -199,6 +199,24 @@ export function pluginDependentClosure(
   return topologicalPluginOrder(plugins).filter(id => closure.has(id))
 }
 
+/** Complete owner impact, including unchanged dependents in either generation. */
+export function pluginAffectedClosure(
+  previous: readonly CordisXPluginActivationItemV1[],
+  candidate: readonly CordisXPluginActivationItemV1[],
+): readonly string[] {
+  const before = new Map(previous.map(item => [item.id, item]))
+  const after = new Map(candidate.map(item => [item.id, item]))
+  const changed = [...new Set([...before.keys(), ...after.keys()])].filter(id =>
+    JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id))
+  )
+  return [
+    ...new Set(changed.flatMap(id => [
+      ...pluginDependentClosure(previous, id),
+      ...pluginDependentClosure(candidate, id),
+    ])),
+  ].sort()
+}
+
 async function syncDirectory(directory: string): Promise<void> {
   let handle
   try {

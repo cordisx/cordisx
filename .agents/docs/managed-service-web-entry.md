@@ -60,6 +60,22 @@ service receives `unsupported` and can use its ordinary manual web entry.
 Closing the page, replacing its renderer or changing the service generation
 retires the active route and stops forwarding its old session.
 
+In standalone Manager service mode, the Host provisions a bounded pool of
+isolated browser-console origins. Each admitted renderer receives a dedicated
+view and navigation ticket; closing or refreshing a renderer retires only its
+assigned route. The Manager Content Security Policy permits only origins issued
+by the current owner. The authenticated browser entry is unavailable when no
+route can be allocated. Browser-specific validation is required before a
+browser can be treated as supported.
+
+The service must permit the Manager origin as a frame ancestor. The gateway
+preserves the service's `Content-Security-Policy`, `X-Frame-Options`, and
+`Cross-Origin-Resource-Policy` headers; conflicting restrictions can still
+block the frame. CORS controls cross-origin requests, not frame admission. The
+standalone Manager and its console gateways remain loopback-only by default.
+An explicitly configured ingress can map owner-issued console origins for a
+network deployment; see [independent manager](independent-manager.md#optional-network-deployment).
+
 The gateway also relays authorization cookies issued by the verified service
 after console authentication. These cookies must be HttpOnly, Secure,
 SameSite=None, partitioned, host-only and scoped to `/`, with an explicit

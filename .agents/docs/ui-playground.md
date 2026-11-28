@@ -33,7 +33,14 @@ verification.
 ```sh
 npm run dev:ui
 npm run dev:ui -- --config /absolute/path/to/cordisx.config.json --port 43124
+npm run dev:ui -- --manager-only
 ```
+
+`--manager-only` places the existing Manager directly in the browser and lets
+the isolated Playground runtime register plugin routes and pages as usual.
+It is a development preview of the Host presentation, not a connection to an
+existing Desktop, profile owner, credentials, or managed services. The same
+profile cannot yet attach a second production renderer through this option.
 
 The default fixture is `cordisx.config.playground.json` (`Comprehensive UI
 demos`). It activates seven local, credential-free renderer plugins:

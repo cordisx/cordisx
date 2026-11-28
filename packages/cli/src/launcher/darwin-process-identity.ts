@@ -40,6 +40,32 @@ export function parseDarwinProcessIdentities(text: string, expectedPid: number):
   return identities
 }
 
+/** A targeted response must contain exactly the requested process, never a partial table. */
+export function parseDarwinProcessIdentity(text: string, expectedPid: number): ProcessIdentity {
+  if (!Number.isInteger(expectedPid) || expectedPid <= 0 || expectedPid > maximumPid) {
+    throw new Error('Invalid Darwin process identity target')
+  }
+  const identities = parseDarwinProcessIdentities(text, expectedPid)
+  if (identities.length !== 1) throw new Error('Invalid Darwin process identity target response')
+  return identities[0]!
+}
+
+/** Inspect one same-user process without requiring a complete process-table enumeration. */
+export function darwinProcessIdentity(pid: number): ProcessIdentity {
+  if (!Number.isInteger(pid) || pid <= 0 || pid > maximumPid) {
+    throw new Error('Invalid Darwin process identity target')
+  }
+  return parseDarwinProcessIdentity(
+    execFileSync(helper, ['--pid', String(pid)], {
+      encoding: 'utf8',
+      env: processIdentityEnvironment(),
+      maxBuffer: 64 * 1024,
+      timeout: 2_000,
+    }),
+    pid,
+  )
+}
+
 export function darwinProcessIdentities(maxBuffer: number): readonly ProcessIdentity[] {
   return parseDarwinProcessIdentities(
     execFileSync(helper, [], {

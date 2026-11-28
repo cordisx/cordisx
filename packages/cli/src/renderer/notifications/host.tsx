@@ -24,7 +24,11 @@ export function notificationCenterForDocument(document: Document) {
 }
 
 /** One renderer-owned viewport; plugin notifications never supply DOM or identity. */
-export function installNotificationHost(document: Document, profileId: string): () => void {
+export function installNotificationHost(
+  document: Document,
+  profileId: string,
+  options: { readonly externalStyles?: boolean } = {},
+): () => void {
   if (centers.has(document)) throw new Error('Notification Host already installed')
   const key = `cordisx:notifications:v1:${profileId}`
   const storage = () => {
@@ -39,9 +43,11 @@ export function installNotificationHost(document: Document, profileId: string): 
   const container = document.createElement('div')
   container.className = 'cxn-root'
   container.dataset.cordisxNotifications = 'v1'
-  const style = document.createElement('style')
-  style.textContent = styles
-  container.append(style)
+  if (!options.externalStyles) {
+    const style = document.createElement('style')
+    style.textContent = styles
+    container.append(style)
+  }
   const seat = document.createElement('div')
   container.append(seat)
   document.body.append(container)

@@ -1,15 +1,28 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { c as createTar } from 'tar'
+import { c as createTar, x as extractTar } from 'tar'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
+import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import { restoreLegacyChannelStyle } from '../packages/cli/src/launcher/legacy-channel-styles.js'
+import {
+  loadServiceConfiguredArchive,
+  loadServiceConfiguredChannelArchive,
+} from '../packages/cli/src/cli/service-renderer-projection.js'
+import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
+import { createManagerRendererPermissionChannel } from '../packages/cli/src/cli/manager-renderer-permission.js'
+import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { persistPermissionPolicies } from '../packages/cli/src/launcher/permission-rpc.js'
+import { STANDALONE_PERMISSION_BINDING_MARKER } from '../packages/cli/src/standalone-permission-contract.js'
+import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 const temporary: string[] = []
+const legacyChannelArchive = process.env.CORDISX_LEGACY_CHANNEL_ARCHIVE_FIXTURE
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
-async function fixture() {
+async function fixture(id = 'demo') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'configured-plugin-manifest-'))
   temporary.push(root)
   await mkdir(path.join(root, 'dist'))
@@ -19,7 +32,7 @@ async function fixture() {
   const runtime = {
     $schema: schema,
     schemaVersion: 16,
-    id: 'demo',
+    id,
     capabilities: [],
     services: [{
       id: 'runtime',
@@ -33,7 +46,7 @@ async function fixture() {
   const descriptor = {
     $schema: schema.replace('plugin-manifest', 'plugin-package'),
     schemaVersion: 16,
-    id: 'demo',
+    id,
     version: '1.0.0',
     entry: './dist/index.js',
     dependencies: [],
@@ -47,7 +60,7 @@ async function fixture() {
   }
   await writeFile(path.join(root, 'cordisx-package.json'), JSON.stringify(descriptor))
   const config = path.join(root, 'cordisx.config.json')
-  await writeFile(config, JSON.stringify({ version: 1, plugins: [{ id: 'demo', entry: './dist/index.js' }] }))
+  await writeFile(config, JSON.stringify({ version: 1, plugins: [{ id, entry: './dist/index.js' }] }))
   return { root, runtime, config, descriptor }
 }
 afterEach(async () => {
@@ -62,6 +75,68 @@ afterEach(async () => {
 })
 
 describe('direct configured package provenance', () => {
+  it.skipIf(!legacyChannelArchive)('restores only the exact published legacy Channel stylesheet', async () => {
+    if (!path.isAbsolute(legacyChannelArchive!)) throw new Error('legacy archive fixture must be absolute')
+    const f = await fixture('channel')
+    const archive = path.join(f.root, 'legacy.tgz')
+    await copyFile(legacyChannelArchive!, archive)
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './legacy.tgz' }] }))
+    const plugin = (await loadConfig(f.config)).plugins[0]!
+    const staged = await loadServiceConfiguredChannelArchive(f.root, plugin)
+    const stylePath = './assets/channel-legacy-v017.css'
+    expect(staged.browserArtifact?.manifest.initialStyles).toEqual([stylePath])
+    const style = staged.browserArtifact?.files.get(stylePath)
+    expect(style).toBeDefined()
+    expect(createHash('sha256').update(style!).digest('hex')).toBe(
+      '0227cf822adc38b51358bf641c38dfd78a8bf70d3f54d6d92215a4a483bf42a3',
+    )
+    expect(staged.artifactIntegrity).toBe(
+      'sha256:0cc75afbf84d117835863b00a57e0412c621b8ec4e2c387327a6dd2e4f123856',
+    )
+
+    const unpacked = path.join(f.root, 'repacked')
+    await mkdir(unpacked)
+    await extractTar({ cwd: unpacked, file: archive })
+    await writeFile(path.join(unpacked, 'package', 'fixture-marker.txt'), 'changed archive')
+    await createTar({ cwd: unpacked, file: path.join(f.root, 'changed.tgz'), gzip: true }, ['package'])
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './changed.tgz' }] }))
+    const changed = (await loadConfig(f.config)).plugins[0]!
+    const changedStaged = await loadServiceConfiguredArchive(f.root, changed)
+    expect(changedStaged.browserArtifact?.manifest.initialStyles).toEqual([])
+    await expect(loadServiceConfiguredChannelArchive(f.root, changed)).rejects.toThrow(
+      'renderer-configured-channel-style-unavailable',
+    )
+    const alteredEntry = path.join(f.root, 'altered.js')
+    await writeFile(alteredEntry, 'const channel_default = "changed"')
+    await expect(restoreLegacyChannelStyle({
+      packageManifest: {
+        pluginId: 'channel',
+        version: '0.1.7',
+        canonicalSource: 'https://github.com/cordisx/plugin-channel',
+      },
+      artifactIntegrity: staged.artifactIntegrity,
+      entry: alteredEntry,
+      artifact: changedStaged.browserArtifact!,
+    })).rejects.toThrow('legacy-channel-entry-integrity-failed')
+  }, 60_000)
+
+  it('rejects a configured Channel graph that cannot supply a standalone stylesheet', async () => {
+    const f = await fixture('channel')
+    const archive = path.join(f.root, 'channel.tgz')
+    await createTar({ cwd: f.root, file: archive, gzip: true }, [
+      'package.json',
+      'cordisx-package.json',
+      'runtime-manifest.json',
+      'dist',
+    ])
+    await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'channel', entry: './channel.tgz' }] }))
+    const plugin = (await loadConfig(f.config)).plugins[0]!
+    expect((await loadServiceConfiguredArchive(f.root, plugin)).browserArtifact?.manifest.initialStyles).toEqual([])
+    await expect(loadServiceConfiguredChannelArchive(f.root, plugin)).rejects.toThrow(
+      'renderer-configured-channel-style-unavailable',
+    )
+  })
+
   it('carries verified archive identity through the production renderer composition', async () => {
     const f = await fixture()
     const source = 'https://github.com/cordisx/demo'
@@ -85,11 +160,153 @@ describe('direct configured package provenance', () => {
       distributionArtifact: { version: '1.0.0', integrity },
     })
     expect(plugin.entry).toContain('/packages/sha256/')
+    expect(plugin.configuredArchiveDigest).toMatch(/^sha256:[a-f0-9]{64}$/)
+    const staged = await loadStagedPluginPackage(f.root, plugin.configuredArchiveDigest!)
+    expect(staged).toMatchObject({ digest: plugin.configuredArchiveDigest, artifactIntegrity: integrity })
+    expect((await loadServiceConfiguredArchive(f.root, plugin)).digest).toBe(staged.digest)
+    for (
+      const changed of [
+        { ...plugin, source: 'https://example.test/other' },
+        { ...plugin, entry: path.join(f.root, 'other.js') },
+        { ...plugin, distributionArtifact: { version: '1.0.0', integrity: `sha256:${'a'.repeat(64)}` as const } },
+      ]
+    ) {
+      await expect(loadServiceConfiguredArchive(f.root, changed)).rejects.toThrow(
+        'renderer-configured-archive-unavailable',
+      )
+    }
+    const firstLifetime = new AbortController()
+    const secondLifetime = new AbortController()
+    const firstContext = {
+      profileId: 'default',
+      rendererId: 'a'.repeat(64),
+      ownerGeneration: 'generation',
+      signal: firstLifetime.signal,
+    }
+    const secondContext = { ...firstContext, rendererId: 'b'.repeat(64), signal: secondLifetime.signal }
+    const firstProjection = new ServiceRendererIdentityProjection({
+      homeDir: f.root,
+      context: firstContext,
+      isCurrent: () => true,
+    })
+    const secondProjection = new ServiceRendererIdentityProjection({
+      homeDir: f.root,
+      context: secondContext,
+      isCurrent: () => true,
+    })
+    try {
+      const alias = await firstProjection.issue(firstContext, plugin)
+      const other = await secondProjection.issue(secondContext, plugin)
+      expect(alias).not.toBe(other)
+      expect(alias).not.toContain(source)
+      expect(firstProjection.resolve(firstContext, alias, 'demo')).toMatchObject({ source, digest: staged.digest })
+      const policies = exactDomPermissionPolicies('default', [{
+        id: 'demo',
+        entry: plugin.entry,
+        pointIds: ['manager.settings.navigation-items', 'manager.content', 'other.point'],
+      }]).map(record => ({ ...record, key: { ...record.key, identity: { ...record.key.identity, source } } }))
+      const projected = firstProjection.projectManagerPolicies(firstContext, alias, 'demo', policies)
+      expect(projected).toHaveLength(2)
+      expect(projected.every(record => record.key.identity.source === alias)).toBe(true)
+      expect(JSON.stringify(projected)).not.toContain(source)
+      const admitted = { ...firstContext, admitted: true }
+      expect(firstProjection.resolveManagerPolicies(admitted, alias, 'demo', projected)).toEqual(policies.slice(0, 2))
+      const ownerConfig = path.join(f.root, 'owner-config.json')
+      await ensureHomeConfig(ownerConfig)
+      await persistPermissionPolicies({ configPath: ownerConfig }, policies.slice(0, 2))
+      let completed = false
+      const permission = createManagerRendererPermissionChannel({
+        profileId: 'default',
+        configPath: ownerConfig,
+        identityAllowed: value => value.id === 'demo' && value.source === alias,
+        identityProjection: {
+          resolve: (records, context) => firstProjection.resolveManagerPolicies(context, alias, 'demo', records),
+          project: (records, context) => firstProjection.projectManagerPolicies(context, alias, 'demo', records),
+        },
+        // This fixture tests the real mapping; user-action proof and peer handoff remain separate.
+        authority: {
+          isAdmitted: context => context.admitted === true,
+          snapshot: () => policies.slice(0, 2),
+          authorize: () => true,
+          acquire: () => ({
+            isCurrent: () => true,
+            run: async action => await action(),
+            complete: () => {
+              completed = true
+              return true
+            },
+            fence: () => {},
+          }),
+        },
+      })
+      const desired = { ...projected[0]!, policy: 'deny-persistent' }
+      const result = await permission.prepare(
+        JSON.stringify({
+          requestId: 'mapped-policy',
+          token: STANDALONE_PERMISSION_BINDING_MARKER,
+          records: [desired],
+        }),
+        admitted,
+      ).dispatch()
+      expect(result).toEqual({ requestId: 'mapped-policy', ok: true, value: [desired] })
+      expect(completed).toBe(true)
+      expect(JSON.stringify(result)).not.toContain(source)
+      expect((await loadHomeConfig(ownerConfig)).permissions).toContainEqual({
+        ...policies[0],
+        policy: 'deny-persistent',
+      })
+      expect(() => firstProjection.resolveManagerPolicies(firstContext, alias, 'demo', projected)).toThrow()
+      expect(() =>
+        firstProjection.resolveManagerPolicies({ ...secondContext, admitted: true }, alias, 'demo', projected)
+      )
+        .toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, other, 'demo', projected)).toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', [projected[0]!, projected[0]!]))
+        .toThrow()
+      const tampered = {
+        ...projected[0]!,
+        key: { ...projected[0]!.key, securityFingerprint: `sha256:${'a'.repeat(64)}` },
+      }
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', [tampered])).toThrow()
+      expect(() => firstProjection.resolveManagerPolicies(admitted, alias, 'demo', policies)).toThrow()
+      const unrelated = policies.map(record => ({ ...record, key: { ...record.key, profileId: 'other' } }))
+      expect(firstProjection.projectManagerPolicies(firstContext, alias, 'demo', unrelated)).toEqual([])
+      const wrongSource = policies.map(record => ({
+        ...record,
+        key: { ...record.key, identity: { ...record.key.identity, source: 'https://example.test/other' } },
+      }))
+      expect(firstProjection.projectManagerPolicies(firstContext, alias, 'demo', wrongSource)).toEqual([])
+      expect(() => firstProjection.projectManagerPolicies(firstContext, alias, 'demo', [policies[0]!, policies[0]!]))
+        .toThrow('renderer-identity-unavailable')
+      expect(() => secondProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(() => firstProjection.resolve(secondContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(() => firstProjection.resolve(firstContext, alias, 'other')).toThrow('renderer-identity-unavailable')
+      firstLifetime.abort()
+      expect(() => firstProjection.resolve(firstContext, alias, 'demo')).toThrow('renderer-identity-unavailable')
+      expect(secondProjection.resolve(secondContext, other, 'demo').digest).toBe(staged.digest)
+      let live = true
+      const pendingProjection = new ServiceRendererIdentityProjection({
+        homeDir: f.root,
+        context: secondContext,
+        isCurrent: () => live,
+      })
+      try {
+        const pending = pendingProjection.issue(secondContext, plugin)
+        live = false
+        await expect(pending).rejects.toThrow('renderer-identity-unavailable')
+      } finally {
+        pendingProjection.close()
+      }
+    } finally {
+      firstProjection.close()
+      secondProjection.close()
+    }
     expect(plugin.manifestFiles).toEqual([archive])
     const composition = await buildRendererCompositionSource(config, {}, { omitPluginModules: true })
     expect(composition.source).toContain(`source: ${JSON.stringify(source)}`)
     expect(plugin.package).toBeUndefined()
     expect(composition.source).toContain(`distributionArtifact: ${JSON.stringify(plugin.distributionArtifact)}`)
+    expect(composition.source).not.toContain(plugin.configuredArchiveDigest)
     // Rebuilt archives must not inherit the previously certified distribution identity.
     await writeFile(path.join(f.root, 'dist', 'index.js'), 'export const name = "changed"')
     await createTar({ cwd: f.root, file: archive, gzip: true }, [
@@ -98,7 +315,9 @@ describe('direct configured package provenance', () => {
       'runtime-manifest.json',
       'dist',
     ])
-    expect((await loadConfig(f.config)).plugins[0]!.distributionArtifact!.integrity).not.toEqual(integrity)
+    const rebuilt = (await loadConfig(f.config)).plugins[0]!
+    expect(rebuilt.distributionArtifact!.integrity).not.toEqual(integrity)
+    expect(rebuilt.configuredArchiveDigest).not.toEqual(plugin.configuredArchiveDigest)
   })
   it('loads service metadata only from the digest-validated descriptor for the exact entry', async () => {
     const f = await fixture(), plugin = (await loadConfig(f.config)).plugins[0]!

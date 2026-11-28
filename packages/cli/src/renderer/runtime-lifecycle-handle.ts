@@ -1,4 +1,8 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
+import { createStandaloneDomReviewModel } from './standalone-dom-review-model.js'
+import { createStandaloneRuntimePolicyModel } from './standalone-runtime-policy-model.js'
+import { configuredStartupGraphGenerations } from './runtime-startup-plugins.js'
+import { adoptOwnerPolicy } from './runtime-owner-policy.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -206,6 +210,8 @@ import {
   type PluginGenerationView,
 } from './generation-visibility.js'
 import { type ChannelManagerProjectionV1, CordisXChannelManagerService } from './channel-manager.js'
+import { adoptStandaloneChannelProjection } from './channel-manager-owner-update.js'
+import { adoptStandaloneDesktopPackageConfig } from './standalone-desktop-package-config-adoption.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -499,6 +505,7 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.finalizedTransactions()!.clear()
   runtimeScope.rollbackReceipts()!.clear()
   runtimeScope.configBridge()!?.dispose()
+  runtimeScope.standaloneDesktopPackageConfigBridge()?.dispose()
   runtimeScope.agentContextBridge()?.dispose()
   runtimeScope.serviceConfigBridge()!?.dispose()
   runtimeScope.managedServiceBridge()!?.dispose()
@@ -758,10 +765,46 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
     const controller = runtimeScope.activeController()!(id)
     return controller === undefined
       ? undefined
-      : runtimeScope.broker()!.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
+      : runtimeScope.broker()!.reviewAuthorizationPlanV4(controller.identity, controller.generationView)
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  adoptOwnerManagerPolicy: async packet => await adoptOwnerPolicy(runtimeScope, packet),
+  adoptStandaloneChannelProjection: (projection, revision) => {
+    if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
+    return adoptStandaloneChannelProjection(
+      runtimeScope.ctx.channelManager as unknown as CordisXChannelManagerService,
+      projection,
+      revision,
+    )
+  },
+  adoptStandaloneDesktopPackageConfig: async value => await adoptStandaloneDesktopPackageConfig(runtimeScope, value),
+  confirmStandaloneManagedServiceState: async input => {
+    if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
+    return await (runtimeScope.managedServiceBridge()?.confirmState(input) ?? Promise.resolve(false))
+  },
+  adoptStandaloneManagedServiceAccounts: async input => {
+    if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
+    return await (runtimeScope.managedServiceBridge()?.adoptAccounts(input) ?? Promise.resolve(false))
+  },
+  configuredPluginGraphGenerations: () =>
+    runtimeScope.metadata()!.hostKind === 'standalone'
+      ? configuredStartupGraphGenerations(runtimeScope.controllers()!)
+      : [],
+  configuredPluginProvenance: pluginId => {
+    const hostKind = runtimeScope.metadata()!.hostKind
+    if (runtimeScope.disposed || hostKind === 'standalone' || hostKind === 'playground') return undefined
+    const matches = runtimeScope.projectedControllers()!().filter(controller => controller.item.id === pluginId)
+    if (matches.length !== 1) return undefined
+    const controller = matches[0]!
+    const item = controller.item
+    if (
+      controller.status !== 'active' || !item.enabled || item.package !== undefined || item.module === undefined
+      || item.distributionArtifact === undefined || typeof item.artifactGeneration !== 'string'
+    ) return undefined
+    return { ...item.distributionArtifact, moduleGeneration: item.artifactGeneration }
+  },
+  pluginRegistryEpoch: () => runtimeScope.generationVisibility()!.registryEpoch(),
   releaseCertifiedPermissionChannel: () => {
     const channel = runtimeScope.certifiedPermissionChannel
     runtimeScope.certifiedPermissionChannel = undefined
@@ -902,6 +945,22 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
+  permissionPolicyWritable: runtimeScope.metadata()!.hostKind !== 'standalone'
+    && runtimeScope.metadata()!.ownerPermissionSnapshot !== true,
+  permissionReviewInWeb: runtimeScope.metadata()!.ownerPermissionSnapshot === true,
+  ...(runtimeScope.metadata()!.ownerPermissionSnapshot !== true || !runtimeScope.pluginManagementBinding() ? {} : {
+    permissionHistory: (pluginId: string) => runtimeScope.pluginManagementBinding()!.permissionHistory(pluginId),
+    pluginAuthorizationHistory: (pluginId: string) =>
+      runtimeScope.pluginManagementBinding()!.pluginAuthorizationHistory(pluginId),
+  }),
+  ...(() => {
+    const review = createStandaloneDomReviewModel(runtimeScope)
+    return review === undefined ? {} : { standaloneDomReview: review }
+  })(),
+  ...(() => {
+    const review = createStandaloneRuntimePolicyModel(runtimeScope)
+    return review === undefined ? {} : { standaloneRuntimeReview: review }
+  })(),
   ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
     chatExecution: new ChannelExecutionWorkflow({
       document,

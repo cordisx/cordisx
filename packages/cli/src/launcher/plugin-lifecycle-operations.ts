@@ -270,6 +270,12 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorDeferr
   async applyPermissionReviewV2(
     input: HostPermissionLifecycleApplyV2Request,
   ): Promise<CordisXPluginLifecycleResultV1> {
+    return await this.permissionReviewGate.run(async () => await this.applyPermissionReviewV2Exclusive(input))
+  }
+
+  private async applyPermissionReviewV2Exclusive(
+    input: HostPermissionLifecycleApplyV2Request,
+  ): Promise<CordisXPluginLifecycleResultV1> {
     if (input.profileId !== this.options.profileId || input.runtimeGeneration !== this.options.runtimeGeneration) {
       throw new LifecycleFailure('stale-generation', safeError('stale-generation'), 'conflict')
     }
@@ -295,6 +301,12 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorDeferr
 
   /** Applies one manifest-v5 through manifest-v14 review through the existing lifecycle authority. */
   async applyPermissionReviewV4(
+    input: HostPermissionLifecycleApplyV4Request,
+  ): Promise<CordisXPluginLifecycleResultV1> {
+    return await this.permissionReviewGate.run(async () => await this.applyPermissionReviewV4Exclusive(input))
+  }
+
+  private async applyPermissionReviewV4Exclusive(
     input: HostPermissionLifecycleApplyV4Request,
   ): Promise<CordisXPluginLifecycleResultV1> {
     if (input.profileId !== this.options.profileId || input.runtimeGeneration !== this.options.runtimeGeneration) {

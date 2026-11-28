@@ -92,6 +92,12 @@ export function createTerminalProviderAuthority(options: {
   readonly resolve: (
     providerId: string,
   ) => NativeManagedGatewayConnectionSession | Promise<NativeManagedGatewayConnectionSession>
+  /** A Host-owned catalog may validate a connection without plugin gateway aliases. */
+  readonly currentHostConnection?: (
+    providerId: string,
+    model: string,
+    connection: NativeManagedGatewayConnectionSession,
+  ) => boolean | undefined
   readonly credentials: NativeProviderCredentialBroker
   readonly now?: () => number
 }) {
@@ -101,10 +107,14 @@ export function createTerminalProviderAuthority(options: {
     providerId: string
     model: string
     waiterId?: string
+    service: { readonly pluginId: string; readonly serviceId: string; readonly generation: string }
     credential: NativeProviderCredentialLease
     expires: number
   }>()
   let closed = false
+  let preparing = 0
+  let reservation: symbol | undefined
+  let fenced = false
   const lifetime = new AbortController()
   const waiters = new Map<string, AbortController>()
   const broker = nativeSubmissionCredentialBroker({
@@ -130,19 +140,68 @@ export function createTerminalProviderAuthority(options: {
       throw new Error('Unknown or unavailable terminal model; use cordisx cli --list')
     }
     const connection = await options.resolve(providerId)
+    let service: { readonly pluginId: string; readonly serviceId: string; readonly generation: string }
     try {
-      if (
-        !connection.value.models.aliases.some(item => item.gatewayModelId === model)
-        || generation !== undefined && connection.value.service.generation !== generation
-      ) {
+      const current = options.currentHostConnection?.(providerId, model, connection)
+        ?? connection.value.models.aliases.some(item => item.gatewayModelId === model)
+      if (!current || generation !== undefined && connection.value.service.generation !== generation) {
         throw new Error('Terminal provider generation or model changed; start a new CLI session')
       }
+      service = { ...connection.value.service }
     } finally {
       connection.dispose()
     }
     if (closed) throw new Error('Terminal provider authority retired')
+    return service
+  }
+  const reserve = (busy: () => boolean) => {
+    sweep()
+    if (closed || fenced || reservation !== undefined || preparing !== 0 || busy()) return undefined
+    const token = Symbol('terminal-service-reservation')
+    reservation = token
+    let ended = false
+    const current = () => !ended && !closed && !fenced && reservation === token
+    return {
+      isCurrent: current,
+      release() {
+        if (!current()) return false
+        ended = true
+        reservation = undefined
+        return true
+      },
+      fence() {
+        if (ended) return
+        ended = true
+        if (reservation === token) {
+          reservation = undefined
+          fenced = true
+        }
+      },
+    }
   }
   return {
+    /** Reserve a service only when no live or in-flight terminal can still use it. */
+    reserveForService(identity: { readonly pluginId: string; readonly serviceId: string }) {
+      if (
+        !identity || typeof identity.pluginId !== 'string' || typeof identity.serviceId !== 'string'
+        || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(identity.pluginId)
+        || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(identity.serviceId)
+      ) return undefined
+      return reserve(() =>
+        [...leases.values()].some(lease =>
+          lease.service.pluginId === identity.pluginId && lease.service.serviceId === identity.serviceId
+        )
+      )
+    },
+    /** Do not replace a plugin generation while a terminal still uses it. */
+    reserveForLifecycle(pluginIds: readonly string[]) {
+      if (
+        !Array.isArray(pluginIds) || pluginIds.length === 0 || pluginIds.length > 4_096
+        || pluginIds.some(id => typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(id))
+      ) return undefined
+      const affected = new Set(pluginIds)
+      return reserve(() => [...leases.values()].some(lease => affected.has(lease.service.pluginId)))
+    },
     async request(raw: TerminalProviderRequest): Promise<TerminalProviderResult> {
       const request = parseTerminalProviderRequest(raw)
       if (closed) throw new Error('Terminal provider authority retired')
@@ -194,9 +253,13 @@ export function createTerminalProviderAuthority(options: {
         }
       }
       if (request.kind === 'prepare') {
+        if (fenced || reservation !== undefined) {
+          throw new Error('Terminal provider is coordinating a service operation')
+        }
         if (request.waiterId !== undefined && waiters.has(request.waiterId)) {
           throw new Error('Terminal waiter already exists')
         }
+        preparing++
         const waiter = new AbortController()
         if (request.waiterId !== undefined) waiters.set(request.waiterId, waiter)
         const abort = () => waiter.abort()
@@ -206,7 +269,7 @@ export function createTerminalProviderAuthority(options: {
           if (waiter.signal.aborted) return { kind: 'unavailable', startup: { status: 'cancelled' } }
           if (startup !== undefined && startup.status !== 'ready') return { kind: 'unavailable', startup }
           if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
-          await validate(request.providerId, request.model)
+          const initialService = await validate(request.providerId, request.model)
           if (closed || waiter.signal.aborted) return { kind: 'unavailable', startup: { status: 'cancelled' } }
           const credential = await broker.prepare(request.providerId)
           try {
@@ -214,25 +277,29 @@ export function createTerminalProviderAuthority(options: {
               credential.dispose()
               return { kind: 'unavailable', startup: { status: 'cancelled' } }
             }
-            await validate(request.providerId, request.model, credential.serviceGeneration)
+            const service = await validate(request.providerId, request.model, credential.serviceGeneration)
+            if (
+              service.pluginId !== initialService.pluginId || service.serviceId !== initialService.serviceId
+              || service.generation !== initialService.generation
+            ) throw new Error('Terminal provider identity changed; start a new CLI session')
             if (closed || waiter.signal.aborted) {
               credential.dispose()
               return { kind: 'unavailable', startup: { status: 'cancelled' } }
             }
             if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
             const provider = nativeProviderConfig(credential)
-            // Claude Code can reuse an unauthenticated loopback gateway. Bearer
-            // credentials retain the Codex command broker and are never exported.
+            // Claude Code may use a loopback gateway with the same scoped
+            // credential command as Codex. It must not receive remote endpoints.
             if (
               request.client === 'claude-code'
-              && ('auth' in provider || !String(provider.base_url).startsWith('http://127.0.0.1:'))
+              && !String(provider.base_url).startsWith('http://127.0.0.1:')
             ) {
               throw new Error(
-                'This managed gateway cannot supply Claude Code authentication; select an anthropic-messages shared service',
+                'This managed gateway is not a local Claude Code endpoint; select an anthropic-messages service',
               )
             }
             const leaseId = randomUUID()
-            leases.set(leaseId, { ...request, credential, expires: now() + ttlMs })
+            leases.set(leaseId, { ...request, service, credential, expires: now() + ttlMs })
             return {
               kind: 'prepared',
               leaseId,
@@ -248,6 +315,7 @@ export function createTerminalProviderAuthority(options: {
             throw error
           }
         } finally {
+          preparing--
           lifetime.signal.removeEventListener('abort', abort)
           if (request.waiterId !== undefined) waiters.delete(request.waiterId)
         }

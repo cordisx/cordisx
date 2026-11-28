@@ -13,6 +13,7 @@ import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
 import type { ManagerRouter, PluginDetailPage as PluginDetailTab } from '../model/routes.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
+import { PluginAuthorizationHistory } from './PluginAuthorizationHistory.js'
 
 function tabs(locale: string): readonly ManagerTab<PluginDetailTab>[] {
   return [
@@ -190,6 +191,8 @@ export function PluginDetailPage(
         </span>
         <span className="cxr-plugin-identity-actions">
           <Button
+            tag="button"
+            type="button"
             shape="square"
             variant="outline"
             aria-label={managerCopy(snapshot.localization.locale, 'plugins.reload')}
@@ -206,6 +209,8 @@ export function PluginDetailPage(
           {plugin.status === 'configured-disabled'
             ? (
               <Button
+                tag="button"
+                type="button"
                 shape="square"
                 theme="primary"
                 aria-label={managerCopy(snapshot.localization.locale, 'plugins.enable')}
@@ -213,12 +218,14 @@ export function PluginDetailPage(
                 data-plugin-lifecycle-action="enable"
                 icon={<HostIcon token="enable-plugin" />}
                 loading={lifecycle.busyPluginId === plugin.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.canRun(plugin, 'enable') || lifecycle.busyPluginId === plugin.id}
                 onClick={() => void lifecycle.run(plugin, { kind: 'enable', pluginId: plugin.id })}
               />
             )
             : (
               <Button
+                tag="button"
+                type="button"
                 shape="square"
                 variant="outline"
                 aria-label={managerCopy(snapshot.localization.locale, 'plugins.disable')}
@@ -226,11 +233,13 @@ export function PluginDetailPage(
                 data-plugin-lifecycle-action="disable"
                 icon={<HostIcon token="disable-plugin" />}
                 loading={lifecycle.busyPluginId === plugin.id}
-                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.canRun(plugin, 'disable') || lifecycle.busyPluginId === plugin.id}
                 onClick={() => void lifecycle.run(plugin, { kind: 'disable', pluginId: plugin.id, impactToken: '' })}
               />
             )}
           <Button
+            tag="button"
+            type="button"
             shape="square"
             variant="outline"
             theme="danger"
@@ -239,11 +248,14 @@ export function PluginDetailPage(
             data-plugin-lifecycle-action="uninstall"
             icon={<HostIcon token="uninstall-plugin" />}
             loading={lifecycle.busyPluginId === plugin.id}
-            disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+            disabled={!lifecycle.canRun(plugin, 'uninstall') || lifecycle.busyPluginId === plugin.id}
             onClick={() => void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' })}
           />
         </span>
       </section>
+      {plugin.status === 'failed' && plugin.error !== undefined && route.page !== 'runtime'
+        ? <div className="cxr-notice cxr-danger" role="alert">{plugin.error}</div>
+        : null}
       <ManagerTabs
         label={managerCopy(snapshot.localization.locale, 'plugins.details-tabs')}
         tabs={tabs(snapshot.localization.locale)}
@@ -281,6 +293,9 @@ export function PluginDetailPage(
       )}
       {route.page === 'permissions' && (
         <div className="cxr-list">
+          {plugin.package
+            ? <PluginAuthorizationHistory pluginId={plugin.id} locale={snapshot.localization.locale} model={model} />
+            : null}
           {permissions.map(item => (
             <button
               className="cxr-card"

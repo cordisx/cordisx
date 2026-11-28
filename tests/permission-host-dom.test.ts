@@ -238,6 +238,93 @@ function setup(input: {
 }
 
 describe('manifest-v5 Host DOM permission model', () => {
+  it('invalidates renderer V4 review after a policy ABA and accepts a new review', async () => {
+    const context = setup({ capabilities: [declaration('models.read', false, { providers: ['codex'] })] })
+    try {
+      const stale = context.broker.reviewAuthorizationPlanV4(identity)!
+      await context.broker.setPolicyV2(identity, 'models.read', 'deny-persistent')
+      await context.broker.setPolicyV2(identity, 'models.read', 'ask')
+      await expect(context.broker.authorizeReviewedActivationV4(identity, decisionV4(stale)))
+        .rejects.toThrow('permission review was invalidated')
+      const fresh = context.broker.reviewAuthorizationPlanV4(identity)!
+      await context.broker.authorizeReviewedActivationV4(identity, decisionV4(fresh))
+      await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' }))
+        .resolves.toMatchObject({ ok: true })
+      expect(context.nonDomPrompts()).toBe(0)
+      await expect(context.broker.authorizeReviewedActivationV4(identity, decisionV4(fresh)))
+        .rejects.toThrow('permission review was invalidated')
+    } finally {
+      context.broker.dispose()
+    }
+  })
+
+  it('invalidates renderer V4 review when a certified snapshot is withdrawn and restored', async () => {
+    const certified = certification()
+    const context = setup({ certified })
+    try {
+      const stale = context.broker.reviewAuthorizationPlanV4(identity)!
+      context.broker.clearCertifiedPermissionSnapshot()
+      context.broker.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certified] })
+      await expect(context.broker.authorizeReviewedActivationV4(identity, decisionV4(stale)))
+        .rejects.toThrow('permission review was invalidated')
+    } finally {
+      context.broker.dispose()
+    }
+  })
+
+  it('does not issue a Host DOM lease when a V4 review changes during persistence', async () => {
+    const backing = new MemoryPermissionPolicyStore()
+    let release!: () => void
+    let started!: () => void
+    const pending = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const writing = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const store: PermissionPolicyStore = {
+      read: () => backing.read(),
+      readV2: () => backing.readV2(),
+      readV4: () => backing.readV4(),
+      write: records => backing.write(records),
+      writeV4: records => backing.writeV4(records),
+      writeAll: async records => {
+        started()
+        await pending
+        backing.writeAll(records)
+      },
+    }
+    const context = setup({
+      store,
+      requestV4: async () => undefined,
+      capabilities: [
+        declaration('models.read', false, { providers: ['codex'] }),
+        declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['read-text'] }),
+      ],
+    })
+    try {
+      const plan = context.broker.reviewAuthorizationPlanV4(identity)!
+      const selected = decisionV4(plan)
+      const committing = context.broker.authorizeReviewedActivationV4(identity, {
+        ...selected,
+        decisions: selected.decisions.map(item =>
+          item.capability === 'models.read'
+            ? { ...item, decision: 'allow-persistent' as const }
+            : item
+        ),
+      })
+      await writing
+      await context.broker.setHostDomPolicy(identity, 'ui.host-dom.read', 'deny-persistent')
+      release()
+      await expect(committing).rejects.toThrow('permission review was invalidated')
+      await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
+        .resolves.toMatchObject({ authorized: false })
+    } finally {
+      release()
+      context.broker.dispose()
+    }
+  })
+
   it('emits manifest, plan, and decision values accepted by the pinned formal Protocol schemas', async () => {
     const validators = await formalPermissionV4Validators()
     const normalizedManifest = manifest([
@@ -252,6 +339,9 @@ describe('manifest-v5 Host DOM permission model', () => {
     const plan = context.broker.authorizationPlanV4(identity)!
     expectFormal(validators.plan, plan)
     expectFormal(validators.decision, decisionV4(plan))
+    const localReview = context.broker.reviewAuthorizationPlanV4(identity)!
+    expectFormal(validators.plan, localReview)
+    expectFormal(validators.decision, decisionV4(localReview))
   })
 
   it.each(

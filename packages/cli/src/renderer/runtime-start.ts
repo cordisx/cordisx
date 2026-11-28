@@ -17,11 +17,6 @@ import type {
   CordisXPointPolicy,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import {
-  isPermissionPolicyRecordV2,
-  isPermissionPolicyRecordV3,
-  isPermissionPolicyRecordV4,
-} from '../permission-persistence.js'
 import type {
   CordisXPermissionAuthorizationDecisionV2,
   CordisXPermissionAuthorizationDecisionV4,
@@ -45,13 +40,8 @@ import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXPageService, CordisXRouteService } from './navigation.js'
 import { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
-import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
-import {
-  type AgentRuntimeConnection,
-  type AgentRuntimeRouteScope,
-  BrowserPermissionPolicyStore,
-  MemoryPermissionPolicyStore,
-} from './platform.js'
+import { createRuntimeRouting } from './runtime-routing.js'
+import { type AgentRuntimeConnection, type AgentRuntimeRouteScope } from './platform.js'
 import { CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice } from './controlled-surfaces.js'
@@ -62,9 +52,9 @@ import {
 } from './extension-points.js'
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
+import { createStandaloneModelBridge, standaloneModelFallback } from './platform-models-binding.js'
 import { CordisXAgentLoopBroker } from './agent-loop.js'
 import { PlaygroundMockAgentLoopHost, PlaygroundMockAgentLoopV4Transport } from './playground-mock-agent-loop.js'
-import { PlaygroundRoomSimulationBridgeRegistry } from './playground-room-simulation-bridge.js'
 import {
   BrowserConfigBridge,
   type ConfigCandidate,
@@ -76,9 +66,11 @@ import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { createRuntimeModelProviders } from './runtime-model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
+import { createStandaloneDesktopPackageConfigBridge } from './standalone-desktop-package-config-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { prepareAgentContextBootstrap } from './agent-context-binding.js'
-import { BindingPermissionPolicyStore } from './permission-binding.js'
+import { prepareStandalonePolicyRuntime } from './standalone-policy-runtime.js'
+import { createRuntimePermissionStore } from './runtime-permission-store.js'
 import { createRuntimeManagementBindings } from './runtime-management-bindings.js'
 import { PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
@@ -99,7 +91,7 @@ import {
 import { createBrowserHostDomWorkerEnvironment, type HostDomWorkerEnvironment } from './host-dom-worker.js'
 import { TransientCanvasCoordinator } from './transient-canvas.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
-import { type EntityPrincipalBinding } from './entities.js'
+import { createEntityPrincipalBindings } from './entity-principal-bindings.js'
 import {
   CordisXInternalRendererBootstrap,
   CordisXRuntimeHandle,
@@ -131,7 +123,8 @@ export async function start(
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
   options.signal?.throwIfAborted()
 
-  const { metadata: safeMetadata, bridge: agentContextBridge } = prepareAgentContextBootstrap(metadata)
+  const policyRuntime = prepareStandalonePolicyRuntime(metadata)
+  const { metadata: safeMetadata, bridge: agentContextBridge } = prepareAgentContextBootstrap(policyRuntime.metadata)
   metadata = safeMetadata
 
   let ctx = new Context()
@@ -140,27 +133,23 @@ export async function start(
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let disposePreparedSharedReactRuntime = options.disposePreparedSharedReactRuntime
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
-  const blockedPlugins = readBlockedPlugins()
+  const blockedPlugins = metadata.hostKind === 'standalone' ? new Set<string>() : readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
+  const standaloneModels = createStandaloneModelBridge(metadata.hostKind, metadata.ownerDocumentBindings !== undefined)
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
   if (metadata.providers.length > 0 && metadata.providerBridgeToken !== undefined) {
     bindingPlatformAdapter = await BindingPlatformAdapter.connect(metadata.providerBridgeToken).catch(() => undefined)
   }
-  const platformAdapter = bindingPlatformAdapter ?? agentAdapter
+  const platformAdapter = bindingPlatformAdapter ?? standaloneModelFallback(standaloneModels, agentAdapter)
   const generation = metadata.generation ?? (typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const iconThemeRegistry = new IconThemeRegistry(generation, metadata.profileId)
-  const browserHostedPlayground = metadata.hostKind === 'playground' || window.location.protocol !== 'app:'
-  const routeHistory = browserHostedPlayground
-    ? new BrowserRouteHistoryAdapter(window, true)
-    : new CodexRouterHistoryAdapter(window)
+  const { browserHostedPlayground, routeHistory, playgroundRoomSimulationBridgeRegistry } = createRuntimeRouting(
+    metadata.hostKind,
+    window,
+  )
   let disposeAgentDetailHistoryReturn: () => void = () => {}
-  const playgroundRoomSimulationBridgeRegistry = metadata.hostKind === 'playground'
-      && window.location.protocol === 'http:'
-      && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
-    ? new PlaygroundRoomSimulationBridgeRegistry()
-    : undefined
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
   const iconThemePreferenceBridge =
     metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
@@ -173,38 +162,22 @@ export async function start(
         metadata.iconThemePreference,
       )
   let disposeIconThemePreferenceSubscription: (() => void) | undefined
-  const permissionStore = metadata.permissionBridgeToken === undefined
-    ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
-      ? new MemoryPermissionPolicyStore(
-        metadata.permissionPolicies.filter(record =>
-          !isPermissionPolicyRecordV2(record)
-          && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
-        ),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV3),
-        metadata.permissionPolicies.filter(isPermissionPolicyRecordV4),
-      )
-      : new BrowserPermissionPolicyStore(metadata.profileId)
-    : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
+  const permissionStore = createRuntimePermissionStore(metadata, policyRuntime.sign)
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
+  let standaloneDesktopPackageConfigBridge: ReturnType<typeof createStandaloneDesktopPackageConfigBridge>
   const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined
     ? undefined
-    : new BrowserOwnerDocumentBridge()
-  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
-  const entityPrincipalBindings = new Map<string, EntityPrincipalBinding>()
-  const registerEntityBindings = (bindings: CordisXRuntimeMetadata['ownerDocumentBindings']): void => {
-    for (const binding of bindings ?? []) {
-      if (binding.installationId !== undefined && binding.pluginGeneration !== undefined) {
-        entityPrincipalBindings.set(
-          JSON.stringify([binding.source, binding.pluginId, binding.moduleGeneration]),
-          binding as EntityPrincipalBinding,
-        )
-      }
-    }
-  }
-  registerEntityBindings(metadata.ownerDocumentBindings)
+    : new BrowserOwnerDocumentBridge(metadata.hostKind === 'standalone' ? 1_000 : undefined)
+  const ownerDocumentBroker = new CordisXOwnerDocumentBroker(
+    ownerDocumentBridge,
+    metadata.ownerDocumentBindings,
+    standaloneModels,
+  )
+  const { bindings: entityPrincipalBindings, register: registerEntityBindings } = createEntityPrincipalBindings(
+    metadata.ownerDocumentBindings,
+  )
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
@@ -214,7 +187,7 @@ export async function start(
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)
   const channelActionsBridge = metadata.channelActionsBridgeToken === undefined
     ? undefined
-    : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken)
+    : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken, metadata.hostKind === 'standalone')
   const { lifecycleBridge, pluginManagementBinding } = createRuntimeManagementBindings(metadata, generation)
   const localDevelopment = new Map(plugins.flatMap(plugin =>
     plugin.development === undefined
@@ -240,14 +213,17 @@ export async function start(
   }
   let ownsSharedReactRuntime = false
   if (globalThis.__cordisxSharedReactRuntime === undefined) {
-    sharedReactRuntime = installSharedReactRuntime(document)
+    sharedReactRuntime = installSharedReactRuntime(document, { externalStyles: metadata.hostKind === 'standalone' })
     ownsSharedReactRuntime = true
   } else {
     sharedReactRuntime = globalThis.__cordisxSharedReactRuntime
   }
   let certifiedPermissionChannel = options.certifiedPermissionChannel
   try {
-    disposeNotifications = installNotificationHost(document, metadata.profileId)
+    standaloneDesktopPackageConfigBridge = createStandaloneDesktopPackageConfigBridge(metadata)
+    disposeNotifications = installNotificationHost(document, metadata.profileId, {
+      externalStyles: metadata.hostKind === 'standalone',
+    })
     disposeDialogs = installDialogHost(document)
     const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
     const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
@@ -313,6 +289,7 @@ export async function start(
       commitPluginMutation: () => commitPluginMutation,
       completePluginMutation: () => completePluginMutation,
       configBridge: () => configBridge,
+      standaloneDesktopPackageConfigBridge: () => standaloneDesktopPackageConfigBridge,
       configRendererFiber: [() => configRendererFiber, (value: any) => configRendererFiber = value],
       configRenderers: () => configRenderers,
       configuration: () => configuration,
@@ -519,6 +496,10 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
+    const permissionWriteUncertain = metadata.standaloneWriteUncertain === undefined
+      ? undefined
+      : () => metadata.standaloneWriteUncertain?.('permission-policy')
+    policyRuntime.register(broker, options.signal, permissionWriteUncertain)
     if (certifiedPermissionChannel !== undefined) {
       certifiedPermissionChannel.replaceSink(broker)
     } else if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
@@ -572,7 +553,7 @@ export async function start(
       : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence)
     const agentLoopBrokerV4 = runtimeClosures1.createRuntimeAgentLoopBrokerV4(closureScope)
     // One Host-private authority backs all public Agent/Session services; the environment selects its transport.
-    const desktopAgentSessionTransport = metadata.hostKind === 'playground'
+    const desktopAgentSessionTransport = metadata.hostKind === 'playground' || metadata.hostKind === 'standalone'
       ? undefined
       : await CodexDesktopAgentSessionTransport.connect()
     const playgroundAgentSessionPersistence = runtimeClosures1.createRuntimePlaygroundAgentSessionPersistence(
@@ -672,7 +653,9 @@ export async function start(
     const externalProviderStatuses = runtimeClosures1.createRuntimeExternalProviderStatuses(closureScope)
     const capabilityAvailability = runtimeClosures1.createRuntimeCapabilityAvailability(closureScope)
     const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
-    const legacyExtensionPointPolicies = new BrowserExtensionPointPolicyStore().read()
+    const legacyExtensionPointPolicies = metadata.hostKind === 'standalone'
+      ? []
+      : new BrowserExtensionPointPolicyStore().read()
     const extensionPointBroker = runtimeClosures1.createRuntimeExtensionPointBroker(closureScope)
     const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
     const moduleGenerationOf = (controller: PluginController): string =>
@@ -969,13 +952,27 @@ export async function start(
     ): Readonly<{ revision: number; pluginRevision: number }> =>
       runtimeClosures5.createRuntimeAdoptPluginBundleSnapshot(closureScope, snapshot)
 
-    const dispose = async (): Promise<void> => {
-      try {
-        await runtimeClosures5.createRuntimeDispose(closureScope)
-      } finally {
-        disposeDialogs()
-        disposeNotifications()
-      }
+    let disposal: Promise<void> | undefined
+    const dispose = (): Promise<void> => {
+      if (disposal !== undefined) return disposal
+      let resolve!: () => void
+      let reject!: (error: unknown) => void
+      // Publish the shared completion before starting cleanup: a second
+      // caller must not mistake an in-progress disposal for a completed one.
+      disposal = new Promise<void>((done, failed) => {
+        resolve = done
+        reject = failed
+      })
+      void (async () => {
+        try {
+          await runtimeClosures5.createRuntimeDispose(closureScope)
+        } finally {
+          policyRuntime.dispose()
+          disposeDialogs()
+          disposeNotifications()
+        }
+      })().then(resolve, reject)
+      return disposal
     }
 
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)
@@ -983,6 +980,9 @@ export async function start(
     await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
+    standaloneModels?.dispose()
+    policyRuntime.dispose()
+    standaloneDesktopPackageConfigBridge?.dispose()
     agentContextBridge?.dispose()
     disposeDialogs()
     disposeNotifications()

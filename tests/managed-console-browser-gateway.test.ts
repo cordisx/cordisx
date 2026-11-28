@@ -77,6 +77,35 @@ async function fixture(
 }
 
 describe('managed console browser gateway', () => {
+  it('preserves service embedding policies without widening CORS', async () => {
+    const policy = 'frame-ancestors http://127.0.0.1:12345'
+    const f = await fixture(undefined, 303, undefined, (req, res) => {
+      if (req.url === '/providers') {
+        res.writeHead(200, {
+          'Content-Security-Policy': policy,
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+          'Access-Control-Allow-Origin': '*',
+        }).end('ok')
+        return true
+      }
+      if (req.url === '/denied') {
+        res.writeHead(200, { 'X-Frame-Options': 'DENY' }).end('ok')
+        return true
+      }
+      return false
+    })
+    try {
+      await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+      const page = await f.send('/providers', iframe)
+      expect(page.headers['content-security-policy']).toBe(policy)
+      expect(page.headers['cross-origin-resource-policy']).toBe('cross-origin')
+      expect(page.headers).not.toHaveProperty('access-control-allow-origin')
+      expect((await f.send('/denied', sameOrigin)).headers['x-frame-options']).toBe('DENY')
+    } finally {
+      await f.close()
+    }
+  })
+
   it('preserves service-issued partitioned authorization state between start and poll', async () => {
     const pending = 'fakemodel_device_pending_embedded=' + 'c'.repeat(210) + '.' + 'd'.repeat(43)
     const attributes = '; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=None; Partitioned'

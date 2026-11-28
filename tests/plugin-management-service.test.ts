@@ -11,6 +11,7 @@ import { openPluginManagementService } from '../packages/cli/src/management/serv
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { LifecycleFailure } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   FakeRuntime,
@@ -342,6 +343,41 @@ describe('plugin management service', () => {
     reopened.close()
   })
 
+  it('reports a definite lifecycle preflight refusal while preserving unknown failures', async () => {
+    const { homeDir, configPath, service: inactive } = await fixture()
+    inactive.close()
+    const runtimeGeneration = 'active-test'
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir,
+      profileId: 'default',
+      runtimeGeneration,
+      permissionPolicies: [],
+      runtime: new FakeRuntime(),
+    })
+    await coordinator.store.bindRuntimeGeneration()
+    const service = await openPluginManagementService({
+      configPath,
+      homeDir,
+      profileId: 'default',
+      watch: false,
+      lifecycle: { coordinator, runtimeGeneration },
+    })
+    const sourceDirectory = await localPackage({ root: homeDir, id: 'preflight-refusal' })
+    const apply = vi.spyOn(coordinator, 'applyPermissionReviewV7').mockRejectedValueOnce(
+      new LifecycleFailure('operation-unavailable', 'The renderer cannot admit this package.'),
+    )
+    expect(await executePlan(service, { kind: 'plugin-plan-local', sourceDirectory })).toMatchObject({
+      status: 'rejected',
+      error: { code: 'operation-unavailable' },
+    })
+    expect((await service.query()).plugins).toEqual([])
+    apply.mockRejectedValueOnce(new Error('unconfirmed failure'))
+    await expect(executePlan(service, { kind: 'plugin-plan-local', sourceDirectory })).rejects.toThrow(
+      'unconfirmed failure',
+    )
+    service.close()
+  })
+
   it.each(['deny', 'ask'] as const)(
     'does not upgrade a persisted V1 %s policy during automatic execution',
     async policy => {
@@ -460,14 +496,53 @@ describe('plugin management service', () => {
       }],
     })
     expect(requests).toEqual(['/marketplace.json'])
+
+    expect(await service.pluginInfo({ pluginId: 'permission-v4', sourceUrl, expectedCanonicalSource: canonicalSource }))
+      .toMatchObject({ canonicalSource })
+    expect(
+      await service.pluginInfo({
+        pluginId: 'permission-v4',
+        sourceUrl,
+        expectedCanonicalSource: 'https://example.test/other',
+      }),
+    )
+      .toBeUndefined()
     await expect(service.refreshCatalog(`${http.url}/unknown.json`)).rejects.toThrow('does not exist')
     expect(requests).toEqual(['/marketplace.json'])
 
-    const planned = await service.plan({
-      kind: 'plugin-plan-marketplace',
+    const selected = {
+      kind: 'plugin-plan-marketplace' as const,
       pluginId: 'permission-v4',
       sourceUrl,
+      version: '1.0.0',
+      expectedCanonicalSource: canonicalSource,
+      expectedArtifactIntegrity: integrity,
+    }
+    expect(await service.plan({ ...selected, expectedCanonicalSource: 'https://example.test/other' } as any))
+      .toMatchObject({ status: 'rejected', error: { code: 'catalog-selection-changed' } })
+    expect(await service.plan({ ...selected, expectedArtifactIntegrity: `sha256:${'0'.repeat(64)}` } as any))
+      .toMatchObject({ status: 'rejected', error: { code: 'catalog-selection-changed' } })
+
+    const stale = await service.plan(selected)
+    const entries = feed.plugins as Array<{ artifact: { integrity: string } }>
+    entries[0]!.artifact.integrity = `sha256:${'0'.repeat(64)}`
+    await service.refreshCatalog(sourceUrl)
+    expect(await service.execute(stale.executionRequest!)).toMatchObject({
+      status: 'rejected',
+      error: { code: 'catalog-selection-changed' },
     })
+    entries[0]!.artifact.integrity = integrity
+    await service.refreshCatalog(sourceUrl)
+    const failedDownload = await service.plan(selected)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('synthetic download failure')))
+    expect(await service.execute(failedDownload.executionRequest!)).toMatchObject({
+      status: 'rejected',
+      error: { code: 'artifact-inspection-failed' },
+    })
+    expect((await service.query()).activationRevision).toBe(0)
+    vi.unstubAllGlobals()
+
+    const planned = await service.plan(selected as any)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
       const controller = new AbortController()

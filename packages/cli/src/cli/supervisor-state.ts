@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { isManagerBrowserOrigin } from '../independent-manager/manager-browser-origin.js'
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import path from 'node:path'
-import { processIdentitiesAfterPsDenied } from '../launcher/process-identity.js'
+import { processIdentityAfterPsDenied } from '../launcher/process-identity.js'
 import { compareProcessStartTimes, processIdentityEnvironment } from '../launcher/process-start-identity.js'
 
 export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
@@ -11,7 +12,14 @@ export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
 export interface SupervisorState {
   readonly schemaVersion: 1
   readonly mode?: 'service'
+  /** Native adapter supervised separately while its profile service owns shared state. */
+  readonly clientOfService?: true
+  readonly clientConnection?: 'connected' | 'disconnected'
   readonly modelApiUrl?: string
+  /** Availability of the service-owned Web gateway. */
+  readonly webStatus?: 'ready' | 'unavailable' | 'disabled'
+  /** Service-owner cleanup receipt for this supervisor generation. */
+  readonly serviceCleanup?: 'pending' | 'completed' | 'failed'
   readonly appId: string
   readonly profileId: string
   readonly phase: SupervisorPhase
@@ -21,6 +29,12 @@ export interface SupervisorState {
   readonly createdAt: string
   readonly version: string
   readonly effectiveConfig: string
+  /** Manager owner identity, independent of an optional deployment choice. */
+  readonly managerOwnerFingerprint?: string
+  /** Browser-facing Manager origin, separate from its local owner listener. */
+  readonly managerPublicOrigin?: string
+  /** The Manager gateway shares the service owner's process and lifetime. */
+  readonly managerOwnedByService?: boolean
   /** Separate detached group launched by the supervisor, when Host startup reached spawn. */
   readonly hostPid?: number
   readonly hostProcessStartedAt?: string
@@ -44,8 +58,7 @@ export interface SupervisorPaths {
   readonly bootstrapToken: string
 }
 
-export function supervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
-  const directory = path.join(homeDir, 'run', appId, profileId)
+function supervisorPathsIn(directory: string): SupervisorPaths {
   return {
     directory,
     state: path.join(directory, 'state.json'),
@@ -55,6 +68,16 @@ export function supervisorPaths(homeDir: string, appId: string, profileId: strin
     log: path.join(directory, 'host.log'),
     bootstrapToken: path.join(directory, 'bootstrap.token'),
   }
+}
+
+export function supervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
+  return supervisorPathsIn(path.join(homeDir, 'run', appId, profileId))
+}
+
+/** A native client and its service owner must never publish into each other's state files. */
+export function clientSupervisorPaths(homeDir: string, appId: string, profileId: string): SupervisorPaths {
+  const scope = createHash('sha256').update(`${appId}\0${profileId}`).digest('hex').slice(0, 20)
+  return supervisorPathsIn(path.join(homeDir, 'run', 'clients', scope))
 }
 
 export function effectiveConfigFingerprint(input: unknown): string {
@@ -132,7 +155,15 @@ function validState(value: unknown): value is SupervisorState {
   const item = value as Record<string, unknown>
   return item.schemaVersion === 1
     && (item.mode === undefined || item.mode === 'service')
+    && (item.clientOfService === undefined || item.clientOfService === true && item.mode === undefined)
+    && (item.clientConnection === undefined || item.clientOfService === true
+        && (item.clientConnection === 'connected' || item.clientConnection === 'disconnected'))
     && (item.modelApiUrl === undefined || typeof item.modelApiUrl === 'string')
+    && (item.webStatus === undefined || item.mode === 'service'
+        && (item.webStatus === 'ready' || item.webStatus === 'unavailable' || item.webStatus === 'disabled'))
+    && (item.serviceCleanup === undefined || item.mode === 'service'
+        && (item.serviceCleanup === 'pending' || item.serviceCleanup === 'completed'
+          || item.serviceCleanup === 'failed'))
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
     && (item.phase === 'starting' || item.phase === 'ready' || item.phase === 'stopping' || item.phase === 'failed')
@@ -142,6 +173,11 @@ function validState(value: unknown): value is SupervisorState {
     && typeof item.createdAt === 'string'
     && typeof item.version === 'string'
     && typeof item.effectiveConfig === 'string'
+    && (item.managerOwnerFingerprint === undefined
+      || typeof item.managerOwnerFingerprint === 'string' && /^[a-f0-9]{64}$/u.test(item.managerOwnerFingerprint))
+    && (item.managerPublicOrigin === undefined
+      || typeof item.managerPublicOrigin === 'string' && isManagerBrowserOrigin(item.managerPublicOrigin))
+    && (item.managerOwnedByService === undefined || item.managerOwnedByService === true)
     && (item.hostPid === undefined || (Number.isSafeInteger(item.hostPid) && (item.hostPid as number) > 0))
     && (item.hostProcessStartedAt === undefined || typeof item.hostProcessStartedAt === 'string')
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')
@@ -181,13 +217,35 @@ export async function readSupervisorState(paths: SupervisorPaths): Promise<Super
   return result.status === 'valid' ? result.state : undefined
 }
 
+async function removeSupervisorFiles(paths: SupervisorPaths): Promise<void> {
+  await Promise.all([
+    rm(paths.state, { force: true }),
+    rm(paths.socket, { force: true }),
+    rm(paths.bootstrapToken, { force: true }),
+  ])
+}
+
 export async function removeSupervisorState(paths: SupervisorPaths): Promise<void> {
-  await stateTransaction(paths, async () => {
-    await Promise.all([
-      rm(paths.state, { force: true }),
-      rm(paths.socket, { force: true }),
-      rm(paths.bootstrapToken, { force: true }),
-    ])
+  await stateTransaction(paths, async () => await removeSupervisorFiles(paths))
+}
+
+/** Do not erase a replacement owner or a cleanup result changed after inspection. */
+export async function removeSupervisorStateIfCurrent(
+  paths: SupervisorPaths,
+  inspected: SupervisorState,
+): Promise<boolean> {
+  return await stateTransaction(paths, async () => {
+    const current = await readSupervisorState(paths)
+    if (
+      !current || current.instanceToken !== inspected.instanceToken || current.pid !== inspected.pid
+      || current.processStartedAt !== inspected.processStartedAt
+      || current.effectiveConfig !== inspected.effectiveConfig
+      || current.appId !== inspected.appId || current.profileId !== inspected.profileId
+      || current.mode !== inspected.mode
+      || current.phase !== inspected.phase || current.serviceCleanup !== inspected.serviceCleanup
+    ) return false
+    await removeSupervisorFiles(paths)
+    return true
   })
 }
 
@@ -274,7 +332,7 @@ export async function processStartIdentity(pid: number): Promise<string | undefi
     return output === '' ? undefined : output
   } catch (error) {
     try {
-      return processIdentitiesAfterPsDenied(error)?.processes.find(item => item.pid === pid)?.startedAt
+      return processIdentityAfterPsDenied(error, pid)?.startedAt
     } catch {
       return undefined
     }

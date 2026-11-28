@@ -186,6 +186,19 @@ describe('capability availability registry', () => {
     })
   })
 
+  it('reports scoped configuration writing as partial rather than generally supported', () => {
+    const providers = hostLocalCapabilityProviders({
+      agentStatus: agentStatus(),
+      historyStatus: historyStatus(),
+      configurationWritable: false,
+      configurationPartiallyWritable: true,
+    })
+    expect(providers.find(item => item.family === 'configuration')).toMatchObject({
+      status: 'degraded',
+      reason: { key: 'provider.configuration.partial' },
+    })
+  })
+
   it('rejects duplicate provider identities', () => {
     const [provider] = externalProviderCapabilityProviders([{
       providerId: 'alpha',

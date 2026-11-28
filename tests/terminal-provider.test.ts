@@ -7,7 +7,10 @@ import { parseTerminalCli } from '../packages/cli/src/cli/terminal-parse.js'
 import { terminalCodexArguments } from '../packages/cli/src/cli/terminal-command.js'
 import type { NativeManagedGatewayConnectionSession } from '../packages/cli/src/launcher/managed-service-native-connection.js'
 
-function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]['startup']) {
+function fixture(
+  startup?: Parameters<typeof createTerminalProviderAuthority>[0]['startup'],
+  origin = 'http://127.0.0.1:54321',
+) {
   let generation = 'generation-one', clock = 1000
   const dispose = vi.fn()
   const releaseCredential = vi.fn()
@@ -15,7 +18,7 @@ function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]
     value: {
       service: { pluginId: 'test-plugin', serviceId: 'gateway', generation },
       endpoint: {
-        origin: 'http://127.0.0.1:54321',
+        origin,
         apiPath: '/v1',
         auth: { scheme: 'bearer', token: 'HOST_ONLY_TOKEN' },
       },
@@ -70,7 +73,55 @@ function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]
 }
 
 describe('terminal provider lifecycle', () => {
-  it('reuses an unauthenticated loopback gateway for Claude without exporting bearer credentials', async () => {
+  it('uses a current Host-owned selection without plugin aliases and retires a stale lease', async () => {
+    let current = true
+    let invalidateDuringPreparation = false
+    const release = vi.fn()
+    const authority = createTerminalProviderAuthority({
+      owns: id => id === 'host-provider',
+      catalog: async () => [{
+        providerId: 'host-provider',
+        pluginId: 'cordisx-host',
+        models: [{ id: 'model-one', label: 'One', aliases: [] }],
+      }],
+      resolve: () => ({
+        value: {
+          service: { pluginId: 'cordisx-host', serviceId: 'one', generation: 'scope' },
+          endpoint: { origin: 'https://fixture.invalid', apiPath: '/v1', auth: { scheme: 'none' } },
+          models: { generation: 'revision', defaultAlias: '', aliases: [] },
+          cleanup: { authorityId: 'fixture' },
+        },
+        dispose() {},
+      }),
+      currentHostConnection: (providerId, model, connection) =>
+        current && providerId === 'host-provider' && model === 'model-one'
+        && connection.value.service.generation === 'scope',
+      credentials: {
+        prepare: async () => {
+          if (invalidateDuringPreparation) current = false
+          return { scheme: 'none', serviceGeneration: 'scope', dispose: release }
+        },
+        close: async () => {},
+      },
+    })
+    try {
+      const lease = await authority.request({ kind: 'prepare', providerId: 'host-provider', model: 'model-one' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      current = false
+      await expect(authority.request({ kind: 'renew', leaseId: lease.leaseId })).rejects.toThrow('generation or model')
+      expect(release).toHaveBeenCalledOnce()
+      current = true
+      invalidateDuringPreparation = true
+      await expect(
+        authority.request({ kind: 'prepare', providerId: 'host-provider', model: 'model-one' }),
+      ).rejects.toThrow('generation or model')
+      expect(release).toHaveBeenCalledTimes(2)
+    } finally {
+      authority.close()
+    }
+  })
+
+  it('leases loopback gateways to Claude without putting bearer credentials in the response', async () => {
     const dispose = vi.fn()
     const authority = createTerminalProviderAuthority({
       owns: id => id === 'aiden',
@@ -111,14 +162,16 @@ describe('terminal provider lifecycle', () => {
     expect(dispose).toHaveBeenCalledOnce()
     const bearer = fixture()
     try {
-      await expect(
-        bearer.authority.request({
-          kind: 'prepare',
-          providerId: 'plugin-provider',
-          model: 'model-one',
-          client: 'claude-code',
-        }),
-      ).rejects.toThrow('authentication')
+      const result = await bearer.authority.request({
+        kind: 'prepare',
+        providerId: 'plugin-provider',
+        model: 'model-one',
+        client: 'claude-code',
+      })
+      expect(result).toMatchObject({ kind: 'prepared', anthropicBaseUrl: 'http://127.0.0.1:54321' })
+      expect(JSON.stringify(result)).not.toContain('HOST_ONLY_TOKEN')
+      if (result.kind !== 'prepared') throw new Error('provider was not prepared')
+      await bearer.authority.request({ kind: 'release', leaseId: result.leaseId })
       expect(bearer.releaseCredential).toHaveBeenCalledOnce()
     } finally {
       bearer.authority.close()
@@ -145,6 +198,88 @@ describe('terminal provider lifecycle', () => {
       f.authority.close()
     }
     expect(f.releaseCredential).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not supply a Claude credential helper for a remote managed gateway', async () => {
+    const f = fixture(undefined, 'https://gateway.example.test')
+    try {
+      await expect(f.authority.request({
+        kind: 'prepare',
+        providerId: 'plugin-provider',
+        model: 'model-one',
+        client: 'claude-code',
+      })).rejects.toThrow('not a local Claude Code endpoint')
+      expect(f.releaseCredential).toHaveBeenCalledOnce()
+    } finally {
+      f.authority.close()
+    }
+  })
+
+  it('reserves logout only after the affected terminal lease retires', async () => {
+    const f = fixture()
+    try {
+      const lease = await f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })).toBeUndefined()
+      const other = f.authority.reserveForService({ pluginId: 'other', serviceId: 'gateway' })!
+      expect(other.isCurrent()).toBe(true)
+      await expect(f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+        .rejects.toThrow('coordinating')
+      expect(other.release()).toBe(true)
+      await f.authority.request({ kind: 'release', leaseId: lease.leaseId })
+      const own = f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })!
+      own.fence()
+      expect(own.release()).toBe(false)
+      await expect(f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+        .rejects.toThrow('coordinating')
+    } finally {
+      f.authority.close()
+    }
+  })
+
+  it('protects an affected plugin while allowing an unrelated terminal lease to continue', async () => {
+    const f = fixture()
+    try {
+      const lease = await f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      expect(f.authority.reserveForLifecycle(['test-plugin'])).toBeUndefined()
+      const unrelated = f.authority.reserveForLifecycle(['other-plugin'])!
+      expect(await f.authority.request({ kind: 'renew', leaseId: lease.leaseId })).toEqual({ kind: 'renewed' })
+      await expect(f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+        .rejects.toThrow('coordinating')
+      expect(unrelated.release()).toBe(true)
+      await f.authority.request({ kind: 'release', leaseId: lease.leaseId })
+      expect(f.authority.reserveForLifecycle(['test-plugin'])?.release()).toBe(true)
+    } finally {
+      f.authority.close()
+    }
+  })
+
+  it('does not reserve a service while a terminal credential is being prepared', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const blocked = new Promise<void>(resolve => {
+      finish = resolve
+    })
+    const original = f.prepare.getMockImplementation()!
+    f.prepare.mockImplementation(async () => {
+      await blocked
+      return await original()
+    })
+    const preparing = f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+    try {
+      await vi.waitFor(() => expect(f.prepare).toHaveBeenCalledOnce())
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })).toBeUndefined()
+      expect(f.authority.reserveForLifecycle(['test-plugin'])).toBeUndefined()
+      finish()
+      const lease = await preparing
+      if (lease.kind !== 'prepared') throw new Error('provider was not prepared')
+      await f.authority.request({ kind: 'release', leaseId: lease.leaseId })
+      expect(f.authority.reserveForService({ pluginId: 'test-plugin', serviceId: 'gateway' })?.release()).toBe(true)
+    } finally {
+      finish()
+      f.authority.close()
+    }
   })
 
   it('rejects unknown models before credentials and revokes on generation replacement', async () => {

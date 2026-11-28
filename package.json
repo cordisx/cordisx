@@ -103,7 +103,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#52fe15b6416be16429357e4994cfe4a7a2fb54fe",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#d5703e7ab7152f134b8d1384e1ec6b5abac8cca6",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -149,7 +149,7 @@
     "fsevents": "~2.3.3"
   },
   "cordisxSources": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#9ba6e842a5c82314335ad12b005b61c10fd434f7",
+    "@cordisx/channel": "github:cordisx/plugin-channel#3b8b7af13c78778e32ac78aa614d43d229acbadc",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#25ff53db12e51e66b304f9f2139c706af0b0c761"
   },
   "devDependencies": {

@@ -240,6 +240,9 @@ function permissionPlanDeclarations(
 
 export interface AuthorizationGrant {
   readonly declaration: CordisXCapabilityDeclaration
+  /** Host-private binding for an owner-side capability invocation. */
+  readonly ownerRequestId?: string
+  readonly moduleGeneration?: string
 }
 
 export function normalizedPath(value: string): string {

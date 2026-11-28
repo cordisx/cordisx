@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { ChannelMemoryModelConnection } from './channel-user-memory-model.js'
 import type { ChannelModelCandidate } from './channel-model-priority.js'
 import { ChannelCredentialUnavailable, ChannelManagedConnectionUnavailable } from './channel-user-memory-connection.js'
@@ -9,6 +9,14 @@ const result = (evidence: ChannelConnectivityEvidence, legacyAvailable: boolean)
   evidence,
   legacyAvailable,
 })
+const sessionHeaders = [
+  'x-claude-code-session-id',
+  'session_id',
+  'session-id',
+  'x-session-id',
+  'thread-id',
+  'conversation_id',
+] as const
 
 async function boundedProbeFence(check: () => Promise<boolean>, signal: AbortSignal): Promise<boolean> {
   let abort!: () => void
@@ -67,12 +75,18 @@ async function channelModelConnectivityProbe(
     if (beforeRequest && !await boundedProbeFence(beforeRequest, signal)) return result('cancelled', false)
     if (parent?.aborted) return result('cancelled', false)
     if (timeout.aborted) return result('inconclusive', false)
+    const headers = new Headers(connection.headers)
+    headers.set('content-type', 'application/json')
+    if (!sessionHeaders.some(name => headers.has(name))) {
+      // Do not bind a synthetic probe to an actual Channel conversation.
+      headers.set('x-session-id', 'cordisx-probe-' + randomBytes(16).toString('hex'))
+    }
     requestStarted = true
     const response = await fetch(`${connection.baseUrl.replace(/\/$/u, '')}/responses`, {
       method: 'POST',
       signal,
       redirect: 'error',
-      headers: { ...connection.headers, 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({
         model: candidate.model,
         // A probe is a synthetic request, never a reusable conversation session.

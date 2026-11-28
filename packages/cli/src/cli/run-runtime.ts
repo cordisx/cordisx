@@ -55,6 +55,8 @@ export interface CordisXCliRuntime {
   }) => Readonly<{ pid: number; unref(): void }>
   /** Repository-only seam for bounded supervisor failure-path integration tests. */
   readonly internalSupervisorReadinessTimeoutMs?: number
+  /** Repository-only seam for exercising retained legacy App-owner behavior. */
+  readonly internalSupervisorLegacyAppOwner?: true
   /** Repository-only startup-gate seam; false keeps command tests headless. */
   readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
   readonly internalScheduleShortcutPresentation?: import('./shortcut-presentation-worker.js').PresentationScheduler

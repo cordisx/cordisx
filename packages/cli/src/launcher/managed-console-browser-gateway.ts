@@ -154,8 +154,33 @@ async function forward(
 
 export interface ManagedConsoleBrowserGateway {
   readonly hostArgument: string
+  readonly origin: `http://${string}`
   readonly boundary: ManagedBrowserConsoleBoundary
   close(): Promise<void>
+}
+
+/** Accept only a Host-generated console origin, never an arbitrary frame source. */
+export function canonicalManagedConsoleBrowserOrigin(value: unknown): `http://${string}` {
+  if (
+    typeof value !== 'string'
+    || !/^http:\/\/console-[a-f0-9]{32}\.cordisx-console\.localhost:[1-9][0-9]{0,4}$/u.test(value)
+  ) {
+    throw new Error('invalid managed browser console origin')
+  }
+  const url = new URL(value)
+  if (url.origin !== value || Number(url.port) > 65_535) throw new Error('invalid managed browser console origin')
+  return value as `http://${string}`
+}
+
+export const MAX_STANDALONE_CONSOLE_ORIGINS = 16
+
+export function canonicalManagedConsoleBrowserOrigins(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_STANDALONE_CONSOLE_ORIGINS) {
+    throw new Error('invalid managed browser console origins')
+  }
+  const origins = value.map(canonicalManagedConsoleBrowserOrigin)
+  if (new Set(origins).size !== origins.length) throw new Error('invalid managed browser console origins')
+  return origins
 }
 
 /** All logical ports of the random browser hostname resolve to this one owned listener. */
@@ -205,6 +230,7 @@ export async function openManagedConsoleBrowserGateway(): Promise<ManagedConsole
   server.on('error', () => void close().catch(() => undefined))
   return {
     hostArgument: `--host-resolver-rules=MAP ${hostname} 127.0.0.1:${port}, MAP ${hostname}. 127.0.0.1:${port}`,
+    origin,
     boundary: {
       open(input) {
         if (closed || active || input.signal.aborted || (service !== undefined && service !== input.service)) {

@@ -1,13 +1,23 @@
 import type {
+  PluginManagementCatalogDetail,
+  PluginManagementCatalogLookup,
   PluginManagementConfigRequest,
   PluginManagementLegacySourceMigration,
   PluginManagementMigrationResult,
+  PluginManagementRequest,
   PluginManagementResult,
   PluginManagementSnapshot,
 } from '../management/contracts.js'
+import { parsePermissionHistory, parsePluginAuthorizationHistory } from './permission-history-binding.js'
+import type { DeferredPermissionDecision } from '../permission-deferral.js'
 
 const BINDING = '__cordisxPluginManagementRequestV1'
 const RECEIVER = '__cordisxPluginManagementReceiveV1'
+
+export type PluginManagementLifecycleRequest = Extract<
+  PluginManagementRequest,
+  { readonly kind: 'plugin-enable' | 'plugin-disable' | 'plugin-uninstall' | 'plugin-plan-marketplace' }
+>
 
 declare global {
   interface Window {
@@ -20,6 +30,15 @@ export interface PluginManagementBinding {
   query(): Promise<PluginManagementSnapshot>
   subscribe(listener: (snapshot: PluginManagementSnapshot) => void): () => void
   mutate(request: PluginManagementConfigRequest, expectedRevision: number): Promise<PluginManagementResult>
+  planLifecycle?(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult>
+  executeLifecycle?(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult>
+  applyLifecycleReview?(
+    reviewToken: string,
+    decision: DeferredPermissionDecision,
+    proof: unknown,
+    requestId: string,
+  ): Promise<PluginManagementResult>
+  pluginInfo?(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined>
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult>
 }
 
@@ -50,6 +69,46 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     return this.send({ kind: 'execute', request, expectedRevision })
   }
 
+  async planLifecycle(request: PluginManagementLifecycleRequest): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({ kind: 'plan', request })
+    this.publish(result.snapshot)
+    return result
+  }
+
+  async executeLifecycle(request: PluginManagementRequest, expectedRevision: number): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({ kind: 'execute', request, expectedRevision })
+    this.publish(result.snapshot)
+    return result
+  }
+
+  async applyLifecycleReview(
+    reviewToken: string,
+    decision: DeferredPermissionDecision,
+    proof: unknown,
+    requestId: string,
+  ): Promise<PluginManagementResult> {
+    const result = await this.send<PluginManagementResult>({
+      kind: 'plugin-review-apply',
+      reviewToken,
+      decision,
+      proof,
+    }, requestId)
+    if ('snapshot' in result) this.publish(result.snapshot)
+    return result
+  }
+
+  pluginInfo(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined> {
+    return this.send({ kind: 'plugin-info', query })
+  }
+
+  async permissionHistory(pluginId: string) {
+    return parsePermissionHistory(await this.send({ kind: 'permission-history', pluginId }), pluginId)
+  }
+
+  async pluginAuthorizationHistory(pluginId: string) {
+    return parsePluginAuthorizationHistory(await this.send({ kind: 'plugin-authorization-history', pluginId }))
+  }
+
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult> {
     return this.send({ kind: 'migrate-legacy-sources', input })
   }
@@ -66,18 +125,30 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     this.listeners.clear()
   }
 
-  private send<Value>(operation: object): Promise<Value> {
+  private publish(snapshot: PluginManagementSnapshot): void {
+    for (const listener of this.listeners) listener(snapshot)
+  }
+
+  private send<Value>(operation: object, suppliedRequestId?: string): Promise<Value> {
     if (this.disposed) return Promise.reject(new Error('plugin management bridge is disposed'))
     const binding = window[BINDING]
     if (typeof binding !== 'function') return Promise.reject(new Error('plugin management is unavailable'))
-    const requestId = typeof crypto.randomUUID === 'function'
+    const requestId = suppliedRequestId ?? (typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
-      : `management-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      : `management-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(requestId) || this.pending.has(requestId)) {
+      return Promise.reject(new Error('plugin management request is invalid'))
+    }
+    const value = operation as { readonly kind?: string; readonly request?: { readonly kind?: string } }
+    const timeout = value.kind === 'plugin-review-apply'
+        || value.kind === 'execute' && value.request?.kind === 'plugin-execute-plan'
+      ? 230_000
+      : 60_000
     return new Promise<Value>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('plugin management request timed out'))
-      }, 60_000)
+      }, timeout)
       this.pending.set(requestId, { resolve: value => resolve(value as Value), reject, timer })
       try {
         binding(JSON.stringify({ version: 1, requestId, token: this.token, profileId: this.profileId, operation }))
@@ -98,7 +169,7 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
     }
     if (response.kind === 'snapshot' && response.profileId === this.profileId) {
       const snapshot = response.snapshot as PluginManagementSnapshot
-      for (const listener of this.listeners) listener(snapshot)
+      this.publish(snapshot)
       return
     }
     if (typeof response.requestId !== 'string') return

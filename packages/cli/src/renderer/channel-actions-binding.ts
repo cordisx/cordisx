@@ -18,7 +18,7 @@ export class BrowserChannelActionsBridge {
     readonly timer: ReturnType<typeof setTimeout>
   }>()
 
-  private constructor(private readonly token: string) {
+  private constructor(private readonly token: string, private readonly standalone: boolean) {
     globalThis[RECEIVER] = payload => {
       let value: { requestId?: unknown; ok?: unknown; value?: unknown }
       try {
@@ -36,8 +36,8 @@ export class BrowserChannelActionsBridge {
     }
   }
 
-  static connect(token: string): BrowserChannelActionsBridge {
-    return new BrowserChannelActionsBridge(token)
+  static connect(token: string, standalone = false): BrowserChannelActionsBridge {
+    return new BrowserChannelActionsBridge(token, standalone)
   }
 
   async run(action: string, input: Record<string, unknown>): Promise<ChannelManagerActionResult> {
@@ -50,9 +50,15 @@ export class BrowserChannelActionsBridge {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('channel-action-timeout'))
-      }, 5_000)
+      }, this.standalone && (action === 'enable' || action === 'disable' || action === 'reconnect') ? 75_000 : 5_000)
       this.pending.set(requestId, { resolve, reject, timer })
-      binding(JSON.stringify({ version: 1, token: this.token, requestId, action, ...input }))
+      try {
+        binding(JSON.stringify({ version: 1, token: this.token, requestId, action, ...input }))
+      } catch (error) {
+        this.pending.delete(requestId)
+        clearTimeout(timer)
+        reject(error)
+      }
     })
   }
 }

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
-import { darwinProcessIdentities } from './darwin-process-identity.js'
+import { darwinProcessIdentities, darwinProcessIdentity } from './darwin-process-identity.js'
 import { compareProcessStartTimes, processIdentityEnvironment } from './process-start-identity.js'
 
 export interface ProcessIdentity {
@@ -37,7 +37,7 @@ export interface UserDataDirProcessInspection {
 export const PROCESS_TABLE_MAX_BUFFER_BYTES = 64 * 1024 * 1024
 
 export interface ProcessIdentitySnapshot {
-  readonly source: 'system-ps' | 'darwin-same-uid'
+  readonly source: 'system-ps' | 'darwin-same-uid' | 'darwin-target'
   readonly processes: readonly ProcessIdentity[]
 }
 
@@ -47,7 +47,18 @@ export function processIdentitiesAfterPsDenied(error: unknown): ProcessIdentityS
   return { source: 'darwin-same-uid', processes: darwinProcessIdentities(PROCESS_TABLE_MAX_BUFFER_BYTES) }
 }
 
-export function processTable(): ProcessIdentitySnapshot {
+/** Prefer exact same-user PID evidence when a sandbox cannot enumerate the whole process table. */
+export function processIdentityAfterPsDenied(error: unknown, pid: number): ProcessIdentity | undefined {
+  if (process.platform !== 'darwin' || (error as NodeJS.ErrnoException | null)?.code !== 'EPERM') return undefined
+  try {
+    return darwinProcessIdentity(pid)
+  } catch {
+    // Older bundled helpers may only support complete snapshots.
+    return processIdentitiesAfterPsDenied(error)?.processes.find(item => item.pid === pid)
+  }
+}
+
+function processTableFor(targetPid?: number): ProcessIdentitySnapshot {
   if (process.platform === 'win32') return { source: 'system-ps', processes: [] }
   let output: string
   try {
@@ -57,6 +68,18 @@ export function processTable(): ProcessIdentitySnapshot {
       env: processIdentityEnvironment(),
     })
   } catch (error) {
+    if (
+      targetPid !== undefined && process.platform === 'darwin'
+      && (error as NodeJS.ErrnoException | null)?.code === 'EPERM'
+    ) {
+      try {
+        const identity = processIdentityAfterPsDenied(error, targetPid)
+        return { source: 'darwin-target', processes: identity === undefined ? [] : [identity] }
+      } catch {
+        // Missing target evidence is not proof of exit; callers still check the PID.
+        return { source: 'darwin-target', processes: [] }
+      }
+    }
     const fallback = processIdentitiesAfterPsDenied(error)
     if (fallback === undefined) throw error
     return fallback
@@ -72,6 +95,11 @@ export function processTable(): ProcessIdentitySnapshot {
       : []
   })
   return { source: 'system-ps', processes }
+}
+
+/** Full-table consumers never receive a targeted or partial snapshot. */
+export function processTable(): ProcessIdentitySnapshot {
+  return processTableFor()
 }
 
 export function unobservedProcessStatus(source: ProcessIdentitySnapshot['source'], pid: number): 'dead' | 'unknown' {
@@ -95,7 +123,7 @@ export function liveProcessStartedAt(pid: number): string | undefined {
       return undefined
     }
   }
-  return processTable().processes.find(item => item.pid === pid)?.startedAt
+  return processTableFor(pid).processes.find(item => item.pid === pid)?.startedAt
 }
 
 /**
@@ -114,7 +142,7 @@ export function recordedProcessStatus(pid: number, startedAt: string): RecordedP
   }
   let snapshot: ProcessIdentitySnapshot
   try {
-    snapshot = processTable()
+    snapshot = processTableFor(pid)
   } catch {
     return 'unknown'
   }

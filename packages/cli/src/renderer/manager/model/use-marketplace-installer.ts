@@ -2,7 +2,11 @@ import { createContext, createElement, type ReactNode, useContext, useEffect, us
 import type { CordisXPluginLifecycleResultV1 } from '../../../plugin-lifecycle-contracts.js'
 import type { MarketplaceCatalogPlugin } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
+import type { PluginManagementRequest, PluginManagementSnapshot } from '../../../management/contracts.js'
+import type { PluginManagementBinding } from '../../management-binding.js'
+import { productLocale } from '../../ui-copy.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
+import { reviewStandaloneLifecycle } from '../../standalone-lifecycle-review.js'
 import type { NotificationsV1 } from '@cordisx/protocol/notifications/v1'
 import {
   requestPluginAuthorizationV2,
@@ -18,11 +22,33 @@ export interface MarketplaceInstallCopy {
 export interface MarketplaceInstaller {
   readonly available: boolean
   readonly installingIdentity: string | undefined
+  readonly cancellable: boolean
   run(plugin: MarketplaceCatalogPlugin, name: string): Promise<void>
   cancel(): void
 }
 
 const MarketplaceInstallerContext = createContext<MarketplaceInstaller | undefined>(undefined)
+
+function sameSelection(
+  request: PluginManagementRequest,
+  selection: Extract<PluginManagementRequest, { readonly kind: 'plugin-plan-marketplace' }>,
+): boolean {
+  return request.kind === 'plugin-plan-marketplace' && request.pluginId === selection.pluginId
+    && request.sourceUrl === selection.sourceUrl && request.version === selection.version
+    && request.expectedCanonicalSource === selection.expectedCanonicalSource
+    && request.expectedArtifactIntegrity === selection.expectedArtifactIntegrity
+}
+
+function installationError(error: { readonly code: string; readonly message: string }, locale: string): string {
+  if (productLocale(locale) !== 'zh-CN') return error.message
+  const messages: Readonly<Record<string, string>> = {
+    'permission-review-unavailable': '该插件需要权限审核，独立管理页暂不支持此操作。',
+    'catalog-unavailable': '插件商店来源暂时不可用。',
+    'catalog-selection-changed': '插件商店信息已变化，请刷新后重试。',
+    'artifact-inspection-failed': '插件制品下载或校验失败，请重试。',
+  }
+  return messages[error.code] ?? error.message
+}
 
 export function MarketplaceInstallerProvider(
   { installer, children }: { readonly installer: MarketplaceInstaller; readonly children: ReactNode },
@@ -44,9 +70,18 @@ export function useMarketplaceInstaller(
   manager: ManagerModel,
   snapshot: ManagerSnapshot,
   copy: MarketplaceInstallCopy,
-  options: { readonly document?: Document; readonly feedbackActive?: boolean } = {},
+  options: {
+    readonly document?: Document
+    readonly feedbackActive?: boolean
+    readonly standalone?: {
+      readonly binding: PluginManagementBinding
+      readonly snapshot: PluginManagementSnapshot | undefined
+    }
+  } = {},
 ): MarketplaceInstaller {
   const [installingIdentity, setInstallingIdentity] = useState<string | undefined>(undefined)
+  const [cancellable, setCancellable] = useState(false)
+  const cancellableRef = useRef(false)
   const controller = useRef<AbortController | undefined>(undefined)
   const notificationSession = useRef<{ readonly id: number; readonly api: NotificationsV1 } | undefined>(undefined)
   const notificationSequence = useRef(0)
@@ -69,21 +104,117 @@ export function useMarketplaceInstaller(
     }
   }, [feedbackActive, ownerDocument])
   useEffect(() => () => controller.current?.abort(), [])
-  const available = snapshot.pluginLifecycle?.operationsAvailable === true
+  const nativeAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
     && manager.inspectMarketplaceArtifact !== undefined
     && manager.requestPluginLifecycle !== undefined
+  const reviewOptions = manager.permissionReviewInWeb === true
+    ? { sessionOnly: true, requireTrustedEvents: true }
+    : undefined
+  const standalone = options.standalone
+  const management = standalone?.snapshot
+  const lifecycle = snapshot.pluginLifecycle
+  const standaloneAvailable = !!standalone?.binding.planLifecycle && !!standalone.binding.executeLifecycle
+    && !!management && !!lifecycle && management.profileId === lifecycle.profileId
+    && management.runtime.kind === 'active' && management.runtime.runtimeGeneration === lifecycle.runtimeGeneration
+    && management.activationRevision === lifecycle.revision
+    && management.rendererLifecycleAccess === 'session-scoped-v1'
+  const available = nativeAvailable || standaloneAvailable
+  const updateCancellable = (value: boolean) => {
+    cancellableRef.current = value
+    setCancellable(value)
+  }
   return {
     available,
     installingIdentity,
-    cancel: () => controller.current?.abort(),
+    cancellable,
+    cancel: () => {
+      if (cancellableRef.current) controller.current?.abort()
+    },
     run: async (plugin, name) => {
-      if (plugin.artifact === undefined || manager.inspectMarketplaceArtifact === undefined) return
+      if (plugin.artifact === undefined || !available) return
       if (controller.current !== undefined) return
       const request = new AbortController()
       const feedbackSessionId = notificationSession.current?.id
       controller.current = request
       setInstallingIdentity(plugin.identity)
+      updateCancellable(true)
       try {
+        if (!nativeAvailable && standaloneAvailable && standalone && management && lifecycle) {
+          const selection = {
+            kind: 'plugin-plan-marketplace' as const,
+            pluginId: plugin.id,
+            sourceUrl: plugin.feedUrl,
+            version: plugin.version,
+            expectedCanonicalSource: plugin.source,
+            expectedArtifactIntegrity: plugin.artifact.integrity,
+          }
+          const plan = await standalone.binding.planLifecycle!(selection)
+          if (request.signal.aborted) return
+          if (
+            plan.status !== 'planned' || plan.executionRequest?.kind !== 'plugin-execute-plan'
+            || plan.snapshot.profileId !== lifecycle.profileId
+            || plan.snapshot.activationRevision !== lifecycle.revision
+            || plan.snapshot.runtime.kind !== 'active'
+            || plan.snapshot.runtime.runtimeGeneration !== lifecycle.runtimeGeneration
+            || plan.snapshot.rendererLifecycleAccess !== 'session-scoped-v1'
+            || !sameSelection(plan.request, selection)
+          ) {
+            throw new Error(
+              'error' in plan
+                ? installationError(plan.error, snapshot.localization.locale)
+                : 'Plugin installation could not be planned',
+            )
+          }
+          // Once dispatched, the owner may commit; cancellation cannot promise rollback.
+          updateCancellable(false)
+          let result = await standalone.binding.executeLifecycle!(plan.executionRequest, plan.snapshot.revision)
+          if (result.status === 'permission-review-required') {
+            const review = result.permissionPlan
+            if (
+              !standalone.binding.applyLifecycleReview || review.schemaVersion !== 7
+              || !sameSelection(result.request, selection) || review.identity.pluginId !== plugin.id
+              || review.profileId !== lifecycle.profileId
+              || review.binding.runtimeGeneration !== lifecycle.runtimeGeneration
+              || review.binding.requestId !== result.candidateId
+              || result.snapshot.activationRevision !== lifecycle.revision
+            ) throw new Error('Plugin permission review is unavailable')
+            const choice = await reviewStandaloneLifecycle(
+              ownerDocument,
+              { id: plugin.id, name, source: review.identity.source },
+              review,
+              snapshot.permissions.filter(item =>
+                item.identity.id === plugin.id && item.identity.source === review.identity.source
+              ),
+              result.candidateId,
+            )
+            if (!choice || request.signal.aborted) return
+            result = await standalone.binding.applyLifecycleReview(
+              result.candidateId,
+              choice.decision,
+              choice.proof,
+              choice.requestId,
+            )
+          }
+          if (
+            result.status !== 'applied' || result.pendingActivation
+            || !sameSelection(result.request, selection)
+            || !result.snapshot.plugins.some(item =>
+              item.id === plugin.id && item.version === plugin.version && item.enabled
+            )
+          ) {
+            throw new Error(
+              'error' in result
+                ? installationError(result.error, snapshot.localization.locale)
+                : 'Plugin installation was not confirmed',
+            )
+          }
+          const session = notificationSession.current
+          if (session !== undefined && session.id === feedbackSessionId) {
+            session.api.show({ kind: 'marketplace.install.succeeded', type: 'success', message: copy.succeeded })
+          }
+          return
+        }
+        if (manager.inspectMarketplaceArtifact === undefined) throw new Error('Plugin installation is unavailable')
         const inspection = await manager.inspectMarketplaceArtifact({
           schemaVersion: plugin.schemaVersion as 3 | 4 | 5 | 6 | 7 | 8,
           pluginId: plugin.id,
@@ -119,6 +250,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV7.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV7(decision)
@@ -133,6 +265,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV4.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV4(decision)
@@ -147,6 +280,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV2.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV2(decision)
@@ -179,6 +313,7 @@ export function useMarketplaceInstaller(
         if (controller.current === request) {
           controller.current = undefined
           setInstallingIdentity(undefined)
+          updateCancellable(false)
         }
       }
     },

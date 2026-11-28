@@ -54,18 +54,21 @@ function verifiedProvider(value: Readonly<Record<string, unknown>>): Readonly<Re
 export class RemoteTerminalProviderClient {
   readonly #listeners = new Set<() => void>()
   readonly #leases = new Set<RemotePreparedProvider>()
+  readonly #retirements = new Set<Promise<void>>()
   readonly #waiters = new Set<AbortController>()
   readonly #known = new Set<string>()
   #providers: readonly NativeModelProviderCatalogEntry[] = []
   #poll: ReturnType<typeof setInterval>
   #closed = false
-  #read: Promise<void> | undefined
+  #read: { epoch: number; promise: Promise<void> } | undefined
   #request: Promise<(input: TerminalProviderRequest) => Promise<TerminalProviderResult>>
   #startup: Extract<TerminalProviderResult, { kind: 'list' }>['startup']
   #state: 'pending' | 'available' | 'unavailable' = 'pending'
+  #epoch = 0
+  #suspended = false
 
   constructor(
-    source: ExistingTerminalProviderSource,
+    private readonly source: ExistingTerminalProviderSource,
     private readonly options: {
       readonly connect?: typeof connectExistingTerminalProvider
       readonly now?: () => number
@@ -96,13 +99,16 @@ export class RemoteTerminalProviderClient {
   }
 
   refresh(): Promise<void> {
-    if (this.#read) return this.#read
+    const epoch = this.#epoch
+    if (this.#read?.epoch === epoch) return this.#read.promise
     const previous = JSON.stringify([this.#state, this.#providers, this.#startup])
-    this.#read = (async () => {
+    const promise = (async () => {
       try {
-        if (this.#closed) throw new Error('Remote provider consumer closed')
+        if (this.#closed || this.#suspended) throw new Error('Remote provider consumer unavailable')
         const result = await (await this.#request)({ kind: 'list' })
-        if (this.#closed || result.kind !== 'list') throw new Error('Remote catalog unavailable')
+        if (this.#closed || this.#suspended || this.#epoch !== epoch || result.kind !== 'list') {
+          throw new Error('Remote catalog unavailable')
+        }
         const providers = result.providers.filter(provider => provider.managed)
         const ids = new Set<string>()
         const projection = providers.map(provider => {
@@ -134,12 +140,14 @@ export class RemoteTerminalProviderClient {
         this.#startup = result.startup
         this.#state = 'available'
       } catch (error) {
-        this.#providers = []
-        this.#startup = undefined
-        this.#state = 'unavailable'
+        if (this.#epoch === epoch && !this.#suspended) {
+          this.#providers = []
+          this.#startup = undefined
+          this.#state = 'unavailable'
+        }
         throw error
       } finally {
-        if (JSON.stringify([this.#state, this.#providers, this.#startup]) !== previous) {
+        if (this.#epoch === epoch && JSON.stringify([this.#state, this.#providers, this.#startup]) !== previous) {
           for (const listener of this.#listeners) {
             try {
               listener()
@@ -150,9 +158,46 @@ export class RemoteTerminalProviderClient {
         }
       }
     })().finally(() => {
-      this.#read = undefined
+      if (this.#read?.epoch === epoch) this.#read = undefined
     })
-    return this.#read
+    this.#read = { epoch, promise }
+    return promise
+  }
+
+  /** Retire old leases and in-flight results; no request is replayed to a replacement owner. */
+  suspend(): void {
+    if (this.#closed) return
+    this.#epoch++
+    this.#suspended = true
+    this.#providers = []
+    this.#startup = undefined
+    this.#state = 'unavailable'
+    for (const waiter of this.#waiters) waiter.abort()
+    for (const lease of this.#leases) {
+      const retirement = lease.dispose().finally(() => this.#retirements.delete(retirement))
+      this.#retirements.add(retirement)
+    }
+    for (const listener of this.#listeners) {
+      try {
+        listener()
+      } catch { /* Subscriber isolation. */ }
+    }
+  }
+
+  async reconnect(expectedOwner: NonNullable<ExistingTerminalProviderSource['expectedOwner']>): Promise<void> {
+    if (this.#closed || !this.#suspended) throw new Error('Remote provider consumer is not suspended')
+    const epoch = ++this.#epoch
+    const request = await (this.options.connect ?? connectExistingTerminalProvider)({ ...this.source, expectedOwner })
+    if (this.#closed || this.#epoch !== epoch) throw new Error('Remote provider reconnect superseded')
+    this.#request = Promise.resolve(request)
+    this.#suspended = false
+    try {
+      await this.refresh()
+      if (this.#closed || this.#epoch !== epoch) throw new Error('Remote provider reconnect superseded')
+    } catch (error) {
+      if (this.#epoch === epoch) this.suspend()
+      throw error
+    }
   }
 
   async validateSelection(selection: { providerId: string; model: string }): Promise<boolean> {
@@ -171,12 +216,14 @@ export class RemoteTerminalProviderClient {
     selection: { providerId: string; model: string },
     signal?: AbortSignal,
   ): Promise<RemotePreparedProvider> {
+    const epoch = this.#epoch
     const waiter = new AbortController()
     const waiterId = randomUUID()
     const now = this.options.now ?? Date.now
     let lease: RemotePreparedProvider | undefined
     let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
     const request = await this.#request
+    if (this.#closed || this.#suspended || this.#epoch !== epoch) throw new Error('Remote provider unavailable')
     const cancel = () => {
       waiter.abort()
     }
@@ -186,7 +233,9 @@ export class RemoteTerminalProviderClient {
     }, { once: true })
     signal?.addEventListener('abort', cancel, { once: true })
     try {
-      if (signal?.aborted || this.#closed) throw new Error('Remote provider preparation cancelled')
+      if (signal?.aborted || this.#closed || this.#suspended || this.#epoch !== epoch) {
+        throw new Error('Remote provider preparation cancelled')
+      }
       if (!await this.validateSelection(selection)) throw new Error('Remote selection unavailable')
       waiter.signal.throwIfAborted()
       const result = await request({
@@ -199,7 +248,7 @@ export class RemoteTerminalProviderClient {
       prepared = result
       if (
         result.providerId !== selection.providerId || result.model !== selection.model || !result.leaseId
-        || this.#closed || waiter.signal.aborted || signal?.aborted
+        || this.#closed || this.#suspended || this.#epoch !== epoch || waiter.signal.aborted || signal?.aborted
       ) throw new Error('Remote provider acknowledgement stale')
       const provider = verifiedProvider(result.provider)
       let expires = now() + 60_000
@@ -209,9 +258,15 @@ export class RemoteTerminalProviderClient {
         if (renewing) return renewing
         renewing = (async () => {
           try {
-            if (retired || this.#closed || expires <= now() || !await this.validateSelection(selection)) return false
+            if (
+              retired || this.#closed || this.#suspended || this.#epoch !== epoch || expires <= now()
+              || !await this.validateSelection(selection)
+            ) return false
             const ack = await request({ kind: 'renew', leaseId: result.leaseId })
-            if (retired || this.#closed || expires <= now() || ack.kind !== 'renewed') return false
+            if (
+              retired || this.#closed || this.#suspended || this.#epoch !== epoch
+              || expires <= now() || ack.kind !== 'renewed'
+            ) return false
             expires = now() + 60_000
             return true
           } catch {
@@ -260,11 +315,12 @@ export class RemoteTerminalProviderClient {
   }
 
   async close(): Promise<void> {
+    this.suspend()
     this.#closed = true
     clearInterval(this.#poll)
     this.#providers = []
     this.#listeners.clear()
     for (const waiter of this.#waiters) waiter.abort()
-    await Promise.allSettled([...this.#leases].map(lease => lease.dispose()))
+    await Promise.allSettled([...this.#retirements, ...[...this.#leases].map(lease => lease.dispose())])
   }
 }

@@ -2,11 +2,45 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CHANNEL_COMMIT = '9ba6e842a5c82314335ad12b005b61c10fd434f7'
+const CHANNEL_COMMIT = '3b8b7af13c78778e32ac78aa614d43d229acbadc'
 const CHANNEL_DEPENDENCY = `github:cordisx/plugin-channel#${CHANNEL_COMMIT}`
 
 export function enableInstalledChannel(config) {
   config.plugins.push({ id: 'channel', entry: 'cordisx:channel', enabled: true, config: {} })
+}
+
+/** Check the graph and stylesheet actually shipped inside the installed Host. */
+export async function verifyBundledChannelBrowserGraph(packageRoot) {
+  const descriptor = JSON.parse(await readFile(path.join(packageRoot, 'cordisx-package.json'), 'utf8'))
+  const graphRoot = path.join(packageRoot, 'dist/browser')
+  const graph = JSON.parse(await readFile(path.join(graphRoot, 'artifact.json'), 'utf8'))
+  if (
+    descriptor.entry !== './dist/browser/module.js' || graph.contract !== 'cordisx.plugin-generation-artifact/v1'
+    || graph.entry !== './module.js' || !Array.isArray(graph.files) || graph.files.length === 0
+    || graph.files.length > 256 || !Array.isArray(graph.initialStyles) || graph.initialStyles.length === 0
+  ) throw new Error('installed Channel browser graph is incomplete')
+  const files = new Map()
+  for (const file of graph.files) {
+    if (
+      !file || typeof file.path !== 'string' || !/^\.\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/u.test(file.path)
+      || file.path.slice(2).split('/').some(segment => segment === '.' || segment === '..')
+      || files.has(file.path) || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0
+      || typeof file.digest !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(file.digest)
+    ) throw new Error('installed Channel browser graph is invalid')
+    files.set(file.path, file)
+  }
+  if (
+    files.get(graph.entry)?.kind !== 'module'
+    || graph.initialStyles.some(style => typeof style !== 'string' || files.get(style)?.kind !== 'stylesheet')
+  ) throw new Error('installed Channel browser graph is incomplete')
+  for (const file of files.values()) {
+    const data = await readFile(path.join(graphRoot, file.path.slice(2)))
+    if (
+      data.byteLength !== file.byteLength || `sha256:${createHash('sha256').update(data).digest('hex')}` !== file.digest
+    ) {
+      throw new Error('installed Channel browser graph failed integrity readback')
+    }
+  }
 }
 
 /** Verify the installed convenience alias without assuming npm's dependency layout. */
@@ -29,5 +63,13 @@ export async function verifyInstalledChannel(input) {
     || createHash('sha256').update(artwork).digest('hex')
       !== '8a989a7a2c83d66d4b10381e77bf596222f8301980518a86b4fbbcad006c1e0d'
   ) throw new Error('installed Channel must carry the selected brand artwork from its pinned source')
+  await verifyBundledChannelBrowserGraph(packageRoot)
+  const archiveRoot = path.dirname(packageRoot)
+  const archive = await readFile(path.join(archiveRoot, 'channel.archive'))
+  const archiveMetadata = JSON.parse(await readFile(path.join(archiveRoot, 'channel-archive.json'), 'utf8'))
+  if (
+    archiveMetadata.source !== CHANNEL_DEPENDENCY
+    || archiveMetadata.integrity !== `sha256:${createHash('sha256').update(archive).digest('hex')}`
+  ) throw new Error('installed Channel archive failed source or integrity readback')
   return config
 }

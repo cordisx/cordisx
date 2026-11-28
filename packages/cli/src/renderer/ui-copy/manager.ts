@@ -100,6 +100,12 @@ export const PERMISSION_COPY = {
     en: 'Permission service is currently unavailable.',
     'zh-CN': '权限服务当前不可用。',
   },
+  'permission.read-only': { en: 'Permissions are read-only here.', 'zh-CN': '此处暂时只能查看权限。' },
+  'permission.read-only-web': {
+    en:
+      'Permissions are read-only here. If CordisX Web is enabled, eligible Manager interface permissions can be reviewed there.',
+    'zh-CN': '此处暂时只能查看权限。服务启用 CordisX Web 时，可在其中确认受支持的管理界面权限。',
+  },
   'permission.review': { en: 'Review permissions', 'zh-CN': '确认权限' },
   'permission.cancel': { en: 'Cancel', 'zh-CN': '取消' },
   'permission.deny': { en: 'Deny', 'zh-CN': '拒绝' },

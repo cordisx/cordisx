@@ -874,6 +874,7 @@ describe('Manager model transfer', () => {
       subscribe: () => () => {},
       refresh: async () => {},
       snapshot: () => legacySnapshot,
+      hasLiveSource: () => false,
     } as unknown as ModelProviderRegistry
     try {
       await managedHost.client.refresh()

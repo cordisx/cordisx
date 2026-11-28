@@ -205,9 +205,9 @@ export class NavigationRegistryBase {
   }
 
   protected async reconcileGeneration(): Promise<void> {
-    if (this.managerSettingsMount !== undefined) await this.unmountManagerSettings()
-    if (this.managerContentMount !== undefined) await this.unmountManagerContent()
-    if (this.historyProjectionStarted) await this.applyHistorySnapshot(this.history.snapshot())
+    // Keep unrelated pages and their drafts mounted. A replaced route or page
+    // is still retired by the exact-record checks in dependency reconciliation.
+    await this.reconcileDependencies()
   }
 
   protected routeError(record: RouteRecord): string | undefined {
@@ -823,8 +823,8 @@ export class NavigationRegistryBase {
         managed.pageId,
       )
       if (
-        current === undefined || resolution.state !== 'available'
-        || this.pages.get(managed.owner, managed.page.metadata.id) === undefined
+        current !== managed.route || resolution.state !== 'available'
+        || this.pages.get(managed.owner, managed.page.metadata.id) !== managed.page
         || (retentionAccess !== undefined && !retentionAccess.authorized)
       ) {
         await this.unmountManagerSettings()
@@ -843,8 +843,8 @@ export class NavigationRegistryBase {
         managerContent.pageId,
       )
       if (
-        current === undefined || resolution.state !== 'available'
-        || this.pages.get(managerContent.owner, managerContent.page.metadata.id) === undefined
+        current !== managerContent.route || resolution.state !== 'available'
+        || this.pages.get(managerContent.owner, managerContent.page.metadata.id) !== managerContent.page
         || (retentionAccess !== undefined && !retentionAccess.authorized)
       ) {
         await this.unmountManagerContent()

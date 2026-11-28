@@ -4,7 +4,10 @@ import type { ManagedServiceProjectionV1 } from '@cordisx/protocol/managed-servi
 import { describe, expect, it } from 'vitest'
 import { ManagedServiceStartupAuthority } from '../packages/cli/src/launcher/managed-service-startup-authority.js'
 import type { StartupPluginAdmission } from '../packages/cli/src/launcher/managed-service-startup-admission.js'
-import { startupProviderAdmission } from '../packages/cli/src/launcher/startup-provider-admission.js'
+import {
+  startupProviderAdmission,
+  startupTerminalRequests,
+} from '../packages/cli/src/launcher/startup-provider-admission.js'
 import {
   draftAction,
   draftScope,
@@ -194,6 +197,20 @@ describe('startup authority', () => {
     const native = startupProviderAdmission(authority)
     expect(native.availability('provider', 'scoped/model')).toEqual({ available: true })
     expect(native.availability('provider', 'model')).toMatchObject({ reason: 'model-unavailable' })
+    await expect(native.wait('provider', 'scoped/model')).resolves.toEqual({ status: 'ready' })
+    await expect(native.wait('provider', 'model')).resolves.toMatchObject({
+      status: 'unavailable',
+      target: ref,
+      reason: 'model-unavailable',
+    })
+    const requests = startupTerminalRequests(authority, () => undefined)
+    await expect(requests({ kind: 'wait', providerId: 'provider', model: 'scoped/model' })).resolves.toEqual({
+      kind: 'ready',
+    })
+    await expect(requests({ kind: 'wait', providerId: 'provider', model: 'model' })).resolves.toMatchObject({
+      kind: 'unavailable',
+      startup: { reason: 'model-unavailable', target: ref },
+    })
     await reporter.report({ ...report(2), state: 'failed' })
     expect(authority.availability(ref)).toMatchObject({ reason: 'failed' })
     await reporter.report(report(3))

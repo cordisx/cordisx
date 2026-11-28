@@ -1,0 +1,42 @@
+.cxr-root[data-manager-surface="standalone"] {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--cx-surface, #17191d);
+}
+.cxr-standalone-layer {
+  width: 100%;
+  height: 100%;
+}
+.cxr-standalone-layer > .cxr-dialog {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.cxr-standalone-loading {
+  display: grid;
+  gap: 14px;
+  padding-block: 4px;
+}
+.cxr-standalone-loading > span {
+  display: block;
+  width: min(18rem, 100%);
+  height: 12px;
+  border-radius: 6px;
+  background: var(--cx-border);
+}
+.cxr-standalone-loading > span:first-child {
+  width: min(26rem, 100%);
+  height: 36px;
+}
+.cxr-standalone-loading > span:last-child {
+  width: min(13rem, 80%);
+}
+.cxr-standalone-unavailable {
+  margin: 0;
+  color: var(--cx-muted);
+}

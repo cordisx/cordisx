@@ -216,6 +216,35 @@ describe('owner-bound managed browser console RPC', () => {
     await rpc.dispose()
   })
 
+  it('keeps separate browser console leases for different documents', async () => {
+    const f = fixture()
+    const secondRoute = {
+      origin: 'http://second.cordisx-console.localhost:18203',
+      admit: vi.fn(() => true),
+      dispose: vi.fn(),
+    } as const
+    f.boundary.open.mockReturnValueOnce(f.route).mockReturnValueOnce(secondRoute)
+    const rpc = handler(f.broker, f.boundary)
+    const first = new AbortController()
+    const second = new AbortController()
+    await expect(rpc.handle(owner, issue, first.signal)).resolves.toMatchObject({ status: 'available' })
+    await expect(
+      rpc.handle(
+        owner,
+        { ...issue, requestId: 'other', request: { ...issue.request, viewId: 'other' } },
+        second.signal,
+      ),
+    )
+      .resolves.toMatchObject({ status: 'available', origin: secondRoute.origin })
+    expect(f.route.dispose).not.toHaveBeenCalled()
+    first.abort()
+    expect(f.route.dispose).toHaveBeenCalledOnce()
+    expect(secondRoute.dispose).not.toHaveBeenCalled()
+    second.abort()
+    expect(secondRoute.dispose).toHaveBeenCalledOnce()
+    await rpc.dispose()
+  })
+
   it('publishes only a browser entry on the adopted production UI route when no native mount exists', async () => {
     const f = fixture()
     const observation = createManagedServiceUIBridgeHandler({

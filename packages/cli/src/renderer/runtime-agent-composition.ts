@@ -121,6 +121,7 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
+import { installStandaloneManagerAdapter } from './standalone-manager-adapter.js'
 import { CodexNativeRouteObserver } from './adapter/native-route-observer.js'
 import {
   createHostManagerSelfConfigurationNavigationOptions,
@@ -233,6 +234,7 @@ import {
   type ChannelManagerServiceInput,
   CordisXChannelManagerService,
 } from './channel-manager.js'
+import { CordisXChannelManagerPresentationService } from './channel-manager-presentation.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -501,13 +503,25 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     await runtimeScope.iconThemeFiber
     runtimeScope.visualFiber = runtimeScope.ctx.plugin(CordisXVisualService)
     await runtimeScope.visualFiber
+    const ChannelManagerService = runtimeScope.metadata()!.hostKind === 'standalone'
+      ? CordisXChannelManagerPresentationService
+      : CordisXChannelManagerService
     runtimeScope.channelManagerFiber =
-      runtimeScope.metadata()!.channelManager === undefined && runtimeScope.serviceConfigBridge()! === undefined
-        ? runtimeScope.ctx.plugin(CordisXChannelManagerService)
+      runtimeScope.metadata()!.hostKind !== 'standalone' && runtimeScope.metadata()!.channelManager === undefined
+        && runtimeScope.serviceConfigBridge()! === undefined
+        ? runtimeScope.ctx.plugin(ChannelManagerService)
         : runtimeScope.ctx.plugin(
-          CordisXChannelManagerService,
+          ChannelManagerService,
           {
             profileId: runtimeScope.metadata()!.profileId,
+            ...(runtimeScope.metadata()!.hostKind === 'standalone'
+              ? {
+                presentationMode: runtimeScope.serviceConfigBridge() !== undefined
+                    && runtimeScope.metadata()!.channelManager?.service.writable === true
+                  ? 'configuration-only' as const
+                  : 'snapshot-only' as const,
+              }
+              : {}),
             document,
             broker: runtimeScope.broker()!,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
@@ -520,17 +534,38 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
             ...(runtimeScope.metadata()!.channelManager === undefined
               ? {}
               : { projection: runtimeScope.metadata()!.channelManager }),
-            ...(runtimeScope.serviceConfigBridge()! === undefined ? {} : {
-              serviceConfig: {
-                list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
-                mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
-              },
-            }),
-            ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
-              credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
-            }),
+            ...(runtimeScope.serviceConfigBridge()! === undefined
+                || runtimeScope.metadata()!.hostKind === 'standalone'
+                  && runtimeScope.metadata()!.channelManager?.service.writable !== true
+              ? {}
+              : {
+                serviceConfig: {
+                  list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
+                  mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
+                },
+              }),
+            ...(runtimeScope.channelCredentialBridge()! === undefined
+                || runtimeScope.metadata()!.hostKind === 'standalone'
+                  && runtimeScope.metadata()!.channelManager?.service.writable !== true
+              ? {}
+              : {
+                credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
+              }),
             ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
-              actions: { run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input) },
+              actions: {
+                ...(runtimeScope.metadata()!.hostKind === 'standalone'
+                  ? {
+                    snapshotOnly: true as const,
+                    ...(runtimeScope.metadata()!.channelManager?.service.connectionControl === 'enable-disable'
+                      ? { connectionControl: 'enable-disable' as const }
+                      : {}),
+                    ...(runtimeScope.metadata()!.channelManager?.service.connectionReconnect === true
+                      ? { connectionReconnect: true as const }
+                      : {}),
+                  }
+                  : {}),
+                run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input),
+              },
             }),
           } satisfies ChannelManagerServiceInput,
         )
@@ -543,6 +578,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       broker: runtimeScope.broker()!,
       console: runtimeScope.pluginConsole()!,
       executionPlatform: runtimeScope.metadata()!.executionPlatform,
+      ...(runtimeScope.metadata()!.hostKind === 'standalone' && runtimeScope.ownerDocumentBroker()!.modelsAvailable()
+        ? {
+          listOwnerModels: (identity, moduleGeneration, requestId, input) =>
+            runtimeScope.ownerDocumentBroker()!.listModels(identity, moduleGeneration, requestId, input),
+        }
+        : {}),
     })
     await runtimeScope.platformFiber
     await runtimeScope.ctx.plugin(CordisXAgentContextService, {
@@ -766,7 +807,14 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       runtimeScope.slotService.subscribeInternal(runtimeScope.notifyFrom()!('surfaces')),
       runtimeScope.iconThemeRegistry()!.subscribe(runtimeScope.notifyFrom()!('icon-themes')),
     )
-    runtimeScope.adapterHandle = runtimeScope.metadata()!.hostKind === 'playground'
+    runtimeScope.adapterHandle = runtimeScope.metadata()!.managerPresentationMode === 'standalone'
+      ? installStandaloneManagerAdapter(
+        runtimeScope.routeService,
+        runtimeScope.extensionPointDescriptors()!,
+        runtimeScope.slotService,
+        runtimeScope.generation()!,
+      )
+      : runtimeScope.metadata()!.hostKind === 'playground'
       ? installPlaygroundAdapter(
         document,
         runtimeScope.slotService,
@@ -871,8 +919,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     const pluginManagement = runtimeScope.pluginManagementBinding()
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
-      nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
-      presentationMode: runtimeScope.metadata()!.managerPresentationMode === 'workspace' ? 'workspace' : 'overlay',
+      ...(runtimeScope.metadata()!.hostKind === 'standalone'
+        ? { standaloneStyleHref: '/manager-host.css' as const }
+        : { nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!) }),
+      presentationMode: runtimeScope.metadata()!.managerPresentationMode ?? 'overlay',
       ...(runtimeScope.metadata()!.nativeAppVersion === undefined
         ? {}
         : { nativeAppVersion: runtimeScope.metadata()!.nativeAppVersion! }),
@@ -884,7 +934,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
         }
         : {}),
     })
-    if (runtimeScope.metadata()!.hostKind !== 'playground') {
+    if (runtimeScope.metadata()!.hostKind !== 'playground' && runtimeScope.metadata()!.hostKind !== 'standalone') {
       const native = globalThis as typeof globalThis & {
         __cordisxNativeProviderOwner?: NativeProviderSelectionOwner
         __cordisxNativeProviderCommandChannel?: NativeProviderSelectionCommandChannel

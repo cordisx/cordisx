@@ -20,7 +20,10 @@ import type {
 import { HostThemeProjection } from '../host-theme.js'
 import { PermissionAuthorizationViewModel } from '../../permission-authorization-view-model.js'
 import type { PermissionAuthorizationProjectionInput } from '../../permission-authorization-view-model.js'
-import { BrowserPermissionAuthorizationDialog } from '../permission-authorization-dialog.js'
+import {
+  BrowserPermissionAuthorizationDialog,
+  type PermissionAuthorizationDialogOptions,
+} from '../permission-authorization-dialog.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
   CordisXPermissionAuthorizationDecisionV2,
@@ -57,8 +60,14 @@ export interface PermissionPolicyStore {
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void | Promise<void>
   readV2?(): readonly CordisXPermissionPolicyRecordV2[]
   writeV2?(records: readonly CordisXPermissionPolicyRecordV2[]): void | Promise<void>
+  /** Owner-attached only: acknowledge the exact in-flight generic policy write. */
+  canAdoptStandaloneV2?(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean
+  markAdoptedStandaloneV2?(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean
   readV3?(): readonly CordisXPermissionPolicyRecordV3[]
   writeV3?(records: readonly CordisXPermissionPolicyRecordV3[]): void | Promise<void>
+  /** Standalone only: bind the writer's adoption to its exact in-flight request. */
+  canAdoptStandaloneV3?(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean
+  markAdoptedStandaloneV3?(requestId: string, records: readonly CordisXPermissionPolicyRecordV3[]): boolean
   readV4?(): readonly CordisXPermissionPolicyRecordV4[]
   writeV4?(records: readonly CordisXPermissionPolicyRecordV4[]): void | Promise<void>
   /** One atomic write for mixed-version records in the single profile ledger. */
@@ -275,6 +284,8 @@ export interface PermissionPrompt {
 }
 
 export interface PermissionAuthorizationPromptV2 {
+  /** A Host-owned review may keep a new DOM lease hidden until its final fence. */
+  isDomLeaseVisible?(identity: CordisXPluginIdentity, pointId: string, moduleGeneration?: string): boolean
   requestUsageV6?(
     plan: UsagePermissionAuthorizationPlanV6,
     identity: CordisXPluginIdentity,
@@ -288,6 +299,10 @@ export interface PermissionAuthorizationPromptV2 {
   request(
     plan: CordisXPermissionAuthorizationPlanV2,
     identity: CordisXPluginIdentity,
+    context?: {
+      readonly ownerReviewEligible: boolean
+      readonly ownerReviewArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
+    },
   ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined>
   requestV3?(
     plan: CordisXPermissionAuthorizationPlanV3,
@@ -306,7 +321,10 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
   private queue = Promise.resolve()
   private readonly theme: HostThemeProjection
 
-  constructor(private readonly document: Document | undefined = globalThis.document) {
+  constructor(
+    private readonly document: Document | undefined = globalThis.document,
+    private readonly options: { readonly sessionOnly?: boolean; readonly requireTrustedEvents?: boolean } = {},
+  ) {
     this.theme = new HostThemeProjection(document ?? globalThis.document)
   }
 
@@ -375,23 +393,31 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
       once.type = 'button'
       once.dataset.permissionDecision = 'allow-once'
       once.textContent = '仅此次允许'
-      once.addEventListener('click', () => finish('allow-once'), { once: true })
+      once.addEventListener('click', event => {
+        if (this.options.requireTrustedEvents && !event.isTrusted) return
+        finish('allow-once')
+      })
       const allow = document.createElement('button')
       allow.type = 'button'
       allow.dataset.permissionDecision = 'allow'
       allow.dataset.primary = 'true'
       allow.textContent = '始终允许'
-      allow.addEventListener('click', () => finish('allow'), { once: true })
+      allow.addEventListener('click', event => {
+        if (this.options.requireTrustedEvents && !event.isTrusted) return
+        finish('allow')
+      })
       overlay.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return
         event.preventDefault()
         finish('deny')
       })
-      actions.append(deny, once, allow)
+      actions.append(deny, once)
+      if (!this.options.sessionOnly) actions.append(allow)
       dialog.append(title, description, reasonNode, actions)
       overlay.append(dialog)
       document.body.append(overlay)
-      allow.focus()
+      if (this.options.sessionOnly) once.focus()
+      else allow.focus()
     })
   }
 }
@@ -404,6 +430,7 @@ export type PermissionAuthorizationProjectionFactoryV2 = (
 /** Host-owned v2 modal; plugin text is already validated and only reaches text nodes. */
 export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthorizationPromptV2 {
   private readonly dialog: BrowserPermissionAuthorizationDialog
+  private readonly sessionOnly: boolean
 
   constructor(
     document: Document = globalThis.document,
@@ -414,17 +441,22 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
       scope: scope => Object.keys(scope).length === 0 ? 'Host default scope' : JSON.stringify(scope),
       requestSource: identity.source,
     }),
+    options: PermissionAuthorizationDialogOptions & { readonly sessionOnly?: boolean } = {},
   ) {
-    this.dialog = new BrowserPermissionAuthorizationDialog(document)
+    this.dialog = new BrowserPermissionAuthorizationDialog(document, undefined, options)
+    this.sessionOnly = options.sessionOnly === true
   }
 
   async request(
     plan: CordisXPermissionAuthorizationPlanV2,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV2 | undefined> {
-    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
-      project: () => this.project(plan, identity),
-    })
+    const result = await this.dialog.show(
+      new PermissionAuthorizationViewModel(plan, { sessionOnly: this.sessionOnly }),
+      {
+        project: () => this.project(plan, identity),
+      },
+    )
     return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
   }
 
@@ -432,9 +464,12 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
     plan: CordisXPermissionAuthorizationPlanV3,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV3 | undefined> {
-    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
-      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
-    })
+    const result = await this.dialog.show(
+      new PermissionAuthorizationViewModel(plan, { sessionOnly: this.sessionOnly }),
+      {
+        project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+      },
+    )
     return result.status === 'confirmed' && result.decision.schemaVersion === 3 ? result.decision : undefined
   }
 
@@ -442,9 +477,12 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
     plan: CordisXPermissionAuthorizationPlanV4,
     identity: CordisXPluginIdentity,
   ): Promise<CordisXPermissionAuthorizationDecisionV4 | undefined> {
-    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
-      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
-    })
+    const result = await this.dialog.show(
+      new PermissionAuthorizationViewModel(plan, { sessionOnly: this.sessionOnly }),
+      {
+        project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+      },
+    )
     return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
   }
 
@@ -452,9 +490,12 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
     plan: UsagePermissionAuthorizationPlanV6,
     identity: CordisXPluginIdentity,
   ): Promise<UsagePermissionAuthorizationDecisionV6 | undefined> {
-    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
-      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
-    })
+    const result = await this.dialog.show(
+      new PermissionAuthorizationViewModel(plan, { sessionOnly: this.sessionOnly }),
+      {
+        project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+      },
+    )
     return result.status === 'confirmed' && result.decision.schemaVersion === 6 ? result.decision : undefined
   }
   cancelUsageV6(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
@@ -465,9 +506,12 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
     plan: VisualPermissionAuthorizationPlanV5,
     identity: CordisXPluginIdentity,
   ): Promise<VisualPermissionAuthorizationDecisionV5 | undefined> {
-    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
-      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
-    })
+    const result = await this.dialog.show(
+      new PermissionAuthorizationViewModel(plan, { sessionOnly: this.sessionOnly }),
+      {
+        project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+      },
+    )
     return result.status === 'confirmed' && result.decision.schemaVersion === 5 ? result.decision : undefined
   }
   cancelVisualV5(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {

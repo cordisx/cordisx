@@ -11,6 +11,7 @@ import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } f
 import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
+import type { ModelServicesClient } from '../model-service-contracts.js'
 import type { StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/startup/v1'
 import { type ModelStartupState, ModelStartupStore, startupExecutionAvailable } from './model-startup-store.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
@@ -20,6 +21,7 @@ import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provi
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
+  readonly readOnly?: boolean
   readonly managementOwner?: 'remote'
   /** Exact Host-private management identity for plugin-owned catalog sources. */
   readonly managementBindingRef?: string
@@ -41,6 +43,7 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
   readonly startup?: StartupProjectionV1
   readonly models: readonly HostModelProviderModel[]
+  readonly readOnly?: boolean
   readonly selectorBrand?: ProviderBrandChoice
   readonly providerFavorite?: boolean
 }
@@ -59,21 +62,47 @@ export interface ModelProviderSnapshot {
   readonly error?: string
 }
 
+interface ProviderLoadResult {
+  readonly providers: readonly NativeProviderProjection[]
+  readonly error?: string
+}
+
 export function nativeModelProviderRegistry(managed?: {
   nativeProviders(): Promise<readonly NativeProviderProjection[]>
+}, standalone?: {
+  nativeProviders(): Promise<readonly NativeProviderProjection[]>
+  dispose(): void
 }): ModelProviderRegistry {
   const channel = (globalThis as typeof globalThis & {
     __cordisxNativeProviderCommandChannel?:
       import('./native-provider-selection-client.js').NativeProviderSelectionCommandChannel
   }).__cordisxNativeProviderCommandChannel
-  const registry = new ModelProviderRegistry(async () =>
+  const loadExisting = async () =>
     channel?.catalogSnapshotRead !== undefined
       ? (await channel.catalogSnapshotRead()).providers
       : channel?.catalogRead === undefined
       ? await managed?.nativeProviders() ?? []
       : await channel.catalogRead()
-  )
-  if (channel?.catalogSubscribe) registry.connectSource(channel.catalogSubscribe)
+  const registry = new ModelProviderRegistry(async () => {
+    if (!standalone) return await loadExisting()
+    const [base, catalog] = await Promise.allSettled([loadExisting(), standalone.nativeProviders()])
+    const existing = base.status === 'fulfilled' ? base.value : []
+    const configured = catalog.status === 'fulfilled' ? catalog.value : []
+    const existingIds = new Set(existing.map(provider => provider.providerId))
+    return {
+      providers: [...existing, ...configured.filter(provider => !existingIds.has(provider.providerId))],
+      ...(base.status === 'rejected' || catalog.status === 'rejected' ? { error: 'provider-catalog-unavailable' } : {}),
+    }
+  })
+  if (channel?.catalogSubscribe || standalone) {
+    registry.connectSource(listener => {
+      const disconnect = channel?.catalogSubscribe?.(listener)
+      return () => {
+        disconnect?.()
+        standalone?.dispose()
+      }
+    })
+  }
   if (channel?.catalogManagementRead && channel.catalogManagementSubscribe && channel.catalogManagementCommand) {
     registry.management = new ModelCatalogClient({
       catalogManagementRead: () => channel.catalogManagementRead!(),
@@ -174,6 +203,17 @@ export class ModelProviderRegistry {
   private disconnectManagement: (() => void) | undefined
   private disconnectSource?: () => void
   private sourceReconcile?: ReturnType<typeof setInterval>
+  private standaloneServices?: ModelServicesClient & { dispose(): void }
+
+  get standaloneModelServices(): ModelServicesClient | undefined {
+    return this.standaloneServices
+  }
+
+  attachStandaloneModelServices(client: ModelServicesClient & { dispose(): void }): void {
+    if (this.disposed) return client.dispose()
+    this.standaloneServices?.dispose()
+    this.standaloneServices = client
+  }
 
   hasStartupProvider(providerId: string): boolean {
     return this.startupProviderIds.has(providerId)
@@ -239,7 +279,7 @@ export class ModelProviderRegistry {
   private readonly disconnectVisibility: (() => void) | undefined
 
   constructor(
-    private readonly load: () => Promise<readonly NativeProviderProjection[]>,
+    private readonly load: () => Promise<readonly NativeProviderProjection[] | ProviderLoadResult>,
     private readonly visibility?: GenerationVisibilityCoordinator,
   ) {
     this.disconnectVisibility = visibility?.connect({ notify: () => this.emit() })
@@ -256,12 +296,17 @@ export class ModelProviderRegistry {
     const revision = ++this.revision
     this.emit(!this.hasSnapshot, this.state.error ?? null, true)
     try {
-      const projections = await this.load()
+      const result = await this.load()
+      const projections: readonly NativeProviderProjection[] = Array.isArray(result)
+        ? result as readonly NativeProviderProjection[]
+        : (result as ProviderLoadResult).providers
+      const sourceError = Array.isArray(result) ? null : (result as ProviderLoadResult).error ?? null
       if (this.disposed || revision !== this.revision) return
       this.projections = projections.map(provider =>
         Object.freeze({
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
+          ...(provider.readOnly === true ? { readOnly: true } : {}),
           ...(provider.managementOwner === 'remote' ? { managementOwner: 'remote' as const } : {}),
           ...(provider.managementBindingRef === undefined
             ? {}
@@ -304,7 +349,7 @@ export class ModelProviderRegistry {
         })
       )
       this.hasSnapshot = true
-      this.emit(false, null, false)
+      this.emit(false, sourceError, false)
     } catch {
       if (!this.disposed && revision === this.revision) {
         // Failed readback cannot leave stale providers selectable.
@@ -438,6 +483,8 @@ export class ModelProviderRegistry {
   dispose(): void {
     this.disconnectStartup?.()
     this.startupStore.dispose()
+    this.standaloneServices?.dispose()
+    delete this.standaloneServices
     this.disconnectManagement?.()
     this._management?.dispose()
     this.disconnectSource?.()
@@ -504,6 +551,7 @@ export class ModelProviderRegistry {
           return Object.freeze({
             ...(progress === undefined ? {} : { startup: progress }),
             providerId: provider.providerId,
+            ...(provider.readOnly === true ? { readOnly: true } : {}),
             title: presentation?.title ?? display?.title ?? provider.title ?? provider.providerId,
             icon: presentation?.icon ?? display?.icon ?? 'host:settings',
             providerFavorite: provider.providerFavorite === true,

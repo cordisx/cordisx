@@ -7,6 +7,7 @@ import type {
 const SERVICE_CONFIG_BINDING = '__cordisxServiceConfigRequestV1'
 const SERVICE_CONFIG_RECEIVER = '__cordisxServiceConfigReceiveV1'
 const REQUEST_TIMEOUT_MS = 4_000
+const MUTATION_TIMEOUT_MS = 75_000
 const LIST_ATTEMPTS = 3
 const LIST_RETRY_DELAY_MS = 100
 
@@ -110,8 +111,14 @@ export class BrowserServiceConfigBridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
-        reject(new Error('Service configuration bridge request timed out'))
-      }, REQUEST_TIMEOUT_MS)
+        reject(
+          new Error(
+            operation === 'mutate'
+              ? 'Service configuration write result is unknown'
+              : 'Service configuration bridge request timed out',
+          ),
+        )
+      }, operation === 'mutate' ? MUTATION_TIMEOUT_MS : REQUEST_TIMEOUT_MS)
       this.pending.set(requestId, { resolve, reject, timer })
       try {
         binding(JSON.stringify({ version: 1, token: this.token, requestId, operation, ...payload }))

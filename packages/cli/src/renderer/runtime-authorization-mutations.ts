@@ -49,6 +49,7 @@ import type {
 } from '../permission-contracts.js'
 import { type CodexAdapterHandle, installCodexAdapter, installPlaygroundAdapter } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
+import { pluginEqual } from './generation-visibility.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import { PageAdmissionBindingRegistry } from './page-admission-lifecycle.js'
@@ -317,7 +318,7 @@ export const createRuntimePermissionAuthorizationPlanV2 = (
     throw new Error(`unknown CordisX plugin: ${id}`)
   }
   return controller.manifest.schemaVersion === 4
-    ? runtimeScope.broker()!.authorizationPlanV2(controller.identity, 'enable', controller.generationView)
+    ? runtimeScope.broker()!.reviewAuthorizationPlanV2(controller.identity, controller.generationView)
     : undefined
 }
 
@@ -375,10 +376,9 @@ export const createRuntimeAuthorizePluginV2 = (
     if (controller.manifest.schemaVersion !== 4) {
       throw new Error(`plugin ${id} does not use permission v2`)
     }
-    await runtimeScope.broker()!.authorizeActivationV2(
+    await runtimeScope.broker()!.authorizeReviewedActivationV2(
       controller.identity,
       decision,
-      'enable',
       controller.generationView,
     )
   })
@@ -452,6 +452,13 @@ export const createRuntimeCandidateController = (
     config: descriptor?.value ?? {},
     revision: descriptor?.revision ?? 0,
     ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
+    // A projected lifecycle graph has the same owner provenance as an initial
+    // standalone graph, so its Manager UI can request the normal scoped review.
+    ...(runtimeScope.metadata()!.hostKind === 'standalone' && (replacesTarget
+        ? mutation.package !== undefined && graphModule !== undefined
+        : existing!.item.standaloneInstalledGraph === true)
+      ? { standaloneInstalledGraph: true as const }
+      : {}),
     package: {
       version: activation.version,
       digest: activation.digest,
@@ -676,9 +683,15 @@ export const createRuntimeStagePluginMutation = (
         mutation.managedServiceUICapabilities ?? [],
       )
       for (const id of handle.affectedPluginIds) {
-        if (!mutation.candidate.plugins.some(item => item.id === id)) {
-          continue
-        }
+        const next = mutation.candidate.plugins.find(item => item.id === id)
+        if (!next) continue
+        const before = mutation.previous.plugins.find(item => item.id === id)
+        // An unchanged disabled dependent stays registered as metadata, but
+        // is not a visible controller to retire. Do not register it twice.
+        if (
+          !next.enabled && before?.enabled === false && pluginEqual(before, next)
+          && runtimeScope.activeController()!(id) !== undefined
+        ) continue
         const candidate = runtimeScope.candidateController()!(handle, mutation, id, module, moduleFactory, modules)
         runtimeScope.registerController()!(candidate.controller, candidate.registerAuthority)
         runtimeScope.controllers()!.push(candidate.controller)

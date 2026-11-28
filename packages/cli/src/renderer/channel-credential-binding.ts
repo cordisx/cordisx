@@ -58,8 +58,8 @@ export class BrowserChannelCredentialBridge {
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
-        reject(new Error('channel-credential-timeout'))
-      }, 30_000)
+        reject(new Error('channel-credential-result-unknown'))
+      }, 75_000)
       this.pending.set(requestId, { resolve: value => resolve(value as ChannelCredentialDraftResult), reject, timer })
       binding(JSON.stringify({ ...input, version: 2, token: this.token, requestId }))
     })

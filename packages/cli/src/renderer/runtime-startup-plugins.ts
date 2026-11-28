@@ -25,3 +25,16 @@ export async function mountStartupPlugins(
     }
   }
 }
+
+/** A loaded graph remains identifiable when its plugin failed or is blocked. */
+export function configuredStartupGraphGenerations(controllers: readonly PluginController[]) {
+  return controllers.flatMap(controller => {
+    const item = controller.item
+    const accounted = controller.status === 'active' || controller.status === 'failed'
+      || controller.status === 'blocked' || controller.status === 'permission-blocked'
+    return accounted && item.enabled && item.module !== undefined && item.standaloneConfiguredGraph === true
+        && item.package === undefined && typeof item.artifactGeneration === 'string'
+      ? [{ pluginId: item.id, moduleGeneration: item.artifactGeneration }]
+      : []
+  })
+}

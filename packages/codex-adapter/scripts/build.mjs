@@ -8,6 +8,8 @@ await build({
   format: 'esm',
   target: 'node22',
   sourcemap: false,
+  // Name linked dependencies by their installed path, not the build machine's source path.
+  preserveSymlinks: true,
   legalComments: 'eof',
 })
 

@@ -252,6 +252,8 @@ export interface ChannelSendResult {
 }
 
 export interface ChannelAdapterConnection {
+  /** Optional current transport health; adapters without it retain their existing lifecycle behavior. */
+  connectionState?(): 'ready' | 'retrying' | 'unavailable'
   readonly richtextV3?: boolean
   readonly richtext?: { readonly paragraphs: boolean; readonly mentions: boolean }
   verifyMentions?(target: ChannelThreadRef, userIds: readonly string[]): Promise<void>
