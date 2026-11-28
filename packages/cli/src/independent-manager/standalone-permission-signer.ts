@@ -18,6 +18,8 @@ import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from '../stand
 import { standaloneOncePermissionProofBytes, standalonePermissionProofBytes } from '../standalone-permission-proof.js'
 import { assertPermissionAuthorizationDecisionV2, normalizePermissionPolicyRecordV2 } from '../permission-model-v2.js'
 import { nativeRuntimeOnceProofBytes } from '../native-runtime-once-proof.js'
+import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
+import { runtimePolicyProofBytes } from '../runtime-policy-proof.js'
 
 type Review = {
   readonly identity: { readonly id: string; readonly source: string }
@@ -31,6 +33,13 @@ type Approval = {
   readonly review: Review
   readonly planId: string
   readonly record: CordisXPermissionPolicyRecordV3
+  readonly observed: CordisXPermissionPolicyV2
+  readonly expires: number
+}
+type RuntimeReview = Omit<Review, 'pointId'>
+type RuntimeApproval = {
+  readonly review: RuntimeReview
+  readonly record: CordisXPermissionPolicyRecordV2
   readonly observed: CordisXPermissionPolicyV2
   readonly expires: number
 }
@@ -59,6 +68,7 @@ export async function createStandalonePermissionSigner(
   }
   const publicKey = Object.freeze({ kty: 'EC', crv: 'P-256', x: exported.x, y: exported.y })
   const approvals = new Map<string, Approval>()
+  const runtimeApprovals = new Map<string, RuntimeApproval>()
   const target = options.target ?? 'standalone'
   const validTarget = target === 'native' ? isNativeManagerDomTarget : isStandaloneManagerDomTarget
   let closed = false
@@ -70,7 +80,7 @@ export async function createStandalonePermissionSigner(
     observed: CordisXPermissionPolicyV2,
   ): (() => void) | undefined => {
     const current = now()
-    if (!Number.isSafeInteger(current) || approvals.size >= 4) return undefined
+    if (!Number.isSafeInteger(current) || approvals.size + runtimeApprovals.size >= 4) return undefined
     const key = JSON.stringify(record)
     const approval: Approval = {
       // Retain only immutable values, never the live review callbacks.
@@ -283,8 +293,79 @@ export async function createStandalonePermissionSigner(
         return undefined
       }
     },
+    /** Host-owned settings controls call this only after consuming a trusted click. */
+    noteRuntimePolicy(
+      review: RuntimeReview,
+      raw: CordisXPermissionPolicyRecordV2,
+      observed: CordisXPermissionPolicyV2,
+    ): (() => void) | undefined {
+      try {
+        const record = normalizePermissionPolicyRecordV2(raw)
+        const current = now()
+        if (
+          closed || !validTarget(review.identity, 'manager.content') || review.profileId !== scope.profileId
+          || review.runtimeGeneration !== scope.generation || record.key.profileId !== scope.profileId
+          || record.key.identity.pluginId !== review.identity.id
+          || record.key.identity.source !== review.identity.source
+          || record.policy === observed || !['ask', 'allow-persistent', 'deny-persistent'].includes(observed)
+          || !Number.isSafeInteger(current) || approvals.size + runtimeApprovals.size >= 4
+        ) return undefined
+        const key = JSON.stringify(record)
+        const approval: RuntimeApproval = {
+          review: {
+            identity: { ...review.identity },
+            profileId: review.profileId,
+            runtimeGeneration: review.runtimeGeneration,
+            moduleGeneration: review.moduleGeneration,
+            artifact: { ...review.artifact },
+          },
+          record,
+          observed,
+          expires: current + 60_000,
+        }
+        runtimeApprovals.set(key, approval)
+        return () => {
+          if (runtimeApprovals.get(key) === approval) runtimeApprovals.delete(key)
+        }
+      } catch {
+        return undefined
+      }
+    },
     async sign(requestId: string, records: readonly unknown[]): Promise<unknown> {
       if (closed || records.length !== 1) throw new Error('standalone-permission-decision-unavailable')
+      if (isPermissionPolicyRecordV2(records[0])) {
+        const record = normalizePermissionPolicyRecordV2(records[0])
+        const key = JSON.stringify(record)
+        const approval = runtimeApprovals.get(key)
+        runtimeApprovals.delete(key)
+        const issuedAt = now()
+        if (!approval || !Number.isSafeInteger(issuedAt) || issuedAt > approval.expires) {
+          throw new Error('runtime-permission-decision-unavailable')
+        }
+        const random = provider.getRandomValues(new Uint8Array(32))
+        const payload = {
+          version: 1 as const,
+          kind: 'runtime-policy-v2' as const,
+          target,
+          rendererId: scope.rendererId,
+          profileId: scope.profileId,
+          ownerGeneration: scope.generation,
+          moduleGeneration: approval.review.moduleGeneration,
+          artifact: approval.review.artifact,
+          requestId,
+          decisionId: [...random].map(byte => byte.toString(16).padStart(2, '0')).join(''),
+          issuedAt,
+          observed: approval.observed,
+          record: approval.record,
+        }
+        const signature = await provider.subtle.sign(
+          { name: 'ECDSA', hash: 'SHA-256' },
+          pair.privateKey,
+          runtimePolicyProofBytes(payload, target),
+        )
+        if (closed) throw new Error('runtime-permission-decision-unavailable')
+        return { payload, signature: base64url(new Uint8Array(signature)) }
+      }
       const record = normalizePermissionPolicyRecordV3(records[0])
       const key = JSON.stringify(record)
       const approval = approvals.get(key)
@@ -317,6 +398,7 @@ export async function createStandalonePermissionSigner(
     close(): void {
       closed = true
       approvals.clear()
+      runtimeApprovals.clear()
     },
   }
 }

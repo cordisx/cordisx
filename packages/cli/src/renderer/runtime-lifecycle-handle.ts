@@ -1,5 +1,6 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { createStandaloneDomReviewModel } from './standalone-dom-review-model.js'
+import { createStandaloneRuntimePolicyModel } from './standalone-runtime-policy-model.js'
 import { configuredStartupGraphGenerations } from './runtime-startup-plugins.js'
 import { adoptOwnerPolicy } from './runtime-owner-policy.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
@@ -955,6 +956,10 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...(() => {
     const review = createStandaloneDomReviewModel(runtimeScope)
     return review === undefined ? {} : { standaloneDomReview: review }
+  })(),
+  ...(() => {
+    const review = createStandaloneRuntimePolicyModel(runtimeScope)
+    return review === undefined ? {} : { standaloneRuntimeReview: review }
   })(),
   ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
     chatExecution: new ChannelExecutionWorkflow({

@@ -57,6 +57,8 @@ import {
 } from '../../permission-deferral.js'
 
 import { permissionPlanDeclarations, Registration } from './platform-permission-types.js'
+import { prepareStandaloneRuntimePolicyAdoption } from '../standalone-runtime-policy-adoption.js'
+import type { StandaloneDomPolicyAdoption } from '../../standalone-permission-contract.js'
 
 export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermissionBroker {
   private readonly localV2Reviews = new Map<string, {
@@ -197,11 +199,12 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     }, [declaration]).declarations[0]!.policy
   }
 
-  async setPolicyV2(
+  /** Prepare the exact declaration and observed policy without publishing a change. */
+  reviewPolicyV2(
     identity: CordisXPluginIdentity,
     capability: CordisXPermissionCapabilityV2,
     policy: CordisXPermissionPolicyV2,
-  ): Promise<void> {
+  ): { readonly record: CordisXPermissionPolicyRecordV2; readonly observed: CordisXPermissionPolicyV2 } {
     const registration = this.registration(identity)
     const declaration = registration?.declarationsV2.get(capability)
     if (registration === undefined || declaration === undefined) {
@@ -233,19 +236,83 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       },
       policy,
     })
+    return { record, observed: item.policy }
+  }
+
+  async setPolicyV2(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPermissionCapabilityV2,
+    policy: CordisXPermissionPolicyV2,
+  ): Promise<void> {
+    const registration = this.registration(identity)
+    if (!registration) throw new Error(`plugin ${identity.id} is not registered`)
+    const { record } = this.reviewPolicyV2(identity, capability, policy)
     const key = permissionRecordKeyV2(record)
     const previous = this.policyRecords.get(key)
-    this.policyRecords.set(key, record)
-    this.changed()
+    await this.commitRuntimePolicyRecords([record], () => {
+      this.policyRecords.set(key, record)
+      this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
+    }, () => {
+      if (!this.isRegistered(registration) || this.policyRecords.get(key) !== previous) {
+        throw new Error('permission policy was invalidated')
+      }
+    })
+  }
+
+  /** Apply an owner-confirmed V2 policy only for the exact current registration. */
+  async adoptOwnerRuntimePolicies(
+    input: StandaloneDomPolicyAdoption & { readonly signal?: AbortSignal; readonly onUnknown?: () => void },
+  ): Promise<boolean> {
     try {
-      await this.persistV2([record])
-    } catch (error) {
-      if (previous === undefined) this.policyRecords.delete(key)
-      else this.policyRecords.set(key, previous)
-      this.changed()
-      throw error
+      if (
+        input.signal?.aborted || !/^[A-Za-z0-9._:-]{1,160}$/u.test(input.requestId)
+        || typeof input.origin !== 'boolean' || !Array.isArray(input.expected)
+        || !Array.isArray(input.updates) || !Array.isArray(input.candidate)
+      ) return false
+      const captured = structuredClone({
+        requestId: input.requestId,
+        origin: input.origin,
+        identity: input.identity,
+        moduleGeneration: input.moduleGeneration,
+        expected: input.expected,
+        updates: input.updates,
+        candidate: input.candidate,
+      })
+      const registration = this.registration(captured.identity)
+      if (
+        !registration || registration.manifest.schemaVersion === 1
+        || registration.generation.moduleGeneration !== captured.moduleGeneration
+      ) return false
+      if (!captured.origin) await this.runtimePolicyCommitTail
+      if (
+        input.signal?.aborted || this.registration(captured.identity)?.token !== registration.token
+        || !this.isRegistered(registration)
+      ) return false
+      const updates = prepareStandaloneRuntimePolicyAdoption({
+        profileId: this.profileId,
+        identity: captured.identity,
+        declarations: registration.declarationsV2,
+        catalog: this.catalog,
+        current: [...this.policyRecords.values()],
+        expected: captured.expected,
+        updates: captured.updates,
+        candidate: captured.candidate,
+      })
+      if (!updates) return false
+      const clearGrants = () => this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
+      if (captured.origin) {
+        if (!input.onUnknown) return false
+        return this.adoptPendingStandaloneRuntimePolicy(captured.requestId, updates, clearGrants, input.onUnknown)
+      }
+      this.batchChanges(() => {
+        for (const record of updates) this.policyRecords.set(permissionRecordKeyV2(record), record)
+        clearGrants()
+        this.changed()
+      })
+      return true
+    } catch {
+      return false
     }
-    this.onceV2.clearGeneration(this.generation, registration.generation.moduleGeneration)
   }
 
   authorizationPlanV2(

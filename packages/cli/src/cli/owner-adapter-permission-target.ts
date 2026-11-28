@@ -49,6 +49,7 @@ export async function ownerAdapterInstalledPermissionTarget(input: {
     moduleGeneration: active.moduleGeneration,
     digest: active.digest,
     artifact,
+    manifest: staged.manifest.runtimeManifest,
     isCurrent: current,
   })
 }

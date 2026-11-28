@@ -7,6 +7,7 @@ import type { ManagerModel, ManagerPermissionSnapshot, ManagerSnapshot } from '.
 import type { ManagerRouter } from '../model/routes.js'
 import { registerStandaloneDomResetButton } from '../../standalone-dom-reset-button.js'
 import { PermissionDecisionHistory } from './PermissionDecisionHistory.js'
+import { RuntimePolicyReview } from './RuntimePolicyReview.js'
 
 const policyOptions = [{ label: '每次询问', value: 'ask' }, { label: '始终允许', value: 'allow' }, {
   label: '始终拒绝',
@@ -182,6 +183,11 @@ export function PermissionDetailPage(
     : undefined
   const reviewedHere = point !== undefined
     && model.standaloneDomReview?.describe(permission.identity, point) !== undefined
+  const runtimeReviewedHere = model.standaloneRuntimeReview?.describe(
+    permission.identity,
+    permission.capability,
+    permission.fingerprint,
+  ) !== undefined
   return (
     <section className="cxr-page cxr-grid">
       <StandaloneDomPermissionReview
@@ -193,50 +199,61 @@ export function PermissionDetailPage(
       <section className="cxr-section">
         <h3>授权策略</h3>
         <p>{permission.reasonText}</p>
-        {ownService ? <p>{managerCopy(snapshot.localization.locale, 'permission.service-owner-reason')}</p> : (
-          <>
-            <Select
-              value={permission.policy}
-              disabled={model.permissionPolicyWritable === false}
-              options={permission.authorizationOrigin === 'local-development' || certifiedAutomatic
-                ? policyOptions.map(option =>
-                  option.value === (certifiedAutomatic ? 'ask' : 'allow')
-                    ? {
-                      ...option,
-                      label: managerCopy(
-                        snapshot.localization.locale,
-                        certifiedAutomatic
-                          ? 'permission.certified-automatic-authorization'
-                          : 'permission.development-authorized',
-                      ),
-                    }
-                    : option
-                )
-                : policyOptions}
-              onChange={value =>
-                void model.setPermissionPolicy(
-                  route.pluginId,
-                  route.capability,
-                  value as CordisXPermissionPolicy,
-                  permission.scope,
-                )}
+        {ownService
+          ? <p>{managerCopy(snapshot.localization.locale, 'permission.service-owner-reason')}</p>
+          : runtimeReviewedHere
+          ? (
+            <RuntimePolicyReview
+              model={model}
+              permission={permission}
+              locale={snapshot.localization.locale}
+              onUpdated={() => setHistoryRevision(value => value + 1)}
             />
-            {model.permissionPolicyWritable === false
-              ? (
-                <p role="status">
-                  {reviewedHere
-                    ? (productLocale(snapshot.localization.locale) === 'zh-CN'
-                      ? '请使用上方的页面授权控制设置此权限。'
-                      : 'Use the page access control above to change this permission.')
-                    : managerCopy(
-                      snapshot.localization.locale,
-                      model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
-                    )}
-                </p>
-              )
-              : null}
-          </>
-        )}
+          )
+          : (
+            <>
+              <Select
+                value={permission.policy}
+                disabled={model.permissionPolicyWritable === false}
+                options={permission.authorizationOrigin === 'local-development' || certifiedAutomatic
+                  ? policyOptions.map(option =>
+                    option.value === (certifiedAutomatic ? 'ask' : 'allow')
+                      ? {
+                        ...option,
+                        label: managerCopy(
+                          snapshot.localization.locale,
+                          certifiedAutomatic
+                            ? 'permission.certified-automatic-authorization'
+                            : 'permission.development-authorized',
+                        ),
+                      }
+                      : option
+                  )
+                  : policyOptions}
+                onChange={value =>
+                  void model.setPermissionPolicy(
+                    route.pluginId,
+                    route.capability,
+                    value as CordisXPermissionPolicy,
+                    permission.scope,
+                  )}
+              />
+              {model.permissionPolicyWritable === false
+                ? (
+                  <p role="status">
+                    {reviewedHere
+                      ? (productLocale(snapshot.localization.locale) === 'zh-CN'
+                        ? '请使用上方的页面授权控制设置此权限。'
+                        : 'Use the page access control above to change this permission.')
+                      : managerCopy(
+                        snapshot.localization.locale,
+                        model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
+                      )}
+                  </p>
+                )
+                : null}
+            </>
+          )}
       </section>
       <section className="cxr-section">
         <h3>能力可用性</h3>

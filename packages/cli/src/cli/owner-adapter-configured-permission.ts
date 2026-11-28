@@ -34,6 +34,7 @@ export async function ownerAdapterConfiguredPermissionTarget(input: {
     moduleGeneration: input.moduleGeneration,
     digest: plugin.configuredArchiveDigest,
     artifact: plugin.distributionArtifact,
+    manifest: selected.manifest,
     isCurrent: selected.isCurrent,
     verifyCurrent: selected.verifyCurrent,
   })

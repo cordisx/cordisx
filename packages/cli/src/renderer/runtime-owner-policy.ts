@@ -1,4 +1,8 @@
-import { isPermissionPolicyRecordV3, normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import {
+  isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  normalizePersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 import { verifyOwnerPolicyPacket } from './owner-policy-verification.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 import type { PermissionPolicyStore } from './platform.js'
@@ -19,15 +23,19 @@ export async function adoptOwnerPolicy(
   })
   if (!transition || runtime.disposed) return false
   const updates = transition.updates.map(record => normalizePersistedPermissionPolicyRecord(record))
-  if (!updates.every(isPermissionPolicyRecordV3)) return false
   const store: PermissionPolicyStore = runtime.permissionStore()!
-  const origin = transition.origin && store.canAdoptStandaloneV3?.(transition.requestId, updates) === true
-  const adopted = await runtime.broker()!.adoptOwnerManagerPolicies({
-    ...transition,
-    origin,
-    onUnknown: () => {
-      void runtime.dispose()!().catch(() => undefined)
-    },
-  })
+  const onUnknown = () => {
+    void runtime.dispose()!().catch(() => undefined)
+  }
+  const broker = runtime.broker()!
+  let origin = false
+  let adopted = false
+  if (updates.every(isPermissionPolicyRecordV3)) {
+    origin = transition.origin && store.canAdoptStandaloneV3?.(transition.requestId, updates) === true
+    adopted = await broker.adoptOwnerManagerPolicies({ ...transition, origin, onUnknown })
+  } else if (updates.every(isPermissionPolicyRecordV2)) {
+    origin = transition.origin && store.canAdoptStandaloneV2?.(transition.requestId, updates) === true
+    adopted = await broker.adoptOwnerRuntimePolicies({ ...transition, origin, onUnknown })
+  }
   return adopted && !runtime.disposed ? origin ? 'origin' : true : false
 }

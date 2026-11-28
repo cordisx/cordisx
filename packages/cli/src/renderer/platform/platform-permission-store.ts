@@ -60,6 +60,9 @@ export interface PermissionPolicyStore {
   write(records: readonly CordisXPermissionPolicyRecordV1[]): void | Promise<void>
   readV2?(): readonly CordisXPermissionPolicyRecordV2[]
   writeV2?(records: readonly CordisXPermissionPolicyRecordV2[]): void | Promise<void>
+  /** Owner-attached only: acknowledge the exact in-flight generic policy write. */
+  canAdoptStandaloneV2?(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean
+  markAdoptedStandaloneV2?(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean
   readV3?(): readonly CordisXPermissionPolicyRecordV3[]
   writeV3?(records: readonly CordisXPermissionPolicyRecordV3[]): void | Promise<void>
   /** Standalone only: bind the writer's adoption to its exact in-flight request. */

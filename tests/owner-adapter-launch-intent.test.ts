@@ -5,6 +5,12 @@ import { OwnerAdapterLaunchIntent } from '../packages/cli/src/cli/owner-adapter-
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import type { OwnerPolicyTransition } from '../packages/cli/src/owner-policy-handoff.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capability-risk-catalog.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../packages/cli/src/permission-contracts.js'
+import {
+  normalizePermissionPolicyRecordV2,
+  permissionSecurityFingerprint,
+} from '../packages/cli/src/permission-model-v2.js'
 
 const invocation = parseCordisXCli(['start', 'codex', '--executable', '/test/codex'])
 if (invocation.action !== 'start') throw new Error('expected start command')
@@ -104,4 +110,32 @@ it('does not overwrite a supervisor whose recorded launch intent has changed', a
   await tracker.adopted(transition([], policy))
   await tracker.adopted(transition([], policy))
   expect(publish).toHaveBeenCalledOnce()
+})
+
+it('records an adopted runtime policy without absorbing other configuration changes', async () => {
+  const declaration = { name: 'models.read' as const, required: false, scope: { providers: ['codex'] } }
+  const update = normalizePermissionPolicyRecordV2({
+    $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+    schemaVersion: 2,
+    key: {
+      profileId: 'default',
+      identity: { pluginId: 'pet', source: policy.key.identity.source },
+      capability: declaration.name,
+      scope: declaration.scope,
+      securityFingerprint: permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration),
+    },
+    policy: 'deny-persistent',
+  })
+  const source = JSON.stringify({ ...initial, permissions: [update] })
+  const publish = vi.fn(async () => true)
+  const tracker = new OwnerAdapterLaunchIntent({
+    initialSource,
+    initialFingerprint: original,
+    launch,
+    readSource: async () => source,
+    publish,
+  })
+  await tracker.markReady()
+  await tracker.adopted({ ...transition([], policy), updates: [update], candidate: [update] })
+  expect(publish).toHaveBeenCalledExactlyOnceWith(original, launchFingerprint({ ...launch, source }))
 })

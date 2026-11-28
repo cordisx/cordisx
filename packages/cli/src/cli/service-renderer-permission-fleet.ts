@@ -1,7 +1,12 @@
 import { randomBytes } from 'node:crypto'
 import { parseStandalonePolicyHandoff } from '../independent-manager/standalone-policy-handoff.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
-import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import {
+  type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  persistedPermissionRecordKey,
+} from '../permission-persistence.js'
 import type { ManagerRendererCommandPeer, ManagerRendererPeerScope } from './manager-renderer-peer.js'
 
 type PolicyProjection = {
@@ -61,6 +66,15 @@ export async function synchronizeServiceRendererPolicies(input: {
         !attachmentEqual(before.identity, update.identity) || !attachmentEqual(before.identity, after.identity)
         || before.moduleGeneration !== update.moduleGeneration || before.moduleGeneration !== after.moduleGeneration
       ) throw new Error('renderer-permission-fleet-unavailable')
+      const changed = update.policies[0]
+      if (!changed) throw new Error('renderer-permission-fleet-unavailable')
+      const relevant = isPermissionPolicyRecordV2(changed)
+        ? (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
+          records.filter(record =>
+            isPermissionPolicyRecordV2(record)
+            && persistedPermissionRecordKey(record) === persistedPermissionRecordKey(changed)
+          )
+        : (records: readonly CordisXPersistedPermissionPolicyRecord[]) => records.filter(isPermissionPolicyRecordV3)
       const payload = parseStandalonePolicyHandoff({
         rendererId: peer.identity.rendererId,
         ownerGeneration: input.scope.generation,
@@ -69,9 +83,9 @@ export async function synchronizeServiceRendererPolicies(input: {
         origin,
         identity: before.identity,
         moduleGeneration: before.moduleGeneration,
-        expected: before.policies,
-        updates: update.policies,
-        candidate: after.policies,
+        expected: relevant(before.policies),
+        updates: relevant(update.policies),
+        candidate: relevant(after.policies),
       }, { profileId: input.scope.profileId, generation: input.scope.generation, rendererId: peer.identity.rendererId })
       return { peer, payload }
     })

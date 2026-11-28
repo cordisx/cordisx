@@ -1,5 +1,5 @@
 import type { CordisXCapabilityDeclarationV2, CordisXPermissionPolicyRecordV2 } from '../permission-contracts.js'
-import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
+import { CapabilityRiskCatalog, CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
 import { isChannelExactRequestDeclaration } from '../channel-exact-request-permissions.js'
 import { normalizePermissionScopeV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
 import { isRuntimeExactRequestDeclaration } from '../runtime-exact-request-permissions.js'
@@ -7,6 +7,24 @@ import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
 import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
 import { normalizeAbsoluteCwd } from '../renderer/platform/platform-runtime-exact-scope.js'
+
+const runtimeCatalog = new CapabilityRiskCatalog()
+
+/** Persistent policies cover only complete manifest declarations, never dynamic targets. */
+export function ownerDeclaredRuntimePolicy(input: {
+  readonly manifest: unknown
+  readonly pluginId: string
+  readonly record: CordisXPermissionPolicyRecordV2
+}): boolean {
+  try {
+    if (ownerRuntimeDeclaration(input).exact) return false
+    const risk = runtimeCatalog.get(input.record.key.capability)
+    return (input.record.policy !== 'allow-persistent' || risk.persistentAllow)
+      && (input.record.policy !== 'deny-persistent' || risk.persistentDeny)
+  } catch {
+    return false
+  }
+}
 
 /** Match only a current declared capability or a single concrete exact-request target. */
 export function ownerRuntimeDeclaration(input: {

@@ -250,6 +250,23 @@ export interface ManagerModel {
     request(identity: CordisXPluginIdentity, pointId: string): Promise<boolean>
     reset(identity: CordisXPluginIdentity, pointId: string, event: Event): Promise<boolean>
   }
+  /** Host-owned controls for a service-synchronized declared runtime policy. */
+  readonly standaloneRuntimeReview?: {
+    readonly native: boolean
+    describe(identity: CordisXPluginIdentity, capability: string, fingerprint: string):
+      | Readonly<{
+        policy: import('../permission-contracts.js').CordisXPermissionPolicyV2
+        options: readonly import('../permission-contracts.js').CordisXPermissionPolicyV2[]
+      }>
+      | undefined
+    set(
+      identity: CordisXPluginIdentity,
+      capability: string,
+      fingerprint: string,
+      policy: import('../permission-contracts.js').CordisXPermissionPolicyV2,
+      event: Event,
+    ): Promise<boolean>
+  }
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1
   clearPluginConsole?(id: string): void

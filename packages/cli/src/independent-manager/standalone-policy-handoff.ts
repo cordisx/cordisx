@@ -1,7 +1,14 @@
-import type { CordisXPermissionPolicyRecordV3 } from '../permission-contracts.js'
-import { normalizePermissionPolicyRecordV3, permissionRecordKeyV3 } from '../permission-model-v3.js'
-import { mergePersistedPermissionPolicies } from '../permission-persistence.js'
+import type { CordisXPermissionPolicyRecordV2, CordisXPermissionPolicyRecordV3 } from '../permission-contracts.js'
+import {
+  isPermissionPolicyRecordV2,
+  isPermissionPolicyRecordV3,
+  mergePersistedPermissionPolicies,
+  normalizePersistedPermissionPolicyRecord,
+  persistedPermissionRecordKey,
+} from '../permission-persistence.js'
 import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
+
+type Policy = CordisXPermissionPolicyRecordV2 | CordisXPermissionPolicyRecordV3
 
 export interface StandalonePolicyHandoff {
   readonly rendererId: string
@@ -11,12 +18,12 @@ export interface StandalonePolicyHandoff {
   readonly origin: boolean
   readonly identity: { readonly id: string; readonly source: string }
   readonly moduleGeneration: string
-  readonly expected: readonly CordisXPermissionPolicyRecordV3[]
-  readonly updates: readonly CordisXPermissionPolicyRecordV3[]
-  readonly candidate: readonly CordisXPermissionPolicyRecordV3[]
+  readonly expected: readonly Policy[]
+  readonly updates: readonly Policy[]
+  readonly candidate: readonly Policy[]
 }
 
-/** Validate a redacted, exact Manager UI policy handoff for one renderer. */
+/** Validate a redacted, exact policy handoff for one renderer. */
 export function parseStandalonePolicyHandoff(
   value: unknown,
   scope: { readonly profileId: string; readonly generation: string; readonly rendererId: string },
@@ -54,18 +61,24 @@ export function parseStandalonePolicyHandoff(
     || !isStandaloneManagerDomTarget({ id: rawIdentity.id, source: rawIdentity.source }, 'manager.content')
   ) return invalid()
   const identity = { id: rawIdentity.id, source: rawIdentity.source }
-  const policies = (input: unknown): readonly CordisXPermissionPolicyRecordV3[] => {
+  const policies = (input: unknown): readonly Policy[] => {
     if (!Array.isArray(input) || input.length > 64) return invalid()
     const seen = new Set<string>()
     return input.map(raw => {
-      const record = normalizePermissionPolicyRecordV3(raw)
-      const point = record.key.scope.extensionPoints?.[0]
+      const record = normalizePersistedPermissionPolicyRecord(raw)
       if (
-        record.key.profileId !== scope.profileId || record.key.identity.pluginId !== identity.id
-        || record.key.identity.source !== identity.source || record.key.scope.extensionPoints?.length !== 1
-        || point === undefined || !isStandaloneManagerDomTarget(identity, point)
+        !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
+        || record.key.profileId !== scope.profileId || record.key.identity.pluginId !== identity.id
+        || record.key.identity.source !== identity.source
       ) return invalid()
-      const key = permissionRecordKeyV3(record)
+      if (isPermissionPolicyRecordV3(record)) {
+        const point = record.key.scope.extensionPoints?.[0]
+        if (
+          record.key.scope.extensionPoints?.length !== 1 || point === undefined
+          || !isStandaloneManagerDomTarget(identity, point)
+        ) return invalid()
+      }
+      const key = persistedPermissionRecordKey(record)
       if (seen.has(key)) return invalid()
       seen.add(key)
       return record
@@ -74,11 +87,15 @@ export function parseStandalonePolicyHandoff(
   const expected = policies(item.expected)
   const updates = policies(item.updates)
   const candidate = policies(item.candidate)
-  const sorted = (records: readonly CordisXPermissionPolicyRecordV3[]) =>
-    [...records].sort((left, right) => permissionRecordKeyV3(left).localeCompare(permissionRecordKeyV3(right)))
+  const sorted = (records: readonly Policy[]) =>
+    [...records].sort((left, right) =>
+      persistedPermissionRecordKey(left).localeCompare(persistedPermissionRecordKey(right))
+    )
   if (
     updates.length === 0 || updates.length > 2
-    || JSON.stringify(sorted(mergePersistedPermissionPolicies(expected, updates) as CordisXPermissionPolicyRecordV3[]))
+    || isPermissionPolicyRecordV2(updates[0]) && updates.length !== 1
+    || [...expected, ...updates, ...candidate].some(record => record.schemaVersion !== updates[0]!.schemaVersion)
+    || JSON.stringify(sorted(mergePersistedPermissionPolicies(expected, updates) as Policy[]))
       !== JSON.stringify(sorted(candidate))
   ) return invalid()
   return {

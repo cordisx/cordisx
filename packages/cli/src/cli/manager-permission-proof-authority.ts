@@ -14,6 +14,7 @@ import {
 } from '../standalone-permission-proof.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { nativeRuntimeOnceProofBytes, normalizeNativeRuntimeOnceProof } from '../native-runtime-once-proof.js'
+import { normalizeRuntimePolicyProof, runtimePolicyProofBytes } from '../runtime-policy-proof.js'
 
 type Entry = {
   readonly signal: AbortSignal
@@ -99,9 +100,36 @@ export class ManagerPermissionProofAuthority {
       ) return false
       const signature = Buffer.from(proof.signature, 'base64url')
       if (signature.length !== 64 || signature.toString('base64url') !== proof.signature) return false
-      const payload = normalizeStandalonePermissionProofPayload(proof.payload, this.input.target)
       const record = normalizePersistedPermissionPolicyRecord(input.records[0])
       const now = (this.input.now ?? Date.now)()
+      if (isPermissionPolicyRecordV2(record)) {
+        const target = this.input.target ?? 'standalone'
+        const payload = normalizeRuntimePolicyProof(proof.payload, target)
+        if (
+          payload.rendererId !== context.rendererId || payload.profileId !== context.profileId
+          || payload.ownerGeneration !== context.ownerGeneration || payload.moduleGeneration !== input.moduleGeneration
+          || JSON.stringify(payload.artifact) !== JSON.stringify(input.artifact)
+          || payload.requestId !== input.requestId
+          || entry.used.has(payload.decisionId) || !Number.isSafeInteger(now)
+          || payload.issuedAt > now + 5_000 || now - payload.issuedAt > 60_000
+          || JSON.stringify(record) !== JSON.stringify(payload.record)
+        ) return false
+        const key = persistedPermissionRecordKey(payload.record)
+        const prior = input.expected.filter(item =>
+          isPermissionPolicyRecordV2(item) && persistedPermissionRecordKey(item) === key
+        )
+        if (prior.length > 1 || (prior[0]?.policy ?? 'ask') !== payload.observed) return false
+        if (
+          !verify('sha256', runtimePolicyProofBytes(payload, target), {
+            key: entry.key,
+            dsaEncoding: 'ieee-p1363',
+          }, signature)
+        ) return false
+        if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
+        entry.used.add(payload.decisionId)
+        return true
+      }
+      const payload = normalizeStandalonePermissionProofPayload(proof.payload, this.input.target)
       if (
         payload.rendererId !== context.rendererId || payload.profileId !== context.profileId
         || payload.ownerGeneration !== context.ownerGeneration || payload.moduleGeneration !== input.moduleGeneration

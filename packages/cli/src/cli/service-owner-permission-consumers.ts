@@ -3,9 +3,11 @@ import { randomBytes } from 'node:crypto'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   mergePersistedPermissionPolicies,
   normalizePersistedPermissionPolicyRecord,
+  persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 import {
   consumeReleasedManagerOriginFence,
@@ -17,9 +19,9 @@ import type { ServiceRendererParticipants } from './service-renderer-participant
 import type { OwnerAdapterSessions } from './owner-adapter-sessions.js'
 
 /**
- * The origin fence reserves every admitted renderer. Manager UI policies are
- * applied to service-attached native adapters with a signed, exact handoff;
- * other policy kinds and owners must provide their own consumer fence.
+ * The origin fence reserves every admitted renderer. Manager UI policies
+ * and exact declared runtime policies are applied to service-attached native
+ * adapters with a signed handoff; other kinds need their own consumer fence.
  */
 export class ServiceOwnerPermissionConsumers {
   private reservation: symbol | undefined
@@ -147,12 +149,16 @@ export class ServiceOwnerPermissionConsumers {
         if (
           request.profileId !== this.input.profileId || request.ownerGeneration !== this.input.generation
           || !/^[A-Za-z0-9._:-]{1,160}$/u.test(request.requestId) || expected.length > 4096
-          || updates.length !== 1 || !update || !isPermissionPolicyRecordV3(update)
+          || updates.length !== 1 || !update
+          || !isPermissionPolicyRecordV3(update) && !isPermissionPolicyRecordV2(update)
           || update.key.profileId !== this.input.profileId || update.key.identity.pluginId !== selected.id
           || update.key.identity.source !== selected.source
-          || update.key.capability !== 'ui.extension-points.render'
-          || update.key.scope.extensionPoints?.length !== 1
-          || !['manager.settings.navigation-items', 'manager.content'].includes(update.key.scope.extensionPoints[0]!)
+          || isPermissionPolicyRecordV3(update) && (
+              update.key.capability !== 'ui.extension-points.render' || update.key.scope.extensionPoints?.length !== 1
+              || !['manager.settings.navigation-items', 'manager.content'].includes(
+                update.key.scope.extensionPoints[0]!,
+              )
+            )
           || !attachmentEqual(candidate, mergePersistedPermissionPolicies(expected, updates))
         ) throw new Error('service-permission-consumers-unavailable')
         const readback = await this.input.loadPolicies()
@@ -160,13 +166,20 @@ export class ServiceOwnerPermissionConsumers {
           throw new Error('service-permission-consumers-unavailable')
         }
         if (nativePeers.length > 0) {
+          const updateKey = persistedPermissionRecordKey(update)
           const relevant = (records: readonly CordisXPersistedPermissionPolicyRecord[]) =>
             records.filter(record =>
-              isPermissionPolicyRecordV3(record) && record.key.profileId === this.input.profileId
-              && record.key.identity.pluginId === selected.id && record.key.identity.source === selected.source
-              && record.key.capability === 'ui.extension-points.render'
-              && record.key.scope.extensionPoints?.length === 1
-              && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+              isPermissionPolicyRecordV2(update)
+                ? isPermissionPolicyRecordV2(record) && persistedPermissionRecordKey(record) === updateKey
+                : (
+                  isPermissionPolicyRecordV3(record) && record.key.profileId === this.input.profileId
+                  && record.key.identity.pluginId === selected.id && record.key.identity.source === selected.source
+                  && record.key.capability === 'ui.extension-points.render'
+                  && record.key.scope.extensionPoints?.length === 1
+                  && ['manager.settings.navigation-items', 'manager.content'].includes(
+                    record.key.scope.extensionPoints[0]!,
+                  )
+                )
             )
           const handoffId = randomBytes(32).toString('hex')
           await Promise.all(nativePeers.map(async peer => {

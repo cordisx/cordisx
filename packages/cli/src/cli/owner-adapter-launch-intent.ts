@@ -2,6 +2,7 @@ import { parseHomeConfig } from '../config/home-config.js'
 import type { OwnerPolicyTransition } from '../owner-policy-handoff.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   mergePersistedPermissionPolicies,
   normalizePersistedPermissionPolicyRecord,
@@ -51,13 +52,25 @@ export class OwnerAdapterLaunchIntent {
   async adopted(transition: OwnerPolicyTransition): Promise<void> {
     if (!this.current) return
     try {
-      const relevant = (record: CordisXPersistedPermissionPolicyRecord) =>
-        isPermissionPolicyRecordV3(record) && record.key.profileId === transition.profileId
-        && record.key.identity.pluginId === transition.identity.id
-        && record.key.identity.source === transition.identity.source
-        && record.key.capability === 'ui.extension-points.render' && record.key.scope.extensionPoints?.length === 1
-        && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
       const updates = transition.updates.map(record => normalizePersistedPermissionPolicyRecord(record))
+      const update = updates[0]
+      if (
+        updates.length !== 1 || !update || update.key.profileId !== transition.profileId
+        || update.key.identity.pluginId !== transition.identity.id
+        || update.key.identity.source !== transition.identity.source
+      ) {
+        this.current = false
+        return
+      }
+      const relevant = (record: CordisXPersistedPermissionPolicyRecord) =>
+        isPermissionPolicyRecordV2(update)
+          ? isPermissionPolicyRecordV2(record)
+            && persistedPermissionRecordKey(record) === persistedPermissionRecordKey(update)
+          : isPermissionPolicyRecordV3(record) && record.key.profileId === transition.profileId
+            && record.key.identity.pluginId === transition.identity.id
+            && record.key.identity.source === transition.identity.source
+            && record.key.capability === 'ui.extension-points.render' && record.key.scope.extensionPoints?.length === 1
+            && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
       if (!updates.every(relevant) || !samePolicies(this.policies.filter(relevant), transition.expected)) {
         this.current = false
         return

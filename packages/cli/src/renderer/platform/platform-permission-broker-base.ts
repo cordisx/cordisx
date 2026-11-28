@@ -37,7 +37,7 @@ import type {
 import { CapabilityRiskCatalog } from '../../capability-risk-catalog.js'
 import type { RuntimeServiceCapabilityOwner } from '../../service-capability-ownership.js'
 import { ServiceCapabilityOwnership } from './service-capability-ownership.js'
-import { PermissionOnceGrantLedger } from '../../permission-model-v2.js'
+import { normalizePermissionPolicyRecordV2, PermissionOnceGrantLedger } from '../../permission-model-v2.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
 import { normalizePermissionPolicyRecordV3 } from '../../permission-model-v3.js'
 import {
@@ -197,6 +197,18 @@ export abstract class PlatformPermissionBrokerBase {
   protected readonly migrationTasks: Promise<void>[] = []
 
   protected domPolicyCommitTail: Promise<void> = Promise.resolve()
+
+  protected runtimePolicyCommitTail: Promise<void> = Promise.resolve()
+
+  private pendingRuntimePolicyCommit: {
+    readonly records: readonly CordisXPermissionPolicyRecordV2[]
+    readonly publish: () => void
+    readonly assertPublish: () => void
+    adopted: boolean
+    adopting: boolean
+    failed: boolean
+    onUnknown?: () => void
+  } | undefined
 
   private pendingDomPolicyCommit: {
     readonly records: readonly CordisXPermissionPolicyRecordV3[]
@@ -465,6 +477,80 @@ export abstract class PlatformPermissionBrokerBase {
   protected persistV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
     if (this.store.writeV3 === undefined) return Promise.reject(new Error('permission v3 persistence is unavailable'))
     return Promise.resolve(this.store.writeV3(records))
+  }
+
+  protected commitRuntimePolicyRecords(
+    records: readonly CordisXPermissionPolicyRecordV2[],
+    publish: () => void,
+    assertCurrent: () => void = () => {},
+  ): Promise<void> {
+    const task = this.runtimePolicyCommitTail.then(async () => {
+      assertCurrent()
+      const pending = {
+        records: records.map(record => normalizePermissionPolicyRecordV2(record)),
+        publish,
+        assertPublish: assertCurrent,
+        adopted: false,
+        adopting: false,
+        failed: false,
+      }
+      this.pendingRuntimePolicyCommit = pending
+      try {
+        await this.persistV2(pending.records)
+        if (pending.failed) throw new Error('Runtime permission adoption is uncertain')
+        if (!pending.adopted) {
+          assertCurrent()
+          publish()
+          this.changed()
+        }
+      } catch (error) {
+        if (pending.adopted || pending.failed) {
+          try {
+            this.pendingRuntimePolicyCommit?.onUnknown?.()
+          } catch { /* the write remains uncertain */ }
+        }
+        throw error
+      } finally {
+        if (this.pendingRuntimePolicyCommit === pending) this.pendingRuntimePolicyCommit = undefined
+      }
+    })
+    this.runtimePolicyCommitTail = task.catch(() => undefined)
+    return task
+  }
+
+  protected adoptPendingStandaloneRuntimePolicy(
+    requestId: string,
+    records: readonly CordisXPermissionPolicyRecordV2[],
+    afterPublish: () => void,
+    onUnknown: () => void,
+  ): boolean {
+    const pending = this.pendingRuntimePolicyCommit
+    if (
+      !pending || pending.adopted || pending.adopting || pending.failed
+      || JSON.stringify(pending.records) !== JSON.stringify(records)
+      || this.store.canAdoptStandaloneV2?.(requestId, records) !== true
+    ) return false
+    pending.adopting = true
+    pending.onUnknown = onUnknown
+    try {
+      pending.assertPublish()
+      pending.publish()
+      afterPublish()
+      if (this.store.markAdoptedStandaloneV2?.(requestId, records) !== true) {
+        throw new Error('Runtime permission adoption is uncertain')
+      }
+      pending.adopted = true
+      this.changed()
+      return true
+    } catch {
+      pending.failed = true
+      try {
+        onUnknown()
+      } catch { /* the write remains uncertain */ }
+      return false
+    } finally {
+      pending.adopting = false
+    }
   }
 
   protected commitDomPolicyRecords(

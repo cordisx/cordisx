@@ -6,6 +6,12 @@ import { createStandalonePermissionSigner } from '../packages/cli/src/independen
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
 import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../packages/cli/src/permission-contracts.js'
 import { normalizePermissionPolicyRecordV3 } from '../packages/cli/src/permission-model-v3.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capability-risk-catalog.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../packages/cli/src/permission-contracts.js'
+import {
+  normalizePermissionPolicyRecordV2,
+  permissionSecurityFingerprint,
+} from '../packages/cli/src/permission-model-v2.js'
 
 it('accepts one native document decision only for its owner session and exact package', async () => {
   const scope = { rendererId: 'a'.repeat(64), profileId: 'default', generation: 'owner-1' }
@@ -89,6 +95,72 @@ it('accepts one native document decision only for its owner session and exact pa
     live = false
     expect(authority.authorize(input)).toBe(false)
   } finally {
+    authority.close()
+    signer.close()
+  }
+})
+
+it('binds a persistent runtime change to its observed policy, artifact and one owner session', async () => {
+  const scope = { rendererId: 'a'.repeat(64), profileId: 'default', generation: 'owner-1' }
+  const identity = { id: 'demo', source: 'file:///demo.js' }
+  const artifact = { version: '1.2.3', integrity: `sha256:${'c'.repeat(64)}` as const }
+  const declaration = { name: 'models.read' as const, required: false, scope: { providers: ['codex'] } }
+  const record = normalizePermissionPolicyRecordV2({
+    $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+    schemaVersion: 2,
+    key: {
+      profileId: scope.profileId,
+      identity: { pluginId: identity.id, source: identity.source },
+      capability: declaration.name,
+      scope: declaration.scope,
+      securityFingerprint: permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration),
+    },
+    policy: 'deny-persistent',
+  })
+  const signer = await createStandalonePermissionSigner(scope, {
+    crypto: webcrypto as unknown as Crypto,
+    target: 'native',
+  })
+  const controller = new AbortController()
+  const context = {
+    rendererId: scope.rendererId,
+    signal: controller.signal,
+    current: () => true,
+    live: () => true,
+  } as never
+  const authority = new OwnerAdapterPermissionProof(scope)
+  const keyId = 'd'.repeat(64)
+  try {
+    authority.register(context, keyId, signer.publicKey)
+    await expect(signer.sign('request-1', [record])).rejects.toThrow()
+    expect(signer.noteRuntimePolicy(
+      {
+        identity,
+        profileId: scope.profileId,
+        runtimeGeneration: scope.generation,
+        moduleGeneration: 'module-1',
+        artifact,
+      },
+      record,
+      'ask',
+    )).toBeTypeOf('function')
+    const proof = { keyId, proof: await signer.sign('request-1', [record]) }
+    const input = {
+      context,
+      requestId: 'request-1',
+      records: [record],
+      expected: [],
+      moduleGeneration: 'module-1',
+      artifact,
+      proof,
+    }
+    expect(authority.authorize({ ...input, expected: [{ ...record, policy: 'allow-persistent' }] })).toBe(false)
+    expect(authority.authorize({ ...input, artifact: { ...artifact, version: '2.0.0' } })).toBe(false)
+    expect(authority.authorize({ ...input, requestId: 'other' })).toBe(false)
+    expect(authority.authorize(input)).toBe(true)
+    expect(authority.authorize(input)).toBe(false)
+  } finally {
+    controller.abort()
     authority.close()
     signer.close()
   }

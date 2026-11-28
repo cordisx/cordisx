@@ -3,9 +3,14 @@ import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 import { standaloneDomReview } from './standalone-dom-review.js'
 import { BrowserPermissionOnceBinding } from './permission-once-binding.js'
 import { nativeRuntimePrompt } from './native-permission-prompt.js'
+import { isPermissionPolicyRecordV2 } from '../permission-persistence.js'
+import { bindStandaloneRuntimePolicyReviewer } from './standalone-runtime-policy-review.js'
 
 type PolicyBroker = {
   adoptStandaloneDomPolicies(
+    input: StandaloneDomPolicyAdoption & { readonly signal?: AbortSignal; readonly onUnknown?: () => void },
+  ): Promise<boolean>
+  adoptOwnerRuntimePolicies(
     input: StandaloneDomPolicyAdoption & { readonly signal?: AbortSignal; readonly onUnknown?: () => void },
   ): Promise<boolean>
 }
@@ -31,6 +36,10 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
     },
     register(broker: PolicyBroker, signal?: AbortSignal, onUnknown?: () => void): void {
       if (standalonePermissionSigner) {
+        bindStandaloneRuntimePolicyReviewer(
+          broker,
+          (context, record, observed) => standalonePermissionSigner.noteRuntimePolicy(context, record, observed),
+        )
         const review = standaloneDomReview(broker)
         if (
           !review?.bindPersistentDecision(
@@ -52,11 +61,14 @@ export function prepareStandalonePolicyRuntime(metadata: CordisXRuntimeMetadata)
       }
       standalonePolicyAdopter?.(async input => {
         if (signal?.aborted) return false
-        const adopted = await broker.adoptStandaloneDomPolicies({
+        const transition = {
           ...input,
           ...(signal === undefined ? {} : { signal }),
           ...(onUnknown === undefined ? {} : { onUnknown }),
-        })
+        }
+        const adopted = input.updates.length > 0 && input.updates.every(isPermissionPolicyRecordV2)
+          ? await broker.adoptOwnerRuntimePolicies(transition)
+          : await broker.adoptStandaloneDomPolicies(transition)
         return adopted && !signal?.aborted
       })
     },

@@ -117,6 +117,26 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
     await this.writeRecords(records)
   }
 
+  canAdoptStandaloneV2(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean {
+    const pending = this.pending.get(requestId)
+    if (
+      !this.standalone || this.closed || !pending || !pending.sent || pending.adopted
+      || !pending.records.every(isPermissionPolicyRecordV2)
+    ) return false
+    try {
+      return JSON.stringify(pending.records)
+        === JSON.stringify(records.map(record => normalizePersistedPermissionPolicyRecord(record)))
+    } catch {
+      return false
+    }
+  }
+
+  markAdoptedStandaloneV2(requestId: string, records: readonly CordisXPermissionPolicyRecordV2[]): boolean {
+    if (!this.canAdoptStandaloneV2(requestId, records)) return false
+    this.pending.get(requestId)!.adopted = true
+    return true
+  }
+
   async writeV3(records: readonly CordisXPermissionPolicyRecordV3[]): Promise<void> {
     await this.writeRecords(records)
   }

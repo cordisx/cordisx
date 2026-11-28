@@ -2,10 +2,12 @@ import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.j
 import { domPermissionAuthorizationKeyV3 } from '../permission-model-v3.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
+import { ownerDeclaredRuntimePolicy } from './owner-adapter-runtime-declaration.js'
 import type { ManagerPolicyTarget } from './service-renderer-installed-permission.js'
 
 /** Map only the owner's exact Manager UI points to a native policy target. */
@@ -16,6 +18,7 @@ export function ownerAdapterManagerPolicyTarget(input: {
   readonly moduleGeneration: string
   readonly digest: `sha256:${string}`
   readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
+  readonly manifest?: unknown
   readonly isCurrent: () => boolean
   readonly verifyCurrent?: () => Promise<boolean>
 }): ManagerPolicyTarget {
@@ -24,11 +27,18 @@ export function ownerAdapterManagerPolicyTarget(input: {
   }
   const identity = Object.freeze({ ...input.identity })
   const artifact = Object.freeze({ ...input.artifact })
-  const selected = (record: CordisXPersistedPermissionPolicyRecord) =>
-    isPermissionPolicyRecordV3(record) && record.key.profileId === input.profileId
-    && record.key.identity.pluginId === identity.id && record.key.identity.source === identity.source
-    && record.key.capability === 'ui.extension-points.render' && record.key.scope.extensionPoints?.length === 1
-    && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+  const selected = (record: CordisXPersistedPermissionPolicyRecord) => {
+    if (
+      record.key.profileId !== input.profileId || record.key.identity.pluginId !== identity.id
+      || record.key.identity.source !== identity.source
+    ) return false
+    if (isPermissionPolicyRecordV2(record) && input.manifest !== undefined) {
+      return ownerDeclaredRuntimePolicy({ manifest: input.manifest, pluginId: identity.id, record })
+    }
+    return isPermissionPolicyRecordV3(record) && record.key.capability === 'ui.extension-points.render'
+      && record.key.scope.extensionPoints?.length === 1
+      && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+  }
   const project = (records: readonly CordisXPersistedPermissionPolicyRecord[]) => {
     if (!input.isCurrent() || records.length > 4096) return invalid()
     const policies = records.map(record => normalizePersistedPermissionPolicyRecord(record)).filter(selected)
@@ -51,7 +61,9 @@ export function ownerAdapterManagerPolicyTarget(input: {
       if (!input.isCurrent() || records.length < 1 || records.length > 2) return invalid()
       const values = records.map(record => normalizePersistedPermissionPolicyRecord(record))
       for (const record of values) {
-        if (!selected(record) || !isPermissionPolicyRecordV3(record)) return invalid()
+        if (!selected(record)) return invalid()
+        if (isPermissionPolicyRecordV2(record)) continue
+        if (!isPermissionPolicyRecordV3(record)) return invalid()
         const pointId = record.key.scope.extensionPoints![0]!
         const expected = domPermissionAuthorizationKeyV3({
           profileId: input.profileId,

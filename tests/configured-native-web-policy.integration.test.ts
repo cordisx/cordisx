@@ -27,9 +27,9 @@ import { bootConfiguredChannelManager } from './helpers/configured-channel-manag
 
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
 
-it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux')(
-  'synchronizes a configured native review to a Web peer through the service owner',
-  async () => {
+it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'linux').each(['dom', 'runtime'] as const)(
+  'synchronizes a configured native %s review to a Web peer through the service owner',
+  async kind => {
     let f!: Awaited<ReturnType<typeof fixture>>
     const authority = new ManagerPermissionProofAuthority({
       profileId: 'default',
@@ -141,30 +141,36 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
           key: nativeSigner.publicKey,
         }),
       ).toMatchObject({ available: true, value: true })
-      const plan = buildDomPermissionAuthorizationPlanV3({
-        planId: 'native-review',
-        profileId: f.profileId,
-        identity: { pluginId: identity.id, source: identity.source },
-        binding: { operationId: 'native-review', runtimeGeneration: f.generation, moduleGeneration: nativeGeneration },
-        declaration: { name: 'ui.extension-points.render', required: false, scope: { extensionPoints: [pointId] } },
-        policies: [],
-      })
-      const choice = new PermissionAuthorizationViewModel(plan)
-      choice.select('ui.extension-points.render', 'allow-persistent')
-      const selected = choice.confirm()
-      if (selected.status !== 'confirmed' || selected.decision.schemaVersion !== 3) throw new Error('fixture failed')
-      expect(nativeSigner.noteConfirmed(
-        {
-          identity,
-          pointId,
+      if (kind === 'dom') {
+        const plan = buildDomPermissionAuthorizationPlanV3({
+          planId: 'native-review',
           profileId: f.profileId,
-          runtimeGeneration: f.generation,
-          moduleGeneration: nativeGeneration,
-          artifact,
-        },
-        plan,
-        selected.decision,
-      )).toBe(true)
+          identity: { pluginId: identity.id, source: identity.source },
+          binding: {
+            operationId: 'native-review',
+            runtimeGeneration: f.generation,
+            moduleGeneration: nativeGeneration,
+          },
+          declaration: { name: 'ui.extension-points.render', required: false, scope: { extensionPoints: [pointId] } },
+          policies: [],
+        })
+        const choice = new PermissionAuthorizationViewModel(plan)
+        choice.select('ui.extension-points.render', 'allow-persistent')
+        const selected = choice.confirm()
+        if (selected.status !== 'confirmed' || selected.decision.schemaVersion !== 3) throw new Error('fixture failed')
+        expect(nativeSigner.noteConfirmed(
+          {
+            identity,
+            pointId,
+            profileId: f.profileId,
+            runtimeGeneration: f.generation,
+            moduleGeneration: nativeGeneration,
+            artifact,
+          },
+          plan,
+          selected.decision,
+        )).toBe(true)
+      }
       const unknown = vi.fn()
       globalThis.__cordisxPermissionPolicyRequestV1 = payload => {
         const request = JSON.parse(payload) as { requestId: string; records: unknown; proof: unknown }
@@ -185,13 +191,16 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         onUnknown: unknown,
         sign: async (requestId, records) => ({ keyId, proof: await nativeSigner!.sign(requestId, records) }),
       })
-      const manifest = normalizePluginManifest({
-        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
-        schemaVersion: 4,
-        id: identity.id,
-        capabilities: [],
-        services: [],
-      }, identity.id)
+      const manifest = normalizePluginManifest(
+        kind === 'runtime' ? plugin.manifest : {
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+          schemaVersion: 4,
+          id: identity.id,
+          capabilities: [],
+          services: [],
+        },
+        identity.id,
+      )
       nativeBroker = new PermissionBroker(
         store,
         { request: async () => 'deny' },
@@ -213,7 +222,23 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         pluginId: identity.id,
         moduleGeneration: webGeneration,
       })
-      const saving = nativeBroker.setDomPolicy(identity, pointId, 'allow-persistent')
+      if (kind === 'runtime') {
+        const decision = nativeBroker.reviewPolicyV2(identity, 'channel.events.receive', 'allow-persistent')
+        expect(nativeSigner.noteRuntimePolicy(
+          {
+            identity,
+            profileId: f.profileId,
+            runtimeGeneration: f.generation,
+            moduleGeneration: nativeGeneration,
+            artifact,
+          },
+          decision.record,
+          decision.observed,
+        )).toBeTypeOf('function')
+      }
+      const saving = kind === 'dom'
+        ? nativeBroker.setDomPolicy(identity, pointId, 'allow-persistent')
+        : nativeBroker.setPolicyV2(identity, 'channel.events.receive', 'allow-persistent')
       const provenance = (await native.poll(opened.sessionId, opened.grant, 5_000))!.command!
       expect(provenance.method).toBe('permission-provenance')
       expect(
@@ -240,7 +265,11 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         key: opened.policyPublicKey,
       })
       expect(transition).toMatchObject({ origin: true, identity, moduleGeneration: nativeGeneration })
-      expect(await nativeBroker.adoptOwnerManagerPolicies({ ...transition!, onUnknown: unknown })).toBe(true)
+      expect(
+        await (kind === 'dom'
+          ? nativeBroker.adoptOwnerManagerPolicies({ ...transition!, onUnknown: unknown })
+          : nativeBroker.adoptOwnerRuntimePolicies({ ...transition!, onUnknown: unknown })),
+      ).toBe(true)
       const webPoll = f.sessions.poll(f.invocation, 5_000)
       expect(
         await native.acknowledge(opened.sessionId, opened.grant, {
@@ -259,7 +288,11 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       ).toBe(true)
       const webCommand = (await webPoll as any).value.command
       expect(webCommand.method).toBe('permission-policy')
-      expect(await webBroker.adoptStandaloneDomPolicies(webCommand.payload)).toBe(true)
+      expect(
+        await (kind === 'dom'
+          ? webBroker.adoptStandaloneDomPolicies(webCommand.payload)
+          : webBroker.adoptOwnerRuntimePolicies(webCommand.payload)),
+      ).toBe(true)
       expect(
         await f.sessions.acknowledge(f.invocation, {
           id: webCommand.id,
@@ -276,8 +309,15 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         }),
       ).toEqual({ status: 'ok', value: { accepted: true } })
       await saving
-      expect(nativeBroker.domPolicy(identity, pointId)).toBe('allow')
-      expect(webBroker.domPolicy({ id: identity.id, source: alias }, pointId)).toBe('allow')
+      if (kind === 'dom') {
+        expect(nativeBroker.domPolicy(identity, pointId)).toBe('allow')
+        expect(webBroker.domPolicy({ id: identity.id, source: alias }, pointId)).toBe('allow')
+      } else {
+        expect(nativeBroker.policyV2(identity, 'channel.events.receive')).toBe('allow-persistent')
+        expect(webBroker.policyV2({ id: identity.id, source: alias }, 'channel.events.receive')).toBe(
+          'allow-persistent',
+        )
+      }
       const persisted = await loadPolicies()
       expect(persisted).toHaveLength(1)
       expect(await journal.recent(persisted)).toMatchObject([{

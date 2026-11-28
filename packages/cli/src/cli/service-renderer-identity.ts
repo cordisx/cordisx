@@ -3,10 +3,12 @@ import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.j
 import { domPermissionAuthorizationKeyV3 } from '../permission-model-v3.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
+import { ownerDeclaredRuntimePolicy } from './owner-adapter-runtime-declaration.js'
 import type { CordisXConfigPlugin } from '../launcher/config.js'
 import { stagedPluginModulePath } from '../launcher/plugin-package.js'
 import { pluginAffectedClosure } from '../launcher/plugin-activation.js'
@@ -23,6 +25,7 @@ type IdentityBinding = {
   pluginId: string
   source: string
   digest: string
+  manifest: unknown
   activation?: CordisXPluginActivationItemV1
   unavailable?: true
 }
@@ -84,7 +87,12 @@ export class ServiceRendererIdentityProjection {
     }
     const alias = `https://renderer.cordisx.invalid/plugin/${randomBytes(32).toString('hex')}`
     if (this.aliases.has(alias)) throw new Error('renderer-identity-unavailable')
-    this.aliases.set(alias, { pluginId: captured.id, source: staged.identitySource, digest: staged.digest })
+    this.aliases.set(alias, {
+      pluginId: captured.id,
+      source: staged.identitySource,
+      digest: staged.digest,
+      manifest: structuredClone(staged.manifest.runtimeManifest),
+    })
     this.plugins.set(captured.id, alias)
     return alias
   }
@@ -120,6 +128,7 @@ export class ServiceRendererIdentityProjection {
       pluginId: captured.id,
       source: staged.identitySource,
       digest: staged.digest,
+      manifest: structuredClone(staged.manifest.runtimeManifest),
       activation: captured,
       ...(options.unavailable ? { unavailable: true } : {}),
     })
@@ -247,7 +256,13 @@ export class ServiceRendererIdentityProjection {
           if (!staged) throw new Error('renderer-identity-unavailable')
           do alias = `https://renderer.cordisx.invalid/plugin/${randomBytes(32).toString('hex')}`
           while (this.aliases.has(alias) || bindings.has(alias))
-          binding = { pluginId: item.id, source: staged.identitySource, digest: staged.digest, activation: item }
+          binding = {
+            pluginId: item.id,
+            source: staged.identitySource,
+            digest: staged.digest,
+            manifest: structuredClone(staged.manifest.runtimeManifest),
+            activation: item,
+          }
         }
         if (bindings.has(alias)) throw new Error('renderer-identity-unavailable')
         aliases.set(item.id, alias)
@@ -353,7 +368,7 @@ export class ServiceRendererIdentityProjection {
     return { id: item.id, source: value.source }
   }
 
-  /** Project only existing owner-approved Manager UI policies; this never creates a grant. */
+  /** Project only owner-approved Manager UI and exact declared runtime policies. */
   projectManagerPolicies(
     context: ManagerRendererChannelContext,
     alias: string,
@@ -361,16 +376,20 @@ export class ServiceRendererIdentityProjection {
     records: readonly CordisXPersistedPermissionPolicyRecord[],
   ): readonly CordisXPersistedPermissionPolicyRecord[] {
     const original = this.resolve(context, alias, pluginId)
+    const manifest = this.aliases.get(alias)?.manifest
     if (records.length > 4096) throw new Error('renderer-identity-unavailable')
     const projected: CordisXPersistedPermissionPolicyRecord[] = []
     const keys = new Set<string>()
     for (const raw of records) {
       const record = normalizePersistedPermissionPolicyRecord(raw)
       if (
-        !isPermissionPolicyRecordV3(record) || record.key.profileId !== context.profileId
+        record.key.profileId !== context.profileId
         || record.key.identity.pluginId !== pluginId || record.key.identity.source !== original.source
-        || record.key.capability !== 'ui.extension-points.render' || record.key.scope.extensionPoints?.length !== 1
-        || !['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+        || !(isPermissionPolicyRecordV2(record)
+          ? ownerDeclaredRuntimePolicy({ manifest, pluginId, record })
+          : isPermissionPolicyRecordV3(record) && record.key.capability === 'ui.extension-points.render'
+            && record.key.scope.extensionPoints?.length === 1
+            && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!))
       ) continue
       const value = normalizePersistedPermissionPolicyRecord({
         ...record,
@@ -385,7 +404,7 @@ export class ServiceRendererIdentityProjection {
     return projected
   }
 
-  /** Resolve a renderer-local Manager UI policy to the owner-selected source.
+  /** Resolve a renderer-local policy to the owner-selected source.
    * This only resolves identity; the caller must separately authorize and
    * coordinate the exact write across every policy consumer.
    */
@@ -399,24 +418,34 @@ export class ServiceRendererIdentityProjection {
       throw new Error('renderer-identity-unavailable')
     }
     const original = this.resolve(context, alias, pluginId)
+    const manifest = this.aliases.get(alias)?.manifest
     const resolved: CordisXPersistedPermissionPolicyRecord[] = []
     const keys = new Set<string>()
     for (const raw of records) {
       const record = normalizePersistedPermissionPolicyRecord(raw)
       if (
-        !isPermissionPolicyRecordV3(record) || record.key.profileId !== context.profileId
+        record.key.profileId !== context.profileId
         || record.key.identity.pluginId !== pluginId || record.key.identity.source !== alias
-        || record.key.capability !== 'ui.extension-points.render' || record.key.scope.extensionPoints?.length !== 1
-        || !['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
       ) throw new Error('renderer-identity-unavailable')
-      const expected = domPermissionAuthorizationKeyV3({
-        profileId: context.profileId,
-        identity: { source: alias, pluginId },
-        pointId: record.key.scope.extensionPoints[0]!,
-        catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
-      })
-      if (record.key.securityFingerprint !== expected.securityFingerprint) {
-        throw new Error('renderer-identity-unavailable')
+      if (isPermissionPolicyRecordV2(record)) {
+        if (!ownerDeclaredRuntimePolicy({ manifest, pluginId, record })) {
+          throw new Error('renderer-identity-unavailable')
+        }
+      } else {
+        if (
+          !isPermissionPolicyRecordV3(record) || record.key.capability !== 'ui.extension-points.render'
+          || record.key.scope.extensionPoints?.length !== 1
+          || !['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
+        ) throw new Error('renderer-identity-unavailable')
+        const expected = domPermissionAuthorizationKeyV3({
+          profileId: context.profileId,
+          identity: { source: alias, pluginId },
+          pointId: record.key.scope.extensionPoints[0]!,
+          catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+        })
+        if (record.key.securityFingerprint !== expected.securityFingerprint) {
+          throw new Error('renderer-identity-unavailable')
+        }
       }
       const value = normalizePersistedPermissionPolicyRecord({
         ...record,
