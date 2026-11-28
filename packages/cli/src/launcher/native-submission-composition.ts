@@ -112,6 +112,10 @@ export interface NativeSubmissionComposition {
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
   readonly environment: Readonly<Record<string, string>>
+  readonly suspendRemoteProvider?: () => void
+  readonly reconnectRemoteProvider?: (
+    owner: NonNullable<ExistingTerminalProviderSource['expectedOwner']>,
+  ) => Promise<void>
   close(): Promise<void>
 }
 export interface NativeSubmissionBootstrap {
@@ -968,6 +972,10 @@ export async function prepareNativeSubmissionBootstrap(
           },
           installation: { authority: cdp, ...discovered },
           environment: Object.freeze({ ...environment, ...providerSyncEnvironment }),
+          ...(remote === undefined ? {} : {
+            suspendRemoteProvider: () => remote!.suspend(),
+            reconnectRemoteProvider: async owner => await remote!.reconnect(owner),
+          }),
           close,
         }
       })()

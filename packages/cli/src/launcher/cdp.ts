@@ -147,6 +147,8 @@ export interface WatchInjectionOptions {
   readonly onStatus?: (message: string) => void
   /** Called after the first workspace renderer accepts the CordisX bootstrap. */
   readonly onReady?: () => void | Promise<void>
+  /** Host-private notification after every installed renderer was removed successfully. */
+  readonly onCleanupConfirmed?: () => void
   readonly providerFleet?: support.ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost?: support.CodexAgentHistoryHost
@@ -694,6 +696,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
         watcherFailure === undefined ? undefined : { cause: watcherFailure },
       )
     }
+    options.onCleanupConfirmed?.()
   }
   if (watcherFailure !== undefined) throw watcherFailure
 }

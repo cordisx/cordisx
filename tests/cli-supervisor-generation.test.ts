@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
-import { runSupervisorCommand } from '../packages/cli/src/cli/supervisor-command.js'
+import { runSupervisorCommand as runDefaultSupervisor } from '../packages/cli/src/cli/supervisor-command.js'
 import { createSupervisorRuntime } from '../packages/cli/src/cli/supervisor-runtime.js'
 import {
   acquireSupervisorStartLock,
@@ -15,6 +15,9 @@ import {
   supervisorPaths,
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
+
+const runSupervisorCommand: typeof runDefaultSupervisor = (invocation, runtime, onState) =>
+  runDefaultSupervisor(invocation, { ...runtime, internalSupervisorLegacyAppOwner: true }, onState)
 
 async function published(paths: ReturnType<typeof supervisorPaths>) {
   const deadline = Date.now() + 2_000

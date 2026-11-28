@@ -33,7 +33,6 @@ it('synchronizes a native adapter with a production service plugin transaction',
     CORDISX_HOME: homeDir,
     CORDISX_MODEL_API_PORT: '0',
     CORDISX_WEB_ENABLED: '0',
-    CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER: '1',
   })
   const command = async (action: string) =>
     JSON.parse(

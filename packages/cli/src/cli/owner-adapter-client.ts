@@ -101,6 +101,7 @@ export class OwnerAdapterClient {
   readonly rendererId: string
   readonly documentSecret: string
   readonly policyPublicKey: string
+  readonly ownerIdentity: Readonly<{ pid: number; processStartedAt: string; generation: string }>
   private readonly controller = new AbortController()
   private readonly poller: Promise<void>
   private handler: Handler | undefined
@@ -117,12 +118,18 @@ export class OwnerAdapterClient {
   private constructor(
     private readonly request: (operation: PluginManagementRpcOperation, signal?: AbortSignal) => Promise<unknown>,
     private readonly session: OpenResult,
+    endpoint: PluginManagementRpcEndpoint,
     private readonly onLost: () => void | Promise<void>,
   ) {
     this.snapshot = structuredClone(session.snapshot)
     this.rendererId = session.rendererId
     this.documentSecret = session.documentSecret
     this.policyPublicKey = session.policyPublicKey
+    this.ownerIdentity = {
+      pid: endpoint.pid,
+      processStartedAt: endpoint.processStartedAt,
+      generation: endpoint.generation,
+    }
     this.poller = this.poll()
   }
 
@@ -170,7 +177,7 @@ export class OwnerAdapterClient {
         .catch(() => undefined)
       throw new Error('adapter-owner-unavailable')
     }
-    return new OwnerAdapterClient(request, session, input.onLost)
+    return new OwnerAdapterClient(request, session, endpoint, input.onLost)
   }
 
   private operation<T extends OwnerAdapterRpcOperation['action']>(action: T) {

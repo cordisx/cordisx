@@ -36,7 +36,13 @@ export async function selectServiceClient(input: {
     if (!client.state.clientOfService) throw new Error('CordisX native client state is invalid')
     return { client: true, waited: false }
   }
-  if (owner.status !== 'valid' || owner.state.mode !== 'service' || owner.state.phase === 'failed') {
+  if (owner.status === 'invalid' || owner.status === 'unreadable') {
+    throw new Error('CordisX service owner state is unavailable')
+  }
+  if (owner.status === 'missing') {
+    return { client: input.action === 'start' || input.action === 'restart', waited: false }
+  }
+  if (owner.state.mode !== 'service' || owner.state.phase === 'failed') {
     return { client: false, waited: false }
   }
   const identity = await processIdentityStatus(owner.state.pid, owner.state.processStartedAt)

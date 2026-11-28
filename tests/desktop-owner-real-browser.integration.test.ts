@@ -533,7 +533,11 @@ async function exerciseDesktopOwner(
       await vi.waitFor(async () => {
         expect(await second!.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'private field retained' })
       }, { timeout: 15_000 })
+      await second.evaluate('globalThis.__privateConfigBeforeReload = true')
       await second.send('Page.reload')
+      await vi.waitFor(async () => {
+        expect(await second!.evaluate('globalThis.__privateConfigBeforeReload === undefined')).toBe(true)
+      }, { timeout: 15_000 })
       await ready(second)
       expect(await second.evaluate('globalThis.__desktopConfigValue')).toEqual({ label: 'private field retained' })
       for (const page of [first, second]) {

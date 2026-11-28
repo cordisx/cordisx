@@ -15,6 +15,8 @@ export interface ExistingTerminalProviderSource {
   /** Explicit configured app namespaces eligible to own this same profile. */
   readonly appIds?: readonly string[]
   readonly selectedAppId?: string
+  /** When attaching a native client, pin discovery to its verified service generation. */
+  readonly expectedOwner?: Readonly<{ pid: number; processStartedAt: string; generation: string }>
 }
 
 export class TerminalOwnerDiscoveryError extends Error {
@@ -76,6 +78,12 @@ export async function connectExistingTerminalProvider(source: ExistingTerminalPr
     return active[0]!
   }
   const { paths, endpoint } = await discover()
+  if (
+    source.expectedOwner !== undefined
+    && (endpoint.pid !== source.expectedOwner.pid
+      || endpoint.processStartedAt !== source.expectedOwner.processStartedAt
+      || endpoint.generation !== source.expectedOwner.generation)
+  ) throw new TerminalOwnerDiscoveryError('unverified')
   const check = async () => {
     const current = (await discover()).endpoint
     if (

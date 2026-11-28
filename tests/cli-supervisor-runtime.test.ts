@@ -48,14 +48,25 @@ describe('background supervisor publication handshake', () => {
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
     })
     try {
+      const release = await acquireSupervisorStartLock(paths)
+      await release()
       expect(await runtime.refreshClientFingerprint(original, updated)).toBe(false)
-      await runtime.markReady(43123)
-      expect(await runtime.refreshClientFingerprint('d'.repeat(64), updated)).toBe(false)
-      expect(await runtime.refreshClientFingerprint(original, updated)).toBe(true)
+      await runtime.markReady(43123, undefined, undefined, updated)
       expect((await readSupervisorState(paths))?.effectiveConfig).toBe(updated)
+      expect(await runtime.refreshClientFingerprint(original, updated)).toBe(false)
+      expect(await runtime.refreshClientFingerprint(updated, original)).toBe(true)
+      expect((await readSupervisorState(paths))?.effectiveConfig).toBe(original)
       expect(await runtime.markClientDisconnected()).toBe(true)
-      expect(await runtime.refreshClientFingerprint(updated, original)).toBe(false)
-      expect((await readSupervisorState(paths))?.effectiveConfig).toBe(updated)
+      expect(await runtime.refreshClientFingerprint(original, updated)).toBe(false)
+      expect((await readSupervisorState(paths))?.effectiveConfig).toBe(original)
+      expect(await runtime.markClientReconnected(updated, updated, new AbortController().signal)).toBe(false)
+      expect(await runtime.markClientReconnected(original, updated, AbortSignal.abort())).toBe(false)
+      expect(await runtime.markClientReconnected(original, updated, new AbortController().signal)).toBe(true)
+      expect(await readSupervisorState(paths)).toMatchObject({
+        clientConnection: 'connected',
+        effectiveConfig: updated,
+      })
+      expect(await runtime.markClientReconnected(updated, original, new AbortController().signal)).toBe(false)
     } finally {
       await runtime.close()
       await rm(root, { recursive: true, force: true })

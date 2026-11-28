@@ -19,8 +19,21 @@ and managed backends. It does not start a desktop application. When Channel is
 enabled for a Codex profile, the service also starts Channel and an independent
 Codex CLI app-server; the CLI must be available on `PATH`. A second `start`
 returns the existing owner. Use
-`restart --mode service` to apply launch environment changes. If an App already
-owns the selected scope, stop that instance explicitly before switching modes.
+`restart --mode service` to apply launch environment changes. An older App
+instance that itself owns the selected scope must be stopped before switching
+that scope to an independent service.
+
+The service starts CordisX Web by default. When Web is ready, the
+`start --mode service` output includes a `webEntry`; open that local entry in a
+browser within 60 seconds. Run the same start command again to obtain a fresh
+entry. To disable Web, set `CORDISX_WEB_ENABLED=0` before service startup.
+
+Start the Codex client with `cordisx start codex`. It starts the matching
+service when necessary and otherwise reuses it. Stopping the client leaves the
+service running. If the service stops, the native App stays open in a
+disconnected state. When a matching service returns, the client revalidates its
+owner and reconnects the existing App; a change to other launch configuration
+may require a client restart. Operations whose result was lost are not replayed.
 
 Use `cordisx plugin list --profile work` and the usual plugin management
 commands. Existing permissions and plugin configuration still apply.
@@ -28,7 +41,8 @@ The [supplemental Codex CLI](codex-cli.md) also exposes shared model services an
 creation defaults in service mode. Session operations require its existing
 headless Codex backend; unsupported capabilities remain explicitly unavailable.
 `--yes` does not approve new permissions. Browser-only plugins are shown as
-unavailable in service mode; there is no native Manager or Desktop session context.
+unavailable to the service itself; a connected native client can run their
+compatible browser contributions.
 For Channel, use `cordisx channel connections --profile work` to inspect connection
 state and `cordisx channel help` for listening, binding and explicit sends. A
 started service does not guarantee an account is connected. The profile owns

@@ -22,7 +22,6 @@ it('admits independent adapter sessions through one production service owner', a
     CORDISX_HOME: homeDir,
     CORDISX_MODEL_API_PORT: '0',
     CORDISX_WEB_ENABLED: '0',
-    CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER: '1',
   })
   const command = async (action: string) =>
     JSON.parse(

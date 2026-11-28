@@ -1,16 +1,16 @@
 import { waitForStartupCaller } from './startup-caller-wait.js'
 import { diagnostic, diagnosticError, diagnosticId, diagnosticRef, withDiagnostics } from '../diagnostics/context.js'
-import { journalDirectory, LocalJournal, readJournal } from '../diagnostics/journal.js'
-import { launchFingerprint } from './launch-fingerprint.js'
+import { LocalJournal, readJournal } from '../diagnostics/journal.js'
 import { type ExpectedService, selectServiceClient } from './client-supervisor-selection.js'
+import { ensureClientServiceScope } from './client-service-owner.js'
+import { waitForClientReconnection } from './client-service-reconnection.js'
+import { selectionFor } from './supervisor-selection.js'
 import { randomBytes } from 'node:crypto'
 import { open, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
-import { resolveProfileSelection } from './profiles.js'
 import type { CordisXCliInvocation } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
 import {
@@ -61,64 +61,6 @@ export function isSupervisorCommand(invocation: CordisXCliInvocation): boolean {
 function output(runtime: CordisXCliRuntime, value: unknown, json: boolean): void {
   const stdout = runtime.stdout ?? console.log
   stdout(json ? JSON.stringify(value) : typeof value === 'string' ? value : JSON.stringify(value, null, 2))
-}
-
-async function selectionFor(
-  invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>,
-  runtime: CordisXCliRuntime,
-) {
-  const environment = runtime.env ?? process.env
-  const requestedCwd = runtime.cwd ?? process.cwd()
-  // Spawn resolves cwd symlinks before the child resolves relative inputs.
-  // Use that same directory for identity, child launch and saved presentation.
-  const cwd = await realpath(requestedCwd).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    return path.resolve(requestedCwd)
-  })
-  const options: HomeConfigPathOptions = {
-    env: environment,
-    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-  }
-  const configPath = resolveHomeConfigPath(options)
-  const config = await ensureHomeConfig(options)
-  const appId = invocation.app ?? config.defaultApp
-  if (
-    invocation.mode === 'service' && ['start', 'restart'].includes(invocation.action) && appId !== config.defaultApp
-  ) {
-    throw new Error(
-      'Service mode uses the default App namespace for plugin management; omit the App or use ' + config.defaultApp,
-    )
-  }
-  const selection = await resolveProfileSelection({
-    config,
-    configPath,
-    appId,
-    ...(invocation.profile === undefined ? {} : { profileId: invocation.profile }),
-    ...(invocation.dataMode === undefined ? {} : { dataMode: invocation.dataMode }),
-  })
-  const source = await readFile(configPath, 'utf8')
-  return {
-    environment,
-    cwd,
-    configPath,
-    appId,
-    selection,
-    journalDirectory: journalDirectory(
-      path.dirname(configPath),
-      invocation.mode === 'service' ? 'service:' + appId : appId,
-      selection.profileId,
-    ),
-    fingerprint: invocation.mode === 'service' ? 'service' : launchFingerprint({
-      source,
-      options: invocation.options,
-      hostArgs: invocation.hostArgs,
-      dataMode: selection.dataMode,
-      cwd,
-      ...(environment.CODEX_HOME
-        ? { codexHome: path.resolve(cwd, environment.CODEX_HOME) }
-        : {}),
-    }),
-  }
 }
 
 function readinessTimeout(runtime: CordisXCliRuntime): number {
@@ -611,7 +553,7 @@ async function runSelectedSupervisorCommand(
   const clientPaths = clientSupervisorPaths(homeDir, target.appId, target.selection.profileId)
   const selectedClient = await selectServiceClient({
     enabled: invocation.mode !== 'service' && target.appId === 'codex'
-      && target.environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1',
+      && runtime.internalSupervisorLegacyAppOwner !== true,
     action: invocation.action,
     ownerPaths,
     clientPaths,
@@ -726,7 +668,7 @@ async function runSelectedSupervisorCommand(
     }
     if (
       !clientOfService && invocation.mode !== 'service' && target.appId === 'codex'
-      && target.environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1'
+      && runtime.internalSupervisorLegacyAppOwner !== true
       && state?.mode === 'service' && state.phase !== 'failed'
     ) {
       // The service may have acquired the owner lock before publishing its
@@ -796,10 +738,31 @@ async function runSelectedSupervisorCommand(
     }
     if (state !== undefined) {
       if (state.clientOfService && state.clientConnection === 'disconnected') {
-        throw new Error('The Codex client lost its CordisX service connection; its App remains open')
+        if (invocation.action !== 'start' || state.version !== VERSION) {
+          throw new Error('The Codex client lost its CordisX service connection; its App remains open')
+        }
+        const disconnected = state
+        await releaseOperation()
+        await ensureClientServiceScope(target, runtime)
+        const ready = await waitForClientReconnection(paths, disconnected, readinessTimeout(runtime))
+        const currentTarget = await selectionFor(invocation, runtime)
+        if (
+          currentTarget.configPath !== target.configPath || currentTarget.appId !== target.appId
+          || currentTarget.selection.profileId !== target.selection.profileId
+          || currentTarget.selection.dataMode !== target.selection.dataMode || currentTarget.cwd !== target.cwd
+          || ready.version !== VERSION || ready.effectiveConfig !== currentTarget.fingerprint
+        ) {
+          throw new Error(
+            'CordisX instance version or effective configuration differs; run `cordisx restart` explicitly',
+          )
+        }
+        const result = { state: ready, target: currentTarget }
+        await onState?.(result, 'ready')
+        return await finishReady(invocation, runtime, result)
       }
       diagnostic({ event: 'supervisor-reused', supervisorGeneration: diagnosticRef(state.instanceToken) })
-      if (state.version !== VERSION || state.effectiveConfig !== target.fingerprint) {
+      const pendingClient = state.clientOfService === true && state.phase === 'starting'
+      if (state.version !== VERSION || !pendingClient && state.effectiveConfig !== target.fingerprint) {
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
       }
       await releaseOperation()
@@ -812,9 +775,31 @@ async function runSelectedSupervisorCommand(
           state.instanceToken,
         )
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
-      const result = { state: ready, target }
+      const currentTarget = pendingClient ? await selectionFor(invocation, runtime) : target
+      if (
+        currentTarget.configPath !== target.configPath || currentTarget.appId !== target.appId
+        || currentTarget.selection.profileId !== target.selection.profileId
+        || currentTarget.selection.dataMode !== target.selection.dataMode || currentTarget.cwd !== target.cwd
+        || ready.version !== VERSION || ready.effectiveConfig !== currentTarget.fingerprint
+      ) throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
+      const result = { state: ready, target: currentTarget }
       await onState?.(result, 'ready')
       return await finishReady(invocation, runtime, result)
+    }
+    if (
+      !clientOfService && invocation.mode !== 'service' && target.appId === 'codex'
+      && runtime.internalSupervisorLegacyAppOwner !== true
+    ) {
+      // A stale legacy owner can disappear after the initial selection. Publish
+      // the client startup before it starts a service, so stop can cancel it.
+      await releaseOperation()
+      const refreshed = await selectionFor(invocation, runtime)
+      if (
+        refreshed.configPath !== target.configPath || refreshed.appId !== target.appId
+        || refreshed.selection.profileId !== target.selection.profileId
+        || refreshed.selection.dataMode !== target.selection.dataMode || refreshed.cwd !== target.cwd
+      ) throw new Error('CordisX client selection changed while the legacy owner was retiring')
+      return await runSelectedSupervisorCommand(invocation, runtime, refreshed, onState, launchId)
     }
     // Persist only the structured allowlisted journal. Legacy raw logs remain readable, never appended.
     const log = await open(os.devNull, 'a')

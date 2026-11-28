@@ -8,7 +8,10 @@ import { pathToFileURL } from 'node:url'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
-import { runSupervisorCommand, waitForState } from '../packages/cli/src/cli/supervisor-command.js'
+import {
+  runSupervisorCommand as runDefaultSupervisor,
+  waitForState,
+} from '../packages/cli/src/cli/supervisor-command.js'
 import {
   acquireSupervisorStartLock,
   clientSupervisorPaths,
@@ -24,6 +27,10 @@ import { shortcutKey } from '../packages/cli/src/shortcuts/model.js'
 const cliVersion = JSON.parse(
   await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'),
 ) as { readonly version: string }
+
+// The general supervisor tests also cover the retained legacy App owner.
+const runSupervisorCommand: typeof runDefaultSupervisor = (invocation, runtime, onState) =>
+  runDefaultSupervisor(invocation, { ...runtime, internalSupervisorLegacyAppOwner: true }, onState)
 
 describe('supervisor management commands', () => {
   it('does not signal a live PID or remove its state when legacy identity is uncertain', async () => {
@@ -111,8 +118,8 @@ describe('supervisor management commands', () => {
         failure: 'fixture failed',
         failedAt: new Date().toISOString(),
       })
-      await runSupervisorCommand(parseCordisXCli(['status', '--json']), {
-        env: { CORDISX_HOME: root, CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER: '1' },
+      await runDefaultSupervisor(parseCordisXCli(['status', '--json']), {
+        env: { CORDISX_HOME: root },
         stdout: value => output.push(value),
       })
       expect(JSON.parse(output.pop()!)).toMatchObject({

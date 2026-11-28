@@ -1,40 +1,22 @@
-import { randomBytes } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
+import { setTimeout as delay } from 'node:timers/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { loadValidatedConfigDocument, parseHomeConfig } from '../config/home-config.js'
-import { CdpPluginLifecycleRuntime } from '../launcher/cdp.js'
-import { loadConfig } from '../launcher/config.js'
 import { codexHomeOfPlan, modelServiceLaunchHook } from '../launcher/model-service-projection.js'
-import { type NativeSubmissionComposition } from '../launcher/native-submission-composition.js'
-import { PluginActivationStore } from '../launcher/plugin-activation.js'
-import {
-  entityInstallationId,
-  entityPluginGeneration,
-  issueOwnerDocumentPrincipalToken,
-  OwnerDocumentLeaseRegistry,
-} from '../launcher/owner-document-rpc.js'
-import {
-  type PluginGenerationArtifactServer,
-  startPluginGenerationArtifactServer,
-} from '../launcher/plugin-generation-loader.js'
+import type { NativeSubmissionComposition } from '../launcher/native-submission-composition.js'
 import { cleanupPrelaunch } from './injected-host-cleanup.js'
+import { ensureClientService } from './client-service-owner.js'
 import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
-import { OwnerAdapterCdpClient } from './owner-adapter-cdp-client.js'
+import type { OwnerAdapterCdpClient } from './owner-adapter-cdp-client.js'
 import { OwnerAdapterClient } from './owner-adapter-client.js'
-import { OwnerAdapterLaunchIntent } from './owner-adapter-launch-intent.js'
-import { createOwnerAdapterGraphBootstrap } from './owner-adapter-graph-bootstrap.js'
-import { createOwnerAdapterManagement } from './owner-adapter-management.js'
-import { loadOwnerAdapterMutation } from './owner-adapter-mutation.js'
+import { createOwnerAdapterNativeSession } from './owner-adapter-native-session.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import { rendererAgentContext } from './renderer-agent-context.js'
-import { buildRendererComposition, loadActiveBrowserGraphs, type RendererComposition } from './renderer-composition.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
+import type { OwnerReconnectionSession } from './run-injected-host.js'
 import {
   agentHistoryHost,
   codexHome,
   type CordisXCliRuntime,
-  pluginIdentities,
   printPlan,
   rootFromConfigPath,
   runInjectedHost,
@@ -42,175 +24,162 @@ import {
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 
-async function readOwnerConfig(configPath: string) {
-  return await loadValidatedConfigDocument(configPath, 'home config', value => ({
-    home: parseHomeConfig(value),
-    source: JSON.stringify(value),
-  }))
-}
-
-/** Experimental native transport: shared authorities remain in the verified service process. */
+/** Shared authorities remain in the verified service process. */
 export async function runServiceAttachedClient(
   prepared: PreparedRunCommand,
   runtime: CordisXCliRuntime,
 ): Promise<void> {
-  const { invocation, stdout, environment, configPath, selection, appId } = prepared
-  if (
-    environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER !== '1' || appId !== 'codex'
-    || invocation.options.attach || invocation.options.dryRun
-  ) throw new Error('service-attached native client is unavailable')
+  const { invocation, stdout, environment, configPath, appId } = prepared
+  if (appId !== 'codex' || invocation.options.attach || invocation.options.dryRun) {
+    throw new Error('service-attached native client is unavailable')
+  }
   const homeDir = rootFromConfigPath(configPath)
   const lifetime = createStartupLifetime(runtime.internalSignal)
-  const ownerLost = new AbortController()
   const supervisor = await createSupervisorRuntime(environment)
-  let client: OwnerAdapterClient | undefined
-  let participant: OwnerAdapterCdpClient | undefined
-  let artifacts: PluginGenerationArtifactServer | undefined
-  let renderer: RendererComposition | undefined
+  const managedClient = environment.CORDISX_SUPERVISOR_CLIENT === '1'
   let bootstrap: ProductionHostBootstrap | undefined
   let submission: NativeSubmissionComposition | undefined
-  let management: ReturnType<typeof createOwnerAdapterManagement> | undefined
+  let activeSession: OwnerReconnectionSession | undefined
+  let currentOwner: OwnerAdapterClient | undefined
+  let disconnected = Promise.resolve(false)
+  let publishedFingerprint: string | undefined
+  let stableFingerprint: string | undefined
   let handedOff = false
+  let detachStartupOwner: (() => void) | undefined
   try {
-    client = await OwnerAdapterClient.connect({
+    await ensureClientService(prepared, runtime)
+    const { prepareRunCommand } = await import('./run-command-dispatch.js')
+    const refreshed = await prepareRunCommand(invocation, runtime)
+    if (
+      !refreshed || refreshed.configPath !== configPath || refreshed.appId !== appId
+      || refreshed.selection.profileId !== prepared.selection.profileId
+      || refreshed.selection.dataMode !== prepared.selection.dataMode
+    ) throw new Error('CordisX client selection changed while the service was starting')
+    const selection = refreshed.selection
+    const context = rendererAgentContext()
+    const cwd = await realpath(runtime.cwd ?? process.cwd()).catch(() => path.resolve(runtime.cwd ?? process.cwd()))
+    const launch = {
+      options: invocation.options,
+      hostArgs: invocation.hostArgs,
+      dataMode: selection.dataMode,
+      cwd,
+      ...(environment.CODEX_HOME ? { codexHome: path.resolve(cwd, environment.CODEX_HOME) } : {}),
+    }
+    type Link = {
+      readonly owner: OwnerAdapterClient
+      readonly signal: AbortSignal
+      participant?: OwnerAdapterCdpClient
+      disconnect(): void
+    }
+    const openLink = async (): Promise<Link> => {
+      const lost = new AbortController()
+      let link: Link | undefined
+      const disconnect = () => {
+        link?.participant?.close()
+        if (!lost.signal.aborted) lost.abort(new Error('CordisX service disconnected'))
+        if (link && currentOwner === link.owner) {
+          currentOwner = undefined
+          submission?.suspendRemoteProvider?.()
+          disconnected = supervisor.markClientDisconnected().catch(() => false)
+        }
+      }
+      const owner = await OwnerAdapterClient.connect({
+        homeDir,
+        appId,
+        profileId: selection.profileId,
+        onLost: disconnect,
+      })
+      link = { owner, signal: lost.signal, disconnect }
+      currentOwner = owner
+      lost.signal.throwIfAborted()
+      return link
+    }
+    const initial = await openLink()
+    const startupOwner = new AbortController()
+    const abortStartupOwner = () => startupOwner.abort(initial.signal.reason)
+    initial.signal.addEventListener('abort', abortStartupOwner, { once: true })
+    detachStartupOwner = () => initial.signal.removeEventListener('abort', abortStartupOwner)
+    if (initial.signal.aborted) abortStartupOwner()
+    const remoteTerminalProvider = {
       homeDir,
-      appId,
       profileId: selection.profileId,
-      onLost: () => {
-        participant?.close()
-        ownerLost.abort(new Error('CordisX service disconnected'))
-        void supervisor.markClientDisconnected().catch(() => undefined)
-      },
-    })
-    const owner = client
-    const generation = owner.snapshot.active.runtimeGeneration
-    const remoteTerminalProvider = { homeDir, profileId: selection.profileId, appIds: [appId], selectedAppId: appId }
+      appIds: [appId],
+      selectedAppId: appId,
+      expectedOwner: initial.owner.ownerIdentity,
+    }
     const clientRuntime: CordisXCliRuntime = { ...runtime, internalRemoteTerminalProvider: remoteTerminalProvider }
-    const signal = AbortSignal.any([lifetime.signal, ownerLost.signal])
-    bootstrap = await prepareProductionHostBootstrap(prepared, clientRuntime, {
+    bootstrap = await prepareProductionHostBootstrap(refreshed, clientRuntime, {
       prelaunch: false,
       prepareNativeSubmission: true,
-      signal,
+      signal: AbortSignal.any([lifetime.signal, startupOwner.signal]),
       mainInspector: supervisor.mainInspector,
       markHostLaunched: async (pid, inspectorUrl, port) => await supervisor.markHostLaunched(pid, inspectorUrl, port),
     })
     if (!bootstrap.plan || bootstrap.debugPort === undefined) throw new Error('native client launch plan unavailable')
     const plan = bootstrap.plan
     const debugPort = bootstrap.debugPort
-    const [configured, config, cwd] = await Promise.all([
-      loadConfig(configPath, { profileId: selection.profileId, projectRoot: homeDir }),
-      readOwnerConfig(configPath),
-      realpath(runtime.cwd ?? process.cwd()).catch(() => path.resolve(runtime.cwd ?? process.cwd())),
-    ])
-    const { home, source } = config
-    const fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
-    const launchIntent = fingerprint === undefined ? undefined : new OwnerAdapterLaunchIntent({
-      initialSource: source,
-      initialFingerprint: fingerprint,
-      launch: {
-        options: invocation.options,
-        hostArgs: invocation.hostArgs,
-        dataMode: selection.dataMode,
-        cwd,
-        ...(environment.CODEX_HOME ? { codexHome: path.resolve(cwd, environment.CODEX_HOME) } : {}),
-      },
-      readSource: async () => (await readOwnerConfig(configPath)).source,
-      publish: async (expected, next) => await supervisor.refreshClientFingerprint(expected, next),
-    })
-    const store = new PluginActivationStore(homeDir, selection.profileId, generation)
-    const cdp = new CdpPluginLifecycleRuntime()
-    cdp.initializeOwnerRegistryEpoch(owner.snapshot.registryEpoch)
-    artifacts = await startPluginGenerationArtifactServer()
-    const { activatedPlugins } = await loadActiveBrowserGraphs(store, owner.snapshot.active, {
-      homeDir,
-      artifactServer: artifacts,
-      lifecycleRuntime: cdp,
-    })
-    const configuredIds = new Set(configured.plugins.map(plugin => plugin.id))
-    if (activatedPlugins.some(plugin => configuredIds.has(plugin.id))) {
-      throw new Error('configured plugin conflicts with a service-owned package')
+    const buildSession = async (link: Link, reconnecting: boolean) => {
+      if (reconnecting && stableFingerprint === undefined) throw new Error('CordisX client launch intent unavailable')
+      const session = await createOwnerAdapterNativeSession({
+        owner: link.owner,
+        ownerSignal: link.signal,
+        prepared: refreshed,
+        runtime,
+        homeDir,
+        launch,
+        context,
+        ...(reconnecting ? { requireStableFingerprint: stableFingerprint! } : {}),
+        publishFingerprint: async (expected, next) => {
+          const published = await supervisor.refreshClientFingerprint(expected, next)
+          if (published && publishedFingerprint === expected) publishedFingerprint = next
+          return published
+        },
+        onParticipant: participant => {
+          link.participant = participant
+        },
+        onReady: async ({ owner, participant, fingerprint, intent, signal }) => {
+          try {
+            signal.throwIfAborted()
+            if (!await owner.admit(async command => await participant.handle(command))) {
+              throw new Error('CordisX service rejected the native client')
+            }
+            signal.throwIfAborted()
+            if (reconnecting) {
+              await submission?.reconnectRemoteProvider?.(owner.ownerIdentity)
+              signal.throwIfAborted()
+              if (
+                managedClient && (!publishedFingerprint
+                  || !await supervisor.markClientReconnected(publishedFingerprint, fingerprint, signal))
+              ) {
+                throw new Error('CordisX client generation changed during reconnection')
+              }
+            } else {
+              await supervisor.markReady(debugPort, submission?.installation.accountCapability, signal, fingerprint)
+            }
+            publishedFingerprint = fingerprint
+            await intent.markReady()
+            signal.throwIfAborted()
+          } catch (error) {
+            if (reconnecting) link.disconnect()
+            throw error
+          }
+        },
+      })
+      const close = session.close
+      return {
+        ...session,
+        async close() {
+          if (currentOwner === link.owner) {
+            currentOwner = undefined
+            submission?.suspendRemoteProvider?.()
+          }
+          await close()
+        },
+      }
     }
-    const composition = { ...configured, plugins: [...configured.plugins, ...activatedPlugins] }
-    const documentLeases = new OwnerDocumentLeaseRegistry({
-      stable: pluginIdentities(configured).map(identity => ({ source: identity.source, pluginId: identity.id })),
-      active: activatedPlugins.flatMap(plugin =>
-        plugin.enabled && plugin.package !== undefined
-          ? [{
-            source: plugin.source ?? pathToFileURL(plugin.entry).href,
-            pluginId: plugin.id,
-            moduleGeneration: plugin.package.moduleGeneration,
-          }]
-          : []
-      ),
-    })
-    cdp.setOwnerDocumentAuthority({
-      leases: documentLeases,
-      issue: (identity, moduleGeneration) => ({
-        ...identity,
-        moduleGeneration,
-        installationId: entityInstallationId(selection.profileId, identity.pluginId),
-        pluginGeneration: entityPluginGeneration(moduleGeneration),
-        token: issueOwnerDocumentPrincipalToken(owner.documentSecret, {
-          profileId: selection.profileId,
-          generation,
-          moduleGeneration,
-          identity,
-        }),
-      }),
-    })
-    const lifecycleToken = randomBytes(32).toString('hex')
-    const managementToken = randomBytes(32).toString('hex')
-    const context = rendererAgentContext()
-    management = createOwnerAdapterManagement(owner)
-    renderer = await buildRendererComposition(composition, stdout, {
-      appId,
-      profileId: selection.profileId,
-      ownerPolicyVerification: { publicKey: owner.policyPublicKey, rendererId: owner.rendererId },
-      ...(selection.profile.iconTheme === undefined ? {} : { iconThemePreference: selection.profile.iconTheme }),
-      permission: {
-        profileId: selection.profileId,
-        policies: home.permissions.filter(policy => policy.key.profileId === selection.profileId),
-        persistent: false,
-        ownerSnapshot: true,
-      },
-      generation,
-      ownerDocumentSecret: owner.documentSecret,
-      pluginLifecycle: {
-        token: lifecycleToken,
-        activation: owner.snapshot.active,
-        registryEpoch: owner.snapshot.registryEpoch,
-      },
-      pluginManagement: { token: managementToken, profileId: selection.profileId },
-      agentContextBridgeToken: context.token,
-      productionGraph: true,
-      ...(runtime.internalBuildRendererBundle === undefined
-        ? {}
-        : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
-    })
-    const graphBootstrap = createOwnerAdapterGraphBootstrap({
-      renderer,
-      configured,
-      configPath,
-      profileId: selection.profileId,
-      store,
-      cdp,
-      current: () => owner.current,
-    })
-    participant = new OwnerAdapterCdpClient({
-      cdp,
-      policyScope: { profileId: selection.profileId, generation, rendererId: owner.rendererId },
-      ...(launchIntent === undefined
-        ? {}
-        : { onPolicyAdopted: async transition => await launchIntent.adopted(transition) }),
-      loadMutation: async value =>
-        await loadOwnerAdapterMutation({
-          value,
-          homeDir,
-          profileId: selection.profileId,
-          generation,
-          rendererId: owner.rendererId,
-        }),
-    })
+    const first = await buildSession(initial, false)
+    activeSession = first
+    stableFingerprint = first.stableFingerprint
     if (bootstrap.nativeSubmissionBootstrap) {
       const { managedCatalog: _managedCatalog, providerBindings: _providerBindings, ...catalog } =
         nativeSubmissionCatalogOptions(
@@ -220,8 +189,8 @@ export async function runServiceAttachedClient(
           environment,
           plan.environment,
           undefined,
-          home.environmentVariables,
-          home.providers,
+          first.home.environmentVariables,
+          first.home.providers,
           invocation.options,
         )
       void _managedCatalog
@@ -237,66 +206,72 @@ export async function runServiceAttachedClient(
         {
           ...catalog,
           nativeClientScope: { homeDir, profileId: selection.profileId },
-          ownerModelServicesRead: async () => await owner.modelServicesRead(),
+          ownerModelServicesRead: async () =>
+            await currentOwner?.modelServicesRead()
+              ?? { status: 'rejected' as const, code: 'unavailable' as const },
           remoteTerminalProvider,
           contextObserver: context.observer,
         },
       )
     }
-    signal.throwIfAborted()
+    initial.signal.throwIfAborted()
+    detachStartupOwner()
+    detachStartupOwner = undefined
+    lifetime.signal.throwIfAborted()
     printPlan(plan, stdout, 'launching')
-    const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
     const history = (runtime.internalAgentHistoryHost ?? agentHistoryHost)(
       { ...environment, ...plan.environment },
       configPath,
       `${appId}:${selection.profileId}:${selection.dataMode}`,
     )
+    const reconnectOwner = async (signal: AbortSignal): Promise<OwnerReconnectionSession> => {
+      await activeSession?.close()
+      activeSession = undefined
+      if (managedClient && !await disconnected) throw new Error('CordisX client generation is unavailable')
+      let reported = false
+      while (!signal.aborted) {
+        let link: Link | undefined
+        try {
+          await delay(1_000, undefined, { signal })
+          const current = await prepareRunCommand(invocation, runtime)
+          if (
+            !current || current.configPath !== configPath || current.appId !== appId
+            || current.selection.profileId !== selection.profileId || current.selection.dataMode !== selection.dataMode
+          ) throw new Error('CordisX client selection changed while disconnected')
+          link = await openLink()
+          signal.throwIfAborted()
+          const session = await buildSession(link, true)
+          if (signal.aborted) {
+            await session.close()
+            signal.throwIfAborted()
+          }
+          activeSession = session
+          return session
+        } catch (error) {
+          if (link) {
+            link.disconnect()
+            await link.owner.close().catch(() => undefined)
+          }
+          if (signal.aborted) throw error
+          if (!reported) {
+            stdout('[cordisx] waiting for the matching CordisX service to become available')
+            reported = true
+          }
+        }
+      }
+      throw signal.reason
+    }
     const input: Parameters<typeof runInjectedHost>[0] = {
+      ...first.input,
+      reconnectOwner,
       ...(submission === undefined ? {} : { nativeSubmission: submission.installation }),
-      source: renderer.source,
-      ...(renderer.newDocumentSource === undefined ? {} : { newDocumentSource: renderer.newDocumentSource }),
-      hasLoopbackGraph: renderer.hasLoopbackGraph,
-      pluginArtifactOrigin: artifacts.origin,
-      productionGraphBootstrap: graphBootstrap,
       agentHistoryHost: history,
-      agentHistoryBridgeToken: renderer.agentHistoryBridgeToken,
-      remoteOwnerDocuments: { request: async payload => await owner.documentBinding(payload) },
-      remoteMarketplaceArtifact: { request: async (payload, signal) => await owner.artifact(payload, signal) },
-      agentContext: context.binding,
-      remotePluginLifecycle: {
-        scope: { token: lifecycleToken, profileId: selection.profileId, generation },
-        request: async envelope => await owner.lifecycle(envelope),
-        runtime: cdp,
-      },
-      pluginManagement: {
-        token: managementToken,
-        profileId: selection.profileId,
-        generation,
-        service: management,
-        ownerCoordinated: true,
-      },
       executable: plan.executable,
-      beforeHostLaunch: modelServiceLaunchHook(home, codexHomeOfPlan(plan), invocation.options, stdout),
+      beforeHostLaunch: modelServiceLaunchHook(first.home, codexHomeOfPlan(plan), invocation.options, stdout),
       debugPort,
       hostArgs: invocation.hostArgs,
       launcher: invocation.options,
       signal: lifetime.signal,
-      ownerSignal: ownerLost.signal,
-      onReady: async readySignal => {
-        readySignal?.throwIfAborted()
-        ownerLost.signal.throwIfAborted()
-        if (!await owner.admit(async command => await participant!.handle(command))) {
-          throw new Error('CordisX service rejected the native client')
-        }
-        readySignal?.throwIfAborted()
-        ownerLost.signal.throwIfAborted()
-        const publicationSignal = readySignal === undefined
-          ? ownerLost.signal
-          : AbortSignal.any([readySignal, ownerLost.signal])
-        await supervisor.markReady(debugPort, submission?.installation.accountCapability, publicationSignal)
-        await launchIntent?.markReady()
-        ownerLost.signal.throwIfAborted()
-      },
       onHostLaunched: async (pid, inspectorUrl) => await supervisor.markHostLaunched(pid, inspectorUrl, debugPort),
       mainInspector: supervisor.mainInspector,
       ...(supervisor.startupNavigation === undefined ? {} : { startupNavigation: supervisor.startupNavigation }),
@@ -306,20 +281,18 @@ export async function runServiceAttachedClient(
       stdout,
     }
     handedOff = true
-    await runHost(input)
+    await (runtime.internalRunInjectedHost ?? runInjectedHost)(input)
   } catch (error) {
     await supervisor.markFailed(error instanceof Error ? error.message : String(error)).catch(() => undefined)
     throw error
   } finally {
+    detachStartupOwner?.()
     lifetime.abort()
-    participant?.close()
-    management?.close()
-    await client?.close().catch(() => undefined)
+    await activeSession?.close().catch(() => undefined)
+    await currentOwner?.close().catch(() => undefined)
     await bootstrap?.nativeSubmissionBootstrap?.close().catch(() => undefined)
     if (!handedOff) await cleanupPrelaunch(undefined, bootstrap?.profile, bootstrap?.profileLease?.release)
     await submission?.close().catch(() => undefined)
-    await renderer?.close().catch(() => undefined)
-    await artifacts?.close().catch(() => undefined)
     await supervisor.close()
     lifetime.close()
   }

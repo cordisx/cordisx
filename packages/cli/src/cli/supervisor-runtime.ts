@@ -105,6 +105,7 @@ export async function createSupervisorRuntime(
     debugPort: number,
     account?: NativeAccountCapabilityDescriptor,
     signal?: AbortSignal,
+    clientFingerprint?: string,
   ) => Promise<void>
   readonly markServiceReady: (
     modelApiUrl: string,
@@ -113,6 +114,7 @@ export async function createSupervisorRuntime(
   ) => Promise<void>
   readonly markServiceWebUnavailable: () => Promise<void>
   readonly markClientDisconnected: () => Promise<boolean>
+  readonly markClientReconnected: (expected: string, next: string, signal: AbortSignal) => Promise<boolean>
   readonly refreshClientFingerprint: (expected: string, next: string) => Promise<boolean>
   readonly markServiceCleanup: (
     outcome: { readonly ok: true } | { readonly ok: false; readonly failure: string },
@@ -138,7 +140,7 @@ export async function createSupervisorRuntime(
   if (dataMode !== undefined && dataMode !== 'shared' && dataMode !== 'host-isolated') {
     throw new Error('Invalid owned Host data mode')
   }
-  const fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
+  let fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
   const tokenFile = environment.CORDISX_SUPERVISOR_TOKEN_FILE
   const selectedHome = home && app === 'codex' && profile && (options.platform ?? process.platform) === 'darwin'
     ? await realpath(home)
@@ -299,8 +301,14 @@ export async function createSupervisorRuntime(
           }
           : {}),
       })
+      if (client) {
+        // A client may spend time starting its service. Once its authenticated
+        // control endpoint exists, let stop cancel this generation promptly.
+        await releaseStartupOperation?.()
+        releaseStartupOperation = undefined
+      }
     } catch (error) {
-      await releaseStartupOperation()
+      await releaseStartupOperation?.()
       releaseStartupOperation = undefined
       throw error
     }
@@ -352,8 +360,11 @@ export async function createSupervisorRuntime(
       }
       return mainAgents !== undefined
     },
-    async markReady(debugPort, account, signal): Promise<void> {
+    async markReady(debugPort, account, signal, clientFingerprint): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
+      if (clientFingerprint !== undefined && (!client || !/^[a-f0-9]{64}$/u.test(clientFingerprint))) {
+        throw new Error('Invalid client launch fingerprint')
+      }
       const current = await readSupervisorState(selectedSupervisorPaths(home, app, profile))
       if (
         current === undefined
@@ -396,10 +407,13 @@ export async function createSupervisorRuntime(
             selectedSupervisorPaths(home, app, profile),
             current,
             latest => {
-              if (signal?.aborted || latest.phase !== 'starting') return undefined
+              if (signal?.aborted || latest.phase !== 'starting' || latest.effectiveConfig !== fingerprint) {
+                return undefined
+              }
               return {
                 ...latest,
                 phase: 'ready',
+                ...(clientFingerprint === undefined ? {} : { effectiveConfig: clientFingerprint }),
                 ...(client ? { clientConnection: 'connected' as const } : {}),
                 ...(startupSurface === undefined ? {} : { startupSurface }),
                 cdpEndpoint: `http://127.0.0.1:${debugPort}`,
@@ -407,6 +421,7 @@ export async function createSupervisorRuntime(
             },
           )
           if (!published) throw new Error('background supervisor generation is no longer starting')
+          fingerprint = clientFingerprint ?? fingerprint
         },
       )
       mainAgents = undefined
@@ -462,6 +477,26 @@ export async function createSupervisorRuntime(
           ? { ...latest, clientConnection: 'disconnected' }
           : undefined)
     },
+    async markClientReconnected(expected, next, signal) {
+      if (
+        !client || !home || !app || !profile || !supervisorToken || signal.aborted
+        || !/^[a-f0-9]{64}$/u.test(expected) || !/^[a-f0-9]{64}$/u.test(next)
+      ) return false
+      const paths = selectedSupervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return false
+      const changed = await updateSupervisorState(
+        paths,
+        owner,
+        latest =>
+          latest.clientOfService && latest.phase === 'ready' && latest.clientConnection === 'disconnected'
+            && latest.effectiveConfig === expected && !signal.aborted
+            ? { ...latest, clientConnection: 'connected', effectiveConfig: next }
+            : undefined,
+      )
+      if (changed && fingerprint === expected) fingerprint = next
+      return changed
+    },
     async refreshClientFingerprint(expected, next) {
       if (
         !client || !home || !app || !profile || !supervisorToken
@@ -470,7 +505,7 @@ export async function createSupervisorRuntime(
       const paths = selectedSupervisorPaths(home, app, profile)
       const owner = await readSupervisorState(paths)
       if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken) return false
-      return await updateSupervisorState(
+      const changed = await updateSupervisorState(
         paths,
         owner,
         latest =>
@@ -479,6 +514,8 @@ export async function createSupervisorRuntime(
             ? { ...latest, effectiveConfig: next }
             : undefined,
       )
+      if (changed && fingerprint === expected) fingerprint = next
+      return changed
     },
     async markServiceCleanup(outcome): Promise<boolean> {
       if (!home || !app || !profile || !supervisorToken) return false

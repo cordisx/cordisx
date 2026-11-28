@@ -295,7 +295,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         })
         const active = await store.bindRuntimeGeneration()
         rendererLifecycle.initialize(active)
-        if (environment.CORDISX_EXPERIMENTAL_SERVICE_NATIVE_ADAPTER === '1') {
+        if (appId === 'codex') {
           const adapterLifecycleHandler = { token: randomUUID(), profileId, generation, coordinator }
           const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
           const documents = createOwnerAdapterDocuments({
