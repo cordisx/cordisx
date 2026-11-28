@@ -69,6 +69,10 @@ export interface PluginManagementService {
   pluginInfo(query: PluginManagementCatalogLookup): Promise<
     PluginManagementCatalogDetail | undefined
   >
+  /** Read-only service-owned permission provenance, when this client is attached to that owner. */
+  permissionHistory?(
+    pluginId: string,
+  ): Promise<readonly import('../permission-decision-history.js').PermissionDecisionHistoryItem[]>
   plan(request: PluginManagementRequest): Promise<PluginManagementResult>
   execute(request: PluginManagementRequest, expectedRevision?: number): Promise<PluginManagementResult>
   /** Owner-only cleanup for a plan that will no longer be exposed to a renderer. */

@@ -8,6 +8,7 @@ import type {
   PluginManagementResult,
   PluginManagementSnapshot,
 } from '../management/contracts.js'
+import { parsePermissionHistory } from './permission-history-binding.js'
 
 const BINDING = '__cordisxPluginManagementRequestV1'
 const RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -75,6 +76,10 @@ export class BrowserPluginManagementBinding implements PluginManagementBinding {
 
   pluginInfo(query: PluginManagementCatalogLookup): Promise<PluginManagementCatalogDetail | undefined> {
     return this.send({ kind: 'plugin-info', query })
+  }
+
+  async permissionHistory(pluginId: string) {
+    return parsePermissionHistory(await this.send({ kind: 'permission-history', pluginId }), pluginId)
   }
 
   migrateLegacySources(input: PluginManagementLegacySourceMigration): Promise<PluginManagementMigrationResult> {

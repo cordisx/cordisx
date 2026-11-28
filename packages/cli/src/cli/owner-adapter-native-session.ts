@@ -146,8 +146,9 @@ export async function createOwnerAdapterNativeSession(input: {
       permission: {
         profileId: selection.profileId,
         policies: home.permissions.filter(policy => policy.key.profileId === selection.profileId),
-        persistent: false,
+        persistent: true,
         ownerSnapshot: true,
+        nativeOwnerReview: true,
       },
       generation,
       ownerDocumentSecret: owner.documentSecret,
@@ -163,6 +164,7 @@ export async function createOwnerAdapterNativeSession(input: {
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
     })
+    if (!renderer.permissionBridgeToken) throw new Error('native-permission-bridge-unavailable')
     const graphBootstrap = createOwnerAdapterGraphBootstrap({
       renderer,
       configured,
@@ -198,6 +200,21 @@ export async function createOwnerAdapterNativeSession(input: {
       agentHistoryBridgeToken: renderer.agentHistoryBridgeToken,
       remoteOwnerDocuments: { request: async payload => await owner.documentBinding(payload) },
       remoteMarketplaceArtifact: { request: async (payload, signal) => await owner.artifact(payload, signal) },
+      permissionPersistence: {
+        configPath,
+        profileId: selection.profileId,
+        token: renderer.permissionBridgeToken!,
+        identities: [],
+        // The service, rather than the launcher page, validates the exact active package.
+        identityAllowed: () => true,
+        remote: {
+          register: async (keyId, key) => await owner.permission({ kind: 'permission-key-register', keyId, key }, true),
+          write: async (request, proof) =>
+            await owner.permission({ kind: 'permission-policy-write', ...request, proof }),
+          once: async request => await owner.permission({ kind: 'permission-once', ...request }),
+          uncertain: () => owner.invalidate(),
+        },
+      },
       agentContext: context.binding,
       remotePluginLifecycle: {
         scope: { token: lifecycleToken, profileId: selection.profileId, generation },

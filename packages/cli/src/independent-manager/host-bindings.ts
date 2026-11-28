@@ -7,6 +7,8 @@ export const INDEPENDENT_HOST_CHANNELS = {
   'plugin-management': ['__cordisxPluginManagementRequestV1', '__cordisxPluginManagementReceiveV1'],
   'plugin-lifecycle': ['__cordisxPluginLifecycleRequestV1', '__cordisxPluginLifecycleReceiveV1'],
   'permission-policy': ['__cordisxPermissionPolicyRequestV1', '__cordisxPermissionPolicyReceiveV1'],
+  'permission-once': ['__cordisxPermissionOnceRequestV1', '__cordisxPermissionOnceReceiveV1'],
+  'permission-history': ['__cordisxPermissionHistoryRequestV1', '__cordisxPermissionHistoryReceiveV1'],
   'service-config': ['__cordisxServiceConfigRequestV1', '__cordisxServiceConfigReceiveV1'],
   'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
   'model-services': ['__cordisxModelServicesRequestV1', '__cordisxModelServicesReceiveV1'],
@@ -201,6 +203,7 @@ export function installIndependentHostBindings(input: {
           const envelope = JSON.parse(payload) as { operation?: unknown }
           if (channel === 'model-services') return envelope.operation === 'read'
           if (channel === 'native-catalog') return envelope.operation === 'read'
+          if (channel === 'permission-history') return true
           if (channel === 'service-config') return envelope.operation === 'list'
           if (channel === 'marketplace') return true
           if (channel === 'owner-document') return envelope.operation === 'load'
@@ -237,6 +240,8 @@ export function installIndependentHostBindings(input: {
           || channel === 'channel-credentials' || channel === 'desktop-package-config'
           || channel === 'native-catalog'
           || channel === 'permission-policy'
+          || channel === 'permission-once'
+          || channel === 'permission-history'
           || channel === 'owner-document' && !request.readOnly
           || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')

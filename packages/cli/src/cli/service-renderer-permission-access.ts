@@ -49,6 +49,12 @@ export class ServiceRendererPermissionAccess {
     },
   ) {}
 
+  /** Hold the same profile policy fence for an admitted native adapter. */
+  async acquireAdapterPermissionFence(): Promise<() => Promise<void>> {
+    if (!this.input.permissionFence) throw new Error('renderer-permission-handoff-unavailable')
+    return await this.input.permissionFence.acquire()
+  }
+
   private entry(context: ManagerRendererChannelContext): ServiceRendererBootstrapEntry {
     const entry = this.input.entries.get(context.rendererId)
     if (
@@ -180,6 +186,7 @@ export class ServiceRendererPermissionAccess {
     expected: readonly CordisXPersistedPermissionPolicyRecord[],
     updates: readonly CordisXPersistedPermissionPolicyRecord[],
     consumers: ServiceRendererPermissionConsumerFence,
+    adapterTarget?: ManagerPolicyTarget,
   ) {
     if (!(this.input.lifecycle instanceof ServiceRendererLifecycle)) {
       try {
@@ -210,6 +217,7 @@ export class ServiceRendererPermissionAccess {
       expected,
       updates,
       consumers,
+      adapterTarget,
     )
   }
 }

@@ -967,6 +967,7 @@ export async function start(
         try {
           await runtimeClosures5.createRuntimeDispose(closureScope)
         } finally {
+          policyRuntime.dispose()
           disposeDialogs()
           disposeNotifications()
         }
@@ -979,6 +980,7 @@ export async function start(
     await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
+    policyRuntime.dispose()
     standaloneDesktopPackageConfigBridge?.dispose()
     agentContextBridge?.dispose()
     disposeDialogs()

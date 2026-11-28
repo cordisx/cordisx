@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { OwnerAdapterSessions } from '../packages/cli/src/cli/owner-adapter-sessions.js'
+import {
+  acquirePermissionFence,
+  SharedProfilePermissionFence,
+} from '../packages/cli/src/config/owned-profile-permission-write.js'
 import { verifyOwnerPolicyPacket } from '../packages/cli/src/renderer/owner-policy-verification.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -21,6 +28,39 @@ const snapshot = { active, registryEpoch: 3 }
 const processIdentity = { pid: 123, processStartedAt: 'start-1' }
 
 describe('owner adapter sessions', () => {
+  it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+    'holds the shared profile permission fence while a native client is attached',
+    async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), 'cx-adapter-permission-fence-'))
+      const configPath = path.join(home, 'config.json')
+      const shared = new SharedProfilePermissionFence(configPath, scope.profileId)
+      const sessions = new OwnerAdapterSessions({
+        scope,
+        adapter: { appId: 'codex', adapterId: 'codex-desktop' },
+        snapshot: () => snapshot,
+        attach: async () => {},
+        ownerCurrent: () => true,
+        identify: async () => 'alive',
+        acquirePermissionFence: async () => await shared.acquire(),
+      })
+      let competingRelease: (() => Promise<void>) | undefined
+      try {
+        const opened = (await sessions.open(processIdentity))!
+        expect(await sessions.admit(opened.sessionId, opened.grant)).toBe(true)
+        await expect(acquirePermissionFence(configPath, scope.profileId)).rejects.toThrow()
+        expect(await sessions.end(opened.sessionId, opened.grant)).toBe(true)
+        await vi.waitFor(async () => {
+          competingRelease = await acquirePermissionFence(configPath, scope.profileId)
+        })
+      } finally {
+        await competingRelease?.()
+        sessions.close()
+        await shared.close()
+        await rm(home, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('allows model-service reads only for admitted clients outside a lifecycle reservation', async () => {
     const read = vi.fn(async () => ({ status: 'ok', revision: 'owner-revision', services: [] }))
     const sessions = new OwnerAdapterSessions({
@@ -243,6 +283,46 @@ describe('owner adapter sessions', () => {
       expect(await sessions.requestLifecycle(sessionId, grant, {})).toEqual({ available: true, value: 'committed' })
     } finally {
       releaseRead?.()
+      sessions.close()
+    }
+  })
+
+  it('derives a reservation origin from the authenticated native call', async () => {
+    let observed: string | undefined
+    let identity: string | undefined
+    let signal: AbortSignal | undefined
+    const sessions = new OwnerAdapterSessions({
+      scope,
+      adapter: { appId: 'codex', adapterId: 'codex-desktop' },
+      snapshot: () => snapshot,
+      attach: async () => {},
+      ownerCurrent: () => true,
+      identify: async () => 'alive',
+      management: async (_payload, context) => {
+        identity = context.rendererId
+        signal = context.signal
+        const reservation = await sessions.reserveForLifecycle()
+        observed = reservation.originRendererId
+        expect(reservation.release()).toBe(true)
+        return 'done'
+      },
+    })
+    try {
+      const opened = (await sessions.open(processIdentity))!
+      expect(await sessions.admit(opened.sessionId, opened.grant)).toBe(true)
+      const external = await sessions.reserveForLifecycle()
+      expect(external.originRendererId).toBeUndefined()
+      expect(external.release()).toBe(true)
+      expect(await sessions.requestManagement(opened.sessionId, opened.grant, {})).toEqual({
+        available: true,
+        value: 'done',
+      })
+      expect(observed).toBe(opened.rendererId)
+      expect(identity).toBe(opened.rendererId)
+      expect(signal?.aborted).toBe(false)
+      expect(await sessions.end(opened.sessionId, opened.grant)).toBe(true)
+      expect(signal?.aborted).toBe(true)
+    } finally {
       sessions.close()
     }
   })

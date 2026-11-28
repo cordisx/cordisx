@@ -129,7 +129,7 @@ export class ServiceOwnerPermissionConsumers {
               rendererId: peer.identity.rendererId,
               handoffId,
               requestId: request.requestId,
-              origin: false as const,
+              origin: peer.identity.rendererId === origin.rendererId,
               identity: selected,
               moduleGeneration: target!.moduleGeneration!,
               expected: relevant(expected),

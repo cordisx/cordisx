@@ -189,7 +189,7 @@ export function createCdpSharedAdmission(host: SharedAdmissionHost, state: Share
       if (state.sessions.length === 0) throw new Error('CDP policy handoff has no renderer')
       const accepted = await Promise.all(
         state.sessions.map(async session =>
-          await evaluateRuntimeOperation<boolean>(
+          await evaluateRuntimeOperation<boolean | 'origin'>(
             session,
             `(async () => { try {
           const runtime = globalThis.__cordisxRuntime
@@ -200,7 +200,13 @@ export function createCdpSharedAdmission(host: SharedAdmissionHost, state: Share
         ),
       )
       assertCurrent()
-      if (accepted.some(value => value !== true)) throw new Error('CDP policy handoff was rejected')
+      const origin = (JSON.parse(packet.payload) as { origin?: unknown }).origin
+      if (
+        typeof origin !== 'boolean' || accepted.some(value => value !== true && value !== 'origin')
+        || accepted.filter(value => value === 'origin').length !== (origin ? 1 : 0)
+      ) {
+        throw new Error('CDP policy handoff was rejected')
+      }
     },
     prepare,
     async stage(mutation) {

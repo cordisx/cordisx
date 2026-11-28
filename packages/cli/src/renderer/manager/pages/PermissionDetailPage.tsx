@@ -6,16 +6,18 @@ import type { CordisXPermissionPolicy } from '../../../contracts.js'
 import type { ManagerModel, ManagerPermissionSnapshot, ManagerSnapshot } from '../../manager.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { registerStandaloneDomResetButton } from '../../standalone-dom-reset-button.js'
+import { PermissionDecisionHistory } from './PermissionDecisionHistory.js'
 
 const policyOptions = [{ label: '每次询问', value: 'ask' }, { label: '始终允许', value: 'allow' }, {
   label: '始终拒绝',
   value: 'deny',
 }]
 
-function StandaloneDomPermissionReview({ model, permission, locale }: {
+function StandaloneDomPermissionReview({ model, permission, locale, onReviewed }: {
   readonly model: ManagerModel
   readonly permission: ManagerPermissionSnapshot
   readonly locale: string
+  readonly onReviewed: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const [declined, setDeclined] = useState(false)
@@ -24,15 +26,15 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
   const pointId = permission.capability === 'ui.extension-points.render' && points?.length === 1
     ? points[0]
     : undefined
+  const review = model.standaloneDomReview
   const unbindReset = useRef<(() => void) | undefined>(undefined)
   const resetRef = useCallback((element: HTMLElement | null) => {
     unbindReset.current?.()
     unbindReset.current = undefined
     if (element && pointId) {
-      unbindReset.current = registerStandaloneDomResetButton(element, permission.identity, pointId)
+      unbindReset.current = registerStandaloneDomResetButton(element, permission.identity, pointId, review?.native)
     }
-  }, [permission.identity.id, permission.identity.source, pointId])
-  const review = model.standaloneDomReview
+  }, [permission.identity.id, permission.identity.source, pointId, review?.native])
   const artifact = pointId === undefined ? undefined : review?.describe(permission.identity, pointId)
   if (pointId === undefined || review === undefined || artifact === undefined) return null
   const chinese = productLocale(locale) === 'zh-CN'
@@ -46,16 +48,22 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
         {artifact.persistentAvailable
           ? chinese ? '页面授权' : 'Page access'
           : chinese
-          ? '当前标签页的页面授权'
+          ? review.native ? '当前客户端的页面授权' : '当前标签页的页面授权'
+          : review.native
+          ? 'Page access in this client'
           : 'Page access in this tab'}
       </h3>
       <p>
         {artifact.persistentAvailable
           ? chinese
-            ? '可以选择仅在此标签页允许，或持续授权并同步到其他管理页。'
-            : 'Choose access for this tab or a persistent decision shared with other Manager pages.'
+            ? '可以选择单次允许，或持续授权并同步到其他客户端。'
+            : 'Allow once or save a decision shared with other clients.'
           : chinese
-          ? '仅对此标签页有效；刷新或与后台失联后需要重新审核。'
+          ? review.native
+            ? '仅对此客户端有效；刷新或与服务失联后需要重新审核。'
+            : '仅对此标签页有效；刷新或与后台失联后需要重新审核。'
+          : review.native
+          ? 'Only this client is covered; review again after refresh or disconnection.'
           : 'Only this tab is covered; review again after refresh or disconnection.'}
       </p>
       <p>
@@ -91,7 +99,10 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
                     void review.reset(permission.identity, pointId, event.nativeEvent).then(
                       reset => setResetFailed(!reset),
                       () => setResetFailed(true),
-                    ).finally(() => setBusy(false))
+                    ).finally(() => {
+                      setBusy(false)
+                      onReviewed()
+                    })
                   }}
                 >
                   {chinese ? '恢复每次询问' : 'Ask each time'}
@@ -102,7 +113,15 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
           </>
         )
         : artifact.authorized
-        ? <p role="status">{chinese ? '已在此标签页允许。' : 'Allowed in this tab.'}</p>
+        ? (
+          <p role="status">
+            {chinese
+              ? review.native ? '已在此客户端允许。' : '已在此标签页允许。'
+              : review.native
+              ? 'Allowed in this client.'
+              : 'Allowed in this tab.'}
+          </p>
+        )
         : (
           <>
             <Button
@@ -118,7 +137,10 @@ function StandaloneDomPermissionReview({ model, permission, locale }: {
                 void review.request(permission.identity, pointId).then(
                   allowed => setDeclined(!allowed),
                   () => setDeclined(true),
-                ).finally(() => setBusy(false))
+                ).finally(() => {
+                  setBusy(false)
+                  onReviewed()
+                })
               }}
             >
               {artifact.persistentAvailable
@@ -141,6 +163,7 @@ export function PermissionDetailPage(
     readonly router: ManagerRouter
   },
 ) {
+  const [historyRevision, setHistoryRevision] = useState(0)
   const route = router.route
   if (route.kind !== 'permission') return null
   const permission = snapshot.permissions.find(item =>
@@ -152,9 +175,19 @@ export function PermissionDetailPage(
   }
   const certifiedAutomatic = permission.authorizationOrigin === 'certified-implicit' && permission.policy === 'ask'
   const ownService = permission.authorizationOrigin === 'service-owner'
+  const point = permission.capability === 'ui.extension-points.render' && permission.scope.extensionPoints?.length === 1
+    ? permission.scope.extensionPoints[0]
+    : undefined
+  const reviewedHere = point !== undefined
+    && model.standaloneDomReview?.describe(permission.identity, point) !== undefined
   return (
     <section className="cxr-page cxr-grid">
-      <StandaloneDomPermissionReview model={model} permission={permission} locale={snapshot.localization.locale} />
+      <StandaloneDomPermissionReview
+        model={model}
+        permission={permission}
+        locale={snapshot.localization.locale}
+        onReviewed={() => setHistoryRevision(value => value + 1)}
+      />
       <section className="cxr-section">
         <h3>授权策略</h3>
         <p>{permission.reasonText}</p>
@@ -189,10 +222,14 @@ export function PermissionDetailPage(
             {model.permissionPolicyWritable === false
               ? (
                 <p role="status">
-                  {managerCopy(
-                    snapshot.localization.locale,
-                    model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
-                  )}
+                  {reviewedHere
+                    ? (productLocale(snapshot.localization.locale) === 'zh-CN'
+                      ? '请使用上方的页面授权控制设置此权限。'
+                      : 'Use the page access control above to change this permission.')
+                    : managerCopy(
+                      snapshot.localization.locale,
+                      model.permissionReviewInWeb ? 'permission.read-only-web' : 'permission.read-only',
+                    )}
                 </p>
               )
               : null}
@@ -208,6 +245,12 @@ export function PermissionDetailPage(
         <h3>使用范围</h3>
         <pre className="cxr-code">{JSON.stringify(permission.scope, null, 2)}</pre>
       </section>
+      <PermissionDecisionHistory
+        permission={permission}
+        locale={snapshot.localization.locale}
+        model={model}
+        refreshKey={historyRevision}
+      />
       {permission.authorizationOrigin === undefined
         ? null
         : (

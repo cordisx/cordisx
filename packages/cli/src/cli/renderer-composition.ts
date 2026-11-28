@@ -81,6 +81,7 @@ export interface BuildRendererCompositionOptions {
     readonly persistent: boolean
     /** Read the service owner's snapshot until a coordinated write bridge exists. */
     readonly ownerSnapshot?: true
+    readonly nativeOwnerReview?: true
   }
   readonly generation?: string
   readonly pluginLifecycle?: {
@@ -175,6 +176,7 @@ export async function buildRendererComposition(
           profileId: options.permission.profileId,
           policies: options.permission.policies,
           ...(options.permission.ownerSnapshot === true ? { ownerSnapshot: true as const } : {}),
+          ...(options.permission.nativeOwnerReview === true ? { nativeOwnerReview: true as const } : {}),
           ...(permissionBridgeToken === undefined ? {} : { bridgeToken: permissionBridgeToken }),
         },
       }),

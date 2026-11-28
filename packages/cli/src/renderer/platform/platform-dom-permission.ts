@@ -350,8 +350,9 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
   }
 
   /** Called only after the native runtime verifies a service-signed policy handoff. */
-  async adoptOwnerManagerPolicies(input: StandaloneDomPolicyAdoption): Promise<boolean> {
-    if (input.origin) return false
+  async adoptOwnerManagerPolicies(
+    input: StandaloneDomPolicyAdoption & { readonly onUnknown?: () => void },
+  ): Promise<boolean> {
     return await this.adoptManagerDomPolicies(input, true)
   }
 

@@ -1,7 +1,7 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
 import type { ManagerModel } from './manager.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
-import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
+import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import { standaloneDomReview } from './standalone-dom-review.js'
 
 /** Bind the Manager control to an exact owner-issued graph and the live owner session. */
@@ -12,10 +12,15 @@ export function createStandaloneDomReviewModel(
   const verifySession = metadata.standaloneReviewSession
   const broker = runtime.broker()!
   const gate = standaloneDomReview(broker)
-  if (metadata.hostKind !== 'standalone' || verifySession === undefined || gate === undefined) return undefined
+  const native = metadata.nativeOwnerPermissionReview === true && metadata.ownerPermissionSnapshot === true
+  if (metadata.hostKind !== 'standalone' && !native || verifySession === undefined || gate === undefined) {
+    return undefined
+  }
 
   const select = (identity: CordisXPluginIdentity, pointId: string, requireReview = true) => {
-    if (runtime.disposed || !isStandaloneManagerDomTarget(identity, pointId)) return undefined
+    if (runtime.disposed || !(native ? isNativeManagerDomTarget : isStandaloneManagerDomTarget)(identity, pointId)) {
+      return undefined
+    }
     const controller = runtime.activeController()!(identity.id, identity.source)
     if (
       controller === undefined || controller.status !== 'active' || !controller.principalLive
@@ -27,7 +32,7 @@ export function createStandaloneDomReviewModel(
     const configured = controller.item.standaloneConfiguredGraph === true && controller.item.package === undefined
     const packageItem = controller.item.package
     let artifact = configured ? controller.item.distributionArtifact : undefined
-    if (!configured && controller.item.standaloneInstalledGraph === true && packageItem !== undefined) {
+    if (!configured && (native || controller.item.standaloneInstalledGraph === true) && packageItem !== undefined) {
       const activation = runtime.currentActivation
       const matches = activation.plugins.filter(item => item.id === identity.id)
       const active = matches[0]
@@ -50,8 +55,8 @@ export function createStandaloneDomReviewModel(
             identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
             || metadata.standaloneConfiguredPluginPolicyReview?.includes(identity.id) === true
           )
-        || controller.item.standaloneInstalledGraph === true
-          && metadata.standaloneInstalledPolicyReview === true,
+        || (native || controller.item.standaloneInstalledGraph === true)
+          && (native || metadata.standaloneInstalledPolicyReview === true),
       packageDigest: packageItem?.digest,
     }
   }
@@ -80,7 +85,13 @@ export function createStandaloneDomReviewModel(
       isCurrent,
       verifyCurrent: async () => {
         try {
-          return isCurrent() && await verifySession() && isCurrent()
+          if (!isCurrent() || !await verifySession()) return false
+          if (native) {
+            const management = runtime.pluginManagementBinding()!
+            if (!management) return false
+            await management.query()
+          }
+          return isCurrent()
         } catch {
           return false
         }
@@ -90,6 +101,7 @@ export function createStandaloneDomReviewModel(
   }
 
   return {
+    native,
     describe(identity, pointId) {
       const selected = select(identity, pointId, false)
       if (selected === undefined) return undefined

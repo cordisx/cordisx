@@ -117,6 +117,47 @@ it('does not sign an unconfirmed or mismatched decision', async () => {
   }
 })
 
+it('confirms a one-time decision against the current owner snapshot and rejects replay', async () => {
+  const signer = await createStandalonePermissionSigner(scope, { crypto: webcrypto as unknown as Crypto })
+  const controller = new AbortController()
+  const context = {
+    profileId: scope.profileId,
+    rendererId: scope.rendererId,
+    ownerGeneration: scope.generation,
+    signal: controller.signal,
+  }
+  const authority = new ManagerPermissionProofAuthority({
+    profileId: scope.profileId,
+    generation: scope.generation,
+    isCurrent: () => true,
+  })
+  try {
+    authority.register(context, signer.publicKey)
+    const view = new PermissionAuthorizationViewModel(plan)
+    view.select('ui.extension-points.render', 'allow-once')
+    const selected = view.confirm()
+    if (selected.status !== 'confirmed' || selected.decision.schemaVersion !== 3) throw new Error('fixture failed')
+    const signed = await signer.signOnce('once-1', review, plan, selected.decision)
+    const input = {
+      context: { ...context, admitted: true },
+      requestId: 'once-1',
+      record: signed.record,
+      decision: signed.decision,
+      expected: [],
+      moduleGeneration: review.moduleGeneration,
+      artifact: review.artifact,
+      proof: signed.proof,
+    }
+    expect(authority.authorizeOnce({ ...input, decision: 'deny-once' })).toBe(false)
+    expect(authority.authorizeOnce({ ...input, expected: [record] })).toBe(false)
+    expect(authority.authorizeOnce(input)).toBe(true)
+    expect(authority.authorizeOnce(input)).toBe(false)
+  } finally {
+    signer.close()
+    authority.close()
+  }
+})
+
 it('binds an installed plugin decision to its renderer alias and exact artifact', async () => {
   const plugin = { id: 'fixture-service', source: `https://renderer.cordisx.invalid/plugin/${'d'.repeat(64)}` }
   const installed = { ...review, identity: plugin, moduleGeneration: 'installed-1' }

@@ -228,8 +228,12 @@ export interface ManagerModel {
   readonly permissionPolicyWritable?: boolean
   /** A service-attached native client can use Web for eligible UI reviews. */
   readonly permissionReviewInWeb?: boolean
+  readonly permissionHistory?: (
+    pluginId: string,
+  ) => Promise<readonly import('../permission-decision-history.js').PermissionDecisionHistoryItem[]>
   /** Host-private review of an owner-selected configured Channel page. */
   readonly standaloneDomReview?: {
+    readonly native?: boolean
     describe(identity: CordisXPluginIdentity, pointId: string):
       | Readonly<{
         version: string

@@ -5,12 +5,14 @@ import {
 } from './manager-origin-fence.js'
 import type { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { createManagerRendererPermissionChannel } from './manager-renderer-permission.js'
-import type { ManagerRendererSessions } from './manager-renderer-sessions.js'
+import type { ManagerRendererChannelContext, ManagerRendererSessions } from './manager-renderer-sessions.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { ServiceRendererPermissionConsumerFence } from './service-renderer-permission-handoff.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import type { ServiceRendererPermissionEvidence } from './service-renderer-permission-access.js'
+import type { PermissionDecisionJournal } from './permission-decision-journal.js'
+import type { PermissionBindingRequest } from '../launcher/permission-rpc.js'
 
 /**
  * Compose the owner-verified decision and profile handoff. The caller must
@@ -24,6 +26,8 @@ export function createServiceRendererPermissionChannel(input: {
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: ServiceRendererLifecycle
   readonly sessions: () => ManagerRendererSessions
+  /** Owner-created evidence store; the client cannot supply its own source. */
+  readonly decisionJournal?: PermissionDecisionJournal
   readonly reserveAdditionalPeers?: () => Promise<ManagerOriginAdditionalFence>
   readonly onFailure?: (phase: string, error: unknown) => void
   readonly reserveOtherConsumers: (
@@ -89,6 +93,10 @@ export function createServiceRendererPermissionChannel(input: {
           return false
         }
       },
+      ...(input.decisionJournal === undefined ? {} : {
+        trace: async (_context: ManagerRendererChannelContext, request: PermissionBindingRequest) =>
+          await input.decisionJournal!.begin({ client: 'web', requestId: request.requestId, records: request.records }),
+      }),
       acquire: async (context, request, expected) => {
         const origin = await fenceManagerOrigin({
           sessions: input.sessions(),

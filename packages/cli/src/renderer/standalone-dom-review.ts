@@ -1,5 +1,5 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
-import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
+import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 import { consumeStandaloneDomReset } from './standalone-dom-reset-button.js'
 import type {
   CordisXPermissionAuthorizationBindingV2,
@@ -64,10 +64,28 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
       observed: 'allow-persistent' | 'deny-persistent',
     ) => (() => void) | undefined)
     | undefined
+  private onceDecision:
+    | ((
+      context: StandaloneDomReviewContext,
+      plan: CordisXPermissionAuthorizationPlanV3,
+      decision: CordisXPermissionAuthorizationDecisionV3,
+    ) => Promise<boolean>)
+    | undefined
 
   constructor(
     private readonly createPrompt: (context: StandaloneDomReviewContext) => PermissionAuthorizationPromptV2,
+    private readonly targetAllowed = isStandaloneManagerDomTarget,
   ) {}
+
+  isReviewing(): boolean {
+    return this.active !== undefined
+  }
+
+  bindOnceDecision(callback: NonNullable<StandaloneDomReview['onceDecision']>): boolean {
+    if (this.closed || this.active || this.onceDecision || typeof callback !== 'function') return false
+    this.onceDecision = callback
+    return true
+  }
 
   /** Installed once by the standalone Host before any plugin is mounted. */
   bindPersistentDecision(callback: NonNullable<StandaloneDomReview['persistentDecision']>): boolean {
@@ -78,7 +96,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   supportsPersistentDecision(context: StandaloneDomReviewContext): boolean {
     return !this.closed && context.persistentEligible
-      && isStandaloneManagerDomTarget(context.identity, context.pointId) && this.persistentDecision !== undefined
+      && this.targetAllowed(context.identity, context.pointId) && this.persistentDecision !== undefined
   }
 
   bindPersistentReset(callback: NonNullable<StandaloneDomReview['persistentReset']>): boolean {
@@ -89,7 +107,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   supportsPersistentReset(context: StandaloneDomReviewContext): boolean {
     return !this.closed && context.persistentEligible
-      && isStandaloneManagerDomTarget(context.identity, context.pointId) && this.persistentReset !== undefined
+      && this.targetAllowed(context.identity, context.pointId) && this.persistentReset !== undefined
   }
 
   private current(active: ActiveReview): boolean {
@@ -131,7 +149,7 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
 
   async review(context: StandaloneDomReviewContext, operation: () => Promise<boolean>): Promise<boolean> {
     if (
-      this.closed || this.active || !isStandaloneManagerDomTarget(context.identity, context.pointId)
+      this.closed || this.active || !this.targetAllowed(context.identity, context.pointId)
       || !ID.test(context.profileId)
       || !ID.test(context.runtimeGeneration) || !ID.test(context.moduleGeneration)
       || !context.artifact.version || context.artifact.version.length > 128
@@ -244,6 +262,10 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     ) return undefined
     const selected = decision.decisions[0]!.decision
     if (
+      (selected === 'allow-once' || selected === 'deny-once') && this.onceDecision
+      && (!await this.onceDecision(active.context, plan, decision) || !await this.verified(active))
+    ) return undefined
+    if (
       (selected === 'allow-persistent' || selected === 'deny-persistent')
       && this.persistentDecision?.(active.context, plan, decision) !== true
     ) return undefined
@@ -264,22 +286,25 @@ export class StandaloneDomReview implements PermissionAuthorizationPromptV2 {
     this.active = undefined
     this.persistentDecision = undefined
     this.persistentReset = undefined
+    this.onceDecision = undefined
   }
 }
 
 /** Use the existing Host dialog with same-origin styles and user-originated decisions. */
-export function createStandaloneDomReview(document: Document): StandaloneDomReview {
-  return new StandaloneDomReview(context =>
-    new BrowserPermissionAuthorizationPromptV2(document, (_plan, identity) => ({
-      plugin: {
-        name: `${identity.id === 'channel' ? 'Channel' : identity.id} ${context.artifact.version}`,
-        source: `${identity.source} · ${context.artifact.integrity}`,
-        trust: 'configured',
-      },
-      availability: {},
-      resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
-      scope: scope => scope.extensionPoints?.join(', ') ?? JSON.stringify(scope),
-      requestSource: identity.source,
-    }), { externalStyles: true, requireTrustedEvents: true, hideManage: true })
+export function createStandaloneDomReview(document: Document, native = false): StandaloneDomReview {
+  return new StandaloneDomReview(
+    context =>
+      new BrowserPermissionAuthorizationPromptV2(document, (_plan, identity) => ({
+        plugin: {
+          name: `${identity.id === 'channel' ? 'Channel' : identity.id} ${context.artifact.version}`,
+          source: `${identity.source} · ${context.artifact.integrity}`,
+          trust: 'configured',
+        },
+        availability: {},
+        resolve: message => message.fallback ?? `[[${message.namespace ?? 'permission'}:${message.key}]]`,
+        scope: scope => scope.extensionPoints?.join(', ') ?? JSON.stringify(scope),
+        requestSource: identity.source,
+      }), { externalStyles: !native, requireTrustedEvents: true, hideManage: true }),
+    native ? isNativeManagerDomTarget : isStandaloneManagerDomTarget,
   )
 }

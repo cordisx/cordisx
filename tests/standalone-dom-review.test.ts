@@ -64,6 +64,22 @@ it('requires an owner-selected review and presents only one-time decisions', asy
   expect(await gate.review(context, async () => true)).toBe(false)
 })
 
+it.each([true, false])('requires the service receipt for a one-time decision: %s', async accepted => {
+  const gate = new StandaloneDomReview(() => ({
+    request: async () => undefined,
+    requestV3: async narrowed => {
+      const view = new PermissionAuthorizationViewModel(narrowed)
+      view.select('ui.extension-points.render', 'allow-once')
+      const result = view.confirm()
+      return result.status === 'confirmed' && result.decision.schemaVersion === 3 ? result.decision : undefined
+    },
+  }))
+  const submit = vi.fn(async () => accepted)
+  expect(gate.bindOnceDecision(submit)).toBe(true)
+  expect(await gate.review(context, async () => Boolean(await gate.requestV3(plan, identity)))).toBe(accepted)
+  expect(submit).toHaveBeenCalledOnce()
+})
+
 it('rejects an answer if the owner no longer recognizes the renderer', async () => {
   let current = true
   const invalidate = vi.fn()

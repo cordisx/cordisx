@@ -6,7 +6,9 @@ import {
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 import {
+  normalizeStandaloneOncePermissionProofPayload,
   normalizeStandalonePermissionProofPayload,
+  standaloneOncePermissionProofBytes,
   standalonePermissionProofBytes,
 } from '../standalone-permission-proof.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
@@ -41,6 +43,7 @@ export class ManagerPermissionProofAuthority {
       readonly profileId: string
       readonly generation: string
       readonly isCurrent: (context: ManagerRendererChannelContext) => boolean
+      readonly target?: 'standalone' | 'native'
       readonly now?: () => number
     },
   ) {}
@@ -94,7 +97,7 @@ export class ManagerPermissionProofAuthority {
       ) return false
       const signature = Buffer.from(proof.signature, 'base64url')
       if (signature.length !== 64 || signature.toString('base64url') !== proof.signature) return false
-      const payload = normalizeStandalonePermissionProofPayload(proof.payload)
+      const payload = normalizeStandalonePermissionProofPayload(proof.payload, this.input.target)
       const record = normalizePersistedPermissionPolicyRecord(input.records[0])
       const now = (this.input.now ?? Date.now)()
       if (
@@ -113,13 +116,69 @@ export class ManagerPermissionProofAuthority {
       if (
         !verify(
           'sha256',
-          standalonePermissionProofBytes(payload),
+          standalonePermissionProofBytes(payload, this.input.target),
           { key: entry.key, dsaEncoding: 'ieee-p1363' },
           signature,
         )
       ) {
         return false
       }
+      if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
+      entry.used.add(payload.decisionId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  authorizeOnce(input: {
+    readonly context: ManagerRendererChannelContext
+    readonly requestId: string
+    readonly record: CordisXPersistedPermissionPolicyRecord
+    readonly decision: 'allow-once' | 'deny-once'
+    readonly expected: readonly CordisXPersistedPermissionPolicyRecord[]
+    readonly moduleGeneration: string
+    readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
+    readonly proof: unknown
+  }): boolean {
+    try {
+      const { context } = input
+      const entry = this.entries.get(context.rendererId)
+      if (
+        !entry || entry.signal !== context.signal || context.admitted !== true || !this.current(context)
+        || input.expected.length > 4096 || entry.used.size >= 4096
+        || !input.proof || typeof input.proof !== 'object' || Array.isArray(input.proof)
+      ) return false
+      const proof = input.proof as Record<string, unknown>
+      if (
+        Object.keys(proof).length !== 2 || Object.keys(proof).some(key => !['payload', 'signature'].includes(key))
+        || typeof proof.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/u.test(proof.signature)
+      ) return false
+      const signature = Buffer.from(proof.signature, 'base64url')
+      if (signature.length !== 64 || signature.toString('base64url') !== proof.signature) return false
+      const payload = normalizeStandaloneOncePermissionProofPayload(proof.payload, this.input.target)
+      const record = normalizePersistedPermissionPolicyRecord(input.record)
+      const now = (this.input.now ?? Date.now)()
+      if (
+        payload.rendererId !== context.rendererId || payload.profileId !== context.profileId
+        || payload.ownerGeneration !== context.ownerGeneration || payload.moduleGeneration !== input.moduleGeneration
+        || JSON.stringify(payload.artifact) !== JSON.stringify(input.artifact)
+        || payload.requestId !== input.requestId || payload.decision !== input.decision
+        || entry.used.has(payload.decisionId)
+        || !Number.isSafeInteger(now) || payload.issuedAt > now + 5_000 || now - payload.issuedAt > 60_000
+        || JSON.stringify(record) !== JSON.stringify(payload.record)
+      ) return false
+      const key = persistedPermissionRecordKey(payload.record)
+      const prior = input.expected.filter(item =>
+        isPermissionPolicyRecordV3(item) && persistedPermissionRecordKey(item) === key
+      )
+      if (prior.length > 1 || (prior[0]?.policy ?? 'ask') !== 'ask') return false
+      if (
+        !verify('sha256', standaloneOncePermissionProofBytes(payload, this.input.target), {
+          key: entry.key,
+          dsaEncoding: 'ieee-p1363',
+        }, signature)
+      ) return false
       if (!this.current(context) || this.entries.get(context.rendererId) !== entry) return false
       entry.used.add(payload.decisionId)
       return true

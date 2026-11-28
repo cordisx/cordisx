@@ -22,6 +22,8 @@ type Session = {
   readonly pid: number
   readonly processStartedAt: string
   readonly peer: ManagerRendererCommandPeer
+  readonly controller: AbortController
+  readonly releasePermissionFence?: () => Promise<void>
   readonly snapshot: Snapshot
   readonly artifacts: Map<string, AbortController>
   readonly cancelledArtifacts: Map<string, number>
@@ -47,6 +49,13 @@ export interface OwnerAdapterDocumentContext {
   current(write: boolean): boolean
 }
 
+/** The owner derives this identity from the admitted adapter session. */
+export interface OwnerAdapterManagementContext extends OwnerAdapterDocumentContext {
+  readonly rendererId: string
+  readonly signal: AbortSignal
+  live(): boolean
+}
+
 const secretPattern = /^[a-f0-9]{64}$/u
 const secret = () => randomBytes(32).toString('hex')
 const matches = (left: string, right: string) =>
@@ -62,6 +71,7 @@ export class OwnerAdapterSessions {
   private readonly sessions = new Map<string, Session>()
   private readonly callContext = new AsyncLocalStorage<symbol>()
   private readonly calls = new Set<symbol>()
+  private readonly callOwners = new Map<symbol, Session>()
   private readonly callsChanged = new Set<() => void>()
   private readonly admission: OwnerAdapterAdmission
   private readonly timeoutMs: number
@@ -79,10 +89,12 @@ export class OwnerAdapterSessions {
       readonly snapshot: () => Snapshot
       readonly attach: (peer: ManagerRendererCommandPeer) => Promise<void>
       readonly lifecycle?: (payload: unknown) => Promise<unknown>
-      readonly management?: (payload: unknown) => Promise<unknown>
+      readonly management?: (payload: unknown, context: OwnerAdapterManagementContext) => Promise<unknown>
       readonly document?: (payload: unknown, context: OwnerAdapterDocumentContext) => Promise<unknown>
       readonly modelServicesRead?: () => Promise<unknown>
       readonly artifact?: (payload: unknown, signal: AbortSignal) => Promise<unknown>
+      /** Owner-held profile fence, shared with the Web fleet. */
+      readonly acquirePermissionFence?: () => Promise<() => Promise<void>>
       readonly ownerCurrent: () => boolean
       readonly now?: () => number
       readonly identify?: typeof processIdentityStatus
@@ -113,6 +125,13 @@ export class OwnerAdapterSessions {
   private retire(session: Session): void {
     if (this.sessions.get(session.id) !== session) return
     this.sessions.delete(session.id)
+    session.controller.abort()
+    if (session.releasePermissionFence) {
+      void session.releasePermissionFence().catch(() => {
+        // Do not admit a replacement after a profile lock release becomes uncertain.
+        this.fenced = true
+      })
+    }
     for (const controller of session.artifacts.values()) controller.abort()
     session.artifacts.clear()
     session.cancelledArtifacts.clear()
@@ -170,20 +189,30 @@ export class OwnerAdapterSessions {
       return undefined
     }
     if (!this.current()) return undefined
+    let releasePermissionFence: (() => Promise<void>) | undefined
     let snapshot: Snapshot
     try {
+      releasePermissionFence = await this.input.acquirePermissionFence?.()
+      if (
+        !this.current()
+        || await this.identify(request.pid, request.processStartedAt).catch(() => 'unknown' as const) !== 'alive'
+      ) throw new Error('stale')
       snapshot = structuredClone(this.input.snapshot())
       if (
         snapshot.active.profileId !== this.input.scope.profileId
         || snapshot.active.runtimeGeneration !== this.input.scope.generation
         || !Number.isSafeInteger(snapshot.registryEpoch) || snapshot.registryEpoch < 0
-      ) return undefined
+      ) throw new Error('stale')
     } catch {
+      await releasePermissionFence?.().catch(() => {
+        this.fenced = true
+      })
       return undefined
     }
     const gateway = { pid: request.pid, processStartedAt: request.processStartedAt, instanceToken: secret() }
     let sessionId: string | undefined
     let peer: ManagerRendererCommandPeer | undefined
+    let transferredFence = false
     try {
       sessionId = this.admission.issue(this.input.adapter, gateway)
       const handle = { rendererId: secret(), ownerGeneration: this.input.scope.generation, grant: secret() }
@@ -197,6 +226,8 @@ export class OwnerAdapterSessions {
         pid: request.pid,
         processStartedAt: request.processStartedAt,
         peer,
+        controller: new AbortController(),
+        ...(releasePermissionFence === undefined ? {} : { releasePermissionFence }),
         snapshot,
         artifacts: new Map(),
         cancelledArtifacts: new Map(),
@@ -204,6 +235,7 @@ export class OwnerAdapterSessions {
         admitted: false,
       }
       this.sessions.set(sessionId, session)
+      transferredFence = true
       peer.onDisconnect(() => this.retire(session))
       this.startMonitor()
       return {
@@ -217,6 +249,11 @@ export class OwnerAdapterSessions {
     } catch {
       peer?.close()
       if (sessionId) this.admission.revokeGrant(sessionId)
+      if (!transferredFence) {
+        await releasePermissionFence?.().catch(() => {
+          this.fenced = true
+        })
+      }
       return undefined
     }
   }
@@ -276,7 +313,11 @@ export class OwnerAdapterSessions {
   async requestManagement(sessionId: string, grant: string, payload: unknown): Promise<
     { readonly available: true; readonly value: unknown } | { readonly available: false }
   > {
-    return await this.invoke(sessionId, grant, payload, this.input.management)
+    const registration = Boolean(
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        && (payload as Record<string, unknown>).kind === 'permission-key-register',
+    )
+    return await this.invoke(sessionId, grant, payload, this.input.management, registration, registration)
   }
 
   async requestDocument(sessionId: string, grant: string, payload: unknown): Promise<
@@ -346,7 +387,7 @@ export class OwnerAdapterSessions {
     sessionId: string,
     grant: string,
     payload: unknown,
-    handler: ((value: unknown, context: OwnerAdapterDocumentContext) => Promise<unknown>) | undefined,
+    handler: ((value: unknown, context: OwnerAdapterManagementContext) => Promise<unknown>) | undefined,
     allowUnadmittedRead = false,
     fenceResult = false,
   ): Promise<{ readonly available: true; readonly value: unknown } | { readonly available: false }> {
@@ -357,8 +398,13 @@ export class OwnerAdapterSessions {
     ) {
       return { available: false }
     }
-    const context: OwnerAdapterDocumentContext = {
+    const context: OwnerAdapterManagementContext = {
       secret: session.documentSecret,
+      rendererId: session.peer.identity.rendererId,
+      signal: session.controller.signal,
+      live: () =>
+        this.current() && this.sessions.get(sessionId) === session && session.admitted
+        && !session.peer.closed && !session.controller.signal.aborted,
       current: write => {
         try {
           return this.current() && this.sessions.get(sessionId) === session && !session.peer.closed
@@ -372,6 +418,7 @@ export class OwnerAdapterSessions {
     if (!context.current(!allowUnadmittedRead)) return { available: false }
     const call = Symbol('adapter-owner-call')
     this.calls.add(call)
+    this.callOwners.set(call, session)
     try {
       const value = await this.callContext.run(call, async () => await handler(payload, context))
       if (
@@ -384,6 +431,7 @@ export class OwnerAdapterSessions {
       return { available: true, value }
     } finally {
       this.calls.delete(call)
+      this.callOwners.delete(call)
       for (const wake of this.callsChanged) wake()
     }
   }
@@ -421,6 +469,8 @@ export class OwnerAdapterSessions {
       throw new Error('adapter-reservation-unavailable')
     }
     const origin = this.callContext.getStore()
+    const originSession = origin === undefined ? undefined : this.callOwners.get(origin)
+    if (origin !== undefined && originSession === undefined) throw new Error('adapter-reservation-unavailable')
     const reservation = this.beginReservation(origin, true)
     const deadline = performance.now() + timeoutMs
     try {
@@ -437,7 +487,9 @@ export class OwnerAdapterSessions {
           if (reservation.ready() || !reservation.alive()) wake()
         })
       }
-      return reservation.lease
+      return originSession === undefined
+        ? reservation.lease
+        : { ...reservation.lease, originRendererId: originSession.peer.identity.rendererId }
     } catch {
       reservation.cancelBeforeDispatch()
       throw new Error('adapter-reservation-unavailable')

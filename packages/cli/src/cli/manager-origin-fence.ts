@@ -7,6 +7,8 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 
 export interface ManagerOriginAdditionalFence {
   readonly peers: readonly ManagerRendererCommandPeer[]
+  /** Set only by an adapter reservation entered from its authenticated current call. */
+  readonly originRendererId?: string
   isCurrent(): boolean
   release(): boolean
   fence(): void
@@ -76,15 +78,50 @@ export async function fenceManagerOrigin(input: {
 }): Promise<ManagerOriginFence> {
   if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-origin-fence-scope-invalid')
   const writes = await input.sessions.suspendMutationsForCurrentWrite(input.timeoutMs)
+  return await issueOriginFence(input, writes, writes.rendererId, 'manager')
+}
+
+/** Keep the authenticated native writer alive while fencing every Manager and adapter. */
+export async function fenceAdapterOrigin(input: {
+  readonly sessions: ManagerRendererSessions
+  readonly participants: ServiceRendererParticipants
+  readonly lifecycle: ExternalLifecycle
+  readonly originRendererId: string
+  readonly reserveAdditionalPeers: () => Promise<ManagerOriginAdditionalFence>
+  readonly onFailure?: (phase: string, error: unknown) => void
+  readonly timeoutMs?: number
+}): Promise<ManagerOriginFence> {
+  if (
+    !input.participants.isBoundTo(input.lifecycle) || !/^[a-f0-9]{64}$/u.test(input.originRendererId)
+  ) throw new Error('manager-origin-fence-scope-invalid')
+  const writes = await input.sessions.suspendMutations(input.timeoutMs)
+  return await issueOriginFence({ ...input, allowAdditionalManagers: true }, writes, input.originRendererId, 'adapter')
+}
+
+async function issueOriginFence(
+  input: {
+    readonly sessions: ManagerRendererSessions
+    readonly participants: ServiceRendererParticipants
+    readonly lifecycle: ExternalLifecycle
+    readonly allowAdditionalManagers?: boolean
+    readonly reserveAdditionalPeers?: () => Promise<ManagerOriginAdditionalFence>
+    readonly onFailure?: (phase: string, error: unknown) => void
+  },
+  writes: { isCurrent(): boolean; release(): boolean; fence(): void },
+  rendererId: string,
+  originKind: 'manager' | 'adapter',
+): Promise<ManagerOriginFence> {
   let lifecycle: ExternalReservation
   let additional: ManagerOriginAdditionalFence | undefined
   let phase = 'manager-cohort'
   let peers: readonly NonNullable<ReturnType<ServiceRendererParticipants['peer']>>[]
   try {
     peers = input.participants.ownerPeers()
-    const origin = input.participants.peer(writes.rendererId)
+    const origin = input.participants.peer(rendererId)
     if (
-      !origin || !peers.includes(origin) || (!input.allowAdditionalManagers && peers.length !== 1)
+      originKind === 'manager' && (!origin || !peers.includes(origin))
+      || originKind === 'adapter' && origin !== undefined
+      || (!input.allowAdditionalManagers && peers.length !== 1)
       || peers.some(peer => !input.participants.isLive(peer.identity) || !input.sessions.hasAdmittedPeer(peer))
     ) {
       throw new Error('manager-origin-fence-unavailable')
@@ -93,7 +130,9 @@ export async function fenceManagerOrigin(input: {
     additional = await input.reserveAdditionalPeers?.()
     if (
       additional && (!additional.isCurrent() || additional.peers.some(peer => peer.closed || peers.includes(peer))
-        || new Set(additional.peers).size !== additional.peers.length)
+          || new Set(additional.peers).size !== additional.peers.length)
+      || originKind === 'adapter' && (!additional || additional.originRendererId !== rendererId
+          || additional.peers.filter(peer => peer.identity.rendererId === rendererId).length !== 1)
     ) throw new Error('manager-origin-fence-unavailable')
     phase = 'lifecycle-fence'
     lifecycle = await input.lifecycle.reserveExternalMutation([...peers, ...(additional?.peers ?? [])])
@@ -156,7 +195,7 @@ export async function fenceManagerOrigin(input: {
     }
   }
   const result: ManagerOriginFence = Object.freeze({
-    rendererId: writes.rendererId,
+    rendererId,
     isCurrent: current,
     ...(additional === undefined ? {} : { additionalPeers: Object.freeze([...additional.peers]) }),
     ...(lifecycle.desktopConfiguration === undefined ? {} : {

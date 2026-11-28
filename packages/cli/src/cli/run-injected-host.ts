@@ -148,6 +148,7 @@ export type OwnerReconnectionSession = {
     | 'pluginArtifactOrigin'
     | 'productionGraphBootstrap'
     | 'agentHistoryBridgeToken'
+    | 'permissionPersistence'
     | 'remoteOwnerDocuments'
     | 'remoteMarketplaceArtifact'
     | 'remotePluginLifecycle'

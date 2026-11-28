@@ -97,6 +97,7 @@ export interface BuildRendererBundleOptions {
     readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
     readonly bridgeToken?: string
     readonly ownerSnapshot?: true
+    readonly nativeOwnerReview?: true
   }
   readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
 }
@@ -581,6 +582,8 @@ export async function buildRendererCompositionSource(
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${
     JSON.stringify(permission.policies)
   }${permission.ownerSnapshot === true ? ', ownerPermissionSnapshot: true' : ''}${
+    permission.nativeOwnerReview === true ? ', nativeOwnerPermissionReview: true' : ''
+  }${
     options.ownerPolicyVerification === undefined
       ? ''
       : `, ownerPolicyVerification: ${JSON.stringify(options.ownerPolicyVerification)}`

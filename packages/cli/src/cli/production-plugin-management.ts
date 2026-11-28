@@ -24,7 +24,7 @@ import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
-import type { ManagerOriginFence } from './manager-origin-fence.js'
+import { fenceAdapterOrigin, type ManagerOriginFence } from './manager-origin-fence.js'
 import { coordinateManagerChannelCredentials } from './manager-channel-credential-fence.js'
 import { coordinateManagerPermissionReview } from './manager-permission-review-fence.js'
 import { createManagerRendererServiceConfigChannel } from './manager-renderer-service-config.js'
@@ -49,11 +49,15 @@ import type {
 } from '../launcher/managed-service-client-reservation.js'
 import type { OwnerAdapterSessions } from './owner-adapter-sessions.js'
 import { dispatchOwnerAdapterRpcOperation } from './owner-adapter-rpc.js'
+import { PermissionDecisionJournal } from './permission-decision-journal.js'
+import { createServiceRendererPermissionHistory } from './service-renderer-permission-history.js'
+import { createServiceRendererPermissionOnce } from './service-renderer-permission-once.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
   /** Owner-only Manager portion of a wider profile mutation barrier. */
   readonly fenceManagers?: () => Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }>
+  readonly fenceAdapterPermissionOrigin?: (rendererId: string) => Promise<ManagerOriginFence>
   readonly lifecycleParticipants?: {
     hasLive(): boolean
     admitted(peer: ManagerRendererCommandPeer): boolean
@@ -267,15 +271,35 @@ export async function openProductionPluginManagementComposition(input: {
       handle: credentialHandler,
     })
     : undefined
+  const decisionJournal = input.rendererPermissionPolicy === undefined
+    ? undefined
+    : new PermissionDecisionJournal({ homeDir: input.homeDir, profileId: input.profileId })
   const rendererPermission = input.rendererPermissionPolicy === undefined
     ? undefined
     : createServiceRendererPermissionChannel({
       profileId: input.profileId,
       configPath: input.configPath,
       ...input.rendererPermissionPolicy,
+      decisionJournal: decisionJournal!,
       participants: input.rendererParticipants!,
       lifecycle: input.rendererLifecycle!,
       sessions: () => rendererSessions,
+    })
+  const rendererPermissionHistory = input.rendererPermissionPolicy === undefined || decisionJournal === undefined
+    ? undefined
+    : createServiceRendererPermissionHistory({
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      bootstrap: input.rendererPermissionPolicy.bootstrap,
+      journal: decisionJournal,
+    })
+  const rendererPermissionOnce = input.rendererPermissionPolicy === undefined || decisionJournal === undefined
+    ? undefined
+    : createServiceRendererPermissionOnce({
+      profileId: input.profileId,
+      bootstrap: input.rendererPermissionPolicy.bootstrap,
+      proof: input.rendererPermissionPolicy.proof,
+      journal: decisionJournal,
     })
   rendererSessions = new ManagerRendererSessions({
     profileId: input.profileId,
@@ -322,6 +346,8 @@ export async function openProductionPluginManagementComposition(input: {
       ...(rendererServiceConfig === undefined ? [] : [['service-config', rendererServiceConfig] as const]),
       ...(rendererCredentials === undefined ? [] : [['channel-credentials', rendererCredentials.channel] as const]),
       ...(rendererPermission === undefined ? [] : [['permission-policy', rendererPermission] as const]),
+      ...(rendererPermissionOnce === undefined ? [] : [['permission-once', rendererPermissionOnce] as const]),
+      ...(rendererPermissionHistory === undefined ? [] : [['permission-history', rendererPermissionHistory] as const]),
       ...(rendererMarketplace === undefined ? [] : [['marketplace', rendererMarketplace] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
@@ -395,6 +421,18 @@ export async function openProductionPluginManagementComposition(input: {
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
+    ...(input.rendererPermissionPolicy?.reserveAdditionalPeers === undefined ? {} : {
+      fenceAdapterPermissionOrigin: async (rendererId: string) => {
+        if (closed) throw new Error('adapter-permission-fence-unavailable')
+        return await fenceAdapterOrigin({
+          sessions: rendererSessions,
+          participants: input.rendererParticipants!,
+          lifecycle: input.rendererLifecycle!,
+          originRendererId: rendererId,
+          reserveAdditionalPeers: input.rendererPermissionPolicy!.reserveAdditionalPeers!,
+        })
+      },
+    }),
     ...(input.rendererParticipants === undefined && input.rendererDesktopLifecycle === undefined ? {} : {
       lifecycleParticipants: {
         hasLive: () => !closed && rendererSessions.hasLiveRenderers(),

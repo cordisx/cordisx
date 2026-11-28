@@ -55,6 +55,12 @@ import { createOwnerAdapterDocuments } from './owner-adapter-documents.js'
 import { readModelServices } from '../launcher/model-service-store.js'
 import { ManagerPermissionProofAuthority } from './manager-permission-proof-authority.js'
 import { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
+import { PermissionDecisionJournal } from './permission-decision-journal.js'
+import { createOwnerAdapterPermissionHistory } from './owner-adapter-permission-history.js'
+import { OwnerAdapterPermissionProof } from './owner-adapter-permission-proof.js'
+import { createOwnerAdapterPermissionPolicy } from './owner-adapter-permission-policy.js'
+import { ownerAdapterInstalledPermissionTarget } from './owner-adapter-permission-target.js'
+import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -101,6 +107,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
       let rendererPermissionProof: ManagerPermissionProofAuthority | undefined
       let rendererPermissionConsumers: ServiceOwnerPermissionConsumers | undefined
+      let nativePermissionProof: OwnerAdapterPermissionProof | undefined
       let ownerOpen = true
       let serviceReady = false
       let webUnavailable = false
@@ -138,6 +145,24 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           (await loadHomeConfig(configPath)).permissions.filter(
             policy => policy.key.profileId === profileId,
           )
+        const decisionJournal = new PermissionDecisionJournal({ homeDir, profileId })
+        const permissionHistory = createOwnerAdapterPermissionHistory({
+          profileId,
+          journal: decisionJournal,
+          loadPolicies,
+          reviewIdentity: async (pluginId, context) => {
+            if (!rendererLifecycle) return undefined
+            const target = await ownerAdapterInstalledPermissionTarget({
+              homeDir,
+              profileId,
+              generation,
+              pluginId,
+              context: context as OwnerAdapterManagementContext,
+              lifecycle: rendererLifecycle,
+            }).catch(() => undefined)
+            return target && { identity: target.ownerIdentity, isCurrent: target.isCurrent }
+          },
+        })
         const config = await loadHomeConfig(configPath)
         const rendererScope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: appId, profileId, generation }
         rendererParticipants = new ServiceRendererParticipants(rendererScope)
@@ -297,6 +322,22 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         rendererLifecycle.initialize(active)
         if (appId === 'codex') {
           const adapterLifecycleHandler = { token: randomUUID(), profileId, generation, coordinator }
+          nativePermissionProof = new OwnerAdapterPermissionProof({ profileId, generation })
+          const nativePermissionPolicy = createOwnerAdapterPermissionPolicy({
+            homeDir,
+            configPath,
+            profileId,
+            generation,
+            lifecycle: rendererLifecycle,
+            loadPolicies,
+            journal: decisionJournal,
+            proof: nativePermissionProof,
+            runtime: () => {
+              const fence = management?.fenceAdapterPermissionOrigin
+              if (!rendererBootstrap || !rendererPermissionConsumers || !fence) return undefined
+              return { bootstrap: rendererBootstrap, consumers: rendererPermissionConsumers, fence }
+            },
+          })
           const configured = await loadConfig(configPath, { profileId, projectRoot: homeDir })
           const documents = createOwnerAdapterDocuments({
             homeDir,
@@ -310,6 +351,12 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             adapter: { appId: 'codex', adapterId: 'codex-desktop' },
             snapshot: () => rendererLifecycle!.snapshot(),
             attach: async peer => await rendererLifecycle!.attach(peer),
+            ...(process.platform !== 'darwin' && process.platform !== 'linux' ? {} : {
+              acquirePermissionFence: async () => {
+                if (!rendererBootstrap) throw new Error('adapter-permission-fence-unavailable')
+                return await rendererBootstrap.permissionAccess.acquireAdapterPermissionFence()
+              },
+            }),
             document: documents,
             modelServicesRead: async () => await readModelServices(configPath, environment),
             artifact: async (value, signal) => {
@@ -328,8 +375,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
               )
               return await handlePluginLifecycleBindingRequest(adapterLifecycleHandler, request)
             },
-            management: async value => {
+            management: async (value, context) => {
               const operation = attachmentRecord(value)
+              if (operation.kind === 'permission-history') {
+                return await permissionHistory(operation, context)
+              }
+              if (
+                operation.kind === 'permission-key-register' || operation.kind === 'permission-policy-write'
+                || operation.kind === 'permission-once'
+              ) {
+                return await nativePermissionPolicy(operation, context)
+              }
               if (
                 ![
                   'query',
@@ -609,6 +665,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             () => webRetirement,
             () => serviceManager?.close(),
             () => api?.close(),
+            () => nativeAdapters?.close(),
             async () => {
               if (rendererBootstrap && !await rendererBootstrap.close()) {
                 throw new Error('renderer-bootstrap-retirement-unconfirmed')
@@ -617,12 +674,12 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             () => rendererReadonlyChannel?.close(),
             () => rendererManagedServiceUI?.dispose(),
             () => services?.browserConsoleLaunch.close(),
-            () => nativeAdapters?.close(),
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),
             () => rendererPermissionConsumers?.close(),
             () => rendererPermissionProof?.close(),
+            () => nativePermissionProof?.close(),
             () => managerChannel?.close(),
             () => terminalProvider?.close(),
             () => channel?.close(),

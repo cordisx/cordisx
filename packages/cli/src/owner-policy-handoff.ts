@@ -11,7 +11,7 @@ export interface OwnerPolicyTransition extends StandaloneDomPolicyAdoption {
   readonly ownerGeneration: string
   readonly rendererId: string
   readonly handoffId: string
-  readonly origin: false
+  readonly origin: boolean
 }
 
 export function parseOwnerPolicyTransition(
@@ -39,7 +39,7 @@ export function parseOwnerPolicyTransition(
   if (
     Object.keys(item).length !== keys.length || Object.keys(item).some(key => !keys.includes(key))
     || item.profileId !== scope.profileId || item.ownerGeneration !== scope.generation
-    || item.rendererId !== scope.rendererId || item.origin !== false
+    || item.rendererId !== scope.rendererId || typeof item.origin !== 'boolean'
     || typeof item.handoffId !== 'string' || !/^[a-f0-9]{64}$/u.test(item.handoffId)
     || typeof item.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(item.requestId)
     || typeof item.moduleGeneration !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(item.moduleGeneration)

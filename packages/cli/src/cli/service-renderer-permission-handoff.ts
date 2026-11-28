@@ -102,9 +102,10 @@ export async function reserveServiceRendererPermissionHandoff(
   expected: readonly CordisXPersistedPermissionPolicyRecord[],
   updates: readonly CordisXPersistedPermissionPolicyRecord[],
   consumers: ServiceRendererPermissionConsumerFence,
+  adapterTarget?: ManagerPolicyTarget,
 ): Promise<ManagerPermissionPolicyBarrier> {
   try {
-    return await reserve(input, origin, context, requestId, expected, updates, consumers)
+    return await reserve(input, origin, context, requestId, expected, updates, consumers, adapterTarget)
   } catch (error) {
     try {
       consumers.fence()
@@ -125,6 +126,7 @@ async function reserve(
   expected: readonly CordisXPersistedPermissionPolicyRecord[],
   updates: readonly CordisXPersistedPermissionPolicyRecord[],
   consumers: ServiceRendererPermissionConsumerFence,
+  adapterTarget?: ManagerPolicyTarget,
 ): Promise<ManagerPermissionPolicyBarrier> {
   const channel = input.channel
   const permissionFence = input.permissionFence
@@ -134,6 +136,7 @@ async function reserve(
     try {
       return context.admitted === true && !context.signal.aborted && context.rendererId === origin.rendererId
         && context.profileId === input.profileId && context.ownerGeneration === input.generation
+        && (adapterTarget?.isCurrent() ?? true)
         && consumers.isCurrent() && isCurrentManagerOriginFence(origin, input.participants, input.lifecycle)
     } catch {
       return false
@@ -172,20 +175,30 @@ async function reserve(
     return { id, entry, configured, peer, target }
   })
   const writer = cohort.find(item => item.id === origin.rendererId)
-  if (!writer || cohort.length === 0 || changes.length === 0 || changes.length > 2) {
+  if (
+    changes.length === 0 || changes.length > 2
+    || adapterTarget === undefined && (!writer || cohort.length === 0)
+    || adapterTarget !== undefined && (writer !== undefined || !adapterTarget.isCurrent()
+        || !origin.additionalPeers?.some(peer => peer.identity.rendererId === origin.rendererId))
+  ) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
+  const writerTarget = adapterTarget ?? writer!.target
+  if (
+    writerTarget.ownerIdentity.id !== targetIdentity.pluginId
+    || writerTarget.ownerIdentity.source !== targetIdentity.source
+  ) throw new Error('renderer-permission-handoff-unavailable')
   if (
     cohort.some(item =>
-      item.target.kind !== writer.target.kind || item.target.digest !== writer.target.digest
-      || !attachmentEqual(item.target.artifact, writer.target.artifact)
-      || item.target.kind === 'installed' && item.target.moduleGeneration !== writer.target.moduleGeneration
+      item.target.kind !== writerTarget.kind || item.target.digest !== writerTarget.digest
+      || !attachmentEqual(item.target.artifact, writerTarget.artifact)
+      || item.target.kind === 'installed' && item.target.moduleGeneration !== writerTarget.moduleGeneration
     )
   ) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
-  const projected = writer.target.project(changes)
-  if (!attachmentEqual(writer.target.resolve(projected.policies), changes)) {
+  const projected = writerTarget.project(changes)
+  if (!attachmentEqual(writerTarget.resolve(projected.policies), changes)) {
     throw new Error('renderer-permission-handoff-unavailable')
   }
   let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspendAll']>> | undefined
@@ -309,9 +322,12 @@ async function reserve(
               candidate,
             })
           ) throw new Error('renderer-permission-handoff-unavailable')
+          const scope = writer?.peer.scope
+            ?? origin.additionalPeers?.find(peer => peer.identity.rendererId === origin.rendererId)?.scope
+          if (!scope) throw new Error('renderer-permission-handoff-unavailable')
           const confirm = async (items: typeof cohort) =>
             await synchronizeServiceRendererPolicies({
-              scope: writer.peer.scope,
+              scope,
               peers: items.map(item => ({
                 peer: item.peer,
                 origin: item === writer,
@@ -326,7 +342,7 @@ async function reserve(
             })
           // The writer must have an explicit in-flight adoption path; ordinary
           // peer adoption waits for its own write and would deadlock here.
-          if (!await confirm(cohort.filter(item => item !== writer)) || !await confirm([writer])) {
+          if (!await confirm(cohort.filter(item => item !== writer)) || writer && !await confirm([writer])) {
             throw new Error('renderer-permission-handoff-unavailable')
           }
           for (const { entry } of cohort) entry.policies = candidate

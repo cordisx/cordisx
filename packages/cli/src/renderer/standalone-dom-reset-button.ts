@@ -1,5 +1,5 @@
 import type { CordisXPluginIdentity } from '../contracts.js'
-import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
+import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
 
 type Registration = {
   readonly button: HTMLElement
@@ -15,9 +15,13 @@ export function registerStandaloneDomResetButton(
   button: HTMLElement,
   identity: CordisXPluginIdentity,
   pointId: string,
+  native = false,
 ): () => void {
   const view = button.ownerDocument.defaultView
-  if (!view || !(button instanceof view.HTMLButtonElement) || !isStandaloneManagerDomTarget(identity, pointId)) {
+  if (
+    !view || !(button instanceof view.HTMLButtonElement)
+    || !(native ? isNativeManagerDomTarget : isStandaloneManagerDomTarget)(identity, pointId)
+  ) {
     return () => {}
   }
   const registration: Registration = { button, identity: { ...identity }, pointId }

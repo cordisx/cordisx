@@ -320,6 +320,8 @@ export interface CordisXRuntimeMetadata {
   readonly standalonePolicyAdopter?: (adopt: StandaloneDomPolicyAdopter) => void
   /** Service-attached native clients must not fall back to browser-local policy storage. */
   readonly ownerPermissionSnapshot?: true
+  /** The service has enabled its authenticated native permission bridge. */
+  readonly nativeOwnerPermissionReview?: true
   readonly ownerPolicyVerification?: { readonly publicKey: string; readonly rendererId: string }
   /** Session-private signer; removed before metadata reaches runtime or plugins. */
   readonly standalonePermissionSigner?:
@@ -587,7 +589,7 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   /** Host-private adoption of an owner-confirmed standalone Channel view. */
   adoptStandaloneChannelProjection?(projection: unknown, revision: number): boolean
   /** Apply only a service-signed transition for this native adapter session. */
-  adoptOwnerManagerPolicy?(packet: unknown): Promise<boolean>
+  adoptOwnerManagerPolicy?(packet: unknown): Promise<boolean | 'origin'>
   /** Adopt an owner-confirmed configuration write without replacing this Manager. */
   adoptStandaloneDesktopPackageConfig?(
     value: import('./standalone-desktop-package-config-binding.js').StandaloneDesktopConfigAdoption,

@@ -282,15 +282,65 @@ it('keeps writes unavailable without an owner authority and rejects the real own
 it('requires the session-bound admission and owner-authorized action before persisting', async () => {
   const fake = simulatedAuthority()
   const authorize = vi.fn<ManagerPermissionPolicyAuthority['authorize']>(() => false)
-  const test = await fixture({ authority: { ...fake.authority, authorize } })
+  const trace = vi.fn()
+  const test = await fixture({ authority: { ...fake.authority, authorize, trace } })
   try {
     const first = await test.open('b'.repeat(64))
     fake.snapshots.set(first.handle.rendererId, [])
     expect(await test.sessions.call(first, 'permission-policy', payload('one', 'allow'))).toEqual({ status: 'unknown' })
     expect(authorize).toHaveBeenCalledOnce()
+    expect(trace).not.toHaveBeenCalled()
     expect(authorize.mock.calls[0]?.[2]).toEqual([])
     expect(fake.fenced).not.toHaveBeenCalled()
     expect((await loadHomeConfig(test.configPath)).permissions).toEqual([])
+  } finally {
+    test.sessions.dispose()
+  }
+})
+
+it('records a verified decision before the write and commits its provenance after all peers adopt it', async () => {
+  const fake = simulatedAuthority()
+  let configPath = ''
+  const commit = vi.fn(async () => {
+    expect((await loadHomeConfig(configPath)).permissions).toEqual([record('allow')])
+    expect(fake.completed).toHaveBeenCalledOnce()
+  })
+  const trace = vi.fn<NonNullable<ManagerPermissionPolicyAuthority['trace']>>(async (_context, request) => {
+    expect(request).toEqual({ requestId: 'one', records: [record('allow')] })
+    expect((await loadHomeConfig(configPath)).permissions).toEqual([])
+    return { commit }
+  })
+  const test = await fixture({ authority: { ...fake.authority, trace } })
+  configPath = test.configPath
+  try {
+    const first = await test.open('b'.repeat(64))
+    fake.snapshots.set(first.handle.rendererId, [])
+    expect((await test.sessions.call(first, 'permission-policy', payload('one', 'allow'))).status).toBe('ok')
+    expect(trace).toHaveBeenCalledOnce()
+    expect(commit).toHaveBeenCalledOnce()
+  } finally {
+    test.sessions.dispose()
+  }
+})
+
+it('reports an unknown write when the decision receipt cannot be saved', async () => {
+  const fake = simulatedAuthority()
+  const test = await fixture({
+    authority: {
+      ...fake.authority,
+      trace: async () => ({
+        commit: async () => {
+          throw new Error('journal failure')
+        },
+      }),
+    },
+  })
+  try {
+    const first = await test.open('b'.repeat(64))
+    fake.snapshots.set(first.handle.rendererId, [])
+    expect((await test.sessions.call(first, 'permission-policy', payload('one', 'allow'))).status).toBe('unknown')
+    expect((await loadHomeConfig(test.configPath)).permissions).toEqual([record('allow')])
+    expect(fake.fenced).toHaveBeenCalledOnce()
   } finally {
     test.sessions.dispose()
   }

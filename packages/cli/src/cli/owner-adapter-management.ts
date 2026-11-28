@@ -55,6 +55,10 @@ export function createOwnerAdapterManagement(
       await client.management({ kind: 'plugin-info', query }) as Awaited<
         ReturnType<PluginManagementService['pluginInfo']>
       >,
+    permissionHistory: async pluginId =>
+      await client.management({ kind: 'permission-history', pluginId }) as Awaited<
+        ReturnType<NonNullable<PluginManagementService['permissionHistory']>>
+      >,
     plan: async request =>
       await client.management({ kind: 'plan', request }) as Awaited<ReturnType<PluginManagementService['plan']>>,
     execute: async (request, expectedRevision) =>

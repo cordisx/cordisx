@@ -75,6 +75,7 @@ export type PluginManagementRpcOperation =
     readonly kind: 'plugin-info'
     readonly query: PluginManagementCatalogLookup
   }
+  | { readonly kind: 'permission-history'; readonly pluginId: string }
   | { readonly kind: 'plan'; readonly request: PluginManagementRequest }
   | { readonly kind: 'execute'; readonly request: PluginManagementRequest; readonly expectedRevision?: number }
   | { readonly kind: 'migrate-legacy-sources'; readonly input: PluginManagementLegacySourceMigration }
@@ -212,6 +213,7 @@ export function parsePluginManagementRpcRequest(
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
+      'permission-history',
       'plan',
       'execute',
       'migrate-legacy-sources',
@@ -219,6 +221,10 @@ export function parsePluginManagementRpcRequest(
   ) throw new Error('plugin management operation is unsupported')
   if (operation.kind === 'manager-renderer') parseManagerRendererOperation(operation)
   if (operation.kind === 'owner-adapter') parseOwnerAdapterRpcOperation(operation)
+  if (
+    operation.kind === 'permission-history' && (Object.keys(operation).length !== 2
+      || typeof operation.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(operation.pluginId))
+  ) throw new Error('permission history request is invalid')
   if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
   if (operation.kind === 'manager-service-auth') parseManagerServiceAuthOperation(operation)
   if (operation.kind === 'manager-channel-credentials') parseManagerChannelCredentialOperation(operation)
@@ -268,6 +274,10 @@ export async function handlePluginManagementRpcRequest(
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
   if (operation.kind === 'query-catalog') return await service.queryCatalog(operation.query)
   if (operation.kind === 'plugin-info') return await service.pluginInfo(operation.query)
+  if (operation.kind === 'permission-history') {
+    if (!service.permissionHistory) throw new Error('permission history is unavailable')
+    return await service.permissionHistory(operation.pluginId)
+  }
   if (operation.kind === 'plan') return await service.plan(operation.request)
   if (operation.kind === 'execute') return await service.execute(operation.request, operation.expectedRevision)
   return await service.migrateLegacySources(operation.input)

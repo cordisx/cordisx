@@ -75,9 +75,10 @@ async function markSupervisorFailed(
   paths: ReturnType<typeof supervisorPaths>,
   state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
   failure: string,
+  knownDead = false,
 ): Promise<void> {
   await updateSupervisorState(paths, state, current => {
-    if (current.phase !== 'starting') return undefined
+    if (current.phase !== 'starting' && !(knownDead && current.phase === 'ready')) return undefined
     const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = current
     return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
   })
@@ -662,7 +663,7 @@ async function runSelectedSupervisorCommand(
       const identity = await processIdentityStatus(state.pid, state.processStartedAt)
       if (identity === 'unknown') throw new Error('unable to verify the CordisX supervisor process identity')
       if (identity === 'dead') {
-        await markSupervisorFailed(paths, state, 'CordisX background supervisor exited before renderer readiness')
+        await markSupervisorFailed(paths, state, 'CordisX background supervisor exited', true)
         state = await readMutableSupervisorState(paths)
       }
     }

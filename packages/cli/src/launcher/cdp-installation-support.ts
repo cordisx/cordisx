@@ -22,7 +22,7 @@ import { CHANNEL_CREDENTIAL_BINDING, CHANNEL_CREDENTIAL_RECEIVER } from './chann
 import { CONFIG_BINDING, CONFIG_RECEIVER } from './config-rpc.js'
 import { ICON_THEME_PREFERENCE_BINDING, ICON_THEME_PREFERENCE_RECEIVER } from './icon-theme-rpc.js'
 import { OWNER_DOCUMENT_BINDING, OWNER_DOCUMENT_RECEIVER } from './owner-document-rpc.js'
-import { PERMISSION_BINDING, PERMISSION_RECEIVER } from './permission-rpc.js'
+import { PERMISSION_BINDING, PERMISSION_ONCE_BINDING, PERMISSION_RECEIVER } from './permission-rpc.js'
 import { PLUGIN_LIFECYCLE_BINDING, PLUGIN_LIFECYCLE_RECEIVER } from './plugin-lifecycle-rpc.js'
 import { MANAGEMENT_BINDING, MANAGEMENT_RECEIVER } from './management-rpc.js'
 import { PROVIDER_BINDING, PROVIDER_RECEIVER } from './provider-rpc.js'
@@ -102,6 +102,7 @@ export {
   MAX_PERMISSION_REQUESTS,
   parsePermissionBindingRequest,
   PERMISSION_BINDING,
+  PERMISSION_ONCE_BINDING,
   type PermissionPersistenceContext,
   persistPermissionPolicies,
 } from './permission-rpc.js'
@@ -311,6 +312,7 @@ export interface InstalledScript {
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
+  readonly permissionOnceBindingInstalled?: boolean
   readonly iconThemePreferenceController?: AbortController
   readonly removeIconThemePreferenceBindingListener?: () => void
   readonly iconThemePreferenceBindingInstalled: boolean
@@ -479,6 +481,7 @@ export function installedBindingNames(installed: InstalledScript): readonly stri
     ...(installed.actionsBindingInstalled ? [CHANNEL_ACTIONS_BINDING] : []),
     ...(installed.agentContextBindingInstalled ? [AGENT_CONTEXT_BINDING] : []),
     ...(installed.permissionBindingInstalled ? [PERMISSION_BINDING] : []),
+    ...(installed.permissionOnceBindingInstalled ? [PERMISSION_ONCE_BINDING] : []),
     ...(installed.iconThemePreferenceBindingInstalled ? [ICON_THEME_PREFERENCE_BINDING] : []),
     ...(installed.lifecycleBindingInstalled ? [PLUGIN_LIFECYCLE_BINDING] : []),
     ...(installed.managementBindingInstalled ? [MANAGEMENT_BINDING] : []),
@@ -779,10 +782,12 @@ export async function sendChannelActionsBindingResponse(
 export async function sendPermissionBindingResponse(
   session: CdpSession,
   payload: Record<string, unknown>,
+  contextId?: number,
 ): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${PERMISSION_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
+    ...(contextId === undefined ? {} : { contextId }),
   })
 }
 
@@ -918,6 +923,9 @@ export async function uninstall(
         : []),
       ...(installed.permissionBindingInstalled
         ? [session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
+        : []),
+      ...(installed.permissionOnceBindingInstalled
+        ? [session.send('Runtime.removeBinding', { name: PERMISSION_ONCE_BINDING })]
         : []),
       ...(installed.iconThemePreferenceBindingInstalled
         ? [session.send('Runtime.removeBinding', { name: ICON_THEME_PREFERENCE_BINDING })]

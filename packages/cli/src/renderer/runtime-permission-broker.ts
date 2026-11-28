@@ -1,13 +1,20 @@
 import { BrowserPermissionAuthorizationPromptV2, BrowserPermissionPrompt, PermissionBroker } from './platform.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 import { bindStandaloneDomReview, createStandaloneDomReview } from './standalone-dom-review.js'
+import { nativePermissionPrompt } from './native-permission-prompt.js'
 
 /** Compose the Host broker with the scoped standalone review, when available. */
 export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
   const standalone = runtimeScope.metadata()!.hostKind === 'standalone'
-  const review = standalone && runtimeScope.metadata()!.standaloneReviewSession !== undefined
-    ? createStandaloneDomReview(document)
+  const native = runtimeScope.metadata()!.nativeOwnerPermissionReview === true
+  const review = (standalone || native) && runtimeScope.metadata()!.standaloneReviewSession !== undefined
+    ? createStandaloneDomReview(document, native)
     : undefined
+  const ordinary = standalone ? undefined : new BrowserPermissionAuthorizationPromptV2(
+    document,
+    undefined,
+    runtimeScope.metadata()!.ownerPermissionSnapshot === true ? { sessionOnly: true } : {},
+  )
   const broker = new PermissionBroker(
     runtimeScope.permissionStore()!,
     standalone ? { request: async () => 'deny' as const } : new BrowserPermissionPrompt(
@@ -20,11 +27,7 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) => {
     runtimeScope.generation()!,
     runtimeScope.generationVisibility()!,
     runtimeScope.pluginConsole()!,
-    standalone ? review : new BrowserPermissionAuthorizationPromptV2(
-      document,
-      undefined,
-      runtimeScope.metadata()!.ownerPermissionSnapshot === true ? { sessionOnly: true } : {},
-    ),
+    standalone ? review : review && ordinary ? nativePermissionPrompt(ordinary, review) : ordinary,
     runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
   )
   if (review !== undefined) bindStandaloneDomReview(broker, review)

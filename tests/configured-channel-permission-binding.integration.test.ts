@@ -1,9 +1,14 @@
 import { randomBytes, webcrypto } from 'node:crypto'
+import { readdir } from 'node:fs/promises'
+import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { buildDomPermissionAuthorizationPlanV3 } from '../packages/cli/src/capability-risk-catalog.js'
 import { ManagerPermissionProofAuthority } from '../packages/cli/src/cli/manager-permission-proof-authority.js'
 import { createServiceRendererPermissionChannel } from '../packages/cli/src/cli/service-renderer-permission-channel.js'
 import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service-owner-permission-consumers.js'
+import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-decision-journal.js'
+import { createServiceRendererPermissionHistory } from '../packages/cli/src/cli/service-renderer-permission-history.js'
+import { createServiceRendererPermissionOnce } from '../packages/cli/src/cli/service-renderer-permission-once.js'
 import type {
   ManagerRendererChannel,
   ManagerRendererChannelContext,
@@ -115,6 +120,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
             policy => policy.key.profileId === f.profileId,
           ),
       })
+      const journal = new PermissionDecisionJournal({ homeDir: f.homeDir, profileId: f.profileId })
       channel = createServiceRendererPermissionChannel({
         profileId: f.profileId,
         configPath: f.configPath,
@@ -123,6 +129,7 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         participants: f.participants,
         lifecycle: f.lifecycle,
         sessions: () => f.sessions,
+        decisionJournal: journal,
         reserveOtherConsumers: async origin => consumers!.reserve(origin),
       })
       const identity = { id: 'channel', source: alias }
@@ -247,6 +254,73 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         policy: 'ask',
       }))
       expect(onUnknown).not.toHaveBeenCalled()
+      const once = createServiceRendererPermissionOnce({
+        profileId: f.profileId,
+        bootstrap: f.bootstrap,
+        proof,
+        journal,
+      })
+      const onceView = new PermissionAuthorizationViewModel(plan)
+      onceView.select('ui.extension-points.render', 'allow-once')
+      const onceDecision = onceView.confirm()
+      if (onceDecision.status !== 'confirmed' || onceDecision.decision.schemaVersion !== 3) {
+        throw new Error('fixture decision failed')
+      }
+      const onceSigned = await signer.signOnce(
+        'once-1',
+        {
+          identity,
+          pointId: point,
+          profileId: f.profileId,
+          runtimeGeneration: f.generation,
+          moduleGeneration: writerGeneration,
+          artifact: f.configuredChannel!.plugin.distributionArtifact!,
+        },
+        plan,
+        onceDecision.decision,
+      )
+      channel = once
+      const oncePayload = JSON.stringify({
+        requestId: 'once-1',
+        token: STANDALONE_PERMISSION_BINDING_MARKER,
+        ...onceSigned,
+      })
+      expect(await f.sessions.call(f.invocation, 'fixture-write', oncePayload)).toMatchObject({
+        status: 'ok',
+        value: { requestId: 'once-1', ok: true, value: true },
+      })
+      expect((await loadHomeConfig(f.configPath)).permissions).toContainEqual(
+        expect.objectContaining({ policy: 'ask' }),
+      )
+      const journalDirectory = path.join(f.homeDir, 'state', 'profiles', f.profileId, 'permission-decisions')
+      const ids = (await readdir(journalDirectory)).flatMap(name => {
+        const match = /^([a-f0-9]{32})\.json$/u.exec(name)
+        return match ? [match[1]!] : []
+      })
+      const recorded = await Promise.all(ids.map(async id => await journal.read(id)))
+      expect(recorded).toHaveLength(3)
+      expect(recorded.every(item => item.entry.client === 'web' && item.committedAt !== undefined)).toBe(true)
+      expect(recorded.flatMap(item => item.entry.changes.map(change => change.policy)).sort()).toEqual([
+        'allow-once',
+        'allow-persistent',
+        'ask',
+      ])
+      const history = createServiceRendererPermissionHistory({
+        profileId: f.profileId,
+        generation: f.generation,
+        bootstrap: f.bootstrap,
+        journal,
+      })
+      const historyResult = await history.prepare(
+        JSON.stringify({ requestId: 'read-history', pluginId: 'channel' }),
+        requestContext!,
+      ).dispatch() as { requestId: string; ok: boolean; value: Array<{ client: string; record: unknown }> }
+      expect(historyResult).toMatchObject({ requestId: 'read-history', ok: true })
+      expect(historyResult.value).toHaveLength(3)
+      expect(historyResult.value.every(item => item.client === 'web')).toBe(true)
+      expect(JSON.stringify(historyResult)).toContain(alias)
+      expect(JSON.stringify(historyResult)).not.toContain(f.configuredChannel!.plugin.source)
+      expect(await f.sessions.call(f.invocation, 'fixture-write', oncePayload)).toMatchObject({ status: 'unknown' })
     } finally {
       consumers?.close()
       signer.close()

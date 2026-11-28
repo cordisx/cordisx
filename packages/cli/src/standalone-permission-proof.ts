@@ -1,7 +1,7 @@
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from './capability-risk-catalog.js'
 import type { CordisXPermissionPolicyRecordV3, CordisXPermissionPolicyV2 } from './permission-contracts.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from './permission-model-v3.js'
-import { isStandaloneManagerDomTarget } from './standalone-permission-contract.js'
+import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from './standalone-permission-contract.js'
 
 export interface StandalonePermissionProofPayload {
   readonly version: 1
@@ -19,7 +19,10 @@ export interface StandalonePermissionProofPayload {
 }
 
 /** Normalize the exact, renderer-local decision signed by the standalone Host. */
-export function normalizeStandalonePermissionProofPayload(value: unknown): StandalonePermissionProofPayload {
+export function normalizeStandalonePermissionProofPayload(
+  value: unknown,
+  target: 'standalone' | 'native' = 'standalone',
+): StandalonePermissionProofPayload {
   const invalid = (): never => {
     throw new Error('standalone-permission-proof-invalid')
   }
@@ -66,7 +69,8 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
   const identity = { id: record.key.identity.pluginId, source: record.key.identity.source }
   if (
     record.key.profileId !== item.profileId || record.key.scope.extensionPoints?.length !== 1
-    || pointId === undefined || !isStandaloneManagerDomTarget(identity, pointId)
+    || pointId === undefined
+    || !(target === 'native' ? isNativeManagerDomTarget : isStandaloneManagerDomTarget)(identity, pointId)
     || (item.observed === 'ask'
       ? record.policy !== 'allow-persistent' && record.policy !== 'deny-persistent'
       : record.policy !== 'ask')
@@ -95,6 +99,39 @@ export function normalizeStandalonePermissionProofPayload(value: unknown): Stand
 }
 
 /** Shared canonical bytes; the signature never contains a private key or owner source. */
-export function standalonePermissionProofBytes(payload: unknown): Uint8Array<ArrayBuffer> {
-  return new TextEncoder().encode(JSON.stringify(normalizeStandalonePermissionProofPayload(payload)))
+export function standalonePermissionProofBytes(
+  payload: unknown,
+  target: 'standalone' | 'native' = 'standalone',
+): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(JSON.stringify(normalizeStandalonePermissionProofPayload(payload, target)))
+}
+
+export type StandaloneOncePermissionProofPayload = StandalonePermissionProofPayload & {
+  readonly decision: 'allow-once' | 'deny-once'
+}
+
+/** A one-time decision signs the same exact target but never changes the durable policy. */
+export function normalizeStandaloneOncePermissionProofPayload(
+  value: unknown,
+  target: 'standalone' | 'native' = 'standalone',
+): StandaloneOncePermissionProofPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('standalone-permission-proof-invalid')
+  }
+  const { decision, ...rest } = value as Record<string, unknown>
+  if (decision !== 'allow-once' && decision !== 'deny-once') throw new Error('standalone-permission-proof-invalid')
+  const record = normalizePermissionPolicyRecordV3(rest.record)
+  if (record.policy !== 'ask' || rest.observed !== 'ask') throw new Error('standalone-permission-proof-invalid')
+  const checked = normalizeStandalonePermissionProofPayload({
+    ...rest,
+    record: { ...record, policy: 'allow-persistent' },
+  }, target)
+  return { ...checked, record, decision }
+}
+
+export function standaloneOncePermissionProofBytes(
+  payload: unknown,
+  target: 'standalone' | 'native' = 'standalone',
+): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(JSON.stringify(normalizeStandaloneOncePermissionProofPayload(payload, target)))
 }

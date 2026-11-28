@@ -43,6 +43,7 @@ type ManagementOperation = Extract<PluginManagementRpcOperation, {
     | 'refresh-catalog'
     | 'query-catalog'
     | 'plugin-info'
+    | 'permission-history'
     | 'plan'
     | 'execute'
     | 'migrate-legacy-sources'
@@ -236,6 +237,23 @@ export class OwnerAdapterClient {
     )
     if (this.closed || !this.admitted) throw new Error('adapter-owner-result-unknown')
     return result
+  }
+
+  /** Launcher-only calls; the public management binding does not expose these operations. */
+  async permission(operation: unknown, registration = false): Promise<unknown> {
+    if (this.closed || !registration && !this.admitted) throw new Error('adapter-owner-unavailable')
+    const result = valueOf(
+      await this.request({ ...this.operation('management'), payload: operation }, this.controller.signal),
+    )
+    if (this.closed || !registration && !this.admitted) throw new Error('adapter-owner-result-unknown')
+    return result
+  }
+
+  /** An uncertain owner write retires this link so reconnection starts from a fresh snapshot. */
+  invalidate(): void {
+    if (this.closed) return
+    void this.close().catch(() => undefined)
+    void Promise.resolve().then(this.onLost).catch(() => undefined)
   }
 
   async lifecycle(payload: unknown): Promise<unknown> {

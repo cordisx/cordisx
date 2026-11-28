@@ -45,6 +45,11 @@ export interface ManagerPermissionPolicyAuthority {
     expected: readonly CordisXPersistedPermissionPolicyRecord[],
     proof: unknown,
   ): boolean | Promise<boolean>
+  /** Record the owner-verified decision before dispatching its policy write. */
+  trace?(
+    context: ManagerRendererChannelContext,
+    request: PermissionBindingRequest,
+  ): Promise<{ commit(): Promise<void> }>
   /** Enter the shared barrier before comparing and writing. */
   acquire(
     context: ManagerRendererChannelContext,
@@ -167,6 +172,8 @@ export function createManagerRendererPermissionChannel(input: {
             )
           ) throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
           await assertAdmission()
+          const trace = await authority.trace?.(context, authorized)
+          await assertAdmission()
           const barrier = await authority.acquire(
             context,
             authorized,
@@ -206,6 +213,7 @@ export function createManagerRendererPermissionChannel(input: {
             ) {
               throw new Error('MANAGER_PERMISSION_UNAVAILABLE')
             }
+            await trace?.commit()
             return { requestId: request.requestId, ok: true, value: responseRecords }
           } catch (error) {
             fenced = true

@@ -82,6 +82,8 @@ const rendererChannelAllowlist = new Set([
   'service-config',
   'marketplace',
   'permission-policy',
+  'permission-once',
+  'permission-history',
   'owner-document',
 ])
 
@@ -636,7 +638,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         if (!activeSession()) return revoked()
         if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
-          || input.channel === 'permission-policy'
+          || input.channel === 'permission-policy' || input.channel === 'permission-once'
         if (input.channel === 'owner-document') {
           const write = managerDocumentWrite(input.payload)
           if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })

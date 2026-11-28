@@ -122,53 +122,56 @@ describe('supervisor readiness generation', () => {
     expect(await readSupervisorState(paths)).toBeUndefined()
   })
 
-  it('recovers proven-dead state on start alone and composes the real publication handshake', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-generation-'))
-    const paths = supervisorPaths(root, 'codex', 'default')
-    await writeSupervisorState(paths, {
-      schemaVersion: 1,
-      appId: 'codex',
-      profileId: 'default',
-      phase: 'starting',
-      pid: process.pid,
-      processStartedAt: 'Mon Jan  1 00:00:00 2001',
-      instanceToken: 'a'.repeat(64),
-      createdAt: new Date().toISOString(),
-      version: 'old',
-      effectiveConfig: 'old',
-    })
-    let child: Promise<Awaited<ReturnType<typeof createSupervisorRuntime>>> | undefined
-    let spawned = 0
-    const output: string[] = []
-    try {
-      const runtime = {
-        env: { CORDISX_HOME: root },
-        stdout: (line: string) => output.push(line),
-        internalSupervisorReadinessTimeoutMs: 2_000,
-        internalSpawnSupervisor: (input: { env: NodeJS.ProcessEnv }) => {
-          spawned++
-          child = createSupervisorRuntime(input.env).then(async supervisor => {
-            await supervisor.markReady(43123)
-            return supervisor
-          })
-          return { pid: process.pid, unref: () => undefined }
-        },
-      }
-      await Promise.all([
-        runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
-        runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
-      ])
-      expect(spawned).toBe(1)
-      expect(output.map(line => JSON.parse(line))).toEqual([
-        expect.objectContaining({ status: 'ready', pid: process.pid }),
-        expect.objectContaining({ status: 'ready', pid: process.pid }),
-      ])
-      expect(await readSupervisorState(paths)).toMatchObject({
-        processStartedAt: await processStartIdentity(process.pid),
-        phase: 'ready',
+  it.each(['starting', 'ready'] as const)(
+    'recovers a proven-dead %s state and composes the publication handshake',
+    async phase => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-generation-'))
+      const paths = supervisorPaths(root, 'codex', 'default')
+      await writeSupervisorState(paths, {
+        schemaVersion: 1,
+        appId: 'codex',
+        profileId: 'default',
+        phase,
+        pid: process.pid,
+        processStartedAt: 'Mon Jan  1 00:00:00 2001',
+        instanceToken: 'a'.repeat(64),
+        createdAt: new Date().toISOString(),
+        version: 'old',
+        effectiveConfig: 'old',
       })
-    } finally {
-      await (await child)?.close()
-    }
-  })
+      let child: Promise<Awaited<ReturnType<typeof createSupervisorRuntime>>> | undefined
+      let spawned = 0
+      const output: string[] = []
+      try {
+        const runtime = {
+          env: { CORDISX_HOME: root },
+          stdout: (line: string) => output.push(line),
+          internalSupervisorReadinessTimeoutMs: 2_000,
+          internalSpawnSupervisor: (input: { env: NodeJS.ProcessEnv }) => {
+            spawned++
+            child = createSupervisorRuntime(input.env).then(async supervisor => {
+              await supervisor.markReady(43123)
+              return supervisor
+            })
+            return { pid: process.pid, unref: () => undefined }
+          },
+        }
+        await Promise.all([
+          runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
+          runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
+        ])
+        expect(spawned).toBe(1)
+        expect(output.map(line => JSON.parse(line))).toEqual([
+          expect.objectContaining({ status: 'ready', pid: process.pid }),
+          expect.objectContaining({ status: 'ready', pid: process.pid }),
+        ])
+        expect(await readSupervisorState(paths)).toMatchObject({
+          processStartedAt: await processStartIdentity(process.pid),
+          phase: 'ready',
+        })
+      } finally {
+        await (await child)?.close()
+      }
+    },
+  )
 })

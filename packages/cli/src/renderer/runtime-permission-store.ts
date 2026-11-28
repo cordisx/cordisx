@@ -17,7 +17,7 @@ export function createRuntimePermissionStore(
     return BindingPermissionPolicyStore.connect(
       metadata.permissionBridgeToken,
       metadata.permissionPolicies ?? [],
-      metadata.hostKind !== 'standalone'
+      metadata.hostKind !== 'standalone' && metadata.nativeOwnerPermissionReview !== true
         ? undefined
         : {
           ...(metadata.standaloneWriteUncertain === undefined

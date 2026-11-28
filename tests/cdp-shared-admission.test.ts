@@ -12,6 +12,26 @@ const active = {
   runtimeGeneration: 'g',
   plugins: [],
 }
+
+it('requires exactly one originating document when adopting a native writer policy', async () => {
+  const cdp = new CdpPluginLifecycleRuntime()
+  let firstResult: boolean | 'origin' = 'origin'
+  const first = { send: async () => ({ result: { value: { ok: true, result: firstResult } } }) } as never
+  const second = { send: async () => ({ result: { value: { ok: true, result: true } } }) } as never
+  const removeFirst = cdp.register(first)
+  const removeSecond = cdp.register(second)
+  const admission = cdp.beginSharedAdmission('policy')
+  const packet = { payload: JSON.stringify({ origin: true }), signature: 'fixture' }
+  try {
+    await expect(admission.adoptOwnerManagerPolicy(packet)).resolves.toBeUndefined()
+    firstResult = true
+    await expect(admission.adoptOwnerManagerPolicy(packet)).rejects.toThrow('rejected')
+  } finally {
+    admission.release()
+    removeFirst()
+    removeSecond()
+  }
+})
 function deferred() {
   let resolve!: () => void
   const promise = new Promise<void>(done => resolve = done)

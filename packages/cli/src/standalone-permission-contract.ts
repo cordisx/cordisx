@@ -24,3 +24,13 @@ export function isStandaloneManagerDomTarget(
 ): boolean {
   return PLUGIN_ID.test(identity.id) && RENDERER_ALIAS.test(identity.source) && MANAGER_UI_POINTS.has(pointId)
 }
+
+/** Native identities are checked against the owner's active package separately. */
+export function isNativeManagerDomTarget(
+  identity: { readonly id: string; readonly source: string },
+  pointId: string,
+): boolean {
+  return PLUGIN_ID.test(identity.id) && typeof identity.source === 'string' && identity.source.length > 0
+    && identity.source.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(identity.source)
+    && MANAGER_UI_POINTS.has(pointId)
+}

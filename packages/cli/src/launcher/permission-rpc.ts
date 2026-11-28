@@ -10,6 +10,8 @@ import {
 
 export const PERMISSION_BINDING = '__cordisxPermissionPolicyRequestV1'
 export const PERMISSION_RECEIVER = '__cordisxPermissionPolicyReceiveV1'
+export const PERMISSION_ONCE_BINDING = '__cordisxPermissionOnceRequestV1'
+export const PERMISSION_ONCE_RECEIVER = '__cordisxPermissionOnceReceiveV1'
 export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024
 export const MAX_PERMISSION_REQUESTS = 4
 export const MAX_PERMISSION_POLICY_BATCH = 23
@@ -25,6 +27,20 @@ export interface PermissionPersistenceContext {
   readonly token: string
   readonly identities: readonly CordisXPluginIdentity[]
   readonly identityAllowed?: (identity: CordisXPluginIdentity) => boolean
+  /** Owner-attached launchers must delegate writes and document key registration. */
+  readonly remote?: {
+    register(keyId: string, key: unknown): Promise<unknown>
+    write(request: PermissionBindingRequest, proof: unknown): Promise<unknown>
+    once(
+      request: {
+        readonly requestId: string
+        readonly record: CordisXPersistedPermissionPolicyRecord
+        readonly decision: 'allow-once' | 'deny-once'
+        readonly proof: unknown
+      },
+    ): Promise<unknown>
+    uncertain(): void
+  }
 }
 
 /** Mutable Host-owned identity fence for package generations not present in launcher config. */

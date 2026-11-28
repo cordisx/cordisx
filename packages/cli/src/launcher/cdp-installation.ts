@@ -15,6 +15,7 @@ import { cdpInstallationAborted } from './cdp-session.js'
 import * as support from './cdp-installation-support.js'
 import { installMarketplaceArtifactBinding, type RemoteMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
 import { installManagementCdpBinding, type ManagementCdpBinding } from './management-cdp-binding.js'
+import { installPermissionCdpBinding } from './permission-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import { type AgentContextCdpOptions, installAgentContextCdpBinding } from './agent-context-cdp.js'
 import { observeComposerDiagnostics } from './composer-diagnostics.js'
@@ -185,6 +186,7 @@ export async function install(
       ...(credential === undefined ? [] : [support.CHANNEL_CREDENTIAL_BINDING]),
       ...(actions === undefined ? [] : [support.CHANNEL_ACTIONS_BINDING]),
       ...(permission === undefined ? [] : [support.PERMISSION_BINDING]),
+      ...(permission?.remote === undefined ? [] : [support.PERMISSION_ONCE_BINDING]),
       ...(iconThemePreference === undefined ? [] : [support.ICON_THEME_PREFERENCE_BINDING]),
       ...(lifecycle === undefined && remoteLifecycle === undefined ? [] : [support.PLUGIN_LIFECYCLE_BINDING]),
       ...(publisherGrant === undefined ? [] : [support.PUBLISHER_GRANT_BINDING]),
@@ -527,43 +529,13 @@ export async function install(
         })()
       })
     }
-    let activePermissionRequests = 0
     if (permission !== undefined) {
-      removePermissionBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
-        if (params.name !== support.PERMISSION_BINDING || typeof params.payload !== 'string') return
-        const payload = params.payload
-        void (async () => {
-          let requestId = 'invalid'
-          try {
-            if (Buffer.byteLength(payload) > support.MAX_PERMISSION_REQUEST_BYTES) {
-              throw new Error('permission request exceeds maximum size')
-            }
-            const request = support.parsePermissionBindingRequest(JSON.parse(payload) as unknown, permission)
-            requestId = request.requestId
-            if (permissionController?.signal.aborted === true) {
-              throw new Error('permission persistence bridge is closed')
-            }
-            if (activePermissionRequests >= support.MAX_PERMISSION_REQUESTS) {
-              throw new Error('too many concurrent permission requests')
-            }
-            activePermissionRequests += 1
-            try {
-              const value = await lifecycleRequests.exclusive(
-                async () => await support.persistPermissionPolicies(permission, request.records),
-              )
-              await support.sendPermissionBindingResponse(session, { requestId, ok: true, value })
-            } finally {
-              activePermissionRequests -= 1
-            }
-          } catch {
-            await support.sendPermissionBindingResponse(session, {
-              requestId,
-              ok: false,
-              error: 'Permission policy request was rejected',
-            }).catch(() => undefined)
-          }
-        })()
-      })
+      removePermissionBindingListener = installPermissionCdpBinding(
+        session,
+        permission,
+        lifecycleRequests,
+        permissionController!,
+      )
     }
     let activeIconThemePreferenceRequests = 0
     if (iconThemePreference !== undefined) {
@@ -910,6 +882,7 @@ export async function install(
       actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
+      permissionOnceBindingInstalled: permission?.remote !== undefined,
       ...(iconThemePreferenceController === undefined
         ? {}
         : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),

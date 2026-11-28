@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { expect, vi } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../../packages/channel-runtime/src/simulator.js'
@@ -90,7 +91,7 @@ export async function fixture(
     selectedConfiguredPlugins?: ConstructorParameters<typeof ServiceRendererBootstrap>[0]['selectedConfiguredPlugins']
   } = {},
 ) {
-  const root = await mkdtemp('/tmp/cx-service-bootstrap-')
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-service-bootstrap-'))
   const homeDir = path.join(root, 'home')
   const configPath = path.join(homeDir, 'config.json')
   await mkdir(homeDir, { recursive: true, mode: 0o700 })

@@ -9,8 +9,8 @@ import {
 } from '../permission-contracts.js'
 import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
 import { domPermissionAuthorizationKeyV3, normalizePermissionPolicyRecordV3 } from '../permission-model-v3.js'
-import { isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
-import { standalonePermissionProofBytes } from '../standalone-permission-proof.js'
+import { isNativeManagerDomTarget, isStandaloneManagerDomTarget } from '../standalone-permission-contract.js'
+import { standaloneOncePermissionProofBytes, standalonePermissionProofBytes } from '../standalone-permission-proof.js'
 
 type Review = {
   readonly identity: { readonly id: string; readonly source: string }
@@ -37,7 +37,7 @@ function base64url(bytes: Uint8Array): string {
 /** The private signing key stays in this closure and cannot be exported. */
 export async function createStandalonePermissionSigner(
   scope: { readonly rendererId: string; readonly profileId: string; readonly generation: string },
-  options: { readonly crypto?: Crypto; readonly now?: () => number } = {},
+  options: { readonly crypto?: Crypto; readonly now?: () => number; readonly target?: 'standalone' | 'native' } = {},
 ) {
   const provider = options.crypto ?? globalThis.crypto
   if (
@@ -52,6 +52,8 @@ export async function createStandalonePermissionSigner(
   }
   const publicKey = Object.freeze({ kty: 'EC', crv: 'P-256', x: exported.x, y: exported.y })
   const approvals = new Map<string, Approval>()
+  const target = options.target ?? 'standalone'
+  const validTarget = target === 'native' ? isNativeManagerDomTarget : isStandaloneManagerDomTarget
   let closed = false
   const now = () => (options.now ?? Date.now)()
   const remember = (
@@ -83,6 +85,49 @@ export async function createStandalonePermissionSigner(
       if (approvals.get(key) === approval) approvals.delete(key)
     }
   }
+  const confirmed = (
+    review: Review,
+    plan: CordisXPermissionAuthorizationPlanV3,
+    decision: CordisXPermissionAuthorizationDecisionV3,
+    once: boolean,
+  ) => {
+    const declaration = plan.declarations[0]
+    const selected = decision.decisions[0]
+    if (
+      closed || !validTarget(review.identity, review.pointId)
+      || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
+      || plan.$schema !== CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3 || plan.schemaVersion !== 3
+      || plan.operation !== 'runtime' || plan.profileId !== review.profileId
+      || plan.identity.pluginId !== review.identity.id || plan.identity.source !== review.identity.source
+      || plan.binding.runtimeGeneration !== scope.generation
+      || plan.binding.moduleGeneration !== review.moduleGeneration
+      || plan.declarations.length !== 1 || !declaration || declaration.policy !== 'ask'
+      || declaration.capability !== 'ui.extension-points.render' || declaration.scope.extensionPoints?.length !== 1
+      || declaration.scope.extensionPoints[0] !== review.pointId
+      || decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3 || decision.schemaVersion !== 3
+      || decision.origin !== 'explicit-user' || decision.planId !== plan.planId || decision.operation !== plan.operation
+      || decision.profileId !== plan.profileId || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
+      || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding) || decision.decisions.length !== 1
+      || !selected || selected.capability !== declaration.capability
+      || JSON.stringify(selected.scope) !== JSON.stringify(declaration.scope)
+      || selected.securityFingerprint !== declaration.securityFingerprint
+      || !(once ? ['allow-once', 'deny-once'] : ['allow-persistent', 'deny-persistent']).includes(selected.decision)
+      || !declaration.allowedDecisions.includes(selected.decision)
+    ) throw new Error('standalone-permission-decision-unavailable')
+    const record = normalizePermissionPolicyRecordV3({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+      schemaVersion: 3,
+      key: {
+        profileId: plan.profileId,
+        identity: plan.identity,
+        capability: declaration.capability,
+        scope: declaration.scope,
+        securityFingerprint: declaration.securityFingerprint,
+      },
+      policy: once ? 'ask' : selected.decision,
+    })
+    return { record, selected: selected.decision }
+  }
   return {
     publicKey,
     /** Call only after the Host dialog has accepted a trusted user event. */
@@ -92,47 +137,51 @@ export async function createStandalonePermissionSigner(
       decision: CordisXPermissionAuthorizationDecisionV3,
     ): boolean {
       try {
-        const declaration = plan.declarations[0]
-        const selected = decision.decisions[0]
-        if (
-          closed || !isStandaloneManagerDomTarget(review.identity, review.pointId)
-          || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
-          || plan.$schema !== CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3 || plan.schemaVersion !== 3
-          || plan.operation !== 'runtime' || plan.profileId !== review.profileId
-          || plan.identity.pluginId !== review.identity.id || plan.identity.source !== review.identity.source
-          || plan.binding.runtimeGeneration !== scope.generation
-          || plan.binding.moduleGeneration !== review.moduleGeneration
-          || plan.declarations.length !== 1 || !declaration || declaration.policy !== 'ask'
-          || declaration.capability !== 'ui.extension-points.render' || declaration.scope.extensionPoints?.length !== 1
-          || declaration.scope.extensionPoints[0] !== review.pointId
-          || decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3 || decision.schemaVersion !== 3
-          || decision.origin !== 'explicit-user' || decision.planId !== plan.planId
-          || decision.operation !== plan.operation
-          || decision.profileId !== plan.profileId
-          || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
-          || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding) || decision.decisions.length !== 1
-          || !selected || selected.capability !== declaration.capability
-          || JSON.stringify(selected.scope) !== JSON.stringify(declaration.scope)
-          || selected.securityFingerprint !== declaration.securityFingerprint
-          || selected.decision !== 'allow-persistent' && selected.decision !== 'deny-persistent'
-          || !declaration.allowedDecisions.includes(selected.decision)
-        ) return false
-        const record = normalizePermissionPolicyRecordV3({
-          $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
-          schemaVersion: 3,
-          key: {
-            profileId: plan.profileId,
-            identity: plan.identity,
-            capability: declaration.capability,
-            scope: declaration.scope,
-            securityFingerprint: declaration.securityFingerprint,
-          },
-          policy: selected.decision,
-        })
+        const { record } = confirmed(review, plan, decision, false)
         return remember(review, plan.planId, record, 'ask') !== undefined
       } catch {
         return false
       }
+    },
+    /** Called only after the Host has received the real one-time decision. */
+    async signOnce(
+      requestId: string,
+      review: Review,
+      plan: CordisXPermissionAuthorizationPlanV3,
+      decision: CordisXPermissionAuthorizationDecisionV3,
+    ): Promise<
+      {
+        readonly record: CordisXPermissionPolicyRecordV3
+        readonly decision: 'allow-once' | 'deny-once'
+        readonly proof: unknown
+      }
+    > {
+      const { record, selected } = confirmed(review, plan, decision, true)
+      if (selected !== 'allow-once' && selected !== 'deny-once') {
+        throw new Error('standalone-permission-decision-unavailable')
+      }
+      const issuedAt = now()
+      const random = provider.getRandomValues(new Uint8Array(32))
+      const decisionId = [...random].map(byte => byte.toString(16).padStart(2, '0')).join('')
+      const payload = {
+        version: 1 as const,
+        rendererId: scope.rendererId,
+        profileId: scope.profileId,
+        ownerGeneration: scope.generation,
+        moduleGeneration: review.moduleGeneration,
+        artifact: review.artifact,
+        requestId,
+        decisionId,
+        planId: plan.planId,
+        issuedAt,
+        observed: 'ask' as const,
+        record,
+        decision: selected,
+      }
+      const bytes = standaloneOncePermissionProofBytes(payload, target)
+      const signature = await provider.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, bytes)
+      if (closed) throw new Error('standalone-permission-decision-unavailable')
+      return { record, decision: selected, proof: { payload, signature: base64url(new Uint8Array(signature)) } }
     },
     /** The Host invokes this only for its trusted reset control. */
     noteReset(
@@ -141,7 +190,7 @@ export async function createStandalonePermissionSigner(
     ): (() => void) | undefined {
       try {
         if (
-          closed || !isStandaloneManagerDomTarget(review.identity, review.pointId)
+          closed || !validTarget(review.identity, review.pointId)
           || review.profileId !== scope.profileId || review.runtimeGeneration !== scope.generation
           || observed !== 'allow-persistent' && observed !== 'deny-persistent'
         ) return undefined
@@ -190,7 +239,7 @@ export async function createStandalonePermissionSigner(
         observed: approval.observed,
         record: approval.record,
       }
-      const bytes = standalonePermissionProofBytes(payload)
+      const bytes = standalonePermissionProofBytes(payload, target)
       const signature = await provider.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, bytes)
       if (closed) throw new Error('standalone-permission-decision-unavailable')
       return { payload, signature: base64url(new Uint8Array(signature)) }
