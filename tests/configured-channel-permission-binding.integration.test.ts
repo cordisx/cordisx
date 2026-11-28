@@ -312,11 +312,16 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
         { id: 'channel', source: channelSource },
         f.configuredChannel!.plugin.manifest,
       )[0]!
+      const indexedRecord = {
+        ...runtimeRecord,
+        key: { ...runtimeRecord.key, securityFingerprint: `sha256:${'f'.repeat(64)}` },
+      } as typeof runtimeRecord
       const runtimeReceipt = await journal.begin({
         client: 'codex',
         requestId: 'native-runtime',
-        records: [runtimeRecord],
+        records: [indexedRecord],
         onceDecision: 'allow-once',
+        runtimeIndex: true,
       })
       await runtimeReceipt.commit()
       const history = createServiceRendererPermissionHistory({

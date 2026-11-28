@@ -44,6 +44,7 @@ export function createServiceRendererPermissionHistory(input: {
             if (context.signal.aborted || !identity.isCurrent()) throw new Error('permission-history-unavailable')
             const snapshot = input.bootstrap.permissionAccess.snapshot(context)
             const lifecycle = await input.journal.recentLifecycle(identity.ownerIdentity)
+            const exactRuntime = await input.journal.recentRuntime(identity.ownerIdentity)
             let evidence: ReturnType<typeof input.bootstrap.permissionAccess.evidence> | undefined
             try {
               evidence = input.bootstrap.permissionAccess.evidence(context, pluginId)
@@ -74,7 +75,9 @@ export function createServiceRendererPermissionHistory(input: {
               || evidence && !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
               || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
             ) throw new Error('permission-history-unavailable')
-            const result = [...lifecycle, ...runtime].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).slice(
+            const result = [...lifecycle, ...runtime, ...exactRuntime].sort((a, b) =>
+              b.requestedAt.localeCompare(a.requestedAt)
+            ).slice(
               0,
               100,
             )

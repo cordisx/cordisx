@@ -15,10 +15,16 @@ import { PermissionDecisionJournal } from '../packages/cli/src/cli/permission-de
 import { createStandalonePermissionSigner } from '../packages/cli/src/independent-manager/standalone-permission-signer.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 } from '../packages/cli/src/runtime-exact-request-permissions.js'
 import { loadHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { nativePermissionPrompt } from '../packages/cli/src/renderer/native-permission-prompt.js'
+import {
+  MemoryPermissionPolicyStore,
+  normalizePluginManifest,
+  PermissionBroker,
+} from '../packages/cli/src/renderer/platform.js'
 import { manifestDeclarationsV2 } from '../packages/cli/src/renderer/platform/platform-permission-types.js'
 import { fixture } from './fixtures/service-renderer-bootstrap-fixture.js'
 
@@ -181,6 +187,160 @@ it('requires the service to authorize an exact native runtime decision before us
 })
 
 const archive = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE
+
+it('records an exact runtime target without exposing its scope or changing older journal entries', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-exact-runtime-once-'))
+  const profileId = 'default', generation = 'owner-1', moduleGeneration = 'module-1'
+  const rendererId = '1'.repeat(64), keyId = '2'.repeat(64), digest = `sha256:${'3'.repeat(64)}` as const
+  const identity = { id: 'exact-demo', source: 'file:///private-fixture.js' }
+  const manifest = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+    schemaVersion: 13,
+    id: identity.id,
+    services: [],
+    capabilities: [{ name: 'tasks.create', required: false, scope: { runtime: 'exact-request' } }],
+  }
+  const catalog = new CapabilityRiskCatalog()
+  const makePlan = (providers: string[]) =>
+    buildPermissionAuthorizationPlanV2({
+      planId: 'runtime-exact',
+      operation: 'runtime',
+      profileId,
+      identity: { pluginId: identity.id, source: identity.source },
+      binding: { operationId: 'runtime-exact', runtimeGeneration: generation, moduleGeneration },
+      declarations: [{ name: 'tasks.create', required: false, scope: { providers, cwdRoots: ['/private/workspace'] } }],
+      policies: [],
+      contextFor: () => ({
+        operation: 'runtime',
+        providerKind: 'current-connection',
+        providerTrust: 'configured',
+        availability: 'supported',
+      }),
+    }, catalog)
+  const signer = await createStandalonePermissionSigner({ rendererId, profileId, generation }, {
+    crypto: webcrypto as unknown as Crypto,
+    target: 'native',
+  })
+  const proof = new OwnerAdapterPermissionProof({ profileId, generation })
+  const signal = new AbortController()
+  const context = { rendererId, signal: signal.signal, current: () => true, live: () => true } as never
+  const journal = new PermissionDecisionJournal({ homeDir, profileId })
+  const active = {
+    recordKind: 'active',
+    profileId,
+    runtimeGeneration: generation,
+    plugins: [{ id: identity.id, version: '1.0.0', digest, moduleGeneration, enabled: true, dependencies: [] }],
+  }
+  const handler = createOwnerAdapterPermissionPolicy({
+    homeDir,
+    configPath: path.join(homeDir, 'config.json'),
+    profileId,
+    generation,
+    lifecycle: { snapshot: () => ({ active, registryEpoch: 1 }) } as never,
+    loadPolicies: async () => [],
+    journal,
+    proof,
+    loadPackage: async () =>
+      ({
+        digest,
+        identitySource: identity.source,
+        browserArtifact: {},
+        manifest: { id: identity.id, version: '1.0.0', dependencies: [], runtimeManifest: manifest },
+      }) as never,
+    runtime: () => ({ bootstrap: {} as never, consumers: {} as never, fence: async () => ({} as never) }),
+  })
+  const signed = async (requestId: string, providers: string[]) => {
+    const plan = makePlan(providers)
+    const view = new PermissionAuthorizationViewModel(plan)
+    view.select('tasks.create', 'allow-once')
+    const selected = view.confirm()
+    if (selected.status !== 'confirmed' || selected.decision.schemaVersion !== 2) throw new Error('fixture failed')
+    return await signer.signRuntimeOnce(requestId, plan, selected.decision)
+  }
+  try {
+    await handler({ kind: 'permission-key-register', keyId, key: signer.publicKey }, context)
+    const broad = await signed('broad-request', ['codex', 'other'])
+    await expect(handler({
+      kind: 'permission-once',
+      requestId: 'broad-request',
+      record: broad.record,
+      decision: broad.decision,
+      proof: { keyId, proof: broad.proof },
+    }, context)).rejects.toThrow()
+    const valid = await signed('exact-request', ['codex'])
+    expect(
+      await handler({
+        kind: 'permission-once',
+        requestId: 'exact-request',
+        record: valid.record,
+        decision: valid.decision,
+        proof: { keyId, proof: valid.proof },
+      }, context),
+    ).toBe(true)
+    expect(await journal.recent([valid.record])).toHaveLength(1)
+    const history = await journal.recentRuntime(identity)
+    expect(history).toMatchObject([{
+      operation: 'runtime',
+      client: 'codex',
+      decisions: [{ capability: 'tasks.create', decision: 'allow-once' }],
+      committedAt: expect.any(String),
+    }])
+    expect(JSON.stringify(history)).not.toContain('/private/')
+    expect(await journal.recentRuntime({ ...identity, source: 'file:///other.js' })).toEqual([])
+    const prompt = nativePermissionPrompt({
+      request: async currentPlan => {
+        const view = new PermissionAuthorizationViewModel(currentPlan)
+        view.select('tasks.create', 'allow-once')
+        const result = view.confirm()
+        return result.status === 'confirmed' && result.decision.schemaVersion === 2 ? result.decision : undefined
+      },
+    }, { dispose() {} } as never)
+    expect(prompt.bindRuntimeDecision(async (plan, decision) => {
+      const result = await signer.signRuntimeOnce('broker-request', plan, decision)
+      return await handler({
+        kind: 'permission-once',
+        requestId: 'broker-request',
+        record: result.record,
+        decision: result.decision,
+        proof: { keyId, proof: result.proof },
+      }, context) === true
+    })).toBe(true)
+    const broker = new PermissionBroker(
+      new MemoryPermissionPolicyStore(),
+      { request: async () => 'deny' },
+      () => new Date(),
+      30_000,
+      profileId,
+      generation,
+      undefined,
+      undefined,
+      prompt,
+    )
+    try {
+      broker.register(
+        identity,
+        normalizePluginManifest(manifest, identity.id),
+        { pluginId: identity.id, moduleGeneration },
+        undefined,
+        { version: '1.0.0', integrity: digest },
+      )
+      await expect(broker.authorize(identity, 'tasks.create', {
+        providerId: 'codex',
+        model: { providerId: 'codex', modelId: 'fixture' },
+        cwd: '/private/workspace',
+      })).resolves.toMatchObject({ ok: true })
+      expect(await journal.recentRuntime(identity)).toHaveLength(2)
+    } finally {
+      broker.dispose()
+    }
+  } finally {
+    signal.abort()
+    proof.close()
+    signer.close()
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})
+
 it.skipIf(!archive)('attributes a declared runtime choice for the exact configured Channel archive', async () => {
   const f = await fixture({ channelArchive: archive })
   const signal = new AbortController()

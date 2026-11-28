@@ -5,10 +5,7 @@ import {
   isPermissionPolicyRecordV2,
   normalizePersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
-import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
-import { normalizePermissionScopeV2, permissionSecurityFingerprint } from '../permission-model-v2.js'
-import { manifestDeclarationsV2 } from '../renderer/platform/platform-permission-types.js'
-import { normalizePluginManifest } from '../renderer/platform/platform-manifest.js'
+import { ownerRuntimeDeclaration } from './owner-adapter-runtime-declaration.js'
 import { STANDALONE_PERMISSION_BINDING_MARKER } from '../standalone-permission-contract.js'
 import type { ManagerOriginFence } from './manager-origin-fence.js'
 import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
@@ -105,21 +102,18 @@ export function createOwnerAdapterPermissionPolicy(input: {
       identities: [target.identity],
     })
     const genericOnce = once && isPermissionPolicyRecordV2(first)
+    let exactRuntime = false
     let updates: readonly CordisXPersistedPermissionPolicyRecord[]
     if (genericOnce) {
       const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, target.digest)
-      const manifest = normalizePluginManifest(staged.manifest.runtimeManifest, target.identity.id)
       if (
         !await targetCurrent() || staged.identitySource !== target.identity.source
-        || manifest.schemaVersion === 1
       ) throw new Error('adapter-permission-unavailable')
-      const declarations = manifestDeclarationsV2(manifest)
-      const declaration = declarations.find(item => item.name === first.key.capability)
-      if (
-        !declaration || !attachmentEqual(normalizePermissionScopeV2(declaration.scope), first.key.scope)
-        || permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, declaration)
-          !== first.key.securityFingerprint
-      ) throw new Error('adapter-permission-unavailable')
+      exactRuntime = ownerRuntimeDeclaration({
+        manifest: staged.manifest.runtimeManifest,
+        pluginId: target.identity.id,
+        record: first,
+      }).exact
       updates = request.records
     } else {
       updates = target.resolve(request.records)
@@ -158,6 +152,7 @@ export function createOwnerAdapterPermissionPolicy(input: {
         requestId: request.requestId,
         records: updates,
         ...(once ? { onceDecision: operation.decision as 'allow-once' | 'deny-once' } : {}),
+        ...(exactRuntime ? { runtimeIndex: true } : {}),
       })
     if (!context.live() || !await targetCurrent()) throw new Error('adapter-permission-unavailable')
     if (once) {

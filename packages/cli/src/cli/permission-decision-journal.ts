@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type CordisXPersistedPermissionPolicyRecord,
+  isPermissionPolicyRecordV2,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
@@ -114,11 +115,11 @@ export class PermissionDecisionJournal {
     }
   }
 
-  private async write(name: string, value: unknown): Promise<void> {
+  private async write(name: string, value: unknown, directoryPath = this.directory): Promise<void> {
     const data = JSON.stringify(value)
     if (Buffer.byteLength(data) > MAX_EVENT_BYTES) throw new Error('permission-decision-journal-unavailable')
     const file = await open(
-      path.join(this.directory, name),
+      path.join(directoryPath, name),
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
     )
@@ -129,11 +130,35 @@ export class PermissionDecisionJournal {
     } finally {
       await file.close()
     }
-    const directory = await open(this.directory, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const directory = await open(directoryPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     try {
       await directory.sync()
     } finally {
       await directory.close()
+    }
+  }
+
+  private async runtimeIndex(create: boolean): Promise<string | undefined> {
+    const directory = path.join(this.directory, 'runtime-index')
+    if (create) {
+      try {
+        await mkdir(directory, { mode: 0o700 })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      const parent = await open(this.directory, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        await parent.sync()
+      } finally {
+        await parent.close()
+      }
+    }
+    try {
+      this.privateEntry(await lstat(directory), true)
+      return directory
+    } catch (error) {
+      if (!create && (error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
     }
   }
 
@@ -142,6 +167,8 @@ export class PermissionDecisionJournal {
     readonly requestId: string
     readonly records: readonly CordisXPersistedPermissionPolicyRecord[]
     readonly onceDecision?: 'allow-once' | 'deny-once'
+    /** Index a dynamic exact-request decision by identity without storing its scope. */
+    readonly runtimeIndex?: true
     readonly lifecycle?: {
       readonly operation: 'install' | 'update' | 'enable'
       readonly decisions: readonly PermissionDecisionChoice[]
@@ -152,6 +179,7 @@ export class PermissionDecisionJournal {
       || input.records.length === 0 || input.records.length > 23
       || input.onceDecision !== undefined && input.onceDecision !== 'allow-once' && input.onceDecision !== 'deny-once'
       || input.onceDecision !== undefined && input.lifecycle !== undefined
+      || input.runtimeIndex === true && (input.onceDecision === undefined || input.lifecycle !== undefined)
     ) throw new Error('permission-decision-journal-unavailable')
     const records = input.records.map(item => normalizePersistedPermissionPolicyRecord(item))
     const first = records[0]!
@@ -160,6 +188,7 @@ export class PermissionDecisionJournal {
       records.some(record => record.key.profileId !== this.input.profileId)
       || new Set(records.map(permissionDecisionKey)).size !== records.length
       || input.onceDecision !== undefined && (records.length !== 1 || records[0]?.policy !== 'ask')
+      || input.runtimeIndex === true && !isPermissionPolicyRecordV2(first)
       || input.lifecycle !== undefined && (
           !['install', 'update', 'enable'].includes(input.lifecycle.operation)
           || !Array.isArray(decisions) || decisions.length !== records.length
@@ -201,6 +230,18 @@ export class PermissionDecisionJournal {
     }
     await this.prepare()
     await this.write(`${id}.json`, entry)
+    if (input.runtimeIndex) {
+      const directory = await this.runtimeIndex(true)
+      if (!directory) throw new Error('permission-decision-journal-unavailable')
+      await this.write(`${id}.json`, {
+        version: 1,
+        id,
+        identityKey: lifecycleIdentityKey(this.input.profileId, {
+          id: first.key.identity.pluginId,
+          source: first.key.identity.source,
+        }),
+      }, directory)
+    }
     let committed = false
     return {
       id,
@@ -211,6 +252,59 @@ export class PermissionDecisionJournal {
         await this.write(`${id}.committed.json`, { version: 1, id, committedAt: new Date().toISOString() })
       },
     }
+  }
+
+  /** Return dynamic runtime origins only for the owner's exact plugin identity. */
+  async recentRuntime(
+    identity: { readonly id: string; readonly source: string },
+    limit = 100,
+  ): Promise<readonly import('../permission-decision-history.js').PluginAuthorizationHistoryItem[]> {
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(identity.id) || typeof identity.source !== 'string'
+      || identity.source.length === 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
+    ) throw new Error('permission-decision-journal-unavailable')
+    await this.prepare()
+    const directory = await this.runtimeIndex(false)
+    if (!directory) return []
+    const identityKey = lifecycleIdentityKey(this.input.profileId, identity)
+    const result: import('../permission-decision-history.js').PluginAuthorizationHistoryItem[] = []
+    for (const name of await readdir(directory)) {
+      const match = /^([a-f0-9]{32})\.json$/u.exec(name)
+      if (!match) continue
+      const file = await open(path.join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW)
+      let value: unknown
+      try {
+        const stat = await file.stat()
+        this.privateEntry(stat, false)
+        if (stat.size > MAX_EVENT_BYTES) throw new Error('permission-decision-journal-unavailable')
+        value = JSON.parse(await file.readFile('utf8')) as unknown
+      } finally {
+        await file.close()
+      }
+      const index = object(value, ['version', 'id', 'identityKey'])
+      if (
+        index.version !== 1 || index.id !== match[1] || typeof index.identityKey !== 'string'
+        || !HASH.test(index.identityKey)
+      ) {
+        throw new Error('permission-decision-journal-unavailable')
+      }
+      if (index.identityKey !== identityKey) continue
+      const receipt = await this.read(match[1]!)
+      const change = receipt.entry.changes[0]
+      if (
+        receipt.entry.lifecycle !== undefined || receipt.entry.changes.length !== 1 || !change
+        || change.pluginId !== identity.id || change.policy !== 'allow-once' && change.policy !== 'deny-once'
+      ) throw new Error('permission-decision-journal-unavailable')
+      result.push({
+        operation: 'runtime',
+        client: receipt.entry.client,
+        requestedAt: receipt.entry.requestedAt,
+        ...(receipt.committedAt === undefined ? {} : { committedAt: receipt.committedAt }),
+        decisions: [{ capability: change.capability, decision: change.policy }],
+      })
+    }
+    result.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+    return result.slice(0, limit)
   }
 
   async read(id: string): Promise<PermissionDecisionReceipt> {

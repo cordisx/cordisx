@@ -653,9 +653,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       try {
         decision = await Promise.race([
           this.promptV2?.request(plan, identity, {
-            ownerReviewEligible: registration.artifact !== undefined
-              && !registration.runtimeExactCapabilities.has(capability as CordisXPlatformCapability)
-              && ![...registration.channelExactCapabilities].some(item => item === capability),
+            ownerReviewEligible: registration.artifact !== undefined,
           }) ?? Promise.resolve(undefined),
           new Promise<undefined>(resolve => {
             timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)

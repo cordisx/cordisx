@@ -46,11 +46,14 @@ export function createOwnerAdapterPermissionHistory(input: {
     if (operation.kind === 'plugin-authorization-history') {
       if (!target || !await targetCurrent()) throw new Error('permission-history-unavailable')
       const lifecycle = await input.journal.recentLifecycle(target.identity)
+      const exactRuntime = await input.journal.recentRuntime(target.identity)
       const runtime = await projectRuntimeDecisionHistory(
         input.journal,
         withDeclaredRuntimeAskPolicies([], input.profileId, target.identity, target.manifest),
       )
-      const result = [...lifecycle, ...runtime].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).slice(0, 100)
+      const result = [...lifecycle, ...runtime, ...exactRuntime].sort((a, b) =>
+        b.requestedAt.localeCompare(a.requestedAt)
+      ).slice(0, 100)
       if (
         !context.current(false) || !attachmentEqual(before, await input.loadPolicies()) || !await targetCurrent()
       ) throw new Error('permission-history-unavailable')
