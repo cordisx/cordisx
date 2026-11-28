@@ -9,7 +9,7 @@ import {
 import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
-import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
+import type { OwnerAdapterDocumentContext, OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
 import type { ManagerPolicyTarget } from './service-renderer-installed-permission.js'
 
 /** Resolve a native Manager target from the owner's active, integrity-checked package. */
@@ -87,4 +87,41 @@ export async function ownerAdapterInstalledPermissionTarget(input: {
       return values
     },
   })
+}
+
+/** A disabled installed package may expose its own history, but cannot receive a policy write. */
+export async function ownerAdapterInstalledHistoryIdentity(input: {
+  readonly homeDir: string
+  readonly profileId: string
+  readonly generation: string
+  readonly pluginId: string
+  readonly context: OwnerAdapterDocumentContext
+  readonly lifecycle: OwnerRendererLifecycle
+  readonly loadPackage?: typeof loadStagedPluginPackage
+}): Promise<{ readonly identity: { readonly id: string; readonly source: string }; isCurrent(): boolean }> {
+  const invalid = (): never => {
+    throw new Error('adapter-permission-history-unavailable')
+  }
+  if (!input.context.current(false)) return invalid()
+  const snapshot = structuredClone(input.lifecycle.snapshot())
+  const matches = snapshot.active.plugins.filter(plugin => plugin.id === input.pluginId)
+  const item = matches[0]
+  if (
+    snapshot.active.recordKind !== 'active' || snapshot.active.profileId !== input.profileId
+    || snapshot.active.runtimeGeneration !== input.generation || matches.length !== 1 || !item
+  ) return invalid()
+  const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, item.digest)
+  const current = () => {
+    try {
+      return input.context.current(false) && attachmentEqual(snapshot, input.lifecycle.snapshot())
+    } catch {
+      return false
+    }
+  }
+  if (
+    !current() || staged.digest !== item.digest || staged.manifest.id !== item.id
+    || staged.manifest.version !== item.version || staged.manifest.canonicalSource !== item.canonicalSource
+    || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
+  ) return invalid()
+  return Object.freeze({ identity: Object.freeze({ id: item.id, source: staged.identitySource }), isCurrent: current })
 }

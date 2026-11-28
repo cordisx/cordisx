@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest'
-import { ownerAdapterInstalledPermissionTarget } from '../packages/cli/src/cli/owner-adapter-permission-target.js'
+import {
+  ownerAdapterInstalledHistoryIdentity,
+  ownerAdapterInstalledPermissionTarget,
+} from '../packages/cli/src/cli/owner-adapter-permission-target.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 it('binds native policy writes to the current owner-selected plugin and exact Manager point', async () => {
@@ -51,4 +54,35 @@ it('binds native policy writes to the current owner-selected plugin and exact Ma
   expect(target.isCurrent()).toBe(false)
   expect(() => target.resolve([record!])).toThrow()
   live = false
+})
+
+it('allows read-only history for the exact disabled package without allowing a policy write', async () => {
+  const digest = `sha256:${'d'.repeat(64)}` as const
+  const active = {
+    recordKind: 'active',
+    profileId: 'default',
+    runtimeGeneration: 'owner-1',
+    plugins: [{ id: 'demo', version: '1.0.0', digest, moduleGeneration: 'module-1', enabled: false, dependencies: [] }],
+  }
+  let snapshot = { active, registryEpoch: 1 }
+  const context = { current: () => true, live: () => true } as never
+  const input = {
+    homeDir: '/unused',
+    profileId: 'default',
+    generation: 'owner-1',
+    pluginId: 'demo',
+    context,
+    lifecycle: { snapshot: () => snapshot } as never,
+    loadPackage: async () =>
+      ({
+        digest,
+        identitySource: 'file:///demo.js',
+        manifest: { id: 'demo', version: '1.0.0', dependencies: [] },
+      }) as never,
+  }
+  const history = await ownerAdapterInstalledHistoryIdentity(input)
+  expect(history.identity).toEqual({ id: 'demo', source: 'file:///demo.js' })
+  await expect(ownerAdapterInstalledPermissionTarget(input)).rejects.toThrow('adapter-permission-target-unavailable')
+  snapshot = { ...snapshot, registryEpoch: 2 }
+  expect(history.isCurrent()).toBe(false)
 })

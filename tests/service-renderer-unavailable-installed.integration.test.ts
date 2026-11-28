@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { DesktopManagerConfigProjection } from '../packages/cli/src/cli/desktop-manager-config-projection.js'
 import { ServiceRendererIdentityProjection } from '../packages/cli/src/cli/service-renderer-identity.js'
+import { ServiceRendererPermissionAccess } from '../packages/cli/src/cli/service-renderer-permission-access.js'
 import { projectManagementRequest } from '../packages/cli/src/cli/service-renderer-management-projection.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
 import { loadPluginComposition } from '../packages/cli/src/launcher/plugin-composition.js'
@@ -108,6 +109,35 @@ it('keeps a supported installed plugin available without loading an unsupported 
       identity.assertInstalledProjection(context, alias, item)
       expect(identity.projectActivation(context, active).plugins).toHaveLength(active.plugins.length)
       expect(() => identity.resolve(context, alias, item.id)).toThrow('renderer-identity-unavailable')
+      expect(identity.resolveHistory(context, alias, item)).toEqual({ id: item.id, source })
+      expect(() => identity.resolveHistory(context, alias, { ...item, version: '2.0.0' }))
+        .toThrow('renderer-identity-unavailable')
+      const historyEntry = {
+        bootstrapConfirmed: true,
+        policies: [],
+        peer: { identity: { rendererId: context.rendererId } },
+        identity,
+        identityAliases: aliases,
+        snapshot: f.lifecycle.snapshot(),
+      }
+      const permissionAccess = new ServiceRendererPermissionAccess({
+        profileId: f.profileId,
+        generation: f.generation,
+        configuredPolicyEnabled: false,
+        configuredPluginPolicyEnabled: false,
+        installedPolicyEnabled: false,
+        channel: () => undefined,
+        permissionFence: undefined,
+        entries: new Map([[context.rendererId, historyEntry]]) as any,
+        participants: f.participants,
+        lifecycle: f.lifecycle,
+        readLifetimes: {} as any,
+        policies: async () => [],
+        current: () => true,
+      })
+      const history = permissionAccess.historyIdentity(context, item.id)
+      expect(history.ownerIdentity).toEqual({ id: item.id, source })
+      expect(history.isCurrent()).toBe(true)
       expect(() => identity.resolveLifecycle(context, alias, item.id)).toThrow('renderer-identity-unavailable')
       expect(identity.resolveLifecycle(context, alias, item.id, item)).toEqual({
         pluginId: item.id,

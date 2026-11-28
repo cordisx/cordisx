@@ -60,8 +60,7 @@ import { createOwnerAdapterPermissionHistory } from './owner-adapter-permission-
 import { OwnerAdapterPermissionProof } from './owner-adapter-permission-proof.js'
 import { createOwnerAdapterPermissionPolicy } from './owner-adapter-permission-policy.js'
 import { createOwnerAdapterLifecycleReview } from './owner-adapter-lifecycle-review.js'
-import { ownerAdapterInstalledPermissionTarget } from './owner-adapter-permission-target.js'
-import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
+import { ownerAdapterInstalledHistoryIdentity } from './owner-adapter-permission-target.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -153,15 +152,15 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           loadPolicies,
           reviewIdentity: async (pluginId, context) => {
             if (!rendererLifecycle) return undefined
-            const target = await ownerAdapterInstalledPermissionTarget({
+            const target = await ownerAdapterInstalledHistoryIdentity({
               homeDir,
               profileId,
               generation,
               pluginId,
-              context: context as OwnerAdapterManagementContext,
+              context,
               lifecycle: rendererLifecycle,
             }).catch(() => undefined)
-            return target && { identity: target.ownerIdentity, isCurrent: target.isCurrent }
+            return target
           },
         })
         const config = await loadHomeConfig(configPath)

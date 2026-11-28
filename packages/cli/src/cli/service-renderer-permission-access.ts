@@ -112,6 +112,38 @@ export class ServiceRendererPermissionAccess {
     }
   }
 
+  /** History is read-only and remains visible when an installed plugin is disabled. */
+  historyIdentity(context: ManagerRendererChannelContext, pluginId: string): {
+    readonly ownerIdentity: { readonly id: string; readonly source: string }
+    isCurrent(): boolean
+  } {
+    const entry = this.entry(context)
+    const alias = entry.identityAliases?.get(pluginId)
+    if (!alias) {
+      const evidence = this.evidence(context, pluginId)
+      return { ownerIdentity: evidence.ownerIdentity, isCurrent: () => this.isCurrentEvidence(evidence) }
+    }
+    const identity = entry.identity
+    const snapshot = entry.snapshot
+    const item = snapshot?.active.plugins.find(plugin => plugin.id === pluginId)
+    if (!identity || !snapshot || !item || !attachmentEqual(snapshot, this.input.lifecycle.snapshot())) {
+      throw new Error('renderer-permission-history-unavailable')
+    }
+    const ownerIdentity = Object.freeze(identity.resolveHistory(context, alias, item))
+    const current = () => {
+      try {
+        return this.entry(context) === entry && entry.identity === identity && entry.snapshot === snapshot
+          && entry.identityAliases?.get(pluginId) === alias
+          && attachmentEqual(snapshot, this.input.lifecycle.snapshot())
+          && attachmentEqual(ownerIdentity, identity.resolveHistory(context, alias, item))
+      } catch {
+        return false
+      }
+    }
+    if (!current()) throw new Error('renderer-permission-history-unavailable')
+    return Object.freeze({ ownerIdentity, isCurrent: current })
+  }
+
   private target(context: ManagerRendererChannelContext, pluginId: string): ManagerPolicyTarget {
     const entry = this.entry(context)
     if (entry.identityAliases?.has(pluginId)) {

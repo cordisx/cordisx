@@ -340,6 +340,19 @@ export class ServiceRendererIdentityProjection {
     return { pluginId: value.pluginId, source: value.source, digest: value.digest }
   }
 
+  /** A read-only history lookup may include disabled or unavailable installed packages. */
+  resolveHistory(
+    context: ManagerRendererChannelContext,
+    alias: string,
+    item: CordisXPluginActivationItemV1,
+  ): { readonly id: string; readonly source: string } {
+    const value = this.current(context) ? this.aliases.get(alias) : undefined
+    if (!value?.activation || value.pluginId !== item.id || !attachmentEqual(value.activation, item)) {
+      throw new Error('renderer-identity-unavailable')
+    }
+    return { id: item.id, source: value.source }
+  }
+
   /** Project only existing owner-approved Manager UI policies; this never creates a grant. */
   projectManagerPolicies(
     context: ManagerRendererChannelContext,

@@ -29,6 +29,22 @@ export function createServiceRendererPermissionHistory(input: {
       ) throw new Error('permission-history-unavailable')
       const requestId = request.requestId
       const pluginId = request.pluginId
+      if (request.kind === 'lifecycle') {
+        const identity = input.bootstrap.permissionAccess.historyIdentity(context, pluginId)
+        return {
+          mode: 'read',
+          dispatch: async () => {
+            if (context.signal.aborted || !identity.isCurrent()) throw new Error('permission-history-unavailable')
+            const snapshot = input.bootstrap.permissionAccess.snapshot(context)
+            const result = await input.journal.recentLifecycle(identity.ownerIdentity)
+            if (
+              context.signal.aborted || !identity.isCurrent()
+              || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
+            ) throw new Error('permission-history-unavailable')
+            return { requestId, ok: true, value: result }
+          },
+        }
+      }
       const evidence = input.bootstrap.permissionAccess.evidence(context, pluginId)
       return {
         mode: 'read',
@@ -37,14 +53,6 @@ export function createServiceRendererPermissionHistory(input: {
             throw new Error('permission-history-unavailable')
           }
           const snapshot = input.bootstrap.permissionAccess.snapshot(context)
-          if (request.kind === 'lifecycle') {
-            const result = await input.journal.recentLifecycle(evidence.ownerIdentity)
-            if (
-              context.signal.aborted || !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
-              || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
-            ) throw new Error('permission-history-unavailable')
-            return { requestId, ok: true, value: result }
-          }
           const records = snapshot.filter(record =>
             record.key.identity.pluginId === evidence.ownerIdentity.id
             && record.key.identity.source === evidence.ownerIdentity.source
