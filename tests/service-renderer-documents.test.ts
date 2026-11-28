@@ -94,6 +94,14 @@ it('keeps document grants scoped to the admitted renderer and the owner identity
   expect(binding!.source).toBe(test.alias)
   expect(JSON.stringify(binding)).not.toContain(test.source)
   const starting = { ...test.context, admitted: false }
+  expect(() => test.documents.principal(starting, binding!.token, { initialRead: true })).toThrow()
+  test.entry.releasePermissionFence = async () => {}
+  const principal = test.documents.principal(starting, binding!.token, { initialRead: true })
+  expect(principal.isCurrent()).toBe(true)
+  expect(() => test.documents.principal(starting, binding!.token)).toThrow()
+  test.entry.lifecycleTransition = { isCurrent: () => true }
+  expect(principal.isCurrent()).toBe(false)
+  delete test.entry.lifecycleTransition
   expect((await test.call(binding!.token, 'load', starting)).result.value.status).toBe('missing')
   expect((await test.call(binding!.token, 'replace', starting)).result.value.status).toBe('unavailable')
   expect((await test.call(binding!.token, 'load')).result.value.status).toBe('missing')

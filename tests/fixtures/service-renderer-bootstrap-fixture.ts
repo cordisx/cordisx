@@ -48,6 +48,7 @@ import { allowedDecisionV2 } from '../../packages/cli/src/launcher/plugin-lifecy
 import { CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 import { stageServiceModePlugin } from './service-mode-plugin.js'
 import { exactDomPermissionPolicies } from '../helpers/dom-permission.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../../packages/cli/src/permission-contracts.js'
 
 const secret = () => randomBytes(32).toString('hex')
 function defer<T>() {
@@ -88,6 +89,7 @@ export async function fixture(
     channelPermissionPolicy?: boolean
     configuredPluginPermissionPolicy?: boolean
     optionalModelsPlugin?: boolean
+    initialModelPolicy?: 'allow-persistent' | 'deny-persistent'
     installedPermissionPolicy?: boolean
     browserManagement?: boolean
     coordinateLifecycle?: boolean
@@ -133,6 +135,22 @@ export async function fixture(
       decision: allowedDecisionV2(plan),
     })
     if (applied.outcome !== 'applied') throw new Error('fixture model plugin activation failed')
+    if (options.initialModelPolicy) {
+      const model = plan.declarations.find(item => item.capability === 'models.read')
+      if (!model) throw new Error('fixture model permission is missing')
+      await persistPermissionPolicies({ configPath }, [{
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+        schemaVersion: 2,
+        key: {
+          profileId,
+          identity: plan.identity,
+          capability: model.capability,
+          scope: model.scope,
+          securityFingerprint: model.securityFingerprint,
+        },
+        policy: options.initialModelPolicy,
+      }])
+    }
   }
   let configuredChannel: {
     plugin: Awaited<ReturnType<typeof loadConfig>>['plugins'][number]

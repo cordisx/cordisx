@@ -74,6 +74,44 @@ export class ServiceRendererPermissionAccess {
     return structuredClone(this.entry(context).policies!)
   }
 
+  /** A bootstrap may read an already-allowed model catalog, but cannot write policy or create a grant. */
+  initialModel(context: ManagerRendererChannelContext, pluginId: string) {
+    const entry = this.input.entries.get(context.rendererId)
+    if (
+      context.admitted === true || !this.input.installedPolicyEnabled || !this.input.permissionFence
+      || !entry?.bootstrapConfirmed || !entry.releasePermissionFence || !entry.policies
+      || context.signal.aborted || context.profileId !== this.input.profileId
+      || context.ownerGeneration !== this.input.generation || entry.peer.identity.rendererId !== context.rendererId
+      || !this.input.current(context.rendererId, entry) || entry.lifecycleTransition || entry.channelTransition
+      || entry.pendingIdentity
+    ) throw new Error('renderer-permission-handoff-unavailable')
+    const target = installedManagerPermissionTarget({
+      entry,
+      context,
+      pluginId,
+      lifecycle: this.input.lifecycle,
+      current: () => this.input.current(context.rendererId, entry),
+      initialRead: true,
+    })
+    const snapshot = structuredClone(entry.policies)
+    const isCurrent = () =>
+      target.isCurrent() && entry.policies !== undefined
+      && attachmentEqual(entry.policies, snapshot)
+    return {
+      evidence: {
+        ...target.project([]),
+        kind: target.kind,
+        artifact: target.artifact,
+        ownerIdentity: target.ownerIdentity,
+        digest: target.digest,
+        isCurrent,
+      } satisfies ServiceRendererPermissionEvidence,
+      snapshot,
+      isCurrent,
+      verifyCurrent: async () => isCurrent() && attachmentEqual(await this.input.policies(), snapshot) && isCurrent(),
+    }
+  }
+
   resolve(records: readonly CordisXPersistedPermissionPolicyRecord[], context: ManagerRendererChannelContext) {
     const pluginId = records[0]?.key.identity.pluginId
     if (!pluginId || records.some(record => record.key.identity.pluginId !== pluginId)) {

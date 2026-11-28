@@ -19,7 +19,7 @@ export function createServiceRendererModels(input: {
 }): ManagerRendererChannel {
   return {
     prepare(payload, context) {
-      if (typeof payload !== 'string' || Buffer.byteLength(payload) > 8 * 1024 || context.admitted !== true) {
+      if (typeof payload !== 'string' || Buffer.byteLength(payload) > 8 * 1024) {
         throw new Error('renderer-models-unavailable')
       }
       const raw: unknown = JSON.parse(payload)
@@ -45,12 +45,19 @@ export function createServiceRendererModels(input: {
       const requestId = request.requestId
       const authorizationRequestId = request.authorizationRequestId
       const providerIds = (request.providerIds ?? []) as string[]
-      const principal = input.documents.principal(context, request.token)
-      const evidence = input.bootstrap.permissionAccess.evidence(context, principal.identity.id)
-      const snapshot = input.bootstrap.permissionAccess.snapshot(context)
+      const initial = context.admitted !== true
+      const principal = input.documents.principal(context, request.token, initial ? { initialRead: true } : {})
+      const initialModel = initial
+        ? input.bootstrap.permissionAccess.initialModel(context, principal.identity.id)
+        : undefined
+      const evidence = initialModel?.evidence
+        ?? input.bootstrap.permissionAccess.evidence(context, principal.identity.id)
+      const snapshot = initialModel?.snapshot ?? input.bootstrap.permissionAccess.snapshot(context)
       const current = () =>
-        principal.isCurrent() && input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
-        && attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
+        principal.isCurrent() && (initialModel
+          ? initialModel.isCurrent()
+          : input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
+            && attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context)))
       if (
         !current() || context.profileId !== input.profileId
         || !attachmentEqual(principal.identity, evidence.identity)
@@ -62,85 +69,101 @@ export function createServiceRendererModels(input: {
         mode: 'write',
         channelConfigurationIndependent: true,
         dispatch: async () => {
-          const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, evidence.digest)
-          if (
-            !current() || staged.identitySource !== principal.ownerIdentity.source
-            || staged.digest !== evidence.digest || staged.manifest.id !== principal.identity.id
-            || staged.manifest.version !== evidence.artifact.version
-            || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
-          ) throw new Error('renderer-models-unavailable')
-          const records = withDeclaredRuntimeAskPolicies(
-            [],
-            input.profileId,
-            principal.ownerIdentity,
-            staged.manifest.runtimeManifest,
-          )
-            .filter(record => isPermissionPolicyRecordV2(record) && record.key.capability === 'models.read')
-          if (records.length !== 1 || !isPermissionPolicyRecordV2(records[0]!)) {
-            throw new Error('renderer-models-unavailable')
-          }
-          const record = records[0]!
-          if (Object.keys(record.key.scope).some(key => key !== 'providers')) {
-            throw new Error('renderer-models-unavailable')
-          }
-          const allowedProviders = record.key.scope.providers
-          if (allowedProviders && providerIds.some(id => !allowedProviders.includes(id))) {
-            throw new Error('renderer-models-unavailable')
-          }
-          const matches = snapshot.filter(policy =>
-            persistedPermissionRecordKey(policy) === persistedPermissionRecordKey(record)
-          )
-          if (matches.length > 1) throw new Error('renderer-models-unavailable')
-          const policy = matches[0]
-          if (
-            policy
-            && (!isPermissionPolicyRecordV2(policy)
-              || !ownerDeclaredRuntimePolicy({
-                manifest: staged.manifest.runtimeManifest,
-                pluginId: principal.identity.id,
-                record: policy,
+          try {
+            if (initialModel && !await initialModel.verifyCurrent()) throw new Error('renderer-models-unavailable')
+            const staged = await (input.loadPackage ?? loadStagedPluginPackage)(input.homeDir, evidence.digest)
+            if (
+              !current() || staged.identitySource !== principal.ownerIdentity.source
+              || staged.digest !== evidence.digest || staged.manifest.id !== principal.identity.id
+              || staged.manifest.version !== evidence.artifact.version
+              || (staged.artifactIntegrity ?? staged.digest) !== evidence.artifact.integrity
+            ) throw new Error('renderer-models-unavailable')
+            const records = withDeclaredRuntimeAskPolicies(
+              [],
+              input.profileId,
+              principal.ownerIdentity,
+              staged.manifest.runtimeManifest,
+            )
+              .filter(record => isPermissionPolicyRecordV2(record) && record.key.capability === 'models.read')
+            if (records.length !== 1 || !isPermissionPolicyRecordV2(records[0]!)) {
+              throw new Error('renderer-models-unavailable')
+            }
+            const record = records[0]!
+            if (Object.keys(record.key.scope).some(key => key !== 'providers')) {
+              throw new Error('renderer-models-unavailable')
+            }
+            const allowedProviders = record.key.scope.providers
+            if (allowedProviders && providerIds.some(id => !allowedProviders.includes(id))) {
+              throw new Error('renderer-models-unavailable')
+            }
+            const matches = snapshot.filter(policy =>
+              persistedPermissionRecordKey(policy) === persistedPermissionRecordKey(record)
+            )
+            if (matches.length > 1) throw new Error('renderer-models-unavailable')
+            const policy = matches[0]
+            if (
+              policy
+              && (!isPermissionPolicyRecordV2(policy)
+                || !ownerDeclaredRuntimePolicy({
+                  manifest: staged.manifest.runtimeManifest,
+                  pluginId: principal.identity.id,
+                  record: policy,
+                }))
+            ) {
+              throw new Error('renderer-models-unavailable')
+            }
+            if (
+              initial && policy?.policy !== 'allow-persistent'
+              || policy?.policy !== 'allow-persistent' && !(policy === undefined || policy.policy === 'ask')
+              || (policy === undefined || policy.policy === 'ask')
+                && !input.bootstrap.permissionAccess.runtimeOnceGrants.consume(context, {
+                  requestId: authorizationRequestId,
+                  record,
+                  moduleGeneration: principal.moduleGeneration,
+                })
+            ) throw new Error('renderer-models-unavailable')
+            const providers = await input.catalog()
+            if (!current() || initialModel && !await initialModel.verifyCurrent()) {
+              throw new Error('renderer-models-unavailable')
+            }
+            const models = providers.filter(provider =>
+              (providerIds.length === 0 || providerIds.includes(provider.providerId))
+              && (!allowedProviders || allowedProviders.includes(provider.providerId))
+            ).flatMap(provider =>
+              provider.models.map(model => ({
+                contract: 'cordisx.platform-model/v1' as const,
+                schemaVersion: 1 as const,
+                ref: { providerId: provider.providerId, modelId: model.id },
+                hostId: 'cordisx-service',
+                label: model.label,
               }))
-          ) {
-            throw new Error('renderer-models-unavailable')
-          }
-          if (
-            policy?.policy !== 'allow-persistent' && !(policy === undefined || policy.policy === 'ask')
-            || (policy === undefined || policy.policy === 'ask')
-              && !input.bootstrap.permissionAccess.runtimeOnceGrants.consume(context, {
-                requestId: authorizationRequestId,
-                record,
-                moduleGeneration: principal.moduleGeneration,
-              })
-          ) throw new Error('renderer-models-unavailable')
-          const providers = await input.catalog()
-          if (!current()) throw new Error('renderer-models-unavailable')
-          const models = providers.filter(provider =>
-            (providerIds.length === 0 || providerIds.includes(provider.providerId))
-            && (!allowedProviders || allowedProviders.includes(provider.providerId))
-          ).flatMap(provider =>
-            provider.models.map(model => ({
-              contract: 'cordisx.platform-model/v1' as const,
-              schemaVersion: 1 as const,
-              ref: { providerId: provider.providerId, modelId: model.id },
-              hostId: 'cordisx-service',
-              label: model.label,
-            }))
-          )
-          if (models.length > 10_000 || Buffer.byteLength(JSON.stringify(models)) > 512 * 1024) {
-            throw new Error('renderer-models-unavailable')
-          }
-          return {
-            requestId,
-            ok: true,
-            value: {
+            )
+            if (models.length > 10_000 || Buffer.byteLength(JSON.stringify(models)) > 512 * 1024) {
+              throw new Error('renderer-models-unavailable')
+            }
+            return {
+              requestId,
               ok: true,
               value: {
-                contract: 'cordisx.platform-model-page/v1',
-                schemaVersion: 1,
-                providerIds,
-                models,
+                ok: true,
+                value: {
+                  contract: 'cordisx.platform-model-page/v1',
+                  schemaVersion: 1,
+                  providerIds,
+                  models,
+                },
               },
-            },
+            }
+          } catch {
+            // Catalog reads and one-use grants have no durable write to reconcile.
+            return {
+              requestId,
+              ok: true,
+              value: {
+                ok: false,
+                error: { code: 'adapter-unavailable', message: 'Service model catalog unavailable' },
+              },
+            }
           }
         },
       }

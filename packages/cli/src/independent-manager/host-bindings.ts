@@ -243,7 +243,6 @@ export function installIndependentHostBindings(input: {
           || channel === 'permission-policy'
           || channel === 'permission-once'
           || channel === 'permission-history'
-          || channel === 'platform-models'
           || channel === 'owner-document' && !request.readOnly
           || channel === 'managed-service-ui' && operation === 'readAccounts'
           || (channel === 'model-services' || channel === 'plugin-management' || channel === 'managed-service-ui')

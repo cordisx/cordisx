@@ -4,6 +4,29 @@ import { installIndependentHostBindings } from '../packages/cli/src/independent-
 type TestWindow = Window & Record<string, any>
 const token = 'a'.repeat(64)
 
+it('forwards model catalog calls during startup for an owner policy check', async () => {
+  const admission = new Promise<boolean>(() => {})
+  const receive = vi.fn()
+  const fetch = vi.fn(async (_url: string, options: RequestInit) => {
+    const request = JSON.parse(JSON.parse(String(options.body)).payload)
+    return new Response(JSON.stringify({ requestId: request.requestId, ok: true, value: { ok: false } }))
+  })
+  const target = { fetch, __cordisxPlatformModelsReceiveV1: receive } as unknown as TestWindow
+  const dispose = installIndependentHostBindings({
+    window: target,
+    sessionToken: token,
+    channels: ['platform-models'],
+    rendererAdmission: admission,
+  })
+  try {
+    target.__cordisxPlatformModelsRequestV1(JSON.stringify({ requestId: 'startup-models' }))
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
+  }
+})
+
 it('loads documents before admission but waits to write, and rejects oversized writes before dispatch', async () => {
   let admit!: (value: boolean) => void
   const admission = new Promise<boolean>(resolve => admit = resolve)

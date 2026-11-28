@@ -29,11 +29,14 @@ export function installedManagerPermissionTarget(input: {
   readonly pluginId: string
   readonly lifecycle: OwnerRendererLifecycle
   readonly current: () => boolean
+  /** Read-only access during bootstrap, while the owner still holds the profile fence. */
+  readonly initialRead?: true
 }): ManagerPolicyTarget {
   const invalid = (): never => {
     throw new Error('renderer-installed-permission-unavailable')
   }
   const { entry, context, pluginId } = input
+  const initialRead = input.initialRead === true && context.admitted !== true
   const identity = entry.identity
   const bound = entry.identityContext
   const alias = entry.identityAliases?.get(pluginId)
@@ -46,7 +49,9 @@ export function installedManagerPermissionTarget(input: {
   )
   if (
     !identity || !bound || !alias || !plugin || !packageItem || !snapshot || !active || leases.length !== 1
-    || !entry.bootstrapConfirmed || context.admitted !== true || context.signal.aborted
+    || !entry.bootstrapConfirmed || context.admitted !== true && !initialRead || context.signal.aborted
+    || initialRead && (!entry.releasePermissionFence || entry.lifecycleTransition || entry.channelTransition
+        || entry.pendingIdentity)
     || bound.signal !== context.signal || bound.rendererId !== context.rendererId
     || bound.profileId !== context.profileId || bound.ownerGeneration !== context.ownerGeneration
     || entry.peer.identity.rendererId !== context.rendererId || !input.current()
@@ -69,6 +74,8 @@ export function installedManagerPermissionTarget(input: {
   const current = () => {
     try {
       return entry.bootstrapConfirmed && !context.signal.aborted && input.current()
+        && (!initialRead || !!entry.releasePermissionFence && !entry.lifecycleTransition && !entry.channelTransition
+            && !entry.pendingIdentity)
         && entry.identity === identity && entry.identityContext === bound
         && entry.identityAliases?.get(pluginId) === alias
         && entry.plugins?.find(item => item.id === pluginId) === plugin && entry.snapshot === snapshot

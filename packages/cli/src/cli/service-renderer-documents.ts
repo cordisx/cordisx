@@ -123,14 +123,20 @@ export class ServiceRendererDocuments {
   }
 
   /** Resolve only a live, generation-bound Host principal for another owner capability. */
-  principal(context: ManagerRendererChannelContext, token: string) {
+  principal(context: ManagerRendererChannelContext, token: string, options: { readonly initialRead?: true } = {}) {
     const grant = this.grants.get(context.signal)?.get(token)
-    if (!grant || !this.allowed(context, grant, true)) throw new Error('renderer-principal-unavailable')
+    const initialRead = options.initialRead === true && context.admitted !== true
+    const current = () => {
+      const entry = this.entry(context)
+      return !!grant && this.allowed(context, grant, !initialRead)
+        && (!initialRead || !!entry?.releasePermissionFence && !entry.pendingIdentity)
+    }
+    if (!grant || !current()) throw new Error('renderer-principal-unavailable')
     return {
       identity: { id: grant.pluginId, source: grant.alias },
       ownerIdentity: { id: grant.pluginId, source: grant.source },
       moduleGeneration: grant.moduleGeneration,
-      isCurrent: () => this.allowed(context, grant, true),
+      isCurrent: current,
     }
   }
 

@@ -162,7 +162,10 @@ it('consumes a plugin-scoped one-time model grant and filters the owner catalog'
       ok: true,
       value: { ok: true, value: { models: [{ ref: { providerId: 'codex', modelId: 'model-a' } }] } },
     })
-    await expect(models.prepare(request('replay', 'auth-1'), admitted).dispatch()).rejects.toThrow()
+    expect(await models.prepare(request('replay', 'auth-1'), admitted).dispatch()).toMatchObject({
+      ok: true,
+      value: { ok: false },
+    })
     snapshot = [{
       ...signed.record,
       key: { ...signed.record.key, identity: { pluginId: 'demo', source: ownerIdentity.source } },
@@ -172,9 +175,15 @@ it('consumes a plugin-scoped one-time model grant and filters the owner catalog'
       ok: true,
       value: { ok: true, value: { models: [{ ref: { providerId: 'codex', modelId: 'model-a' } }] } },
     })
-    await expect(models.prepare(request('out-of-scope', 'other-id', ['other']), admitted).dispatch()).rejects.toThrow()
+    expect(await models.prepare(request('out-of-scope', 'other-id', ['other']), admitted).dispatch()).toMatchObject({
+      ok: true,
+      value: { ok: false },
+    })
     snapshot = [{ ...snapshot[0], policy: 'deny-persistent' }]
-    await expect(models.prepare(request('denied', 'other-id'), admitted).dispatch()).rejects.toThrow()
+    expect(await models.prepare(request('denied', 'other-id'), admitted).dispatch()).toMatchObject({
+      ok: true,
+      value: { ok: false },
+    })
   } finally {
     controller.abort()
     proof.close()
