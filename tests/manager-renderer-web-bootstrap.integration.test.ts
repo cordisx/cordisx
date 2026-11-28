@@ -11,6 +11,65 @@ import { managerRendererGraphFixture } from './fixtures/manager-renderer-graph.j
 
 const secret = () => randomBytes(32).toString('hex')
 
+it.each(['execute', 'plugin-review-apply'])(
+  'retires a Web session when a dispatched %s result is unknown',
+  async kind => {
+    const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
+    const authority = new ManagerRendererSessions({
+      profileId: 'fixture',
+      ownerGeneration: 'generation',
+      ownerCurrent: () => true,
+      authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+      channels: new Map([['plugin-management', {
+        prepare: payload => {
+          const operation = JSON.parse(String(payload)) as { operation: { kind: string }; requestId: string }
+          return operation.operation.kind === 'query'
+            ? { mode: 'read' as const, dispatch: async () => ({ requestId: operation.requestId, ok: true, value: {} }) }
+            : {
+              mode: 'write' as const,
+              dispatch: async () => {
+                throw new Error('lost after dispatch')
+              },
+            }
+        },
+      }]]),
+    })
+    const web = await startManagerWeb({
+      appId: 'codisx',
+      profileId: 'fixture',
+      generation: 'generation',
+      isCurrent: async () => true,
+      request: async operation => await dispatchManagerRendererOperation(authority, operation),
+    }, { rendererGateway: gateway })
+    const origin = new URL(web.url).origin
+    const post = async (route: string, data: unknown, token?: string) =>
+      await fetch(origin + route, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify(data),
+      })
+    try {
+      const session = await post('/api/session', { token: new URL(web.url).hash.slice(1) })
+      const token = (await session.json() as { token: string }).token
+      expect((await post('/api/renderer/open', {}, token)).status).toBe(200)
+      const send = async (operation: string) =>
+        await post('/api/renderer/binding', {
+          channel: 'plugin-management',
+          payload: JSON.stringify({ requestId: 'fixture', operation: { kind: operation } }),
+        }, token)
+      expect((await send('query')).status).toBe(200)
+      const unknown = await send(kind)
+      expect(unknown.status).toBe(503)
+      expect(await unknown.json()).toEqual({ error: 'OPERATION_RESULT_UNKNOWN' })
+      expect((await send('query')).status).toBe(401)
+    } finally {
+      authority.dispose()
+      await web.close()
+    }
+  },
+  15_000,
+)
+
 it('admits the owner document channel and forwards only valid document operations', async () => {
   const gateway = { pid: 42, processStartedAt: 'fixture', instanceToken: secret() }
   const authority = new ManagerRendererSessions({

@@ -11,6 +11,7 @@ import { sendManagerBundle } from './manager-bundle-encoding.js'
 import { managerDocumentWrite } from './manager-document-write.js'
 import { MANAGER_RENDERER_BINDING_WIRE_BYTES } from '../independent-manager/owner-document-limits.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
+import { rendererManagementWrite } from '../management/renderer-operation-mode.js'
 import { exchangeManagerSessionResume, ManagerSessionResumeGrants } from './manager-session-resume.js'
 import { ManagerBootstrapEntries } from './manager-bootstrap-entries.js'
 import { createManagerBrowserSessionIdIssuer } from './manager-browser-session-id.js'
@@ -641,6 +642,11 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
         let rendererWrite = input.channel === 'channel-credentials' || input.channel === 'desktop-package-config'
           || input.channel === 'permission-policy' || input.channel === 'permission-once'
           || input.channel === 'platform-models'
+        if (input.channel === 'plugin-management') {
+          const write = rendererManagementWrite(input.payload)
+          if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+          rendererWrite = write
+        }
         if (input.channel === 'owner-document') {
           const write = managerDocumentWrite(input.payload)
           if (write === undefined) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
