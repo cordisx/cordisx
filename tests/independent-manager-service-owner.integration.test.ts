@@ -179,6 +179,8 @@ it('connects the independent manager to a real service owner without Channel or 
         'model-services',
         'native-catalog',
         'permission-policy',
+        'permission-once',
+        'permission-history',
         'marketplace',
       ],
       commands: true,

@@ -57,3 +57,33 @@ it('rejects history returned for a different plugin', async () => {
     binding.dispose()
   }
 })
+
+it('reads lifecycle authorization choices through the same bounded Web channel', async () => {
+  globalThis.__cordisxPermissionHistoryRequestV1 = payload => {
+    const request = JSON.parse(payload) as { requestId: string; kind: string }
+    expect(request.kind).toBe('lifecycle')
+    queueMicrotask(() =>
+      globalThis.__cordisxPermissionHistoryReceiveV1?.(JSON.stringify({
+        requestId: request.requestId,
+        ok: true,
+        value: [{
+          operation: 'install',
+          client: 'codex',
+          requestedAt: '2026-11-28T08:00:00.000Z',
+          committedAt: '2026-11-28T08:00:01.000Z',
+          decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+        }],
+      }))
+    )
+  }
+  const binding = BrowserPermissionHistoryBinding.connect()!
+  try {
+    expect(await binding.readLifecycle('demo')).toMatchObject([{
+      client: 'codex',
+      operation: 'install',
+      decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+    }])
+  } finally {
+    binding.dispose()
+  }
+})

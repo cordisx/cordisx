@@ -76,6 +76,7 @@ export type PluginManagementRpcOperation =
     readonly query: PluginManagementCatalogLookup
   }
   | { readonly kind: 'permission-history'; readonly pluginId: string }
+  | { readonly kind: 'plugin-authorization-history'; readonly pluginId: string }
   | { readonly kind: 'plan'; readonly request: PluginManagementRequest }
   | { readonly kind: 'execute'; readonly request: PluginManagementRequest; readonly expectedRevision?: number }
   | { readonly kind: 'migrate-legacy-sources'; readonly input: PluginManagementLegacySourceMigration }
@@ -214,6 +215,7 @@ export function parsePluginManagementRpcRequest(
       'query-catalog',
       'plugin-info',
       'permission-history',
+      'plugin-authorization-history',
       'plan',
       'execute',
       'migrate-legacy-sources',
@@ -222,7 +224,8 @@ export function parsePluginManagementRpcRequest(
   if (operation.kind === 'manager-renderer') parseManagerRendererOperation(operation)
   if (operation.kind === 'owner-adapter') parseOwnerAdapterRpcOperation(operation)
   if (
-    operation.kind === 'permission-history' && (Object.keys(operation).length !== 2
+    (operation.kind === 'permission-history' || operation.kind === 'plugin-authorization-history')
+    && (Object.keys(operation).length !== 2
       || typeof operation.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(operation.pluginId))
   ) throw new Error('permission history request is invalid')
   if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
@@ -277,6 +280,10 @@ export async function handlePluginManagementRpcRequest(
   if (operation.kind === 'permission-history') {
     if (!service.permissionHistory) throw new Error('permission history is unavailable')
     return await service.permissionHistory(operation.pluginId)
+  }
+  if (operation.kind === 'plugin-authorization-history') {
+    if (!service.pluginAuthorizationHistory) throw new Error('plugin authorization history is unavailable')
+    return await service.pluginAuthorizationHistory(operation.pluginId)
   }
   if (operation.kind === 'plan') return await service.plan(operation.request)
   if (operation.kind === 'execute') return await service.execute(operation.request, operation.expectedRevision)

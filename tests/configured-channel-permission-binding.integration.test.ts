@@ -320,6 +320,27 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       expect(historyResult.value.every(item => item.client === 'web')).toBe(true)
       expect(JSON.stringify(historyResult)).toContain(alias)
       expect(JSON.stringify(historyResult)).not.toContain(f.configuredChannel!.plugin.source)
+      const ownerPolicy = (await loadHomeConfig(f.configPath)).permissions.find(item =>
+        item.key.identity.pluginId === 'channel' && item.policy === 'ask'
+      )!
+      const lifecycleReceipt = await journal.begin({
+        client: 'codex',
+        requestId: 'native-install',
+        records: [ownerPolicy],
+        lifecycle: { operation: 'install', decisions: ['allow-once'] },
+      })
+      await lifecycleReceipt.commit()
+      const lifecycleHistory = await history.prepare(
+        JSON.stringify({ requestId: 'read-lifecycle', pluginId: 'channel', kind: 'lifecycle' }),
+        requestContext!,
+      ).dispatch() as { value: unknown }
+      expect(lifecycleHistory.value).toMatchObject([{
+        client: 'codex',
+        operation: 'install',
+        decisions: [{ decision: 'allow-once' }],
+        committedAt: expect.any(String),
+      }])
+      expect(JSON.stringify(lifecycleHistory)).not.toContain(f.configuredChannel!.plugin.source)
       expect(await f.sessions.call(f.invocation, 'fixture-write', oncePayload)).toMatchObject({ status: 'unknown' })
     } finally {
       consumers?.close()

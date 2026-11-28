@@ -58,6 +58,9 @@ export function usePluginLifecycleActions(
   }, [snapshot.localization.locale])
   const operationsAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
     && model.requestPluginLifecycle !== undefined
+  const reviewOptions = model.permissionReviewInWeb === true
+    ? { sessionOnly: true, requireTrustedEvents: true }
+    : undefined
   const canRun = (plugin: ManagerPluginSnapshot, operation: 'enable' | 'disable' | 'uninstall'): boolean => {
     if (standalone && !plugin.package) return false
     if (operationsAvailable) return true
@@ -154,6 +157,7 @@ export function usePluginLifecycleActions(
             snapshot.permissions.filter(item =>
               item.identity.id === planV7.identity.pluginId && item.identity.source === planV7.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await model.applyPermissionLifecycleReviewV7(decision)
@@ -168,6 +172,7 @@ export function usePluginLifecycleActions(
             snapshot.permissions.filter(item =>
               item.identity.id === planV4.identity.pluginId && item.identity.source === planV4.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await model.applyPermissionLifecycleReviewV4(decision)
@@ -182,6 +187,7 @@ export function usePluginLifecycleActions(
             snapshot.permissions.filter(item =>
               item.identity.id === planV2.identity.pluginId && item.identity.source === planV2.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await model.applyPermissionLifecycleReviewV2(decision)

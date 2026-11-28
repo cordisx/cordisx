@@ -88,7 +88,7 @@ export class OwnerAdapterSessions {
       readonly adapter: Readonly<{ appId: string; adapterId: string }>
       readonly snapshot: () => Snapshot
       readonly attach: (peer: ManagerRendererCommandPeer) => Promise<void>
-      readonly lifecycle?: (payload: unknown) => Promise<unknown>
+      readonly lifecycle?: (payload: unknown, context: OwnerAdapterManagementContext) => Promise<unknown>
       readonly management?: (payload: unknown, context: OwnerAdapterManagementContext) => Promise<unknown>
       readonly document?: (payload: unknown, context: OwnerAdapterDocumentContext) => Promise<unknown>
       readonly modelServicesRead?: () => Promise<unknown>

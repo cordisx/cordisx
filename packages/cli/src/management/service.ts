@@ -73,6 +73,9 @@ export interface PluginManagementService {
   permissionHistory?(
     pluginId: string,
   ): Promise<readonly import('../permission-decision-history.js').PermissionDecisionHistoryItem[]>
+  pluginAuthorizationHistory?(
+    pluginId: string,
+  ): Promise<readonly import('../permission-decision-history.js').PluginAuthorizationHistoryItem[]>
   plan(request: PluginManagementRequest): Promise<PluginManagementResult>
   execute(request: PluginManagementRequest, expectedRevision?: number): Promise<PluginManagementResult>
   /** Owner-only cleanup for a plan that will no longer be exposed to a renderer. */

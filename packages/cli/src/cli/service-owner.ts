@@ -59,6 +59,7 @@ import { PermissionDecisionJournal } from './permission-decision-journal.js'
 import { createOwnerAdapterPermissionHistory } from './owner-adapter-permission-history.js'
 import { OwnerAdapterPermissionProof } from './owner-adapter-permission-proof.js'
 import { createOwnerAdapterPermissionPolicy } from './owner-adapter-permission-policy.js'
+import { createOwnerAdapterLifecycleReview } from './owner-adapter-lifecycle-review.js'
 import { ownerAdapterInstalledPermissionTarget } from './owner-adapter-permission-target.js'
 import type { OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
@@ -322,6 +323,12 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         rendererLifecycle.initialize(active)
         if (appId === 'codex') {
           const adapterLifecycleHandler = { token: randomUUID(), profileId, generation, coordinator }
+          const adapterLifecycleReview = createOwnerAdapterLifecycleReview({
+            homeDir,
+            coordinator,
+            journal: decisionJournal,
+            dispatch: async request => await handlePluginLifecycleBindingRequest(adapterLifecycleHandler, request),
+          })
           nativePermissionProof = new OwnerAdapterPermissionProof({ profileId, generation })
           const nativePermissionPolicy = createOwnerAdapterPermissionPolicy({
             homeDir,
@@ -366,18 +373,18 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
                 ? await previewMarketplaceArtifactPackage(adapterLifecycleHandler, request.request, signal)
                 : await inspectMarketplaceArtifactPackage(adapterLifecycleHandler, request.request, signal)
             },
-            lifecycle: async value => {
+            lifecycle: async (value, context) => {
               const envelope = attachmentRecord(value)
               if (Object.hasOwn(envelope, 'token')) throw new Error('adapter-lifecycle-request-invalid')
               const request = parsePluginLifecycleBindingRequest(
                 { ...envelope, token: adapterLifecycleHandler.token },
                 adapterLifecycleHandler,
               )
-              return await handlePluginLifecycleBindingRequest(adapterLifecycleHandler, request)
+              return await adapterLifecycleReview(request, context)
             },
             management: async (value, context) => {
               const operation = attachmentRecord(value)
-              if (operation.kind === 'permission-history') {
+              if (operation.kind === 'permission-history' || operation.kind === 'plugin-authorization-history') {
                 return await permissionHistory(operation, context)
               }
               if (

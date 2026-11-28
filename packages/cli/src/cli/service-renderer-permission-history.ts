@@ -22,7 +22,8 @@ export function createServiceRendererPermissionHistory(input: {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('permission-history-unavailable')
       const request = value as Record<string, unknown>
       if (
-        Object.keys(request).length !== 2 || typeof request.requestId !== 'string'
+        Object.keys(request).some(key => !['requestId', 'pluginId', 'kind'].includes(key))
+        || request.kind !== undefined && request.kind !== 'lifecycle' || typeof request.requestId !== 'string'
         || !/^[A-Za-z0-9._:-]{1,160}$/u.test(request.requestId)
         || typeof request.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(request.pluginId)
       ) throw new Error('permission-history-unavailable')
@@ -36,6 +37,14 @@ export function createServiceRendererPermissionHistory(input: {
             throw new Error('permission-history-unavailable')
           }
           const snapshot = input.bootstrap.permissionAccess.snapshot(context)
+          if (request.kind === 'lifecycle') {
+            const result = await input.journal.recentLifecycle(evidence.ownerIdentity)
+            if (
+              context.signal.aborted || !input.bootstrap.permissionAccess.isCurrentEvidence(evidence)
+              || !attachmentEqual(snapshot, input.bootstrap.permissionAccess.snapshot(context))
+            ) throw new Error('permission-history-unavailable')
+            return { requestId, ok: true, value: result }
+          }
           const records = snapshot.filter(record =>
             record.key.identity.pluginId === evidence.ownerIdentity.id
             && record.key.identity.source === evidence.ownerIdentity.source

@@ -106,6 +106,9 @@ export function useMarketplaceInstaller(
   const nativeAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
     && manager.inspectMarketplaceArtifact !== undefined
     && manager.requestPluginLifecycle !== undefined
+  const reviewOptions = manager.permissionReviewInWeb === true
+    ? { sessionOnly: true, requireTrustedEvents: true }
+    : undefined
   const standalone = options.standalone
   const management = standalone?.snapshot
   const lifecycle = snapshot.pluginLifecycle
@@ -219,6 +222,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV7.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV7(decision)
@@ -233,6 +237,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV4.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV4(decision)
@@ -247,6 +252,7 @@ export function useMarketplaceInstaller(
             snapshot.permissions.filter(item =>
               item.identity.id === plugin.id && item.identity.source === planV2.identity.source
             ),
+            reviewOptions,
           )
           if (decision === undefined) return
           result = await manager.applyPermissionLifecycleReviewV2(decision)

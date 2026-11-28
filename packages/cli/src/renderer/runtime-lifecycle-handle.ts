@@ -949,6 +949,8 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   permissionReviewInWeb: runtimeScope.metadata()!.ownerPermissionSnapshot === true,
   ...(runtimeScope.metadata()!.ownerPermissionSnapshot !== true || !runtimeScope.pluginManagementBinding() ? {} : {
     permissionHistory: (pluginId: string) => runtimeScope.pluginManagementBinding()!.permissionHistory(pluginId),
+    pluginAuthorizationHistory: (pluginId: string) =>
+      runtimeScope.pluginManagementBinding()!.pluginAuthorizationHistory(pluginId),
   }),
   ...(() => {
     const review = createStandaloneDomReviewModel(runtimeScope)

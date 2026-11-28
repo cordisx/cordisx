@@ -125,3 +125,35 @@ it('finds a one-time decision even before a policy is saved', async () => {
     committedAt: expect.any(String),
   }])
 })
+
+it('projects lifecycle reviews only for the exact plugin source and keeps unconfirmed outcomes distinct', async () => {
+  const { journal } = await fixture()
+  const ask = { ...record, policy: 'ask' as const }
+  const pending = await journal.begin({
+    client: 'codex',
+    requestId: 'install-1',
+    records: [ask],
+    lifecycle: { operation: 'install', decisions: ['allow-once'] },
+  })
+  const identity = { id: 'demo', source: record.key.identity.source }
+  expect(await journal.recentLifecycle(identity)).toMatchObject([{
+    operation: 'install',
+    client: 'codex',
+    decisions: [{ capability: 'models.read', decision: 'allow-once' }],
+  }])
+  expect((await journal.recentLifecycle(identity))[0]?.committedAt).toBeUndefined()
+  expect(await journal.recentLifecycle({ ...identity, source: 'file:///another/plugin.js' })).toEqual([])
+  await pending.commit()
+  const handler = createOwnerAdapterPermissionHistory({
+    profileId: 'work',
+    journal,
+    loadPolicies: async () => [],
+    reviewIdentity: async () => ({ identity, isCurrent: () => true }),
+  })
+  const result = await handler({ kind: 'plugin-authorization-history', pluginId: 'demo' }, {
+    secret: 'not-exposed',
+    current: () => true,
+  })
+  expect(result).toMatchObject([{ client: 'codex', committedAt: expect.any(String) }])
+  expect(JSON.stringify(result)).not.toContain(identity.source)
+})

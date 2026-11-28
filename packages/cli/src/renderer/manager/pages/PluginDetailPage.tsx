@@ -13,6 +13,7 @@ import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
 import type { ManagerRouter, PluginDetailPage as PluginDetailTab } from '../model/routes.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
+import { PluginAuthorizationHistory } from './PluginAuthorizationHistory.js'
 
 function tabs(locale: string): readonly ManagerTab<PluginDetailTab>[] {
   return [
@@ -292,6 +293,9 @@ export function PluginDetailPage(
       )}
       {route.page === 'permissions' && (
         <div className="cxr-list">
+          {plugin.package
+            ? <PluginAuthorizationHistory pluginId={plugin.id} locale={snapshot.localization.locale} model={model} />
+            : null}
           {permissions.map(item => (
             <button
               className="cxr-card"

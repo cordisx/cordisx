@@ -1,4 +1,4 @@
-import type { PermissionDecisionHistoryItem } from '../permission-decision-history.js'
+import type { PermissionDecisionHistoryItem, PluginAuthorizationHistoryItem } from '../permission-decision-history.js'
 import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
 
 const REQUEST = '__cordisxPermissionHistoryRequestV1'
@@ -38,13 +38,57 @@ export function parsePermissionHistory(value: unknown, pluginId: string): readon
   })
 }
 
+export function parsePluginAuthorizationHistory(value: unknown): readonly PluginAuthorizationHistoryItem[] {
+  if (!Array.isArray(value) || value.length > 100) throw new Error('plugin authorization history is unavailable')
+  return value.map((raw): PluginAuthorizationHistoryItem => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('plugin authorization history is invalid')
+    }
+    const item = raw as Record<string, unknown>
+    if (
+      Object.keys(item).some(key => !['operation', 'client', 'requestedAt', 'committedAt', 'decisions'].includes(key))
+      || !['install', 'update', 'enable'].includes(String(item.operation))
+      || item.client !== 'web' && item.client !== 'codex' || typeof item.requestedAt !== 'string'
+      || !Number.isFinite(Date.parse(item.requestedAt))
+      || item.committedAt !== undefined && (typeof item.committedAt !== 'string'
+          || !Number.isFinite(Date.parse(item.committedAt)))
+      || !Array.isArray(item.decisions) || item.decisions.length === 0 || item.decisions.length > 23
+    ) throw new Error('plugin authorization history is invalid')
+    const decisions = item.decisions.map(rawDecision => {
+      if (!rawDecision || typeof rawDecision !== 'object' || Array.isArray(rawDecision)) {
+        throw new Error('plugin authorization history is invalid')
+      }
+      const decision = rawDecision as Record<string, unknown>
+      if (
+        Object.keys(decision).length !== 2 || typeof decision.capability !== 'string'
+        || !/^[a-z][a-z0-9.-]{0,127}$/u.test(decision.capability)
+        || !['ask', 'allow', 'deny', 'allow-persistent', 'deny-persistent', 'allow-once', 'deny-once'].includes(
+          String(decision.decision),
+        )
+      ) throw new Error('plugin authorization history is invalid')
+      return {
+        capability: decision.capability,
+        decision: decision.decision as PermissionDecisionHistoryItem['decision'],
+      }
+    })
+    return {
+      operation: item.operation as PluginAuthorizationHistoryItem['operation'],
+      client: item.client,
+      requestedAt: item.requestedAt,
+      ...(typeof item.committedAt === 'string' ? { committedAt: item.committedAt } : {}),
+      decisions,
+    }
+  })
+}
+
 /** A read-only view of decisions held by the currently admitted service owner. */
 export class BrowserPermissionHistoryBinding {
   private readonly pending = new Map<string, {
-    readonly resolve: (value: readonly PermissionDecisionHistoryItem[]) => void
+    readonly resolve: (value: unknown) => void
     readonly reject: (error: Error) => void
     readonly timer: ReturnType<typeof setTimeout>
     readonly pluginId: string
+    readonly lifecycle: boolean
   }>()
   private closed = false
 
@@ -59,7 +103,15 @@ export class BrowserPermissionHistoryBinding {
     return new BrowserPermissionHistoryBinding(binding)
   }
 
-  read(pluginId: string): Promise<readonly PermissionDecisionHistoryItem[]> {
+  async read(pluginId: string): Promise<readonly PermissionDecisionHistoryItem[]> {
+    return parsePermissionHistory(await this.request(pluginId, false), pluginId)
+  }
+
+  async readLifecycle(pluginId: string): Promise<readonly PluginAuthorizationHistoryItem[]> {
+    return parsePluginAuthorizationHistory(await this.request(pluginId, true))
+  }
+
+  private request(pluginId: string, lifecycle: boolean): Promise<unknown> {
     if (this.closed || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(pluginId)) {
       return Promise.reject(new Error('permission history is unavailable'))
     }
@@ -69,9 +121,9 @@ export class BrowserPermissionHistoryBinding {
         this.pending.delete(requestId)
         reject(new Error('permission history timed out'))
       }, 15_000)
-      this.pending.set(requestId, { resolve, reject, timer, pluginId })
+      this.pending.set(requestId, { resolve, reject, timer, pluginId, lifecycle })
       try {
-        this.requestBinding(JSON.stringify({ requestId, pluginId }))
+        this.requestBinding(JSON.stringify({ requestId, pluginId, ...(lifecycle ? { kind: 'lifecycle' } : {}) }))
       } catch (error) {
         clearTimeout(timer)
         this.pending.delete(requestId)
@@ -94,7 +146,7 @@ export class BrowserPermissionHistoryBinding {
     clearTimeout(pending.timer)
     try {
       if (response.ok !== true) throw new Error('permission history is unavailable')
-      pending.resolve(parsePermissionHistory(response.value, pending.pluginId))
+      pending.resolve(response.value)
     } catch (error) {
       pending.reject(error instanceof Error ? error : new Error('permission history is unavailable'))
     }

@@ -19,7 +19,8 @@ export function createOwnerAdapterPermissionHistory(input: {
   return async (value: unknown, context: OwnerAdapterDocumentContext) => {
     const operation = attachmentRecord(value)
     if (
-      Object.keys(operation).length !== 2 || operation.kind !== 'permission-history'
+      Object.keys(operation).length !== 2
+      || operation.kind !== 'permission-history' && operation.kind !== 'plugin-authorization-history'
       || typeof operation.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(operation.pluginId)
       || !context.current(false)
     ) throw new Error('permission-history-unavailable')
@@ -29,6 +30,14 @@ export function createOwnerAdapterPermissionHistory(input: {
     }
     let records = before.filter(record => record.key.identity.pluginId === operation.pluginId)
     const target = await input.reviewIdentity?.(operation.pluginId, context)
+    if (operation.kind === 'plugin-authorization-history') {
+      if (!target || !target.isCurrent()) throw new Error('permission-history-unavailable')
+      const result = await input.journal.recentLifecycle(target.identity)
+      if (
+        !context.current(false) || !target.isCurrent() || !attachmentEqual(before, await input.loadPolicies())
+      ) throw new Error('permission-history-unavailable')
+      return result
+    }
     if (target) records = [...withManagerDomAskPolicies(records, input.profileId, target.identity)]
     const result = await projectPermissionDecisionHistory({
       journal: input.journal,

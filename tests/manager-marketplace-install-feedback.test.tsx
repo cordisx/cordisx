@@ -159,6 +159,84 @@ it('installs an optional-only Marketplace candidate without opening permission r
   }
 })
 
+it('limits a service-attached native install review to trusted session decisions', async () => {
+  const fixture = reactManagerFixture()
+  const source = 'https://example.test/plugin'
+  const plan = buildDeferredPermissionPlan({
+    planId: 'install-required',
+    operation: 'install',
+    profileId: 'test',
+    identity: { source, pluginId: 'example' },
+    binding: { operationId: 'install-required', runtimeGeneration: 'test', requestId: 'candidate' },
+    declarations: [{ name: 'models.read', required: true, scope: {} }],
+    policiesV2: [],
+    policiesV4: [],
+  })
+  const snapshot = managerSnapshot({
+    pluginLifecycle: { profileId: 'test', revision: 0, runtimeGeneration: 'test', operationsAvailable: true },
+  })
+  const apply = vi.fn()
+  const manager = managerModel(snapshot, {
+    permissionReviewInWeb: true,
+    inspectMarketplaceArtifact: vi.fn().mockResolvedValue({
+      outcome: 'planned',
+      operation: 'install',
+      candidateId: 'candidate',
+      package: { id: 'example', version: '1.0.0', canonicalSource: source },
+    }),
+    requestPluginLifecycle: vi.fn(),
+    permissionLifecycleReviewPlanV7: vi.fn().mockResolvedValue(plan),
+    applyPermissionLifecycleReviewV7: apply,
+  })
+  const plugin = {
+    id: 'example',
+    identity: 'example@1.0.0',
+    version: '1.0.0',
+    schemaVersion: 8,
+    source,
+    feedUrl: 'https://example.test/marketplace.json',
+    artifact: {
+      packageName: 'example',
+      downloadUrl: 'https://example.test/example.tgz',
+      integrity: `sha256:${'a'.repeat(64)}`,
+    },
+  } as MarketplaceCatalogPlugin
+  let installer!: ReturnType<typeof useMarketplaceInstaller>
+  function Installer() {
+    installer = useMarketplaceInstaller(manager, snapshot, { failed: 'Failed', succeeded: 'Installed' }, {
+      document: fixture.document,
+    })
+    return null
+  }
+  try {
+    await fixture.render(<Installer />)
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = installer.run(plugin, 'Example')
+      await Promise.resolve()
+    })
+    const overlay = fixture.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+    expect(overlay).not.toBeNull()
+    expect(overlay.querySelector('[data-permission-decision="allow-once"]')).not.toBeNull()
+    expect(overlay.querySelector('[data-permission-decision="allow-persistent"]')).toBeNull()
+    await act(async () => {
+      overlay.querySelector<HTMLElement>('[data-permission-decision="allow-once"]')!.click()
+      overlay.querySelector<HTMLElement>('[data-permission-action="confirm"]')!.click()
+      await Promise.resolve()
+    })
+    expect(apply).not.toHaveBeenCalled()
+    await act(async () => {
+      overlay.dispatchEvent(
+        new fixture.document.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+      await pending
+    })
+    expect(apply).not.toHaveBeenCalled()
+  } finally {
+    await fixture.dispose()
+  }
+})
+
 it('keeps failed installation feedback visible, allows retry, and does not report cancellation as failure', async () => {
   const fixture = reactManagerFixture()
   let disposeNotifications!: () => void

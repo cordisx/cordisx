@@ -44,6 +44,7 @@ type ManagementOperation = Extract<PluginManagementRpcOperation, {
     | 'query-catalog'
     | 'plugin-info'
     | 'permission-history'
+    | 'plugin-authorization-history'
     | 'plan'
     | 'execute'
     | 'migrate-legacy-sources'

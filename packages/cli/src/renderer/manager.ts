@@ -231,6 +231,9 @@ export interface ManagerModel {
   readonly permissionHistory?: (
     pluginId: string,
   ) => Promise<readonly import('../permission-decision-history.js').PermissionDecisionHistoryItem[]>
+  readonly pluginAuthorizationHistory?: (
+    pluginId: string,
+  ) => Promise<readonly import('../permission-decision-history.js').PluginAuthorizationHistoryItem[]>
   /** Host-private review of an owner-selected configured Channel page. */
   readonly standaloneDomReview?: {
     readonly native?: boolean

@@ -116,6 +116,9 @@ export function LocalPluginInstallSection({ model, snapshot }: {
     setMessage(undefined)
     try {
       const target = { kind: 'candidate' as const, candidateId: inspection.candidateId }
+      const reviewOptions = model.permissionReviewInWeb === true
+        ? { sessionOnly: true, requireTrustedEvents: true }
+        : undefined
       const planV7 = await model.permissionLifecycleReviewPlanV7?.(target)
       const planV4 = planV7 === undefined ? await model.permissionLifecycleReviewPlanV4?.(target) : undefined
       const planV2 = planV7 === undefined && planV4 === undefined
@@ -135,6 +138,7 @@ export function LocalPluginInstallSection({ model, snapshot }: {
           },
           planV7,
           snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
+          reviewOptions,
         )
         if (decision !== undefined) result = await model.applyPermissionLifecycleReviewV7(decision)
       } else if (planV4 !== undefined) {
@@ -150,6 +154,7 @@ export function LocalPluginInstallSection({ model, snapshot }: {
           },
           planV4,
           snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
+          reviewOptions,
         )
         if (decision !== undefined) result = await model.applyPermissionLifecycleReviewV4(decision)
       } else if (planV2 !== undefined) {
@@ -165,6 +170,7 @@ export function LocalPluginInstallSection({ model, snapshot }: {
           },
           planV2,
           snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
+          reviewOptions,
         )
         if (decision !== undefined) result = await model.applyPermissionLifecycleReviewV2(decision)
       } else {
