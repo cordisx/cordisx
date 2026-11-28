@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { fenceAdapterOrigin } from '../packages/cli/src/cli/manager-origin-fence.js'
+import { ServiceOwnerPermissionConsumers } from '../packages/cli/src/cli/service-owner-permission-consumers.js'
 import { reserveServiceRendererPermissionHandoff } from '../packages/cli/src/cli/service-renderer-permission-handoff.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
@@ -95,4 +96,65 @@ it('commits an authenticated native-origin policy with no Web client running', a
   expect(writes.release).toHaveBeenCalled()
   expect(consumers.release).toHaveBeenCalledOnce()
   expect(consumers.fence).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('checks the configured native writer graph (mismatch: %s)', async mismatch => {
+  const rendererId = 'a'.repeat(64)
+  const identity = { id: 'channel', source: 'https://example.test/channel' }
+  const artifact = { version: '1.0.0', integrity: `sha256:${'c'.repeat(64)}` as const }
+  const snapshot = { active: 'current', registryEpoch: 1 }
+  const peer = {
+    identity: { rendererId },
+    closed: false,
+    onDisconnect: () => () => {},
+    request: async () => ({
+      available: true,
+      rendererId,
+      ownerGeneration: 'owner-1',
+      snapshot,
+      identity,
+      artifact,
+      moduleGeneration: 'other-graph',
+    }),
+  }
+  const writes = { isCurrent: () => true, release: () => true, fence: () => {} }
+  const lifecycle = {
+    snapshot: () => snapshot,
+    reserveExternalMutation: () => ({ isCurrent: () => true, release: () => true, fence: () => {} }),
+    terminal: () => {},
+  }
+  const participants = { isBoundTo: () => true, ownerPeers: () => [], peer: () => undefined, isLive: () => true }
+  const origin = await fenceAdapterOrigin({
+    sessions: { suspendMutations: async () => writes, hasAdmittedPeer: () => true } as never,
+    participants: participants as never,
+    lifecycle: lifecycle as never,
+    originRendererId: rendererId,
+    reserveAdditionalPeers: async () => ({ peers: [peer], originRendererId: rendererId, ...writes }) as never,
+  })
+  const consumers = new ServiceOwnerPermissionConsumers({
+    profileId: 'default',
+    generation: 'owner-1',
+    participants: participants as never,
+    lifecycle: lifecycle as never,
+    nativeAdapters: {} as never,
+    ownerCurrent: () => true,
+    loadPolicies: async () => [],
+  })
+  const reservation = consumers.reserve(origin, {
+    identity,
+    moduleGeneration: mismatch ? 'signed-graph' : 'other-graph',
+    kind: 'configured-channel',
+    artifact,
+    isCurrent: () => true,
+  })
+  if (mismatch) {
+    await expect(reservation.prepare()).rejects.toThrow('service-permission-consumers-unavailable')
+    expect(reservation.isCurrent()).toBe(false)
+  } else {
+    await reservation.prepare()
+    expect(reservation.isCurrent()).toBe(true)
+    reservation.fence()
+  }
+  origin.fence()
+  consumers.close()
 })

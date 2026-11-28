@@ -11,9 +11,11 @@ import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { PermissionDecisionJournal } from './permission-decision-journal.js'
 import type { OwnerAdapterPermissionProof } from './owner-adapter-permission-proof.js'
 import { ownerAdapterInstalledPermissionTarget } from './owner-adapter-permission-target.js'
+import { ownerAdapterConfiguredPermissionTarget } from './owner-adapter-configured-permission.js'
 import type { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
 import type { ServiceOwnerPermissionConsumers } from './service-owner-permission-consumers.js'
 import type { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import type { CordisXConfig } from '../launcher/config.js'
 
 /** Owner-only native permission writes use the same profile and renderer barrier as Web. */
 export function createOwnerAdapterPermissionPolicy(input: {
@@ -26,6 +28,7 @@ export function createOwnerAdapterPermissionPolicy(input: {
   readonly journal: PermissionDecisionJournal
   readonly proof: OwnerAdapterPermissionProof
   readonly loadPackage?: typeof loadStagedPluginPackage
+  readonly configured?: () => { readonly config: CordisXConfig; readonly signal: AbortSignal } | undefined
   readonly runtime: () => {
     readonly bootstrap: ServiceRendererBootstrap
     readonly consumers: ServiceOwnerPermissionConsumers
@@ -57,7 +60,7 @@ export function createOwnerAdapterPermissionPolicy(input: {
     const rawRecords = once ? [operation.record] : operation.records as unknown[]
     const first = normalizePersistedPermissionPolicyRecord(rawRecords[0])
     if (once && first.policy !== 'ask') throw new Error('adapter-permission-unavailable')
-    const target = await ownerAdapterInstalledPermissionTarget({
+    let target = await ownerAdapterInstalledPermissionTarget({
       homeDir: input.homeDir,
       profileId: input.profileId,
       generation: input.generation,
@@ -65,7 +68,28 @@ export function createOwnerAdapterPermissionPolicy(input: {
       context,
       lifecycle: input.lifecycle,
       ...(input.loadPackage === undefined ? {} : { loadPackage: input.loadPackage }),
-    })
+    }).catch(() => undefined)
+    if (!target) {
+      const configured = input.configured?.()
+      if (!configured) throw new Error('adapter-permission-unavailable')
+      const wrapped = attachmentRecord(operation.proof)
+      const signed = attachmentRecord(wrapped.proof)
+      const payload = attachmentRecord(signed.payload)
+      if (typeof payload.moduleGeneration !== 'string') throw new Error('adapter-permission-unavailable')
+      target = await ownerAdapterConfiguredPermissionTarget({
+        homeDir: input.homeDir,
+        profileId: input.profileId,
+        generation: input.generation,
+        pluginId: first.key.identity.pluginId,
+        moduleGeneration: payload.moduleGeneration,
+        context,
+        lifecycle: input.lifecycle,
+        ...configured,
+      })
+    }
+    const targetCurrent = async () =>
+      target!.isCurrent() && (target!.verifyCurrent === undefined || await target!.verifyCurrent())
+    if (!await targetCurrent()) throw new Error('adapter-permission-unavailable')
     const request = parsePermissionBindingRequest({
       token: STANDALONE_PERMISSION_BINDING_MARKER,
       requestId: operation.requestId,
@@ -81,7 +105,7 @@ export function createOwnerAdapterPermissionPolicy(input: {
     }
     const expected = await input.loadPolicies()
     const runtime = input.runtime()
-    if (!runtime || !context.live() || !target.isCurrent()) throw new Error('adapter-permission-unavailable')
+    if (!runtime || !context.live() || !await targetCurrent()) throw new Error('adapter-permission-unavailable')
     const common = {
       context,
       requestId: request.requestId,
@@ -104,13 +128,13 @@ export function createOwnerAdapterPermissionPolicy(input: {
       records: updates,
       ...(once ? { onceDecision: operation.decision as 'allow-once' | 'deny-once' } : {}),
     })
-    if (!context.live() || !target.isCurrent()) throw new Error('adapter-permission-unavailable')
+    if (!context.live() || !await targetCurrent()) throw new Error('adapter-permission-unavailable')
     if (once) {
       if (!attachmentEqual(expected, await input.loadPolicies()) || !context.current(false)) {
         throw new Error('adapter-permission-unavailable')
       }
       await trace.commit()
-      if (!context.current(false) || !target.isCurrent() || !attachmentEqual(expected, await input.loadPolicies())) {
+      if (!context.current(false) || !await targetCurrent() || !attachmentEqual(expected, await input.loadPolicies())) {
         throw new Error('adapter-permission-unavailable')
       }
       return true
@@ -121,8 +145,12 @@ export function createOwnerAdapterPermissionPolicy(input: {
       consumers = runtime.consumers.reserve(origin, {
         identity: target.ownerIdentity,
         moduleGeneration: target.moduleGeneration,
+        kind: target.kind,
+        artifact: target.artifact,
         isCurrent: target.isCurrent,
       })
+      if (target.kind !== 'installed') await consumers.prepare()
+      if (!await targetCurrent()) throw new Error('adapter-permission-unavailable')
       const renderer = {
         profileId: input.profileId,
         ownerGeneration: input.generation,
@@ -147,7 +175,9 @@ export function createOwnerAdapterPermissionPolicy(input: {
             profileId: input.profileId,
             expected,
             assertCurrent: async () => {
-              if (!target.isCurrent() || !await barrier.isCurrent()) throw new Error('adapter-permission-unavailable')
+              if (!await targetCurrent() || !await barrier.isCurrent()) {
+                throw new Error('adapter-permission-unavailable')
+              }
             },
           }, updates)
         )

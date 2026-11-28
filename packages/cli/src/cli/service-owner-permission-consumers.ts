@@ -120,6 +120,7 @@ export class ServiceOwnerPermissionConsumers {
               || !attachmentEqual(proof.identity, selected) || !attachmentEqual(proof.artifact, target.artifact)
               || typeof proof.moduleGeneration !== 'string'
               || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(proof.moduleGeneration)
+              || peer.identity.rendererId === origin.rendererId && proof.moduleGeneration !== target.moduleGeneration
             ) throw new Error('service-permission-consumers-unavailable')
             generations.set(peer.identity.rendererId, proof.moduleGeneration)
           }))

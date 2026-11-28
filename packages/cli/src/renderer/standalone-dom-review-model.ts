@@ -29,7 +29,11 @@ export function createStandaloneDomReviewModel(
       || requireReview && broker.domPolicy(identity, pointId) !== 'inherit'
     ) return undefined
     const moduleGeneration = runtime.moduleGenerationOf()!(controller)
-    const configured = controller.item.standaloneConfiguredGraph === true && controller.item.package === undefined
+    const configured = controller.item.package === undefined && (
+      controller.item.standaloneConfiguredGraph === true
+      || native && controller.item.distributionArtifact !== undefined
+        && controller.item.artifactGeneration === moduleGeneration
+    )
     const packageItem = controller.item.package
     let artifact = configured ? controller.item.distributionArtifact : undefined
     if (!configured && (native || controller.item.standaloneInstalledGraph === true) && packageItem !== undefined) {
@@ -52,7 +56,7 @@ export function createStandaloneDomReviewModel(
       artifact,
       moduleGeneration,
       persistentEligible: configured && (
-            identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
+            native || identity.id === 'channel' && metadata.standaloneConfiguredPolicyReview === true
             || metadata.standaloneConfiguredPluginPolicyReview?.includes(identity.id) === true
           )
         || (native || controller.item.standaloneInstalledGraph === true)

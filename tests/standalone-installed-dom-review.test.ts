@@ -240,6 +240,31 @@ it('offers a persistent review only for the configured graph selected by the own
   }
 })
 
+it('offers native review for the exact configured archive generation', () => {
+  const f = configuredFixture()
+  try {
+    f.item.standaloneConfiguredGraph = false
+    const item = f.item as typeof f.item & { artifactGeneration?: string }
+    item.artifactGeneration = packageItem.moduleGeneration
+    const scope = {
+      ...f.scope,
+      metadata: () => ({
+        hostKind: 'codex',
+        profileId: 'default',
+        standaloneReviewSession: f.verify,
+        nativeOwnerPermissionReview: true,
+        ownerPermissionSnapshot: true,
+      }),
+    }
+    const model = createStandaloneDomReviewModel(scope as never)!
+    expect(model.describe(identity, point)).toMatchObject({ persistentAvailable: true, version: packageItem.version })
+    item.artifactGeneration = 'different-graph'
+    expect(model.describe(identity, point)).toBeUndefined()
+  } finally {
+    f.broker.dispose()
+  }
+})
+
 it('rejects a configured graph that changes during the owner review', async () => {
   const f = configuredFixture()
   try {

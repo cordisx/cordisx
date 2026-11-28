@@ -13,6 +13,7 @@ export interface ManagerPolicyTarget {
   readonly digest: `sha256:${string}`
   readonly artifact: { readonly version: string; readonly integrity: `sha256:${string}` }
   isCurrent(): boolean
+  verifyCurrent?(): Promise<boolean>
   project(records: readonly CordisXPersistedPermissionPolicyRecord[]): {
     readonly identity: { readonly id: string; readonly source: string }
     readonly moduleGeneration: string

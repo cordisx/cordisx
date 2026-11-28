@@ -350,6 +350,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             loadPolicies,
             journal: decisionJournal,
             proof: nativePermissionProof,
+            configured: () =>
+              ownerConfigured === undefined ? undefined : { config: ownerConfigured, signal: lifetime.signal },
             runtime: () => {
               const fence = management?.fenceAdapterPermissionOrigin
               if (!rendererBootstrap || !rendererPermissionConsumers || !fence) return undefined

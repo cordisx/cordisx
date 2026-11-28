@@ -1,13 +1,6 @@
-import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../capability-risk-catalog.js'
-import { domPermissionAuthorizationKeyV3 } from '../permission-model-v3.js'
-import {
-  type CordisXPersistedPermissionPolicyRecord,
-  isPermissionPolicyRecordV3,
-  normalizePersistedPermissionPolicyRecord,
-  persistedPermissionRecordKey,
-} from '../permission-persistence.js'
 import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
+import { ownerAdapterManagerPolicyTarget } from './owner-adapter-manager-policy-target.js'
 import type { OwnerRendererLifecycle } from './owner-renderer-lifecycle.js'
 import type { OwnerAdapterDocumentContext, OwnerAdapterManagementContext } from './owner-adapter-sessions.js'
 import type { ManagerPolicyTarget } from './service-renderer-installed-permission.js'
@@ -49,43 +42,14 @@ export async function ownerAdapterInstalledPermissionTarget(input: {
       return false
     }
   }
-  const selected = (record: CordisXPersistedPermissionPolicyRecord) =>
-    isPermissionPolicyRecordV3(record) && record.key.profileId === input.profileId
-    && record.key.identity.pluginId === identity.id && record.key.identity.source === identity.source
-    && record.key.capability === 'ui.extension-points.render' && record.key.scope.extensionPoints?.length === 1
-    && ['manager.settings.navigation-items', 'manager.content'].includes(record.key.scope.extensionPoints[0]!)
-  const project = (records: readonly CordisXPersistedPermissionPolicyRecord[]) => {
-    if (!current() || records.length > 4096) return invalid()
-    const policies = records.map(record => normalizePersistedPermissionPolicyRecord(record)).filter(selected)
-    if (new Set(policies.map(persistedPermissionRecordKey)).size !== policies.length || !current()) return invalid()
-    return { identity, moduleGeneration: active.moduleGeneration, policies }
-  }
-  return Object.freeze({
+  return ownerAdapterManagerPolicyTarget({
     kind: 'installed' as const,
+    profileId: input.profileId,
     identity,
-    ownerIdentity: identity,
     moduleGeneration: active.moduleGeneration,
     digest: active.digest,
     artifact,
     isCurrent: current,
-    project,
-    resolve(records: readonly CordisXPersistedPermissionPolicyRecord[]) {
-      if (!current() || records.length < 1 || records.length > 2) return invalid()
-      const values = records.map(record => normalizePersistedPermissionPolicyRecord(record))
-      for (const record of values) {
-        if (!selected(record) || !isPermissionPolicyRecordV3(record)) return invalid()
-        const pointId = record.key.scope.extensionPoints![0]!
-        const expected = domPermissionAuthorizationKeyV3({
-          profileId: input.profileId,
-          identity: record.key.identity,
-          pointId,
-          catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
-        })
-        if (record.key.securityFingerprint !== expected.securityFingerprint) return invalid()
-      }
-      if (new Set(values.map(persistedPermissionRecordKey)).size !== values.length || !current()) return invalid()
-      return values
-    },
   })
 }
 

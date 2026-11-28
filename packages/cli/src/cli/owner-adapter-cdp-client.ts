@@ -60,8 +60,9 @@ export class OwnerAdapterCdpClient {
         !this.input.policyScope || this.transaction || Object.keys(frame).length !== 1
         || typeof frame.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(frame.pluginId)
       ) throw new Error('adapter-policy-provenance-unavailable')
-      const admission = this.input.cdp.beginSharedAdmission(`adapter-provenance-${randomUUID()}`)
+      let admission: ReturnType<typeof this.input.cdp.beginSharedAdmission> | undefined
       try {
+        admission = this.input.cdp.beginSharedAdmission(`adapter-provenance-${randomUUID()}`)
         const before = await admission.readSnapshot()
         const proof = await admission.configurationProof(frame.pluginId)
         const configured = proof?.plugin.configured
@@ -83,7 +84,7 @@ export class OwnerAdapterCdpClient {
         // A read-only proof can be unavailable without retiring a healthy client.
         return { available: false }
       } finally {
-        admission.release()
+        admission?.release()
       }
     }
     if (command.method === 'permission-policy') {
